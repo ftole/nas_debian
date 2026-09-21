@@ -110,11 +110,24 @@ else
     umount "$TARGET_DISK"* 2>/dev/null || true
     parted -s "$TARGET_DISK" mklabel gpt mkpart primary btrfs 0% 100%
     partprobe "$TARGET_DISK" 2>/dev/null || true
-    sleep 2
+    udevadm settle 2>/dev/null || true
 
-    PART_NAS="${TARGET_DISK}1"
-    [ ! -b "$PART_NAS" ] && PART_NAS="${TARGET_DISK}p1"
-    [ ! -b "$PART_NAS" ] && PART_NAS="$TARGET_DISK"
+    PART_NAS=""
+    for _ in {1..10}; do
+        if [ -b "${TARGET_DISK}1" ]; then
+            PART_NAS="${TARGET_DISK}1"
+            break
+        elif [ -b "${TARGET_DISK}p1" ]; then
+            PART_NAS="${TARGET_DISK}p1"
+            break
+        fi
+        sleep 1
+    done
+    if [ -z "$PART_NAS" ]; then
+        echo "[-] ERROR CRITICO: No se detecto la particion en $TARGET_DISK tras el particionado."
+        echo "    Abortando para no formatear el disco completo por error."
+        exit 1
+    fi
 
     mkfs.btrfs -f -L "NAS_DATA" "$PART_NAS"
     UUID_NAS=$(blkid -s UUID -o value "$PART_NAS")
@@ -257,8 +270,9 @@ if ! id "$ADMIN_USER" &>/dev/null; then
 fi
 
 usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
-echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/$ADMIN_USER"
-chmod 0440 "/etc/sudoers.d/$ADMIN_USER"
+SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
+echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
 
 if [ -n "$ADMIN_PASS" ]; then
     echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
