@@ -70,7 +70,10 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     git reset -q --hard origin/main >/dev/null 2>&1 || true
 elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ] && [ -d "$SCRIPT_DIR/.git" ]; then
     rm -rf "$INSTALL_DIR"
-    git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null || cp -a "$SCRIPT_DIR" "$INSTALL_DIR"
+    if ! git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null; then
+        cp -a "$SCRIPT_DIR" "$INSTALL_DIR"
+        find "$INSTALL_DIR" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.bats" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+    fi
     if cd "$INSTALL_DIR"; then
         git remote set-url origin "$REPO_URL" 2>/dev/null || true
     fi
