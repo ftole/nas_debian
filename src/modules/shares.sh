@@ -359,12 +359,9 @@ m = pattern.search(text)
 if m:
     block = m.group(1)
     if "available = no" in block:
-        block = block.replace("available = no\n", "").replace("browseable = no", "browseable = yes")
+        block = block.replace("available = no\n", "")
         msg = "HABILITADO (En línea)"
     else:
-        block = block.replace("browseable = yes", "browseable = no")
-        if "browseable = no" not in block:
-            block = block.replace(f"[{target}]\n", f"[{target}]\n   browseable = no\n")
         block = block.replace(f"[{target}]\n", f"[{target}]\n   available = no\n")
         msg = "DESHABILITADO (Fuera de línea)"
     text = text[:m.start()] + block + text[m.end():]
