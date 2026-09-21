@@ -38,13 +38,13 @@ for r in runners:
     
     with open(r, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
-        if "cifs" in content:
+        if "SRC_SHARE=" in content:
             proto = "CIFS (Win)"
             m_ip = re.search(r"SRC_IP=\"([^\"]+)\"", content)
             m_sh = re.search(r"SRC_SHARE=\"([^\"]+)\"", content)
             if m_ip and m_sh:
                 src = f"//{m_ip.group(1)}/{m_sh.group(1)}"
-        elif "sshpass" in content or "ssh -p" in content:
+        elif "SRC_PORT=" in content or "sshpass" in content:
             proto = "SSH (Linux)"
             m_ip = re.search(r"SRC_IP=\"([^\"]+)\"", content)
             m_pt = re.search(r"SRC_PATH=\"([^\"]+)\"", content)
@@ -98,6 +98,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$TASK_NAME" ]; then continue; fi
                 TASK_NAME=$(echo "$TASK_NAME" | tr " " "_" | tr -cd "A-Za-z0-9_-")
+                if [ -z "$TASK_NAME" ]; then
+                    whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
+                    continue
+                fi
 
                 WIN_IP=$(whiptail --title "Paso 2 de 5: Servidor Windows Remoto" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -188,6 +193,9 @@ RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
+exec 9>"/var/lock/backup_${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+
 echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
@@ -228,7 +236,7 @@ RUNNER_EOF
                 chmod 750 "$RUNNER"
 
                 # Programar en Cron
-                echo "$CRON_EXPR root systemd-run --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
+                echo "$CRON_EXPR root systemd-run --collect --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
                 chmod 644 "/etc/cron.d/backup_${TASK_NAME}"
 
                 whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
@@ -243,6 +251,11 @@ RUNNER_EOF
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$TASK_NAME" ]; then continue; fi
                 TASK_NAME=$(echo "$TASK_NAME" | tr " " "_" | tr -cd "A-Za-z0-9_-")
+                if [ -z "$TASK_NAME" ]; then
+                    whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
+                    continue
+                fi
 
                 LNX_IP=$(whiptail --title "Paso 2 de 5: Servidor Linux Remoto" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -319,6 +332,9 @@ RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
+exec 9>"/var/lock/backup_${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 
@@ -329,8 +345,7 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-PASS=$(cat "$CRED_FILE")
-sshpass -p "$PASS" rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=no" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1
+SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=no" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1
 
 SNAPSHOT_COUNT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -353,7 +368,7 @@ RUNNER_EOF
                 sed -i "s|RETENTION_PLACEHOLDER|$RETENTION|g" "$RUNNER"
                 chmod 750 "$RUNNER"
 
-                echo "$CRON_EXPR root systemd-run --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
+                echo "$CRON_EXPR root systemd-run --collect --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
                 chmod 644 "/etc/cron.d/backup_${TASK_NAME}"
 
                 whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
@@ -368,6 +383,11 @@ RUNNER_EOF
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$TASK_NAME" ]; then continue; fi
                 TASK_NAME=$(echo "$TASK_NAME" | tr " " "_" | tr -cd "A-Za-z0-9_-")
+                if [ -z "$TASK_NAME" ]; then
+                    whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
+                    continue
+                fi
 
                 LOC_SRC=$(whiptail --title "Paso 2 de 4: Ruta Origen Local" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -400,6 +420,9 @@ RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
+exec 9>"/var/lock/backup_${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 
@@ -429,7 +452,7 @@ RUNNER_EOF
                 sed -i "s|RETENTION_PLACEHOLDER|$RETENTION|g" "$RUNNER"
                 chmod 750 "$RUNNER"
 
-                echo "$CRON_EXPR root systemd-run --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
+                echo "$CRON_EXPR root systemd-run --collect --unit=backup-${TASK_NAME} --slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle bash $RUNNER >/dev/null 2>&1" > "/etc/cron.d/backup_${TASK_NAME}"
                 chmod 644 "/etc/cron.d/backup_${TASK_NAME}"
 
                 whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
