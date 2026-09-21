@@ -105,6 +105,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 if [ $RET -ne 0 ] || [ -z "$NOMBRE_SHARE" ]; then continue; fi
 
                 NOMBRE_SHARE=$(echo "$NOMBRE_SHARE" | tr " " "_" | tr -cd "A-Za-z0-9_$-")
+                if [ -z "$NOMBRE_SHARE" ]; then
+                    whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El nombre del recurso no puede estar vacio ni contener solo simbolos." 9 65
+                    continue
+                fi
 
                 OPC_VIS=$(whiptail --title "Visibilidad en Red (Samba / Windows)" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -130,11 +135,17 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     --inputbox "Ruta física en el disco del servidor:" 10 65 "/srv/nas/$NOMBRE_DIR" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$RUTA_SHARE" ]; then continue; fi
+                if [[ ! "$RUTA_SHARE" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La ruta debe ser absoluta y sin espacios ni caracteres especiales." 9 68
+                    continue
+                fi
 
                 COMENTARIO=$(whiptail --title "$APP_TITLE" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Descripción o comentario del recurso:" 10 65 "Carpeta compartida $NOMBRE_DIR" 3>&1 1>&2 2>&3)
                 [ -z "$COMENTARIO" ] && COMENTARIO="Carpeta compartida $NOMBRE_DIR"
+                COMENTARIO=$(printf '%s' "$COMENTARIO" | tr -d '\r\n')
 
                 TIPO_PERM=$(whiptail --title "Esquema de Seguridad y Permisos" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
