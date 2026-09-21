@@ -299,24 +299,27 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         fi
                     fi
 
-                    cat << SMBCONF >> /etc/samba/smb.conf
-
-# ==============================================================================
-# RECURSO COMPARTIDO: $NOMBRE_SHARE
-# ==============================================================================
-[$NOMBRE_SHARE]
-   comment = $COMENTARIO
-   path = $RUTA_SHARE
-   browseable = $BROWSEABLE
-   read only = $READ_ONLY
-   guest ok = $GUEST_OK
-$([ -n "$VALID_USERS" ] && echo "   valid users = $VALID_USERS")
-$([ -n "$WRITE_LIST" ] && echo "   write list = $WRITE_LIST")
-   create mask = $MASK
-   directory mask = $MASK
-   force create mode = $MASK
-   force directory mode = $MASK
-SMBCONF
+                    {
+                        printf '\n# ==============================================================================\n'
+                        printf '# RECURSO COMPARTIDO: %s\n' "$NOMBRE_SHARE"
+                        printf '# ==============================================================================\n'
+                        printf '[%s]\n' "$NOMBRE_SHARE"
+                        printf '   comment = %s\n' "$COMENTARIO"
+                        printf '   path = %s\n' "$RUTA_SHARE"
+                        printf '   browseable = %s\n' "$BROWSEABLE"
+                        printf '   read only = %s\n' "$READ_ONLY"
+                        printf '   guest ok = %s\n' "$GUEST_OK"
+                        if [ -n "$VALID_USERS" ]; then
+                            printf '   valid users = %s\n' "$VALID_USERS"
+                        fi
+                        if [ -n "$WRITE_LIST" ]; then
+                            printf '   write list = %s\n' "$WRITE_LIST"
+                        fi
+                        printf '   create mask = %s\n' "$MASK"
+                        printf '   directory mask = %s\n' "$MASK"
+                        printf '   force create mode = %s\n' "$MASK"
+                        printf '   force directory mode = %s\n' "$MASK"
+                    } >> /etc/samba/smb.conf
                     testparm -s &>/dev/null || true
                     smbcontrol all reload-config 2>/dev/null || systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
                     whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
