@@ -1,0 +1,21 @@
+# Normalizacion de fin de linea: preservar LF en scripts y archivos de texto
+# para evitar errores de interprete (#!/bin/bash^M) al desplegar en Debian.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.bats text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+
+# Recursos binarios: no normalizar
+*.gz    binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.svg   text eol=lf
+*.pyc   binary
