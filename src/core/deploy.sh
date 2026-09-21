@@ -358,6 +358,9 @@ else
 fi
 LASTB_WRAP
 chmod 755 /usr/local/bin/lastb
+if command -v dpkg-divert &>/dev/null; then
+    dpkg-divert --add --rename --divert /usr/bin/lastb.distrib /usr/bin/lastb 2>/dev/null || true
+fi
 ln -sf /usr/local/bin/lastb /usr/bin/lastb 2>/dev/null || true
 
 cat << MOTD > /etc/motd
