@@ -54,18 +54,18 @@ sudo nas
 ### Método 2: Despliegue Automatizado por Línea de Comandos
 ```bash
 # Sintaxis (los parámetros son opcionales con auto-detección):
-sudo bash ejecutar_configuracion_ead.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]
+sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]
 
 # Ejemplo para Servidor NAS de Archivos:
-sudo bash ejecutar_configuracion_ead.sh LOCAL EAD-COL SRV-EAD-NAS admin DE0puFvp85# ARCHIVOS
+sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin <CLAVE_ADMIN> ARCHIVOS
 
 # Ejemplo para Servidor de Backup con disco secundario:
-sudo bash ejecutar_configuracion_ead.sh /dev/sda EAD-COL SRV-EAD-BKP admin DE0puFvp85# BACKUP
+sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BACKUP
 ```
 
 ### Método 3: Desinstalación y Limpieza Rápida
 ```bash
-sudo bash desinstalar_nas_ead.sh
+sudo nas uninstall
 ```
 
 ---
@@ -91,17 +91,20 @@ Para restaurar archivos o carpetas de cualquier fecha histórica:
 
 ## 4. Diferencias de Arquitectura: Servidor NAS vs Servidor de Backup
 
+> [!IMPORTANT]
+> El despliegue base es **idéntico y limpio** para ambos roles: crea únicamente `grp_sistemas` y `/srv/nas`, con **0 recursos compartidos**. Los grupos y carpetas de ejemplo siguientes se crean después desde el asistente (menús [2] y [3]) según las necesidades del entorno.
+
 ### Rol ARCHIVOS (NAS Departamental):
-* **Grupos:** `grp_sistemas`, `grp_c1_admin`, `grp_c1_analista`, `grp_c1_asesor`, `grp_c2_admin`, etc.
-* **Carpetas Visibles:** `[SISTEMAS]`, `[C1_*]`, `[C2_*]` accesibles según matriz de permisos.
+* **Grupos de ejemplo:** `grp_sistemas`, `grp_c1_admin`, `grp_c1_analista`, `grp_c2_admin`, etc. (creados por el administrador).
+* **Carpetas Visibles de ejemplo:** `[SISTEMAS]`, `[C1_*]`, `[C2_*]` accesibles según matriz de permisos.
 
 ### Rol BACKUP (100% Oculto e Inmune a Ransomware):
-* **Grupos Exclusivos:** Solo existen `grp_sistemas` (TI) y `grp_backups` (Servicio técnico). Ningún usuario común existe en este servidor.
-* **Recursos Ocultos:** Todos los recursos terminan en `$` y tienen `browseable = no` (**completamente invisibles en la red de Windows**):
+* **Grupos de ejemplo:** `grp_sistemas` (TI) y, opcionalmente, `grp_backups` (servicio técnico). Ningún usuario común debería existir en este servidor.
+* **Recursos Ocultos:** Se crean con el sufijo `$` (y opcionalmente `browseable = no`) para quedar **invisibles en el explorador de Windows**:
   * `[BACKUPS_WINDOWS$]`: Destino oculto para agentes Windows (Veeam / Windows Backup).
   * `[BACKUPS_LINUX$]`: Destino oculto para servidores Linux.
   * `[BACKUPS_SERVIDORES$]`: Repositorio de imágenes y snapshots.
-* **Acceso Estricto:** Solo accesible por credenciales de `@grp_sistemas` y `@grp_backups` escribiendo la ruta UNC directa (ej. `\\<IP_SERVIDOR>\BACKUPS_WINDOWS$`).
+* **Acceso Estricto:** Solo accesible por credenciales autorizadas escribiendo la ruta UNC directa (ej. `\\<IP_SERVIDOR>\BACKUPS_WINDOWS$`).
 
 ## 5. Acceso Web y Conexión de Red
 
