@@ -59,6 +59,11 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                     if [[ "$NUEVO_GRP" != grp_* ]]; then
                         NUEVO_GRP="grp_${NUEVO_GRP}"
                     fi
+                    if [ "$NUEVO_GRP" == "grp_" ]; then
+                        whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
+                            --msgbox "El nombre del grupo no puede estar vacio ni contener solo simbolos." 9 65
+                        continue
+                    fi
                     if groupadd "$NUEVO_GRP" 2>/dev/null; then
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
                             --msgbox "✔ Grupo \"$NUEVO_GRP\" creado exitosamente." 8 50
