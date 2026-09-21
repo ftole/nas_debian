@@ -36,8 +36,7 @@ instalar_nas() {
     # PASO 2: SELECCIÓN DEL DISCO DE ALMACENAMIENTO
     # --------------------------------------------------------------------------
     ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
-    ROOT_DISK=$(lsblk -no PKNAME "$ROOT_DEV" 2>/dev/null || echo "")
-    [ -n "$ROOT_DISK" ] && ROOT_DISK="/dev/$ROOT_DISK"
+    ROOT_DISK="/dev/$(resolver_disco_base "$ROOT_DEV")"
 
     MENU_DISCOS=()
     MENU_DISCOS+=("LOCAL" "Usar espacio de partición raíz ($ROOT_DEV)")
