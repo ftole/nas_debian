@@ -109,14 +109,17 @@ crear_usuario_guiado() {
 }
 
 alternar_estado_usuario() {
-    local LISTA_USERS MENU_ITEMS USER_SEL IS_DISABLED u
+    local LISTA_USERS USER_SEL IS_DISABLED u st
     LISTA_USERS=$(pdbedit -L 2>/dev/null | cut -d: -f1 | grep -v "^root$")
     if [ -z "$LISTA_USERS" ]; then
         whiptail --ok-button "< Aceptar >" --msgbox "No hay usuarios registrados en Samba." 8 45
         return
     fi
 
-    MENU_ITEMS=$(python3 -c '
+    local -a MENU_ITEMS=()
+    while IFS=$'\t' read -r u st; do
+        [ -n "$u" ] && MENU_ITEMS+=("$u" "$st")
+    done < <(python3 -c '
 import subprocess
 out = subprocess.run(["pdbedit", "-L", "-v"], capture_output=True, text=True)
 users = {}
@@ -133,7 +136,7 @@ for line in out.stdout.splitlines():
 for u, data in users.items():
     if u != "root":
         st = "[SUSPENDIDO]" if "D" in data["flags"] else "[ACTIVO]"
-        print(f"{u} {st}")
+        print(f"{u}\t{st}")
 ')
 
     USER_SEL=$(whiptail --title "Alternar Estado de Usuario (Activar / Suspender)" \
