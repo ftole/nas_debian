@@ -303,9 +303,15 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                             done
                             usermod -aG "$NUEVOS_GRPS_CSV" "$TARGET_USER"
                             
-                            # Ajustar shell según pertenezca a grp_sistemas
+                            # Ajustar shell y home según pertenezca a grp_sistemas
                             if echo "$NUEVOS_GRPS_CSV" | grep -qw "grp_sistemas"; then
                                 usermod -s /bin/bash -aG sudo,adm "$TARGET_USER"
+                                if [ ! -d "/home/$TARGET_USER" ]; then
+                                    mkdir -p "/home/$TARGET_USER"
+                                    cp -r /etc/skel/. "/home/$TARGET_USER/" 2>/dev/null || true
+                                    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER"
+                                    chmod 700 "/home/$TARGET_USER"
+                                fi
                             else
                                 usermod -s /usr/sbin/nologin "$TARGET_USER"
                                 gpasswd -d "$TARGET_USER" sudo 2>/dev/null || true
