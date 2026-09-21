@@ -48,6 +48,27 @@ function runApi(args) {
 		});
 }
 
+function runApiInput(action, payloadObj) {
+	return new Promise(function (resolve) {
+		var proc = cockpit.spawn(["python3", API_PATH, action], { superuser: "try", err: "message" });
+		proc.input(JSON.stringify(payloadObj), true);
+		proc.then(function (out) {
+			try {
+				resolve(JSON.parse(out.trim()));
+			} catch (e) {
+				resolve({ status: "error", message: "Respuesta inválida del servidor. " + String(e) });
+			}
+		});
+		proc.catch(function (err) {
+			var msg = "Error desconocido";
+			if (err && err.message) msg = err.message;
+			else if (err && err.problem) msg = err.problem;
+			else msg = String(err);
+			resolve({ status: "error", message: "Error interno: " + msg });
+		});
+	});
+}
+
 /* =================== Tabs =================== */
 
 function switchTab(paneId, btnId) {
@@ -188,7 +209,7 @@ function probarConexion() {
 		payload.port = document.getElementById("task-port").value.trim();
 	}
 
-	runApi([action, JSON.stringify(payload)]).then(function (res) {
+	runApiInput(action, payload).then(function (res) {
 		if (res.status === "ok") {
 			box.className = "bkp-alert bkp-alert-ok visible";
 			box.innerHTML = '<i class="fas fa-check-circle"></i> ' + esc(res.message);
@@ -233,7 +254,7 @@ function guardarTarea() {
 	var btn = document.getElementById("btn-save");
 	btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
 
-	runApi(["create", JSON.stringify(payload)]).then(function (res) {
+	runApiInput("create", payload).then(function (res) {
 		btn.innerHTML = '<i class="fas fa-save"></i> Guardar y Programar';
 		if (res.status === "ok") {
 			alert("✔ " + res.message);
