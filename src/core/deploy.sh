@@ -21,6 +21,9 @@ SMB_WORKGROUP="${2:-$(obtener_workgroup_defecto)}"
 SMB_NETBIOS="${3:-$(obtener_netbios_defecto)}"
 ADMIN_USER="${4:-$(detect_default_user)}"
 ADMIN_PASS="${5:-}"
+if [ "$ADMIN_PASS" == "-" ]; then
+    IFS= read -r ADMIN_PASS || true
+fi
 SERVER_ROLE="${6:-ARCHIVOS}"
 
 # Sanear identificadores de red para evitar expansión/inyección en las configuraciones
@@ -103,8 +106,9 @@ mkdir -p /srv/nas
 
 ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
 ROOT_DISK="/dev/$(resolver_disco_base "$ROOT_DEV")"
+ROOT_DEVS="$(resolver_discos_raiz "$ROOT_DEV")"
 
-if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TARGET_DISK" == "$ROOT_DISK" ]; then
+if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TARGET_DISK" == "$ROOT_DISK" ] || printf '%s\n' "$ROOT_DEVS" | grep -qx "$TARGET_DISK"; then
     echo "  -> Almacenamiento local configurado en la partición raíz."
     auto_tune_hardware "$ROOT_DEV"
 else
