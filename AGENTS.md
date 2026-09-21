@@ -111,15 +111,13 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
 1. **Visibilidad en Red Windows (WSDD2):**
    * *Problema:* `wsdd2` en Debian 13 usa `DynamicUser=true` y falla al ejecutar `testparm` para leer `smb.conf`.
    * *Solución:* Override en `/etc/default/wsdd2` y `/etc/systemd/system/wsdd2.service.d/override.conf` con `WSDD2_OPTS="-N <NETBIOS> -G <WORKGROUP> -H <NETBIOS>"`.
-2. **Permisos de Base de Datos Samba:**
-   * `/var/lib/samba/registry.tdb` configurado con `chmod 644`.
-3. **Compatibilidad de Cockpit en Servidores en Español:**
+2. **Compatibilidad de Cockpit en Servidores en Español:**
    * *Problema:* Cockpit espera salida en inglés de herramientas del sistema (`chage`, `passwd -S`, `lastb`).
-   * *Solución:* Wrappers en `/usr/local/sbin/` que fuerzan `LANG=C.UTF-8` y regla en `/etc/sudoers.d/99-cockpit-spanish-fix`.
+   * *Solución:* Wrappers en `/usr/local/sbin/chage`, `/usr/local/sbin/passwd` y `/usr/local/bin/lastb` que fuerzan `LC_ALL=C LANG=C`.
 
 ---
 
-4. **Interfaz Web (Cockpit Backups):**
+3. **Interfaz Web (Cockpit Backups):**
    * *Arquitectura:* Aplicación web ES5 nativa sin frameworks pesados, inyectada en `/usr/share/cockpit/backups`.
    * *Estilos:* Utiliza PatternFly 4 (`cockpit.css.gz`) importado desde Navigator para mantener coherencia de diseño oscuro/claro nativo de 45Drives.
    * *Backend:* `backup_api.py` actúa como puente JSON. `cockpit.spawn` invoca la API localmente usando escalada de privilegios segura.
