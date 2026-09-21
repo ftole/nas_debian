@@ -105,7 +105,7 @@ crear_usuario_guiado() {
             echo "${USER_NAME}:${USER_PW}" | chpasswd
         fi
 
-        echo -e "${USER_PW}\n${USER_PW}" | smbpasswd -a -s "$USER_NAME"
+        printf '%s\n%s\n' "$USER_PW" "$USER_PW" | smbpasswd -a -s "$USER_NAME"
 
         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
             --msgbox "✔ ¡Usuario Registrado con Éxito!\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: $GRUPO_FINAL\n• Acceso:           $PERM_TXT\n\nYa puede conectar desde la red a: \\\\${SERVER_IP}" 15 72
@@ -346,7 +346,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         --passwordbox "Ingresa la nueva contraseña de Samba para $USER_PW_SEL:" 10 65 3>&1 1>&2 2>&3)
                     RET=$?
                     if [ $RET -eq 0 ] && [ -n "$NUEVA_CLAVE" ]; then
-                        echo -e "${NUEVA_CLAVE}\n${NUEVA_CLAVE}" | smbpasswd -s "$USER_PW_SEL"
+                        printf '%s\n%s\n' "$NUEVA_CLAVE" "$NUEVA_CLAVE" | smbpasswd -s "$USER_PW_SEL"
                         if id -Gn "$USER_PW_SEL" 2>/dev/null | grep -qw "grp_sistemas"; then
                             echo "${USER_PW_SEL}:${NUEVA_CLAVE}" | chpasswd 2>/dev/null || true
                         fi
