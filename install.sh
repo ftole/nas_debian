@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/nas_debian"
 BIN_PATH="/usr/local/bin/nas"
 
-SSH_CHECK=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1 || true)
+SSH_CHECK=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 || true)
 if echo "$SSH_CHECK" | grep -qi "successfully authenticated"; then
     REPO_URL="git@github.com:ftole/nas_debian.git"
 else
