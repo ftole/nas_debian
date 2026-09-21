@@ -60,3 +60,11 @@ resolver_disco_base() {
     fi
     echo "$base"
 }
+
+# Lista los discos físicos (tipo disk) que respaldan un dispositivo dado.
+# Soporta md/RAID, LVM, LUKS y subvolúmenes btrfs.
+resolver_discos_raiz() {
+    local dev="$1"
+    dev="${dev%%[*}"
+    lsblk -s -n -o NAME,TYPE "$dev" 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'
+}
