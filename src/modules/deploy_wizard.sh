@@ -4,7 +4,7 @@
 # ==============================================================================
 
 instalar_nas() {
-    local SERVER_IP DEFAULT_USER DEFAULT_NETBIOS DEFAULT_WG ROL_OPCION ROL_SERVER ROL_NETBIOS ROOT_DEV ROOT_DISK
+    local SERVER_IP DEFAULT_USER DEFAULT_NETBIOS DEFAULT_WG ROL_OPCION ROL_SERVER ROL_NETBIOS ROOT_DEV ROOT_DEVS
     local MENU_DISCOS DISCO_SELECCIONADO SMB_NETBIOS SMB_WORKGROUP USUARIO_ACTUAL OPCION_USER ADMIN_USER ADMIN_PASS
     local RESUMEN CORE_DEPLOY name size type dev_path
     
@@ -36,7 +36,7 @@ instalar_nas() {
     # PASO 2: SELECCIÓN DEL DISCO DE ALMACENAMIENTO
     # --------------------------------------------------------------------------
     ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
-    ROOT_DISK="/dev/$(resolver_disco_base "$ROOT_DEV")"
+    ROOT_DEVS=$(resolver_discos_raiz "$ROOT_DEV")
 
     MENU_DISCOS=()
     MENU_DISCOS+=("LOCAL" "Usar espacio de partición raíz ($ROOT_DEV)")
@@ -44,7 +44,7 @@ instalar_nas() {
     while read -r name size type _; do
         if [ "$type" == "disk" ]; then
             dev_path="/dev/$name"
-            if [ "$dev_path" != "$ROOT_DISK" ]; then
+            if ! printf '%s\n' "$ROOT_DEVS" | grep -qx "$dev_path"; then
                 MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato BTRFS automático (auto-tuning)")
             fi
         fi
@@ -135,7 +135,7 @@ INCLUYE PARCHES AUTOMATICOS:
         printf "  ╰──────────────────────────────────────────────────────────────────────╯%b\n\n" "${C_RESET}"
         
         CORE_DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../core" && pwd)/deploy.sh"
-        bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "$ADMIN_PASS" "$ROL_SERVER"
+        printf '%s\n' "$ADMIN_PASS" | bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "-" "$ROL_SERVER"
         local ret_exec=$?
         
         if [ $ret_exec -eq 0 ]; then
