@@ -3,6 +3,17 @@
 # Módulo: Motor de Respaldos Multiplataforma y Deduplicación
 # ==============================================================================
 
+validar_cron() {
+    local expr="$1" campo
+    local -a campos
+    read -r -a campos <<< "$expr"
+    [ "${#campos[@]}" -eq 5 ] || return 1
+    for campo in "${campos[@]}"; do
+        [[ "$campo" =~ ^[0-9*,/-]+$ ]] || return 1
+    done
+    return 0
+}
+
 gestionar_backups() {
     local OPC_BKP TABLA_BKPS TASK_NAME WIN_IP WIN_SHARE WIN_USER WIN_PASS LNX_IP LNX_PORT LNX_USER LNX_PASS LNX_PATH LOC_SRC
     local CRON_SCHED CRON_EXPR RETENTION CRED_FILE RUNNER TAREAS_DEL MENU_DEL TASK_DEL_SEL TEST_CONN
@@ -109,6 +120,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     --inputbox "Dirección IP o Nombre del Servidor Windows (ej. 10.10.1.50):" 10 65 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$WIN_IP" ]; then continue; fi
+                if [[ ! "$WIN_IP" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                    whiptail --title "IP Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La direccion IP o nombre del servidor contiene caracteres no permitidos." 9 65
+                    continue
+                fi
 
                 WIN_SHARE=$(whiptail --title "Paso 3 de 5: Recurso Compartido Remoto" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -116,12 +132,22 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$WIN_SHARE" ]; then continue; fi
                 WIN_SHARE=$(echo "$WIN_SHARE" | tr -d '/')
+                if [[ ! "$WIN_SHARE" =~ ^[A-Za-z0-9_$.-]+$ ]]; then
+                    whiptail --title "Recurso Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El nombre del recurso compartido contiene caracteres no permitidos." 9 65
+                    continue
+                fi
 
                 WIN_USER=$(whiptail --title "Paso 4 de 5: Credenciales de Acceso" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-                    --inputbox "Usuario de Windows con permisos de lectura (ej. Administrador o DOMINIO\\admin):" 10 65 "Administrador" 3>&1 1>&2 2>&3)
+                    --inputbox "Usuario de Windows con permisos de lectura (ej. Administrador o usuario@dominio):" 10 65 "Administrador" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$WIN_USER" ]; then continue; fi
+                if [[ ! "$WIN_USER" =~ ^[A-Za-z0-9._@-]+$ ]]; then
+                    whiptail --title "Usuario Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El usuario contiene caracteres no permitidos. Usa el formato usuario@dominio." 9 68
+                    continue
+                fi
 
                 WIN_PASS=$(whiptail --title "Paso 4 de 5: Credenciales de Acceso" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -131,7 +157,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
 
                 # Test de conexión en vivo con smbclient
                 if command -v smbclient &>/dev/null; then
-                    TEST_CONN=$(smbclient "//$WIN_IP/$WIN_SHARE" -U "$WIN_USER%$WIN_PASS" -c "dir" 2>&1 || true)
+                    TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -c "dir" 2>&1 || true)
                     if echo "$TEST_CONN" | grep -qiE "NT_STATUS_LOGON_FAILURE|NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_UNSUCCESSFUL|Connection to .* failed"; then
                         whiptail --title "Error de Conexión Remota" --ok-button "< Corregir >" \
                             --msgbox "✖ No se pudo conectar al servidor Windows con los datos ingresados:\n\n$TEST_CONN\n\nVerifica la IP, el recurso compartido o las credenciales." 14 72
@@ -160,6 +186,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         if [ $RET -ne 0 ] || [ -z "$CRON_EXPR" ]; then continue; fi
                         ;;
                 esac
+
+                if ! validar_cron "$CRON_EXPR"; then
+                    whiptail --title "Cron Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "La expresion cron no es valida. Debe tener 5 campos (minuto hora dia mes diasemana)." 9 70
+                    continue
+                fi
 
                 RETENTION=$(whiptail --title "Política de Retención de Snapshots" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -262,22 +294,42 @@ RUNNER_EOF
                     --inputbox "Dirección IP o Nombre del Servidor Linux Remoto:" 10 65 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LNX_IP" ]; then continue; fi
+                if [[ ! "$LNX_IP" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                    whiptail --title "IP Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La direccion IP o nombre del servidor contiene caracteres no permitidos." 9 65
+                    continue
+                fi
 
                 LNX_PORT=$(whiptail --title "Puerto SSH" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Puerto SSH del Servidor Remoto:" 10 65 "22" 3>&1 1>&2 2>&3)
                 LNX_PORT=${LNX_PORT:-22}
+                if [[ ! "$LNX_PORT" =~ ^[0-9]+$ ]] || [ "$LNX_PORT" -lt 1 ] || [ "$LNX_PORT" -gt 65535 ]; then
+                    whiptail --title "Puerto Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El puerto SSH debe ser un numero entre 1 y 65535." 9 65
+                    continue
+                fi
 
                 LNX_PATH=$(whiptail --title "Paso 3 de 5: Ruta Remota a Respaldar" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Ruta absoluta en el servidor remoto (ej. /var/www o /etc):" 10 65 "/var/www" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LNX_PATH" ]; then continue; fi
+                if [[ ! "$LNX_PATH" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La ruta remota debe ser absoluta y sin caracteres especiales." 9 68
+                    continue
+                fi
 
                 LNX_USER=$(whiptail --title "Paso 4 de 5: Credenciales SSH" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Usuario SSH en el servidor remoto:" 10 65 "root" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LNX_USER" ]; then continue; fi
+                if [[ ! "$LNX_USER" =~ ^[A-Za-z0-9._@-]+$ ]]; then
+                    whiptail --title "Usuario Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "El usuario contiene caracteres no permitidos." 9 60
+                    continue
+                fi
 
                 LNX_PASS=$(whiptail --title "Paso 4 de 5: Credenciales SSH" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -304,6 +356,12 @@ RUNNER_EOF
                         if [ $RET -ne 0 ] || [ -z "$CRON_EXPR" ]; then continue; fi
                         ;;
                 esac
+
+                if ! validar_cron "$CRON_EXPR"; then
+                    whiptail --title "Cron Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "La expresion cron no es valida. Debe tener 5 campos (minuto hora dia mes diasemana)." 9 70
+                    continue
+                fi
 
                 RETENTION=$(whiptail --title "Política de Retención" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Número de snapshots a conservar:" 10 65 "15" 3>&1 1>&2 2>&3)
@@ -394,12 +452,22 @@ RUNNER_EOF
                     --inputbox "Ruta física absoluta de la carpeta origen a respaldar:" 10 65 "/srv/nas/SISTEMAS" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LOC_SRC" ]; then continue; fi
+                if [[ ! "$LOC_SRC" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La ruta local debe ser absoluta y sin caracteres especiales." 9 68
+                    continue
+                fi
 
                 CRON_EXPR=$(whiptail --title "Paso 3 de 4: Horario de Ejecución" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Expresión cron (por defecto a las 23:30 hrs diario):" 10 65 "30 23 * * *" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
                 CRON_EXPR=${CRON_EXPR:-"30 23 * * *"}
+                if ! validar_cron "$CRON_EXPR"; then
+                    whiptail --title "Cron Invalido" --ok-button "< Aceptar >" \
+                        --msgbox "La expresion cron no es valida. Debe tener 5 campos (minuto hora dia mes diasemana)." 9 70
+                    continue
+                fi
 
                 RETENTION=$(whiptail --title "Paso 4 de 4: Retención" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Número de snapshots a retener:" 10 65 "30" 3>&1 1>&2 2>&3)
