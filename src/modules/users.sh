@@ -14,9 +14,9 @@ crear_usuario_guiado() {
     RET=$?
     if [ $RET -ne 0 ] || [ -z "$USER_NAME" ]; then return; fi
 
-    if ! [[ "$USER_NAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    if ! [[ "$USER_NAME" =~ ^[a-z][a-z0-9_-]*$ ]]; then
         whiptail --title "Error de Formato" --ok-button "< Aceptar >" \
-            --msgbox "El identificador solo puede contener letras minúsculas, números y guión bajo." 9 65
+            --msgbox "El identificador debe iniciar con una letra minuscula y solo puede contener letras, numeros y guion bajo." 9 70
         return
     fi
 
