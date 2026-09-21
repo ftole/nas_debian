@@ -40,9 +40,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 auto_tune_hardware() {
     local DISCO="$1"
     local DISCO_BASE
-    DISCO=$(printf '%s' "$DISCO" | sed 's/\[.*\]$//')
-    DISCO_BASE=$(lsblk -no PKNAME "$DISCO" 2>/dev/null | head -n1)
-    [ -z "$DISCO_BASE" ] && DISCO_BASE=$(basename "$DISCO")
+    DISCO="${DISCO%%[*}"
+    DISCO_BASE=$(resolver_disco_base "$DISCO")
     local ES_HDD
     ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
     local RAM_KB
@@ -97,8 +96,7 @@ echo " [2/9] Configurando almacenamiento (/srv/nas) en $TARGET_DISK..."
 mkdir -p /srv/nas
 
 ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
-ROOT_DISK=$(lsblk -no PKNAME "$ROOT_DEV" 2>/dev/null || echo "")
-[ -n "$ROOT_DISK" ] && ROOT_DISK="/dev/$ROOT_DISK"
+ROOT_DISK="/dev/$(resolver_disco_base "$ROOT_DEV")"
 
 if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TARGET_DISK" == "$ROOT_DISK" ]; then
     echo "  -> Almacenamiento local configurado en la partición raíz."
