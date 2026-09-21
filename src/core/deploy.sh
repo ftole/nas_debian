@@ -40,7 +40,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 auto_tune_hardware() {
     local DISCO="$1"
     local DISCO_BASE
-    DISCO_BASE=$(basename "$DISCO")
+    DISCO=$(printf '%s' "$DISCO" | sed 's/\[.*\]$//')
+    DISCO_BASE=$(lsblk -no PKNAME "$DISCO" 2>/dev/null | head -n1)
+    [ -z "$DISCO_BASE" ] && DISCO_BASE=$(basename "$DISCO")
     local ES_HDD
     ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
     local RAM_KB
@@ -249,7 +251,8 @@ fi
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
 mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
 chown -R root:grp_sistemas /srv/nas
-chmod -R 2775 /srv/nas
+find /srv/nas -type d -exec chmod 2775 {} +
+find /srv/nas -type f -exec chmod 664 {} +
 
 echo " [6/9] Configurando /etc/samba/smb.conf (Infraestructura Limpia)..."
 mkdir -p /etc/samba
