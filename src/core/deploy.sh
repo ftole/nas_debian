@@ -125,7 +125,17 @@ else
     else
         echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2" >> /etc/fstab
     fi
-    mount -o "$BTRFS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null || mount /srv/nas 2>/dev/null || true
+    MOUNT_OK=false
+    if mount -o "$BTRFS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null; then
+        MOUNT_OK=true
+    elif mount /srv/nas 2>/dev/null; then
+        MOUNT_OK=true
+    fi
+    if [ "$MOUNT_OK" != "true" ]; then
+        echo "[-] ERROR CRITICO: No se pudo montar $PART_NAS en /srv/nas."
+        echo "    Abortando para evitar escribir los respaldos en la particion del sistema."
+        exit 1
+    fi
 fi
 
 echo " [3/9] Instalando extensiones de Cockpit (File Sharing, Identities, Navigator)..."
@@ -135,17 +145,24 @@ cd "$TMP_DIR"
 install_deb_pkg() {
     local url="$1"
     local filename="$2"
+    local plugin_dir="$3"
     if wget -q --spider "$url" 2>/dev/null; then
         wget -q "$url" -O "$filename"
         if [ -s "$filename" ]; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./"$filename" >/dev/null 2>&1 || true
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./"$filename" >/dev/null 2>&1; then
+                echo "  [!] Aviso: no se pudo instalar $filename (posibles dependencias incompatibles). Se omitira el modulo."
+            elif [ -n "$plugin_dir" ] && [ ! -d "$plugin_dir" ]; then
+                echo "  [!] Aviso: $filename se instalo pero no se detecto el directorio $plugin_dir."
+            fi
         fi
+    else
+        echo "  [!] Aviso: no se pudo descargar $filename desde GitHub."
     fi
 }
 
-install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v3.3.4/cockpit-file-sharing_3.3.4-1focal_all.deb" "cockpit-file-sharing.deb"
-install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb" "cockpit-identities.deb"
-install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb"
+install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v3.3.4/cockpit-file-sharing_3.3.4-1focal_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing"
+install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities"
+install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator"
 
 cd /
 rm -rf "$TMP_DIR"
@@ -254,6 +271,11 @@ chown -R root:grp_sistemas /srv/nas
 find /srv/nas -type d -exec chmod 2775 {} +
 find /srv/nas -type f -exec chmod 664 {} +
 
+VFS_IOURING_LINE=""
+if find /usr/lib -path "*samba/vfs/io_uring.so" -print -quit 2>/dev/null | grep -q .; then
+    VFS_IOURING_LINE="   vfs objects = io_uring"
+fi
+
 echo " [6/9] Configurando /etc/samba/smb.conf (Infraestructura Limpia)..."
 mkdir -p /etc/samba
 cat << SMBCONF > /etc/samba/smb.conf
@@ -274,7 +296,7 @@ cat << SMBCONF > /etc/samba/smb.conf
    min receivefile size = 16384
    aio read size = 16384
    aio write size = 16384
-   vfs objects = io_uring
+$VFS_IOURING_LINE
    socket options = TCP_NODELAY IPTOS_LOWDELAY
 
    log file = /var/log/samba/log.%m
