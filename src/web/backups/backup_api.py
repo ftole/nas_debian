@@ -101,6 +101,9 @@ def list_tasks():
     print(json.dumps({"status": "ok", "tasks": tasks}))
 
 def test_cifs(ip, share, user, password):
+    if not _valid_host(ip) or not _valid_share(share) or not _valid_user(user):
+        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido."}))
+        return
     try:
         env = os.environ.copy()
         env["USER"] = user
@@ -118,6 +121,16 @@ def test_cifs(ip, share, user, password):
         print(json.dumps({"status": "error", "message": f"Excepción: {str(e)}"}))
 
 def test_ssh(ip, port, user, password):
+    if not _valid_host(ip) or not _valid_user(user):
+        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido."}))
+        return
+    try:
+        port = int(port)
+    except (ValueError, TypeError):
+        port = 22
+    if port < 1 or port > 65535:
+        print(json.dumps({"status": "error", "message": "Puerto SSH inválido."}))
+        return
     try:
         env = os.environ.copy()
         env["SSHPASS"] = password
@@ -138,7 +151,13 @@ def _valid_share(value):
     return bool(re.fullmatch(r'[A-Za-z0-9_$.-]+', value or ""))
 
 def _valid_path(value):
-    return bool(re.fullmatch(r'/[A-Za-z0-9._/-]*', value or ""))
+    value = value or ""
+    if not re.fullmatch(r'/[A-Za-z0-9._/-]*', value):
+        return False
+    return ".." not in value.split("/")
+
+def _sanitize_name(name):
+    return re.sub(r'[^A-Za-z0-9_-]', '_', name or "")
 
 def _valid_user(value):
     return bool(re.fullmatch(r'[A-Za-z0-9._@-]+', value or ""))
@@ -153,7 +172,7 @@ def create_task(data):
     if not ensure_dirs():
         print(json.dumps({"status": "error", "message": "Sin permisos para preparar los directorios de backup. Verifica la escalada de privilegios."}))
         return
-    tname = re.sub(r'[^A-Za-z0-9_-]', '_', data.get("id", ""))
+    tname = _sanitize_name(data.get("id", ""))
     if not tname or tname.strip("_") == "":
         print(json.dumps({"status": "error", "message": "Nombre de tarea inválido."}))
         return
@@ -361,7 +380,7 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' programada exitosamente."}))
 
 def delete_task(tname):
-    tname = re.sub(r'[^A-Za-z0-9_-]', '', tname)
+    tname = _sanitize_name(tname)
     runner = f"{BIN_DIR}/backup_{tname}.sh"
     cron_file = f"{CRON_DIR}/backup_{tname}"
     cred_file = f"{CRED_DIR}/{tname}.cred"
@@ -373,7 +392,7 @@ def delete_task(tname):
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' eliminada."}))
 
 def read_logs(tname):
-    tname = re.sub(r'[^A-Za-z0-9_-]', '', tname)
+    tname = _sanitize_name(tname)
     log_file = f"{LOG_ROOT}/backup_{tname}.log"
     if os.path.exists(log_file):
         try:
@@ -384,6 +403,18 @@ def read_logs(tname):
             print(json.dumps({"status": "error", "logs": str(e)}))
     else:
         print(json.dumps({"status": "ok", "logs": "(No se han generado registros todavía)"}))
+
+def _read_payload():
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        raw = ""
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return {}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -398,11 +429,10 @@ if __name__ == "__main__":
     elif action == "logs":
         read_logs(sys.argv[2])
     elif action == "create":
-        data = json.loads(sys.argv[2])
-        create_task(data)
+        create_task(_read_payload())
     elif action == "test_cifs":
-        data = json.loads(sys.argv[2])
+        data = _read_payload()
         test_cifs(data.get("ip"), data.get("share"), data.get("user"), data.get("password"))
     elif action == "test_ssh":
-        data = json.loads(sys.argv[2])
+        data = _read_payload()
         test_ssh(data.get("ip"), data.get("port", 22), data.get("user"), data.get("password"))
