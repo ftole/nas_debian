@@ -280,7 +280,7 @@ chmod 0440 "$SUDOERS_FILE"
 
 if [ -n "$ADMIN_PASS" ]; then
     echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
-    echo -e "${ADMIN_PASS}\n${ADMIN_PASS}" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
+    printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
