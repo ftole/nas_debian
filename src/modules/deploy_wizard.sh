@@ -46,7 +46,7 @@ instalar_nas() {
         if [ "$type" == "disk" ]; then
             dev_path="/dev/$name"
             if [ "$dev_path" != "$ROOT_DISK" ]; then
-                MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato EXT4 automático")
+                MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato BTRFS automático (auto-tuning)")
             fi
         fi
     done < <(lsblk -dn -o NAME,SIZE,TYPE,MOUNTPOINT)
