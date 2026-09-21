@@ -9,9 +9,13 @@ BKP_ROOT = "/srv/nas/BACKUPS_HISTORICOS"
 LOG_ROOT = "/srv/nas/LOGS_BACKUP"
 
 def ensure_dirs():
-    os.makedirs(CRED_DIR, exist_ok=True)
-    os.makedirs(BKP_ROOT, exist_ok=True)
-    os.makedirs(LOG_ROOT, exist_ok=True)
+    try:
+        os.makedirs(CRED_DIR, exist_ok=True)
+        os.makedirs(BKP_ROOT, exist_ok=True)
+        os.makedirs(LOG_ROOT, exist_ok=True)
+        return True
+    except OSError:
+        return False
 
 def list_tasks():
     ensure_dirs()
@@ -146,7 +150,9 @@ def _valid_cron(value):
     return all(re.fullmatch(r'[0-9*,/-]+', p) for p in parts)
 
 def create_task(data):
-    ensure_dirs()
+    if not ensure_dirs():
+        print(json.dumps({"status": "error", "message": "Sin permisos para preparar los directorios de backup. Verifica la escalada de privilegios."}))
+        return
     tname = re.sub(r'[^A-Za-z0-9_-]', '_', data.get("id", ""))
     if not tname or tname.strip("_") == "":
         print(json.dumps({"status": "error", "message": "Nombre de tarea inválido."}))
