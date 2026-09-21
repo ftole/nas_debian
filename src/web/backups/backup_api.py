@@ -152,7 +152,7 @@ def _valid_share(value):
 
 def _valid_path(value):
     value = value or ""
-    if not re.fullmatch(r'/[A-Za-z0-9._/-]*', value):
+    if value == "/" or not re.fullmatch(r'/[A-Za-z0-9._/-]*', value):
         return False
     return ".." not in value.split("/")
 
