@@ -23,6 +23,12 @@ ADMIN_USER="${4:-$(detect_default_user)}"
 ADMIN_PASS="${5:-}"
 SERVER_ROLE="${6:-ARCHIVOS}"
 
+# Sanear identificadores de red para evitar expansión/inyección en las configuraciones
+SMB_NETBIOS=$(printf '%s' "$SMB_NETBIOS" | tr -cd 'A-Za-z0-9_-' | tr '[:lower:]' '[:upper:]')
+SMB_WORKGROUP=$(printf '%s' "$SMB_WORKGROUP" | tr -cd 'A-Za-z0-9_-' | tr '[:lower:]' '[:upper:]')
+SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')
+[ -z "$SERVER_ROLE" ] && SERVER_ROLE="ARCHIVOS"
+
 SERVER_IP=$(obtener_ip_local)
 
 echo "=============================================================================="
