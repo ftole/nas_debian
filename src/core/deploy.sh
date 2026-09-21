@@ -33,7 +33,7 @@ echo "==========================================================================
 echo " [1/9] Actualizando repositorios e instalando paquetes base..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
+    sudo samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
     cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1
 
@@ -260,7 +260,7 @@ cat << SMBCONF > /etc/samba/smb.conf
    server role = standalone server
    netbios name = $SMB_NETBIOS
    security = user
-   map to guest = Never
+   map to guest = Bad User
    server min protocol = SMB2_02
    server smb encrypt = desired
    dns proxy = no
