@@ -38,7 +38,11 @@ rm -rf /mnt/backup_sources
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 rm -rf /etc/samba
-rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb /usr/bin/lastb
+rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
+rm -f /usr/bin/lastb
+if command -v dpkg-divert &>/dev/null; then
+    dpkg-divert --remove --rename /usr/bin/lastb 2>/dev/null || true
+fi
 rm -rf /usr/share/cockpit/file-sharing /usr/share/cockpit/identities /usr/share/cockpit/navigator /usr/share/cockpit/backups
 rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
 rm -f /etc/sysctl.d/99-nas-tuning.conf
