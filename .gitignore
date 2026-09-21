@@ -1,1 +1,8 @@
+# Byte-compiled / cache de Python
+__pycache__/
+*.py[cod]
 
+# Editores y sistema operativo
+.DS_Store
+Thumbs.db
+*.swp
