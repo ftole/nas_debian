@@ -203,10 +203,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 # Crear credenciales protegidas
                 mkdir -p /etc/backup-credentials /mnt/backup_sources/"$TASK_NAME" /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 CRED_FILE="/etc/backup-credentials/${TASK_NAME}.cred"
-                cat << CREDFILE > "$CRED_FILE"
-username=$WIN_USER
-password=$WIN_PASS
-CREDFILE
+                printf 'username=%s\npassword=%s\n' "$WIN_USER" "$WIN_PASS" > "$CRED_FILE"
                 chmod 600 "$CRED_FILE"
 
                 # Generar script de respaldo
@@ -371,7 +368,7 @@ RUNNER_EOF
 
                 mkdir -p /etc/backup-credentials /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 CRED_FILE="/etc/backup-credentials/${TASK_NAME}.cred"
-                echo "$LNX_PASS" > "$CRED_FILE"
+                printf '%s\n' "$LNX_PASS" > "$CRED_FILE"
                 chmod 600 "$CRED_FILE"
 
                 RUNNER="/usr/local/bin/backup_${TASK_NAME}.sh"
