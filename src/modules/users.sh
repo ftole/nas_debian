@@ -87,7 +87,11 @@ crear_usuario_guiado() {
         --yes-button "< Sí, Registrar Usuario >" --no-button "< Cancelar >" \
         --yesno "¿Confirmas el registro del usuario con los siguientes datos?\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: $GRUPO_FINAL\n• Nivel de Acceso:  $PERM_TXT" 16 72); then
         
-        adduser --disabled-password --gecos "$FULL_NAME" --no-create-home --shell "$SHELL_TYPE" "$USER_NAME" 2>/dev/null || useradd -c "$FULL_NAME" -s "$SHELL_TYPE" -M "$USER_NAME"
+        if [ "$SHELL_TYPE" == "/bin/bash" ]; then
+            adduser --disabled-password --gecos "$FULL_NAME" --shell "$SHELL_TYPE" "$USER_NAME" 2>/dev/null || useradd -c "$FULL_NAME" -s "$SHELL_TYPE" -m "$USER_NAME"
+        else
+            adduser --disabled-password --gecos "$FULL_NAME" --no-create-home --shell "$SHELL_TYPE" "$USER_NAME" 2>/dev/null || useradd -c "$FULL_NAME" -s "$SHELL_TYPE" -M "$USER_NAME"
+        fi
 
         IFS=',' read -ra GRPS <<< "$GRUPO_FINAL"
         for g in "${GRPS[@]}"; do
