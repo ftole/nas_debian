@@ -1,6 +1,6 @@
 # Servidor NAS & Central de Respaldos Multiplataforma (Debian 13)
 
-[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)]() [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)]() [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)]() [![Cockpit](https://img.shields.io/badge/Web%20UI-Cockpit-FF6600?style=for-the-badge)]()
+[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Cockpit](https://img.shields.io/badge/Web%20UI-Cockpit-FF6600?style=for-the-badge)](https://github.com/ftole/nas_debian)
 
 Este repositorio contiene la suite de scripts interactivos y automatizados para desplegar y administrar servidores de almacenamiento en red (**NAS Departamental**) y **Centrales de Copias de Seguridad** inmunes a ransomware bajo **Debian 13 (Trixie)**.
 
@@ -23,10 +23,12 @@ Una vez instalado, el comando **`nas`** queda registrado en el sistema para uso 
 | Comando | Acción |
 | :--- | :--- |
 | `sudo nas` | Abre el **Asistente Visual Interactivo** con todos sus módulos. |
-| `sudo nas update` | Actualiza el proyecto a la última versión de GitHub en 1 segundo. |
-| `sudo nas status` | Diagnóstico rápido en tiempo real de Samba, Cockpit, UFW y discos. |
+| `sudo nas update` | Sincroniza el proyecto con la última versión de GitHub. |
+| `sudo nas status` | Diagnóstico en tiempo real de servicios (Samba/Cockpit), almacenamiento, recursos compartidos y tareas de backup. |
 | `sudo nas version` | Muestra la versión actual y el último commit instalado. |
 | `sudo nas uninstall` | Desinstala el comando `nas` y limpia el servidor por completo. |
+
+> **Nota:** El instalador despliega el proyecto en `/opt/nas_debian` y crea el comando global `/usr/local/bin/nas`. El comando `nas help` muestra la ayuda.
 
 ---
 
@@ -49,20 +51,22 @@ su -
 
 ### Paso 2: Configurar los Repositorios APT (Debian 13 Trixie)
 
-Asegúrate de contar con los componentes oficiales (`main`, `contrib`, `non-free`, `non-free-firmware`) y los repositorios de seguridad.
+Debian 12+ usa por defecto el formato **deb822** en `/etc/apt/sources.list.d/debian.sources`. Configúralo ahí (y vacía `sources.list`) para evitar fuentes duplicadas:
 
-Edita el archivo de repositorios:
 ```bash
-cat << 'SOURCES' > /etc/apt/sources.list
-deb http://deb.debian.org/debian/ trixie main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian/ trixie main contrib non-free non-free-firmware
+cat << 'SOURCES' > /etc/apt/sources.list.d/debian.sources
+Types: deb deb-src
+URIs: http://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main contrib non-free non-free-firmware
 
-deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
-deb-src http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
-
-deb http://deb.debian.org/debian/ trixie-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian/ trixie-updates main contrib non-free non-free-firmware
+Types: deb deb-src
+URIs: http://security.debian.org/debian-security
+Suites: trixie-security
+Components: main contrib non-free non-free-firmware
 SOURCES
+
+: > /etc/apt/sources.list
 ```
 
 ---
@@ -127,16 +131,17 @@ ping -c 4 google.com
    ```bash
    apt install -y sudo
    usermod -aG sudo <nombre_usuario>
-   echo "<nombre_usuario> ALL=(ALL:ALL) ALL" > /etc/sudoers.d/<nombre_usuario>
-   chmod 0440 /etc/sudoers.d/<nombre_usuario>
+   echo "<nombre_usuario> ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-<nombre_usuario>
+   chmod 0440 /etc/sudoers.d/90-<nombre_usuario>
    ```
    *Ejemplo para el usuario `jose`:*
    ```bash
    usermod -aG sudo jose
-   echo "jose ALL=(ALL:ALL) ALL" > /etc/sudoers.d/jose
-   chmod 0440 /etc/sudoers.d/jose
+   echo "jose ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-jose
+   chmod 0440 /etc/sudoers.d/90-jose
    ```
    > **Nota:** La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
+   > **Aviso:** `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
 
 3. **Salir de root:**
    ```bash
@@ -150,8 +155,13 @@ ping -c 4 google.com
 Por seguridad, restringe el acceso directo de root vía SSH para obligar a usar un usuario estándar con escalado de privilegios:
 
 ```bash
+# Aplicar en el archivo principal y en los drop-ins (tienen mayor precedencia)
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
 systemctl restart ssh || systemctl restart sshd
+
+# Verificar el valor efectivo
+sshd -T 2>/dev/null | grep -i permitrootlogin
 ```
 
 ---
