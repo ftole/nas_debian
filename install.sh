@@ -3,7 +3,7 @@
 # INSTALADOR OFICIAL: Servidor NAS & Central de Respaldos EAD-COL (Debian 13)
 # ==============================================================================
 # Uso remoto con One-Liner:
-#   curl -fsSL https://raw.githubusercontent.com/ciscored3507/nas_debian/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
 # ==============================================================================
 
 set -e
@@ -17,9 +17,9 @@ BIN_PATH="/usr/local/bin/nas"
 
 SSH_CHECK=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@github.com 2>&1 || true)
 if echo "$SSH_CHECK" | grep -qi "successfully authenticated"; then
-    REPO_URL="git@github.com:ciscored3507/nas_debian.git"
+    REPO_URL="git@github.com:ftole/nas_debian.git"
 else
-    REPO_URL="https://github.com/ciscored3507/nas_debian.git"
+    REPO_URL="https://github.com/ftole/nas_debian.git"
 fi
 
 # Colores de consola
@@ -87,7 +87,7 @@ cat << 'EOF' > "$BIN_PATH"
 #!/bin/bash
 # Wrapper CLI Global: nas
 INSTALL_DIR="/opt/nas_debian"
-REPO_URL="https://github.com/ciscored3507/nas_debian.git"
+REPO_URL="https://github.com/ftole/nas_debian.git"
 
 if [ "$EUID" -ne 0 ]; then
     echo "[-] El comando 'nas' requiere privilegios de administrador. Ejecuta: sudo nas $@"
