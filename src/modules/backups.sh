@@ -159,6 +159,8 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 RETENTION=$(whiptail --title "Política de Retención de Snapshots" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Número de snapshots históricos a conservar antes de rotar:" 10 65 "30" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-30}
 
                 # Crear credenciales protegidas
@@ -292,6 +294,8 @@ RUNNER_EOF
 
                 RETENTION=$(whiptail --title "Política de Retención" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Número de snapshots a conservar:" 10 65 "15" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-15}
 
                 mkdir -p /etc/backup-credentials /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
@@ -373,10 +377,14 @@ RUNNER_EOF
 
                 CRON_EXPR=$(whiptail --title "Paso 3 de 4: Horario de Ejecución" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Expresión cron (por defecto a las 23:30 hrs diario):" 10 65 "30 23 * * *" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -ne 0 ]; then continue; fi
                 CRON_EXPR=${CRON_EXPR:-"30 23 * * *"}
 
                 RETENTION=$(whiptail --title "Paso 4 de 4: Retención" --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Número de snapshots a retener:" 10 65 "30" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-30}
 
                 mkdir -p /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
