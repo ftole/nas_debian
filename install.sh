@@ -60,7 +60,7 @@ echo -e "  ╰──────────────────────
 
 echo -e " ${C_BOLD}[1/4]${C_RESET} Verificando e instalando herramientas base (git, curl, whiptail)..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git curl wget whiptail ca-certificates btrfs-progs samba-vfs-modules >/dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl wget whiptail ca-certificates btrfs-progs samba-vfs-modules >/dev/null 2>&1
 
 echo -e " ${C_BOLD}[2/4]${C_RESET} Descargando y sincronizando componentes en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
 if [ -d "$INSTALL_DIR/.git" ]; then
