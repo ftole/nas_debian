@@ -199,6 +199,9 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-30}
+                if ! [[ "$RETENTION" =~ ^[0-9]+$ ]] || [ "$RETENTION" -lt 1 ]; then
+                    RETENTION=30
+                fi
 
                 # Crear credenciales protegidas
                 mkdir -p /etc/backup-credentials /mnt/backup_sources/"$TASK_NAME" /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
@@ -233,7 +236,7 @@ umount "$MOUNT_POINT" 2>/dev/null || true
 # Montaje en solo lectura
 mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
 
-LAST_SNAPSHOT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | head -n 1 || echo "")
+LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
@@ -245,9 +248,9 @@ rsync -a --delete $LINK_DEST_OPT "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FI
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 # Rotación de snapshots antiguos
-SNAPSHOT_COUNT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | tail -n +$(($RETENTION + 1)))
+    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
     for old in $OLDEST; do
         echo " -> Rotando y eliminando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
@@ -365,6 +368,9 @@ RUNNER_EOF
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-15}
+                if ! [[ "$RETENTION" =~ ^[0-9]+$ ]] || [ "$RETENTION" -lt 1 ]; then
+                    RETENTION=15
+                fi
 
                 mkdir -p /etc/backup-credentials /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 CRED_FILE="/etc/backup-credentials/${TASK_NAME}.cred"
@@ -393,7 +399,7 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 
-LAST_SNAPSHOT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | head -n 1 || echo "")
+LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
@@ -402,9 +408,9 @@ fi
 
 SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=no" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1
 
-SNAPSHOT_COUNT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | tail -n +$(($RETENTION + 1)))
+    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
     for old in $OLDEST; do
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
@@ -471,6 +477,9 @@ RUNNER_EOF
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
                 RETENTION=${RETENTION:-30}
+                if ! [[ "$RETENTION" =~ ^[0-9]+$ ]] || [ "$RETENTION" -lt 1 ]; then
+                    RETENTION=30
+                fi
 
                 mkdir -p /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 RUNNER="/usr/local/bin/backup_${TASK_NAME}.sh"
@@ -491,7 +500,7 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 
-LAST_SNAPSHOT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | head -n 1 || echo "")
+LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
@@ -500,9 +509,9 @@ fi
 
 rsync -a --delete $LINK_DEST_OPT "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1
 
-SNAPSHOT_COUNT=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -td "$BKP_DIR"/snapshot_* 2>/dev/null | tail -n +$(($RETENTION + 1)))
+    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
     for old in $OLDEST; do
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
