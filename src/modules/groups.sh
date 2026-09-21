@@ -55,7 +55,7 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                     --inputbox "Ingresa el nombre del grupo (ej. grp_contabilidad o grp_ventas):" 10 65 "grp_" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -eq 0 ] && [ -n "$NUEVO_GRP" ]; then
-                    NUEVO_GRP=$(echo "$NUEVO_GRP" | tr ' ' '_' | tr -cd 'a-z0-9_-')
+                    NUEVO_GRP=$(echo "$NUEVO_GRP" | tr ' ' '_' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
                     if [[ "$NUEVO_GRP" != grp_* ]]; then
                         NUEVO_GRP="grp_${NUEVO_GRP}"
                     fi
