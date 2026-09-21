@@ -12,9 +12,9 @@ Este repositorio contiene la suite de scripts interactivos y automatizados para 
 Puedes instalar y desplegar todo el entorno en cualquier servidor Debian 13 ejecutando una sola línea en tu terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ciscored3507/nas_debian/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
 ```
-*(o si dispones de `wget`: `wget -qO- https://raw.githubusercontent.com/ciscored3507/nas_debian/main/install.sh | sudo bash`)*
+*(o si dispones de `wget`: `wget -qO- https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`)*
 
 ### 🎮 Comandos Globales del CLI `nas`:
 
