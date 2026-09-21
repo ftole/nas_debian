@@ -423,18 +423,27 @@ if __name__ == "__main__":
         list_tasks()
         sys.exit(0)
 
-    action = sys.argv[1]
-    if action == "list":
-        list_tasks()
-    elif action == "delete":
-        delete_task(sys.argv[2])
-    elif action == "logs":
-        read_logs(sys.argv[2])
-    elif action == "create":
-        create_task(_read_payload())
-    elif action == "test_cifs":
-        data = _read_payload()
-        test_cifs(data.get("ip"), data.get("share"), data.get("user"), data.get("password"))
-    elif action == "test_ssh":
-        data = _read_payload()
-        test_ssh(data.get("ip"), data.get("port", 22), data.get("user"), data.get("password"))
+    try:
+        action = sys.argv[1]
+        if action == "list":
+            list_tasks()
+        elif action == "delete":
+            delete_task(sys.argv[2])
+        elif action == "logs":
+            read_logs(sys.argv[2])
+        elif action == "create":
+            create_task(_read_payload())
+        elif action == "test_cifs":
+            data = _read_payload()
+            test_cifs(data.get("ip"), data.get("share"), data.get("user"), data.get("password"))
+        elif action == "test_ssh":
+            data = _read_payload()
+            test_ssh(data.get("ip"), data.get("port", 22), data.get("user"), data.get("password"))
+        else:
+            print(json.dumps({"status": "error", "message": f"Acción desconocida: {action}"}))
+    except (IndexError, KeyError) as e:
+        print(json.dumps({"status": "error", "message": f"Parámetros incompletos: {str(e)}"}))
+    except OSError as e:
+        print(json.dumps({"status": "error", "message": f"Error de sistema de archivos: {str(e)}"}))
+    except ValueError as e:
+        print(json.dumps({"status": "error", "message": f"Entrada inválida: {str(e)}"}))
