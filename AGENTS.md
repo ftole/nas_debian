@@ -40,6 +40,12 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS` o `BACKUP`), formateo, Samba, Cockpit y parches. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
+| `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
+| `src/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente: `deploy_wizard`, `groups`, `shares`, `backups`, `users`, `diagnostics`. |
+| `src/web/backups/` | Web (Cockpit) | Plugin de respaldos: `index.html`, `main.js`, `style.css`, `backup_api.py` y FontAwesome. |
+| `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
+| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS y Flake8. |
+| `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
 | `SMB_DEBIAN.md` | Markdown | **Manual Técnico y Guía de Replicación** para usuarios y administradores. |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
@@ -135,10 +141,10 @@ sudo nas
 ### Despliegue Manual por Consola:
 ```bash
 # Servidor NAS (usando partición local o disco dedicado):
-sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin DE0puFvp85# ARCHIVOS
+sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin <CLAVE_ADMIN> ARCHIVOS
 
 # Servidor de Backup con disco secundario (/dev/sdb o /dev/sda según escaneo):
-sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin DE0puFvp85# BACKUP
+sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BACKUP
 ```
 
 ### Limpieza y Desinstalación Total:
