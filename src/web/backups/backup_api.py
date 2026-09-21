@@ -127,6 +127,24 @@ def test_ssh(ip, port, user, password):
     except Exception as e:
         print(json.dumps({"status": "error", "message": f"Excepción: {str(e)}"}))
 
+def _valid_host(value):
+    return bool(re.fullmatch(r'[A-Za-z0-9._-]+', value or ""))
+
+def _valid_share(value):
+    return bool(re.fullmatch(r'[A-Za-z0-9_$.-]+', value or ""))
+
+def _valid_path(value):
+    return bool(re.fullmatch(r'/[A-Za-z0-9._/-]*', value or ""))
+
+def _valid_user(value):
+    return bool(re.fullmatch(r'[A-Za-z0-9._@-]+', value or ""))
+
+def _valid_cron(value):
+    parts = (value or "").split()
+    if len(parts) != 5:
+        return False
+    return all(re.fullmatch(r'[0-9*,/-]+', p) for p in parts)
+
 def create_task(data):
     ensure_dirs()
     tname = re.sub(r'[^A-Za-z0-9_-]', '_', data.get("id", ""))
@@ -142,6 +160,9 @@ def create_task(data):
         retention = 30
     if retention < 1:
         retention = 30
+    if not _valid_cron(cron_expr):
+        print(json.dumps({"status": "error", "message": "Expresión cron inválida."}))
+        return
     runner = f"{BIN_DIR}/backup_{tname}.sh"
     cron_file = f"{CRON_DIR}/backup_{tname}"
     cred_file = f"{CRED_DIR}/{tname}.cred"
@@ -152,8 +173,14 @@ def create_task(data):
         user = data.get("user", "Administrador")
         pwd = data.get("password", "")
 
-        if not ip or not share:
-            print(json.dumps({"status": "error", "message": "IP y recurso compartido son obligatorios."}))
+        if not _valid_host(ip) or not _valid_share(share):
+            print(json.dumps({"status": "error", "message": "IP o recurso compartido con formato inválido."}))
+            return
+        if not _valid_user(user):
+            print(json.dumps({"status": "error", "message": "Usuario con formato inválido."}))
+            return
+        if "\n" in pwd or "\r" in pwd:
+            print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
         with open(cred_file, "w") as f:
@@ -205,13 +232,25 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
 """
     elif proto == "ssh":
         ip = (data.get("ip") or "").strip()
-        port = data.get("port", 22)
         rpath = (data.get("path") or "/var/www").strip()
         user = data.get("user", "root")
         pwd = data.get("password", "")
 
-        if not ip or not rpath:
-            print(json.dumps({"status": "error", "message": "IP y ruta remota son obligatorias."}))
+        try:
+            port = int(data.get("port", 22))
+        except (ValueError, TypeError):
+            port = 22
+        if port < 1 or port > 65535:
+            print(json.dumps({"status": "error", "message": "Puerto SSH inválido."}))
+            return
+        if not _valid_host(ip) or not _valid_path(rpath):
+            print(json.dumps({"status": "error", "message": "IP o ruta remota con formato inválido."}))
+            return
+        if not _valid_user(user):
+            print(json.dumps({"status": "error", "message": "Usuario con formato inválido."}))
+            return
+        if "\n" in pwd or "\r" in pwd:
+            print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
         with open(cred_file, "w") as f:
@@ -260,8 +299,8 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
 """
     else:
         lpath = (data.get("path") or "/srv/nas/SISTEMAS").strip()
-        if not lpath:
-            print(json.dumps({"status": "error", "message": "La ruta local es obligatoria."}))
+        if not _valid_path(lpath):
+            print(json.dumps({"status": "error", "message": "La ruta local tiene un formato inválido."}))
             return
         script = f"""#!/bin/bash
 set -e
