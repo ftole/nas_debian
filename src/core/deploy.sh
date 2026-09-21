@@ -42,7 +42,7 @@ echo "==========================================================================
 echo " [1/9] Actualizando repositorios e instalando paquetes base..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    sudo samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
+    sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
     cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1
 
@@ -167,23 +167,34 @@ install_deb_pkg() {
     local url="$1"
     local filename="$2"
     local plugin_dir="$3"
+    local expected_sha="$4"
     if wget -q --spider "$url" 2>/dev/null; then
         wget -q "$url" -O "$filename"
-        if [ -s "$filename" ]; then
-            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./"$filename" >/dev/null 2>&1; then
-                echo "  [!] Aviso: no se pudo instalar $filename (posibles dependencias incompatibles). Se omitira el modulo."
-            elif [ -n "$plugin_dir" ] && [ ! -d "$plugin_dir" ]; then
-                echo "  [!] Aviso: $filename se instalo pero no se detecto el directorio $plugin_dir."
+        if [ ! -s "$filename" ]; then
+            echo "  [!] Aviso: la descarga de $filename quedo vacia."
+            return
+        fi
+        if [ -n "$expected_sha" ]; then
+            local actual_sha
+            actual_sha=$(sha256sum "$filename" | awk '{print $1}')
+            if [ "$actual_sha" != "$expected_sha" ]; then
+                echo "  [!] Aviso: checksum SHA256 invalido para $filename. Se omite por seguridad."
+                return
             fi
+        fi
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./"$filename" >/dev/null 2>&1; then
+            echo "  [!] Aviso: no se pudo instalar $filename (posibles dependencias incompatibles). Se omitira el modulo."
+        elif [ -n "$plugin_dir" ] && [ ! -d "$plugin_dir" ]; then
+            echo "  [!] Aviso: $filename se instalo pero no se detecto el directorio $plugin_dir."
         fi
     else
         echo "  [!] Aviso: no se pudo descargar $filename desde GitHub."
     fi
 }
 
-install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v3.3.4/cockpit-file-sharing_3.3.4-1focal_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing"
-install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities"
-install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator"
+install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v3.3.4/cockpit-file-sharing_3.3.4-1focal_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing" "fd75ee1690159642de3663870b46efc5bb25dddf983e1a1726c0089d4b0cf27e"
+install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities" "85d1412da210c86d0ebad35624fc512d895fd52f09ee0a8629cc1bc3bd0e825a"
+install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator" "784b8b1d7e02224594d34e6d60945c72b54a557692a37fefbb0046146b74040e"
 
 cd /
 rm -rf "$TMP_DIR"
