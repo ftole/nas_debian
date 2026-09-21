@@ -292,6 +292,9 @@ usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
 SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
 echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
 chmod 0440 "$SUDOERS_FILE"
+if command -v visudo &>/dev/null && ! visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
+    rm -f "$SUDOERS_FILE"
+fi
 
 if [ -n "$ADMIN_PASS" ]; then
     echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
