@@ -45,3 +45,36 @@ setup() {
         [ "$output" = "nas" ]
     fi
 }
+
+@test "resolver_disco_base retorna un disco base no vacio" {
+    local root_dev
+    root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+    if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
+        skip "la raiz no es un dispositivo de bloque en este entorno"
+    fi
+    run resolver_disco_base "$root_dev"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+}
+
+@test "resolver_discos_raiz retorna al menos un disco para la raiz" {
+    local root_dev
+    root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+    if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
+        skip "la raiz no es un dispositivo de bloque en este entorno"
+    fi
+    run resolver_discos_raiz "$root_dev"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+}
+
+@test "validar_cron acepta expresiones validas y rechaza invalidas" {
+    # shellcheck source=src/modules/backups.sh
+    source "src/modules/backups.sh"
+    run validar_cron "0 23 * * *"
+    [ "$status" -eq 0 ]
+    run validar_cron "0 23 * *"
+    [ "$status" -ne 0 ]
+    run validar_cron "0 23 * * *; rm -rf /"
+    [ "$status" -ne 0 ]
+}
