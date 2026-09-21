@@ -6,6 +6,17 @@
 var API_PATH = "/usr/share/cockpit/backups/backup_api.py";
 var currentProto = "cifs";
 
+/* =================== Utilidades =================== */
+
+function esc(s) {
+	return String(s == null ? "" : s)
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
 /* =================== Tema Houston =================== */
 
 function initTheme() {
@@ -114,23 +125,23 @@ function cargarTareas() {
 
 			var tr = document.createElement("tr");
 
-			var badge = '<span class="bkp-badge bkp-badge-warn"><i class="fas fa-clock"></i> ' + t.last_status + "</span>";
+			var badge = '<span class="bkp-badge bkp-badge-warn"><i class="fas fa-clock"></i> ' + esc(t.last_status) + "</span>";
 			if (t.last_status === "Éxito") badge = '<span class="bkp-badge bkp-badge-ok"><i class="fas fa-check-circle"></i> Éxito</span>';
 			if (t.last_status === "Fallo") badge = '<span class="bkp-badge bkp-badge-err"><i class="fas fa-times-circle"></i> Fallo</span>';
 
 			tr.innerHTML =
-				"<td><strong>" + t.id + "</strong></td>" +
-				'<td><span class="bkp-badge bkp-badge-proto">' + t.proto + "</span></td>" +
-				'<td><code style="color: #58a6ff;">' + t.src + "</code></td>" +
-				"<td><code>" + t.cron + "</code></td>" +
-				"<td>" + t.retention + " snaps</td>" +
-				"<td><strong>" + t.snaps + "</strong> en disco</td>" +
-				"<td>" + t.last_run + "</td>" +
+				"<td><strong>" + esc(t.id) + "</strong></td>" +
+				'<td><span class="bkp-badge bkp-badge-proto">' + esc(t.proto) + "</span></td>" +
+				'<td><code style="color: #58a6ff;">' + esc(t.src) + "</code></td>" +
+				"<td><code>" + esc(t.cron) + "</code></td>" +
+				"<td>" + esc(t.retention) + " snaps</td>" +
+				"<td><strong>" + esc(t.snaps) + "</strong> en disco</td>" +
+				"<td>" + esc(t.last_run) + "</td>" +
 				"<td>" + badge + "</td>" +
 				'<td class="bkp-actions-row">' +
-				'<button class="pf-c-button pf-m-secondary bkp-btn-exec" data-id="' + t.id + '"><i class="fas fa-bolt"></i></button>' +
-				'<button class="pf-c-button pf-m-secondary bkp-btn-logs" data-id="' + t.id + '"><i class="fas fa-file-alt"></i></button>' +
-				'<button class="pf-c-button pf-m-danger bkp-btn-del" data-id="' + t.id + '"><i class="fas fa-trash-alt"></i></button>' +
+				'<button class="pf-c-button pf-m-secondary bkp-btn-exec" data-id="' + esc(t.id) + '"><i class="fas fa-bolt"></i></button>' +
+				'<button class="pf-c-button pf-m-secondary bkp-btn-logs" data-id="' + esc(t.id) + '"><i class="fas fa-file-alt"></i></button>' +
+				'<button class="pf-c-button pf-m-danger bkp-btn-del" data-id="' + esc(t.id) + '"><i class="fas fa-trash-alt"></i></button>' +
 				"</td>";
 
 			tbody.appendChild(tr);
@@ -180,10 +191,10 @@ function probarConexion() {
 	runApi([action, JSON.stringify(payload)]).then(function (res) {
 		if (res.status === "ok") {
 			box.className = "bkp-alert bkp-alert-ok visible";
-			box.innerHTML = '<i class="fas fa-check-circle"></i> ' + res.message;
+			box.innerHTML = '<i class="fas fa-check-circle"></i> ' + esc(res.message);
 		} else {
 			box.className = "bkp-alert bkp-alert-err visible";
-			box.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + res.message;
+			box.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + esc(res.message);
 		}
 	});
 }
@@ -237,8 +248,13 @@ function guardarTarea() {
 
 function ejecutarAhora(taskId) {
 	if (!confirm("¿Ejecutar backup [" + taskId + "] ahora en segundo plano?")) return;
-	cockpit.spawn(["bash", "/usr/local/bin/backup_" + taskId + ".sh"], { superuser: "try" })
-		.then(function () { alert("✔ Tarea [" + taskId + "] finalizada."); cargarTareas(); })
+	var unit = "backup-manual-" + taskId + "-" + Date.now();
+	cockpit.spawn([
+		"systemd-run", "--collect", "--unit=" + unit, "--slice=backups.slice",
+		"-p", "CPUSchedulingPolicy=batch", "-p", "IOSchedulingClass=idle",
+		"bash", "/usr/local/bin/backup_" + taskId + ".sh"
+	], { superuser: "try" })
+		.then(function () { alert("✔ Tarea [" + taskId + "] lanzada en segundo plano."); cargarTareas(); })
 		.catch(function (err) { alert("Error: " + (err.message || err)); cargarTareas(); });
 }
 
