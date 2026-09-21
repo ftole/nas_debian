@@ -406,6 +406,8 @@ def read_logs(tname):
 
 def _read_payload():
     try:
+        if sys.stdin.isatty():
+            return {}
         raw = sys.stdin.read()
     except Exception:
         raw = ""
