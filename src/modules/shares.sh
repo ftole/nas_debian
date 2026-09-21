@@ -283,6 +283,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     if [ "$TIPO_PERM" == "1" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
                         chmod -R 2770 "$RUTA_SHARE"
+                        local -a GRPS_ACL=()
+                        read -r -a GRPS_ACL <<< "$(echo "$GRUPOS_SEL" | tr -d '"')"
+                        for g in "${GRPS_ACL[@]}"; do
+                            setfacl -R -m "g:$g:rwx" "$RUTA_SHARE" 2>/dev/null || true
+                            setfacl -R -d -m "g:$g:rwx" "$RUTA_SHARE" 2>/dev/null || true
+                        done
                     elif [ "$TIPO_PERM" == "2" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
                         chmod -R 2775 "$RUTA_SHARE"
@@ -309,6 +315,9 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         printf '   browseable = %s\n' "$BROWSEABLE"
                         printf '   read only = %s\n' "$READ_ONLY"
                         printf '   guest ok = %s\n' "$GUEST_OK"
+                        if [ "$TIPO_PERM" == "1" ]; then
+                            printf '   inherit acls = yes\n'
+                        fi
                         if [ -n "$VALID_USERS" ]; then
                             printf '   valid users = %s\n' "$VALID_USERS"
                         fi
