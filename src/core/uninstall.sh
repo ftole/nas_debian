@@ -87,6 +87,12 @@ else
         skip {next}
         $2 != "/srv/nas"
     ' /etc/fstab > /etc/fstab.nas.tmp && mv /etc/fstab.nas.tmp /etc/fstab
+    if ! findmnt --verify >/dev/null 2>&1; then
+        echo "  [!] /etc/fstab quedó inválido; restaurando el respaldo."
+        if [ -f "$BACKUP_DIR/fstab.$STAMP" ]; then
+            cp -a "$BACKUP_DIR/fstab.$STAMP" /etc/fstab
+        fi
+    fi
     systemctl daemon-reload
 fi
 
