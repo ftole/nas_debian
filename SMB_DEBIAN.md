@@ -2,13 +2,13 @@
 
 Esta guía documenta el procedimiento completo, probado y replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
 1. **Servidor de Archivos (NAS Principal):** Almacenamiento en red departamental para clientes Windows con Samba, WSDD2 y Cockpit.
-2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado e inmune a ransomware para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
+2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots inmutables) para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
 
 ---
 
 ## 1. Arquitectura y Métodos de Respaldo
 
-### A. Tipos de Copias de Seguridad y Deduplicación:
+### A. Método de Copia de Seguridad y Deduplicación:
 * **Incremental Versionada con Snapshots y Hardlinks (Recomendada):**
   * Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`).
   * Los archivos que no han sido modificados **comparten el mismo bloque físico en el disco** (*hardlinks*).
@@ -20,6 +20,7 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
 ---
 
 ### B. Respaldo de Servidores Windows (Active Directory, SQL, File Server):
+* **Alcance:** copia a nivel de archivos del recurso compartido SMB. Para aplicaciones como AD o SQL usa herramientas nativas/conscientes de VSS.
 * **Protocolo:** SMB / CIFS con montaje en modo **Solo Lectura (`ro`)**.
 * **Seguridad de Credenciales:** El usuario y contraseña de Windows se almacenan en `/etc/backup-credentials/<tarea>.cred` con permisos estrictos `0600 root:root` (inaccesible para usuarios normales).
 * **Flujo de Ejecución:**
@@ -45,13 +46,19 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
 sudo nas
 ```
 * **Detección Automática del Entorno:**
-  * Escanea dinámicamente los discos del servidor, identifica el disco del sistema operativo (`/`) para protegerlo contra formateo accidental, y sugiere discos secundarios libres o partición local.
+  * Escanea dinámicamente los discos del servidor, identifica el disco del sistema operativo (`/`, incluidos LVM/RAID/LUKS) para protegerlo contra formateo accidental, y ofrece discos secundarios o la partición local.
+  * **Aviso:** el disco dedicado seleccionado se **formatea por completo** (BTRFS) y se borran sus datos; el asistente solicita confirmación explícita antes de hacerlo.
   * Detecta la dirección IP real del servidor en la red local para paneles web y accesos SMB.
   * Detecta el usuario administrador actual para asignarle permisos en Cockpit y Samba.
 
 ---
 
-### Método 2: Despliegue Automatizado por Línea de Comandos
+### Método 2: Panel Web Cockpit (Backups)
+Accede a `https://<IP_DEL_SERVIDOR>:9090` → módulo **Backups** para crear, listar y ejecutar tareas y consultar sus registros desde el navegador (usa la misma API que el asistente).
+
+---
+
+### Método 3: Despliegue Automatizado por Línea de Comandos
 ```bash
 # Sintaxis (los parámetros son opcionales con auto-detección):
 sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]
@@ -69,7 +76,7 @@ sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BA
 > printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS
 > ```
 
-### Método 3: Desinstalación y Limpieza Rápida
+### Método 4: Desinstalación y Limpieza Rápida
 ```bash
 sudo nas uninstall
 ```
@@ -99,6 +106,9 @@ Para restaurar archivos o carpetas de cualquier fecha histórica:
 
 > [!IMPORTANT]
 > El despliegue base es **idéntico y limpio** para ambos roles: crea únicamente `grp_sistemas` y `/srv/nas`, con **0 recursos compartidos**. Los grupos y carpetas de ejemplo siguientes se crean después desde el asistente (menús [2] y [3]) según las necesidades del entorno.
+
+> [!NOTE]
+> El asistente ofrece **4 esquemas de permisos** por recurso (Lectura/Escritura por grupo, Solo Lectura + Escritura exclusiva, Solo Lectura estricta y Público/Invitados) y una **retención por defecto** de 30 snapshots (15 para tareas Linux por SSH).
 
 ### Rol ARCHIVOS (NAS Departamental):
 * **Grupos de ejemplo:** `grp_sistemas`, `grp_c1_admin`, `grp_c1_analista`, `grp_c2_admin`, etc. (creados por el administrador).
