@@ -1,6 +1,6 @@
 # Guía de Implementación y Replicación: Servidor NAS & Central de Backup Multiplataforma (Debian Linux)
 
-Esta guía documenta el procedimiento completo, probado y 100% replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
+Esta guía documenta el procedimiento completo, probado y replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
 1. **Servidor de Archivos (NAS Principal):** Almacenamiento en red departamental para clientes Windows con Samba, WSDD2 y Cockpit.
 2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado e inmune a ransomware para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
 
@@ -12,10 +12,10 @@ Esta guía documenta el procedimiento completo, probado y 100% replicable para d
 * **Incremental Versionada con Snapshots y Hardlinks (Recomendada):**
   * Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`).
   * Los archivos que no han sido modificados **comparten el mismo bloque físico en el disco** (*hardlinks*).
-  * **Ahorro de espacio:** Más del **85% de ahorro de disco** en comparación con copias completas repetitivas.
-  * **Retención histórica:** Tus archivos actuales nunca se borran; solo se depuran las carpetas históricas de hace más de $N$ días automáticamente.
-* **Sincronización Espejo (Mirror / Sync):**
-  * Mantiene una réplica idéntica y exacta del origen en el destino en tiempo real (`rsync -a --delete`).
+  * **Ahorro de espacio:** Significativo (típicamente superior al **85%**) frente a copias completas repetitivas, gracias a los hardlinks.
+  * **Retención histórica:** Tus archivos actuales nunca se borran; solo se eliminan los snapshots más antiguos que excedan la retención configurada (N snapshots).
+* **Exactitud punto en el tiempo:**
+  * Cada snapshot es una réplica exacta del origen en el instante de la ejecución (`rsync -a --delete`); las versiones previas se conservan como snapshots anteriores.
 
 ---
 
@@ -31,9 +31,9 @@ Esta guía documenta el procedimiento completo, probado y 100% replicable para d
 ---
 
 ### C. Respaldo de Servidores Linux / NAS Principal:
-* **Protocolo:** Túnel SSH cifrado con `rsync` y `sshpass` (o llaves SSH).
+* **Protocolo:** Túnel SSH cifrado con `rsync` y `sshpass` (autenticación por contraseña).
 * **Flujo de Ejecución:**
-  1. Conexión segura por SSH con usuario autorizado (`root` o `nas`).
+  1. Conexión segura por SSH con un usuario autorizado (configurable; por defecto `root`).
   2. Preservación exacta de permisos POSIX, propietarios, grupos y fechas de modificación.
 
 ---
@@ -63,6 +63,12 @@ sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin <CLAVE_ADMIN> ARCHI
 sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BACKUP
 ```
 
+> [!TIP]
+> Pasar la clave como argumento la expone temporalmente en `ps`. Para evitarlo, usa `-` en el campo de contraseña y envíala por `stdin`:
+> ```bash
+> printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS
+> ```
+
 ### Método 3: Desinstalación y Limpieza Rápida
 ```bash
 sudo nas uninstall
@@ -84,7 +90,7 @@ Para restaurar archivos o carpetas de cualquier fecha histórica:
 3. **Copiar el archivo hacia el servidor de destino:**
    ```bash
    # Ejemplo restaurando un archivo hacia Windows o NAS:
-   cp snapshot_2026-08-28_230000/Contabilidad/Reporte.xlsx /srv/nas/CAMPANA_UNO/Administrativo/
+   cp snapshot_2026-08-28_230000/Contabilidad/Reporte.xlsx /srv/nas/VENTAS/
    ```
 
 ---
