@@ -187,13 +187,16 @@ if [[ ! "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
     exit 1
 fi
 
-# Permite forzar el formateo de un disco en uso con --force.
+# --force confirma sin preguntar, pero NO salta los chequeos de seguridad.
 # --confirm indica que el llamador ya obtuvo confirmación explícita del usuario.
+# --ignore-in-use permite formatear un disco en uso (peligroso, con confirmación textual).
 FORCE=false
 CONFIRM=false
+IGNORE_IN_USE=false
 for _arg in "$@"; do
     [ "$_arg" == "--force" ] && FORCE=true
     [ "$_arg" == "--confirm" ] && CONFIRM=true
+    [ "$_arg" == "--ignore-in-use" ] && IGNORE_IN_USE=true
 done
 
 SERVER_IP=$(obtener_ip_local)
@@ -287,9 +290,9 @@ if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TAR
     auto_tune_hardware "$ROOT_DEV"
 else
     echo "  -> Inicializando y formateando disco dedicado: $TARGET_DISK"
-    if [ "$FORCE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
+    if [ "$IGNORE_IN_USE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
         echo "[-] ERROR: $TARGET_DISK parece estar en uso (montado, PV de LVM o miembro de RAID)."
-        echo "    Abortando por seguridad. Usa --force si realmente deseas formatearlo."
+        echo "    Abortando por seguridad. Usa --ignore-in-use bajo tu responsabilidad si realmente deseas formatearlo."
         exit 1
     fi
 
@@ -304,11 +307,21 @@ else
     fi
 
     # Confirmación explícita antes de una operación destructiva.
-    if [ "$FORCE" == "true" ]; then
-        echo "  [!] ADVERTENCIA FUERTE: se está forzando (--force) el formateo de $TARGET_DISK."
-        echo "      TODOS los datos del disco serán eliminados de forma irreversible."
-    elif [ "$CONFIRM" == "true" ]; then
-        echo "  [•] Confirmación recibida del llamador. Continuando con el formateo."
+    if [ "$IGNORE_IN_USE" == "true" ]; then
+        echo "  [!] ADVERTENCIA EXTREMA: --ignore-in-use permite formatear un disco EN USO."
+        echo "      TODOS los datos serán eliminados. Esta acción puede dañar el sistema."
+        if [ -t 0 ]; then
+            read -r -p "  Escribe 'SI-FORMATEAR' para confirmar: " RESP
+            if [ "$RESP" != "SI-FORMATEAR" ]; then
+                echo "[-] Formateo cancelado."
+                exit 1
+            fi
+        else
+            echo "[-] ERROR: --ignore-in-use requiere confirmación interactiva."
+            exit 1
+        fi
+    elif [ "$FORCE" == "true" ] || [ "$CONFIRM" == "true" ]; then
+        echo "  [•] Confirmación recibida. Continuando con el formateo."
     elif [ -t 0 ]; then
         echo "  [!] ADVERTENCIA: se formateará $TARGET_DISK y se borrarán TODOS sus datos."
         read -r -p "  ¿Deseas continuar con el formateo? [s/N]: " RESP
