@@ -8,6 +8,7 @@ Este repositorio contiene la suite de scripts interactivos y automatizados para 
 
 > [!TIP]
 > Este instalador verifica dependencias, descarga el entorno y te presenta el menú interactivo sin tocar tus particiones hasta que lo autorices.
+> Requiere `curl` (o `wget`) y `ca-certificates` para la descarga por HTTPS.
 
 Puedes instalar y desplegar todo el entorno en cualquier servidor Debian 13 ejecutando una sola línea en tu terminal:
 
@@ -85,10 +86,10 @@ apt update && apt upgrade -y
 
 ### Paso 4: Instalar Paquetes Base Esenciales
 
-Instala utilidades clave de diagnóstico, descarga y firewall:
+Instala utilidades clave de diagnóstico, descarga, certificados TLS y firewall (necesarios para el one-liner por HTTPS):
 
 ```bash
-apt install -y curl wget htop ufw
+apt install -y curl wget ca-certificates htop ufw
 ```
 
 ---
@@ -142,13 +143,12 @@ ping -c 4 google.com
    echo "jose ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-jose
    chmod 0440 /etc/sudoers.d/90-jose
    ```
-   
+
    > [!NOTE]
    > La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
 
    > [!TIP]
    > `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
-
 
 3. **Salir de root:**
    ```bash
@@ -247,7 +247,7 @@ sudo nas
 * **[3] Gestión de Recursos Compartidos:** Creación de recursos visibles u ocultos (`$`) con 4 esquemas de permisos granulares.
 * **[4] Gestión de Tareas de Backup:** Programación de copias incrementales deduplicadas (con *hardlinks*) para servidores Windows (CIFS), Linux (SSH) o carpetas locales.
 * **[5] Gestión de Usuarios:** Creación y asignación de grupos mediante checklist dinámico y contraseñas de red Samba.
-* **[6] Diagnóstico y Discos:** Monitoreo en tiempo real de servicios, almacenamiento y tareas cron.
+* **[6] Diagnóstico, Discos y Recursos:** Monitoreo en tiempo real de servicios, almacenamiento, recursos compartidos y tareas cron.
 * **[7] Reiniciar Servicios:** Recarga limpia de Samba, WSDD2 y Cockpit.
 * **[8] Buscar Actualizaciones:** Sincronización automática con las últimas mejoras de GitHub.
 * **[9] Desinstalar y Limpiar:** Restablecimiento total del sistema a su estado base.
