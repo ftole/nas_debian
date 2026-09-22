@@ -52,10 +52,10 @@ curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | 
 
 ### Preparación manual (opcional)
 
-Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos **en orden y como `root`**.
+Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos **en orden**.
 
 > [!IMPORTANT]
-> Ejecuta todos los pasos dentro de la **misma sesión de `root`** (Paso 1). **No ejecutes `exit` hasta el final.** Si vuelves a tu usuario normal, los pasos siguientes fallarán con `Permiso denegado` u `orden no encontrada`, porque requieren privilegios de administrador y el `PATH` de `root` (que incluye `/usr/sbin`).
+> Los **Pasos 1–7** se ejecutan como `root` (bootstrap: repositorios, paquetes y creación del usuario administrador). Tras el Paso 7 **sal de `root`** y ejecuta los **Pasos 8–12 con `sudo`** desde tu usuario administrador. `sudo` usa `secure_path` (que incluye `/usr/sbin`), por lo que `ufw` y `dpkg-reconfigure` se encuentran sin problema.
 
 #### Paso 1: Acceso como `root`
 
@@ -120,12 +120,13 @@ ping -c 4 google.com   # resolución DNS
    grep -E '/bin/bash|/bin/sh' /etc/passwd
    ```
 
-2. Instalar `sudo` y conceder permisos (el usuario administrador se **detecta automáticamente**, no hay que editar nada):
+2. Instalar `sudo` y conceder permisos (el usuario administrador se **detecta automáticamente**; si no existe, se crea):
 
    ```bash
    apt install -y sudo
    ADMIN_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1; exit}' /etc/passwd)"
    ADMIN_USER="${ADMIN_USER:-nas}"
+   id "$ADMIN_USER" &>/dev/null || adduser --disabled-password --gecos "" "$ADMIN_USER"
    SUDO_NAME="$(printf '%s' "$ADMIN_USER" | tr -c 'A-Za-z0-9_-' '_')"
    usermod -aG sudo "$ADMIN_USER"
    echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-$SUDO_NAME"
@@ -133,8 +134,14 @@ ping -c 4 google.com   # resolución DNS
    echo "Administrador configurado: $ADMIN_USER"
    ```
 
+3. **Salir de `root`** (los pasos siguientes se ejecutan con `sudo`):
+
+   ```bash
+   exit
+   ```
+
 > [!NOTE]
-> La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión. **Continúa en esta misma sesión de `root`** para los pasos siguientes (no ejecutes `exit` todavía).
+> La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión.
 
 > [!TIP]
 > `sudo` ignora los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto; el bloque anterior reemplaza esos caracteres por guion bajo de forma automática. Para comprobar la sintaxis, ejecuta `visudo -c`.
@@ -143,59 +150,57 @@ ping -c 4 google.com   # resolución DNS
 
 ```bash
 # Archivo principal y drop-ins (tienen mayor precedencia)
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
-systemctl restart ssh || systemctl restart sshd
+sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
+sudo systemctl restart ssh || sudo systemctl restart sshd
 
 # Verificar el valor efectivo
-sshd -T 2>/dev/null | grep -i permitrootlogin
+sudo sshd -T 2>/dev/null | grep -i permitrootlogin
 ```
 
 #### Paso 9: Actualizaciones de seguridad automáticas
 
 ```bash
-apt install -y unattended-upgrades
-dpkg-reconfigure -plow unattended-upgrades
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
 ```
 
 #### Paso 10: Firewall (UFW)
 
 ```bash
-ufw default deny incoming
-ufw default allow outgoing
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
 
-ufw allow 22/tcp comment 'SSH'
-ufw allow 9090/tcp comment 'Cockpit Web Admin'
-ufw allow 137,138/udp comment 'Samba NetBIOS'
-ufw allow 139,445/tcp comment 'Samba SMB'
-ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP'
-ufw allow 3702/tcp comment 'WSDD2 WSD Discovery TCP'
-ufw allow 5355/udp comment 'WSDD2 LLMNR UDP'
-ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP'
-ufw allow 5357/tcp comment 'WSDD2 WSD HTTP'
+sudo ufw allow 22/tcp comment 'SSH'
+sudo ufw allow 9090/tcp comment 'Cockpit Web Admin'
+sudo ufw allow 137,138/udp comment 'Samba NetBIOS'
+sudo ufw allow 139,445/tcp comment 'Samba SMB'
+sudo ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP'
+sudo ufw allow 3702/tcp comment 'WSDD2 WSD Discovery TCP'
+sudo ufw allow 5355/udp comment 'WSDD2 LLMNR UDP'
+sudo ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP'
+sudo ufw allow 5357/tcp comment 'WSDD2 WSD HTTP'
 
-ufw --force enable
-ufw status verbose
+sudo ufw --force enable
+sudo ufw status verbose
 ```
 
 #### Paso 11: fail2ban
 
 ```bash
-apt install -y fail2ban
-cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-systemctl enable --now fail2ban
-systemctl status fail2ban
+sudo apt install -y fail2ban
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+sudo systemctl enable --now fail2ban
+sudo systemctl status fail2ban
 ```
 
 #### Paso 12: Ejecutar el asistente
 
-Ya puedes abrir el asistente (sigue como `root`):
+Ya puedes abrir el asistente como tu usuario administrador:
 
 ```bash
 sudo nas
 ```
-
-Si deseas volver a tu usuario normal, ejecuta `exit` **solo al terminar**.
 
 ## Comandos del CLI `nas`
 
@@ -264,7 +269,7 @@ FAILURE_MODES.md           Modos de fallo y su verificación
 ## Solución de problemas
 
 - **`curl: (60) certificate problem`**: instala `ca-certificates` (`apt install -y ca-certificates`).
-- **`Permiso denegado` u `orden no encontrada`** al seguir la preparación manual: **no estás como `root`**. Ejecuta `su -` y repite los pasos desde donde falló (no uses `exit` hasta el final).
+- **`Permiso denegado` u `orden no encontrada`** en la preparación manual: te faltó anteponer `sudo` (Pasos 8–12) o no ejecutaste como `root` (Pasos 1–7).
 - **El asistente no abre**: ejecútalo con `sudo` y en una terminal de al menos 72x20 caracteres.
 - **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Un PV de LVM o un miembro de RAID activo **nunca** se puede formatear. Para un disco simplemente montado, el despliegue por consola permite continuar con `--ignore-in-use` y la confirmación textual `SI-FORMATEAR`.
 - **Una tarea de backup no se ejecuta**: comprueba que `cron` esté activo (`systemctl status cron`) y revisa el log en `/srv/nas/LOGS_BACKUP/`.
