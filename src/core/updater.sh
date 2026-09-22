@@ -21,6 +21,10 @@ EXPECTED_BRANCH="${NAS_UPDATE_BRANCH:-main}"
 # Vacío = sin verificación criptográfica (se advierte y se pide confirmación).
 NAS_UPDATE_SIGNER="${NAS_UPDATE_SIGNER:-}"
 
+# Exigir que la actualización provenga de un tag firmado (recomendado en producción).
+# Con "true", si no existe un tag con firma válida, la actualización se cancela.
+NAS_REQUIRE_SIGNED_TAGS="${NAS_REQUIRE_SIGNED_TAGS:-false}"
+
 # Normaliza la URL del remoto a la forma "propietario/repositorio" para admitir
 # tanto el formato HTTPS como el formato SSH sin comparaciones frágiles.
 _normalizar_remoto() {
@@ -169,7 +173,7 @@ actualizar_desde_git() {
         CANDIDATE_TAG="$LATEST_TAG"
         REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
         VERIFICADO="sí ($LATEST_TAG)"
-    elif [ -n "$NAS_UPDATE_SIGNER" ]; then
+    elif [ -n "$NAS_UPDATE_SIGNER" ] || [ "$NAS_REQUIRE_SIGNED_TAGS" == "true" ]; then
         _aviso "No se encontró una versión firmada válida. Actualización cancelada por seguridad."
         return 1
     fi
