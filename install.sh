@@ -69,8 +69,18 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     if ! git fetch -q origin main 2>/dev/null; then
         echo -e "${C_YELLOW}  [!] No se pudo contactar con GitHub; se conserva la versión instalada.${C_RESET}"
     else
+        git fetch -q origin --tags 2>/dev/null || true
         CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
         REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "")
+        if [ -n "${NAS_UPDATE_SIGNER:-}" ]; then
+            LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "")
+            VERIFY_OUT=$(git verify-tag "$LATEST_TAG" 2>&1 || echo "VERIFY_FAILED")
+            if [ -z "$LATEST_TAG" ] || ! echo "$VERIFY_OUT" | grep -q "Good signature"; then
+                echo -e "${C_RED}[-] No se encontró una versión firmada válida. Abortando por seguridad.${C_RESET}"
+                exit 1
+            fi
+            REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
+        fi
         if [ -n "$CURRENT_REV" ] && [ -n "$REMOTE_REV" ] && [ "$CURRENT_REV" != "$REMOTE_REV" ]; then
             BACKUP_DIR=$(mktemp -d "${INSTALL_DIR}.install_backup_XXXXXX")
             if ! cp -a "$INSTALL_DIR/." "$BACKUP_DIR/" 2>/dev/null; then
