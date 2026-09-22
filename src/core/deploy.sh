@@ -149,6 +149,13 @@ SMB_WORKGROUP=$(printf '%s' "$SMB_WORKGROUP" | tr -cd 'A-Za-z0-9_-' | tr '[:lowe
 SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')
 [ -z "$SERVER_ROLE" ] && SERVER_ROLE="ARCHIVOS"
 
+# Validar estrictamente el nombre de usuario administrador antes de usarlo.
+if [[ ! "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "[-] ERROR: Nombre de usuario administrador inválido: '$ADMIN_USER'."
+    echo "    Debe iniciar con letra minúscula o guion bajo y contener solo [a-z0-9_-]."
+    exit 1
+fi
+
 # Permite forzar el formateo de un disco en uso con --force.
 # --confirm indica que el llamador ya obtuvo confirmación explícita del usuario.
 FORCE=false
