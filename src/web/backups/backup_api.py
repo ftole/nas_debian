@@ -102,6 +102,13 @@ def list_tasks():
     
     print(json.dumps({"status": "ok", "tasks": tasks}))
 
+def _redact(msg, secret):
+    """Elimina un secreto del texto para no exponerlo en logs ni respuestas."""
+    if secret and isinstance(msg, str):
+        return msg.replace(secret, "***")
+    return msg
+
+
 def test_cifs(ip, share, user, password):
     if not _valid_host(ip) or not _valid_share(share) or not _valid_user(user):
         print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido."}))
@@ -118,7 +125,7 @@ def test_cifs(ip, share, user, password):
             print(json.dumps({"status": "error", "message": "Error: Tiempo de espera agotado (7s). Verifica la IP."}))
         else:
             err = res.stderr or res.stdout
-            print(json.dumps({"status": "error", "message": f"Error de conexión: {err.strip()}"}))
+            print(json.dumps({"status": "error", "message": f"Error de conexión: {_redact(err.strip(), password)}"}))
     except Exception as e:
         print(json.dumps({"status": "error", "message": f"Excepción: {str(e)}"}))
 
@@ -145,7 +152,7 @@ def test_ssh(ip, port, user, password):
             print(json.dumps({"status": "ok", "message": "Conexión SSH exitosa."}))
         else:
             err = res.stderr or res.stdout or "Tiempo de espera agotado"
-            print(json.dumps({"status": "error", "message": f"Error SSH: {err.strip()}"}))
+            print(json.dumps({"status": "error", "message": f"Error SSH: {_redact(err.strip(), password)}"}))
     except Exception as e:
         print(json.dumps({"status": "error", "message": f"Excepción: {str(e)}"}))
 
@@ -244,6 +251,10 @@ if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
+if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
+    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+    exit 1
+fi
 mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
@@ -330,6 +341,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
+if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
+    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+    exit 1
+fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
     rm -rf "$TARGET_SNAPSHOT"
