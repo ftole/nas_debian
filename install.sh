@@ -93,9 +93,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
         git fetch -q origin --tags 2>/dev/null || true
         CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
         REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "")
-        if [ -n "${NAS_UPDATE_SIGNER:-}" ]; then
+        if [ -n "${NAS_UPDATE_SIGNER:-}" ] || [ "${NAS_REQUIRE_SIGNED_TAGS:-false}" == "true" ]; then
             LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "")
-            if [ -z "$LATEST_TAG" ] || ! verificar_firma_tag "$LATEST_TAG" "$NAS_UPDATE_SIGNER"; then
+            if [ -z "$LATEST_TAG" ] || ! verificar_firma_tag "$LATEST_TAG" "${NAS_UPDATE_SIGNER:-}"; then
                 echo -e "${C_RED}[-] No se encontró una versión firmada válida. Abortando por seguridad.${C_RESET}"
                 exit 1
             fi
@@ -108,8 +108,10 @@ if [ -d "$INSTALL_DIR/.git" ]; then
                 exit 1
             fi
             TARGET_REF="origin/main"
-            if [ -n "${NAS_UPDATE_SIGNER:-}" ] && [ -n "$LATEST_TAG" ]; then
-                TARGET_REF="$LATEST_TAG"
+            if [ -n "$LATEST_TAG" ]; then
+                if [ -n "${NAS_UPDATE_SIGNER:-}" ] || [ "${NAS_REQUIRE_SIGNED_TAGS:-false}" == "true" ]; then
+                    TARGET_REF="$LATEST_TAG"
+                fi
             fi
             if ! git merge --ff-only "$TARGET_REF"; then
                 echo -e "${C_RED}[-] La actualización no es fast-forward. Backup disponible en: $BACKUP_DIR${C_RESET}"
