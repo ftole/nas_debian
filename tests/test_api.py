@@ -116,7 +116,6 @@ def test_create_task_revierte_si_falla_la_escritura(tmp_path, monkeypatch, capsy
     api.create_task({"id": "t_rb", "proto": "local", "cron": "0 23 * * *", "path": "/srv/nas/datos"})
     capsys.readouterr()
     runner = tmp_path / "bin" / "backup_t_rb.sh"
-    cron_file = tmp_path / "cron" / "backup_t_rb"
     original = runner.read_text()
     real_atomic = api._atomic_write
 
