@@ -404,12 +404,23 @@ else
     UUID_NAS=$(blkid -s UUID -o value "$PART_NAS")
 
     cp -a /etc/fstab "/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
-    sed -i '\|/srv/nas|d' /etc/fstab
-    if [ -n "$UUID_NAS" ]; then
-        echo "UUID=$UUID_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2" >> /etc/fstab
-    else
-        echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2" >> /etc/fstab
-    fi
+    # Eliminar el bloque administrado y cualquier entrada heredada cuyo punto de
+    # montaje sea exactamente /srv/nas (no otras lineas que lo mencionen).
+    awk '
+        /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
+        /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
+        skip {next}
+        $2 != "/srv/nas"
+    ' /etc/fstab > /etc/fstab.nas.tmp && mv /etc/fstab.nas.tmp /etc/fstab
+    {
+        echo "# BEGIN NAS_DEBIAN /srv/nas"
+        if [ -n "$UUID_NAS" ]; then
+            echo "UUID=$UUID_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
+        else
+            echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
+        fi
+        echo "# END NAS_DEBIAN /srv/nas"
+    } >> /etc/fstab
     if ! findmnt --verify --verbose >/dev/null 2>&1; then
         echo "[-] ERROR CRITICO: /etc/fstab quedó inválido tras la modificación."
         log "[ERROR] findmnt --verify falló para /etc/fstab."
