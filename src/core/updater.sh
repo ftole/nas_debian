@@ -63,27 +63,22 @@ _validar_sintaxis() {
 }
 
 # Verifica la firma GPG de un tag y que el firmante coincida con el esperado.
+# Usa la salida de estado (--raw) para no depender del texto humano de GPG.
 # Devuelve 0 si la firma es válida y confiable.
 _verificar_firma_tag() {
-    local tag="$1" esperado="$2" salida keyid
-    if ! salida=$(git verify-tag "$tag" 2>&1); then
+    local tag="$1" esperado="$2" salida fp
+    if ! salida=$(git verify-tag --raw "$tag" 2>&1); then
         return 1
     fi
-    if ! echo "$salida" | grep -q "Good signature"; then
+    fp=$(echo "$salida" | awk '/^\[GNUPG:\] VALIDSIG /{print $3; exit}')
+    if [ -z "$fp" ]; then
         return 1
     fi
     if [ -n "$esperado" ]; then
-        keyid=$(echo "$salida" | grep -o '[0-9A-F]\{16,\}' | head -n1)
-        if [ -z "$keyid" ]; then
-            return 1
-        fi
-        local esperado_norm
+        local esperado_norm fp_norm
         esperado_norm=$(printf '%s' "$esperado" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
-        # Acepta huella completa (40) o key ID largo (16, sufijo).
-        if [ "${#esperado_norm}" -gt 16 ]; then
-            esperado_norm=$(printf '%s' "$esperado_norm" | tail -c 17)
-        fi
-        if [ "$keyid" != "$esperado_norm" ]; then
+        fp_norm=$(printf '%s' "$fp" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+        if [ "$fp_norm" != "$esperado_norm" ] && [ "${fp_norm: -16}" != "$esperado_norm" ] && [ "$fp_norm" != "${esperado_norm: -16}" ]; then
             return 1
         fi
     fi
