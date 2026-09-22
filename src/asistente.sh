@@ -66,7 +66,7 @@ desinstalar_guiado() {
         --yes-button "< Sí, Desinstalar Todo >" --no-button "< Cancelar >" \
         --yesno "¡CUIDADO! Esta acción desinstalará todos los paquetes de Samba, Cockpit, desmontará el disco y limpiará las configuraciones.\n\n¿Confirmas que deseas restablecer el servidor a su estado base limpio?" 12 72); then
         clear 2>/dev/null || true
-        bash "$SRC_DIR/core/uninstall.sh"
+        bash "$SRC_DIR/core/uninstall.sh" --yes
         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
             --msgbox "✔ El servidor ha sido desinstalado y el sistema quedó completamente limpio." 8 65
     fi
