@@ -242,8 +242,16 @@ def create_task(data):
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
-        with open(cred_file, "w") as f:
-            f.write(f"username={user}\npassword={pwd}\n")
+        old_umask = os.umask(0o177)
+        try:
+            with open(cred_file, "w", encoding="utf-8") as f:
+                f.write(f"username={user}\npassword={pwd}\n")
+        finally:
+            os.umask(old_umask)
+        try:
+            os.chown(cred_file, 0, 0)
+        except OSError:
+            pass
         os.chmod(cred_file, 0o600)
 
         script = f"""#!/bin/bash
@@ -280,14 +288,14 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
 fi
 mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
 
-LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
-LINK_DEST_OPT=""
+LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
+RSYNC_OPTS=(-a --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
+    RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync -a --delete $LINK_DEST_OPT "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
     if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
         rm -rf "$TARGET_SNAPSHOT"
@@ -336,8 +344,16 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
             print(json.dumps({"status": "error", "message": "No se pudo preparar el archivo de huellas SSH."}))
             return
 
-        with open(cred_file, "w") as f:
-            f.write(pwd)
+        old_umask = os.umask(0o177)
+        try:
+            with open(cred_file, "w", encoding="utf-8") as f:
+                f.write(pwd)
+        finally:
+            os.umask(old_umask)
+        try:
+            os.chown(cred_file, 0, 0)
+        except OSError:
+            pass
         os.chmod(cred_file, 0o600)
 
         script = f"""#!/bin/bash
@@ -376,10 +392,10 @@ if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
     exit 1
 fi
 
-LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
-LINK_DEST_OPT=""
+LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
+RSYNC_OPTS=(-avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
+    RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
@@ -389,7 +405,7 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
-if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${{RSYNC_OPTS[@]}}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
@@ -446,14 +462,14 @@ if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
     exit 1
 fi
 
-LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
-LINK_DEST_OPT=""
+LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
+RSYNC_OPTS=(-a --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    LINK_DEST_OPT="--link-dest=$LAST_SNAPSHOT"
+    RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync -a --delete $LINK_DEST_OPT "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${{RSYNC_OPTS[@]}}" "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
