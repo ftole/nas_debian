@@ -152,7 +152,7 @@ sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BA
 ```
 
 > [!IMPORTANT]
-> Por seguridad, `deploy.sh` **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); añade `--force` al final para forzarlo. La clave puede enviarse por `stdin` usando `-` en su lugar (evita exponerla en `ps`).
+> Por seguridad, `deploy.sh` **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); `--force` solo confirma sin preguntar (sin saltar chequeos). Para formatear un disco en uso se exige `--ignore-in-use` con confirmación textual explícita. La clave puede enviarse por `stdin` usando `-` en su lugar (evita exponerla en `ps`).
 
 ### Limpieza y Desinstalación Total:
 ```bash
