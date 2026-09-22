@@ -319,6 +319,11 @@ else
             exit 1
         fi
     fi
+    if disco_en_uso_critico "$TARGET_DISK"; then
+        echo "[-] ERROR CRITICO: $TARGET_DISK es un PV de LVM o un miembro de RAID activo."
+        echo "    Formatearlo puede dañar otros volúmenes o arreglos. Abortando (no se omite con --ignore-in-use)."
+        exit 1
+    fi
     if [ "$IGNORE_IN_USE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
         echo "[-] ERROR: $TARGET_DISK parece estar en uso (montado, PV de LVM o miembro de RAID)."
         echo "    Abortando por seguridad. Usa --ignore-in-use bajo tu responsabilidad si realmente deseas formatearlo."
