@@ -114,6 +114,13 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
                     continue
                 fi
+                if [ -f "/usr/local/bin/backup_${TASK_NAME}.sh" ]; then
+                    if ! (whiptail --title "Tarea Existente" \
+                        --yes-button "< Sobrescribir >" --no-button "< Cancelar >" \
+                        --yesno "Ya existe una tarea llamada [$TASK_NAME]. ¿Deseas sobrescribirla?" 9 68); then
+                        continue
+                    fi
+                fi
 
                 WIN_IP=$(whiptail --title "Paso 2 de 5: Servidor Windows Remoto" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -158,7 +165,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 # Test de conexión en vivo con smbclient
                 if command -v smbclient &>/dev/null; then
                     TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -c "dir" 2>&1 || true)
-                    if echo "$TEST_CONN" | grep -qiE "NT_STATUS_LOGON_FAILURE|NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_UNSUCCESSFUL|Connection to .* failed"; then
+                    if echo "$TEST_CONN" | grep -qiE "NT_STATUS_LOGON_FAILURE|NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_UNSUCCESSFUL|NT_STATUS_ACCESS_DENIED|NT_STATUS_ACCOUNT_DISABLED|NT_STATUS_PASSWORD_EXPIRED|NT_STATUS_NO_LOGON_SERVERS|NT_STATUS_HOST_UNREACHABLE|NT_STATUS_CONNECTION_REFUSED|Connection to .* failed"; then
                         whiptail --title "Error de Conexión Remota" --ok-button "< Corregir >" \
                             --msgbox "✖ No se pudo conectar al servidor Windows con los datos ingresados:\n\n$TEST_CONN\n\nVerifica la IP, el recurso compartido o las credenciales." 14 72
                         continue
@@ -231,6 +238,11 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 # Montaje en solo lectura
@@ -287,6 +299,13 @@ RUNNER_EOF
                     whiptail --title "Nombre Invalido" --ok-button "< Aceptar >" \
                         --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
                     continue
+                fi
+                if [ -f "/usr/local/bin/backup_${TASK_NAME}.sh" ]; then
+                    if ! (whiptail --title "Tarea Existente" \
+                        --yes-button "< Sobrescribir >" --no-button "< Cancelar >" \
+                        --yesno "Ya existe una tarea llamada [$TASK_NAME]. ¿Deseas sobrescribirla?" 9 68); then
+                        continue
+                    fi
                 fi
 
                 LNX_IP=$(whiptail --title "Paso 2 de 5: Servidor Linux Remoto" \
@@ -398,6 +417,11 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 
 LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
@@ -449,6 +473,13 @@ RUNNER_EOF
                         --msgbox "El identificador de la tarea no puede estar vacio ni contener solo simbolos." 9 65
                     continue
                 fi
+                if [ -f "/usr/local/bin/backup_${TASK_NAME}.sh" ]; then
+                    if ! (whiptail --title "Tarea Existente" \
+                        --yes-button "< Sobrescribir >" --no-button "< Cancelar >" \
+                        --yesno "Ya existe una tarea llamada [$TASK_NAME]. ¿Deseas sobrescribirla?" 9 68); then
+                        continue
+                    fi
+                fi
 
                 LOC_SRC=$(whiptail --title "Paso 2 de 4: Ruta Origen Local" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -499,6 +530,11 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 
 LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
