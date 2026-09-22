@@ -87,7 +87,11 @@ if [ -d "$INSTALL_DIR/.git" ]; then
                 echo -e "${C_RED}[-] No se pudo crear el backup de la instalación.${C_RESET}"
                 exit 1
             fi
-            if ! git merge --ff-only origin/main; then
+            TARGET_REF="origin/main"
+            if [ -n "${NAS_UPDATE_SIGNER:-}" ] && [ -n "$LATEST_TAG" ]; then
+                TARGET_REF="$LATEST_TAG"
+            fi
+            if ! git merge --ff-only "$TARGET_REF"; then
                 echo -e "${C_RED}[-] La actualización no es fast-forward. Backup disponible en: $BACKUP_DIR${C_RESET}"
                 exit 1
             fi
