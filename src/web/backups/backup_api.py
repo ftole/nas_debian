@@ -150,18 +150,26 @@ def ensure_known_hosts():
 def list_tasks():
     ensure_dirs()
     tasks = []
+    warnings = []
     runners = sorted(glob.glob(f"{BIN_DIR}/backup_*.sh"))
     
     for r in runners:
-        # Ignorar runners no confiables (symlink, propietario o permisos inseguros).
+        # Ignorar runners no confiables, informando el motivo (sin exponer secretos).
+        nombre = os.path.basename(r)
         if os.path.islink(r) or not os.path.isfile(r):
+            warnings.append(f"{nombre}: omitido (no es un archivo regular o es un enlace).")
             continue
         if _is_root():
             try:
                 st = os.stat(r)
             except OSError:
+                warnings.append(f"{nombre}: omitido (no se pudo leer).")
                 continue
-            if st.st_uid != 0 or (st.st_mode & 0o022):
+            if st.st_uid != 0:
+                warnings.append(f"{nombre}: omitido (propietario distinto de root).")
+                continue
+            if st.st_mode & 0o022:
+                warnings.append(f"{nombre}: omitido (permisos modificables por grupo u otros).")
                 continue
         tname = os.path.basename(r).replace("backup_", "").replace(".sh", "")
         proto = "Local"
@@ -238,7 +246,7 @@ def list_tasks():
             "snaps": snap_count
         })
     
-    print(json.dumps({"status": "ok", "tasks": tasks}))
+    print(json.dumps({"status": "ok", "tasks": tasks, "warnings": warnings}))
 
 def _redact(msg, secret):
     """Elimina un secreto del texto para no exponerlo en logs ni respuestas."""
@@ -352,7 +360,12 @@ def create_task(data):
     # Los directorios usados por runners root deben existir y ser seguros.
     for _d, _gw in ((BIN_DIR, False), (CRON_DIR, False), (CRED_DIR, False), (BKP_ROOT, True), (LOG_ROOT, True)):
         if not os.path.isdir(_d) or not _secure_directory(_d, _gw):
-            print(json.dumps({"status": "error", "message": f"Directorio ausente o con permisos inseguros: {_d}"}))
+            try:
+                st = os.stat(_d)
+                detalle = f" (propietario {st.st_uid}:{st.st_gid}, modo {oct(st.st_mode & 0o777)})"
+            except OSError:
+                detalle = " (no existe)"
+            print(json.dumps({"status": "error", "message": f"Directorio ausente o con permisos inseguros: {_d}{detalle}"}))
             return
 
     cred_content = None
@@ -717,7 +730,7 @@ def read_logs(tname):
     if os.path.exists(log_file):
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                content = "".join(f.readlines()[-200:])
+                content = "".join(f.readlines()[-100:])
             print(json.dumps({"status": "ok", "logs": content}))
         except Exception as e:
             print(json.dumps({"status": "error", "logs": str(e)}))
