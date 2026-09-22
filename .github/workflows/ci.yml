@@ -59,3 +59,24 @@ jobs:
           if [ -f "src/web/backups/backup_api.py" ]; then
             flake8 src/web/backups/backup_api.py --select=E9,F63,F7,F82 --show-source
           fi
+
+  test-python:
+    name: Pruebas Unitarias Python (pytest)
+    runs-on: ubuntu-latest
+    needs: lint-python
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configurar entorno Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Ejecutar pruebas del backend web
+        run: pytest tests/ -q
