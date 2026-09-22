@@ -103,30 +103,13 @@ git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || git confi
 
 case "$1" in
     update|--update|-u)
-        echo "=============================================================================="
-        echo " [★] Buscando e instalando actualizaciones desde GitHub..."
-        echo "=============================================================================="
-        if [ -d "$INSTALL_DIR/.git" ]; then
-            cd "$INSTALL_DIR"
-            if ! git fetch origin main; then
-                echo "[-] No se pudo contactar con GitHub (sin conexión). Inténtalo de nuevo más tarde."
-                exit 1
-            fi
-            CURRENT_REV=$(git rev-parse HEAD)
-            REMOTE_REV=$(git rev-parse origin/main)
-            if [ "$CURRENT_REV" == "$REMOTE_REV" ]; then
-                echo "✔ Ya tienes la última versión instalada ($(git log -1 --format='%h - %s (%cd)' --date=short))."
-            else
-                git reset --hard origin/main
-                find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
-                echo "✔ ¡Actualización completada con éxito a la versión $(git log -1 --format='%h - %s')!"
-            fi
+        if [ -f "$INSTALL_DIR/src/core/updater.sh" ]; then
+            bash "$INSTALL_DIR/src/core/updater.sh" "${@:2}"
+            exit $?
         else
-            echo "[-] Error: No se encontró el repositorio en $INSTALL_DIR. Reinstalando..."
-            git clone "$REPO_URL" "$INSTALL_DIR"
-            find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
+            echo "[-] Error: no se encontró el actualizador en $INSTALL_DIR. Reinstala con install.sh."
+            exit 1
         fi
-        exit 0
         ;;
 
     status|--status|-s)
