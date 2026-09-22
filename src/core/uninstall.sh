@@ -81,7 +81,12 @@ if [ "$DRY_RUN" == "true" ]; then
     echo "  [dry-run] desmontar /srv/nas y quitar su línea de /etc/fstab"
 else
     umount /srv/nas 2>/dev/null || true
-    sed -i '\|/srv/nas|d' /etc/fstab
+    awk '
+        /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
+        /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
+        skip {next}
+        $2 != "/srv/nas"
+    ' /etc/fstab > /etc/fstab.nas.tmp && mv /etc/fstab.nas.tmp /etc/fstab
     systemctl daemon-reload
 fi
 
