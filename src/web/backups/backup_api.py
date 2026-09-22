@@ -19,6 +19,24 @@ def ensure_dirs():
     except OSError:
         return False
 
+def ensure_known_hosts():
+    """Inicializa el known_hosts dedicado con propietario root y permisos 0600."""
+    try:
+        ssh_dir = os.path.dirname(KNOWN_HOSTS)
+        os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+        os.chmod(ssh_dir, 0o700)
+        if not os.path.exists(KNOWN_HOSTS):
+            with open(KNOWN_HOSTS, "a"):
+                pass
+        try:
+            os.chown(KNOWN_HOSTS, 0, 0)
+        except OSError:
+            pass
+        os.chmod(KNOWN_HOSTS, 0o600)
+        return True
+    except OSError:
+        return False
+
 def list_tasks():
     ensure_dirs()
     tasks = []
@@ -140,6 +158,9 @@ def test_ssh(ip, port, user, password):
     if port < 1 or port > 65535:
         print(json.dumps({"status": "error", "message": "Puerto SSH inválido."}))
         return
+    if not ensure_known_hosts():
+        print(json.dumps({"status": "error", "message": "No se pudo preparar el archivo de huellas SSH."}))
+        return
     try:
         env = os.environ.copy()
         env["SSHPASS"] = password
@@ -251,8 +272,10 @@ if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
-if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
-    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
+CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
+if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
 mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
@@ -309,6 +332,9 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
         if "\n" in pwd or "\r" in pwd:
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
+        if not ensure_known_hosts():
+            print(json.dumps({"status": "error", "message": "No se pudo preparar el archivo de huellas SSH."}))
+            return
 
         with open(cred_file, "w") as f:
             f.write(pwd)
@@ -346,8 +372,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
-    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
+CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
+if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
