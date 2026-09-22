@@ -28,6 +28,97 @@ advertir() {
 
 trap 'log "[ERROR] Fallo en la línea $LINENO: $BASH_COMMAND"' ERR
 
+# Restaura los parches de Cockpit desde la copia de seguridad más reciente.
+restaurar_parches_cockpit() {
+    local f orig
+    for f in /usr/share/cockpit/identities/assets/*.js.bak-* /usr/share/cockpit/storaged/storaged.js.gz.bak-*; do
+        [ -f "$f" ] || continue
+        orig="${f%.bak-*}"
+        cp -p "$f" "$orig"
+        echo "  [•] Parche restaurado en $orig"
+    done
+}
+
+# Aplica el parche de Identities con respaldo, verificación y escritura atómica.
+aplicar_parche_identities() {
+    local PATCH_PY PATCH_SALIDA
+    PATCH_PY=$(mktemp)
+    cat << 'PY' > "$PATCH_PY"
+import glob, os, shutil, time
+
+REEMPLAZOS = [
+    ("l.value=f.split(\"\\n\").filter(w=>!/^\\s*$/.test(w))",
+     "l.value=f.split(\"\\n\").filter(w=>w.startsWith(\"grp_\"))"),
+    ("if(u<1e3&&u!==0)return null;",
+     "if(u<1e3||u>=6e4)return null;"),
+    ("if(u<1e3)return null;",
+     "if(u<1e3||u>=6e4)return null;"),
+]
+
+for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
+    try:
+        with open(js, "r", encoding="utf-8") as f:
+            contenido = f.read()
+        aplicados = 0
+        for origen, destino in REEMPLAZOS:
+            if origen in contenido:
+                contenido = contenido.replace(origen, destino)
+                aplicados += 1
+        if aplicados == 0:
+            print("  [!] Parche Identities omitido (patrones no encontrados): %s" % js)
+            continue
+        respaldo = "%s.bak-%s" % (js, time.strftime("%Y%m%d_%H%M%S"))
+        shutil.copy2(js, respaldo)
+        tmp = "%s.tmp" % js
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(contenido)
+        os.replace(tmp, js)
+        print("  [OK] Parche Identities aplicado en %s (respaldo: %s)" % (js, respaldo))
+    except Exception as e:
+        print("  [!] No se pudo parchear %s: %s" % (js, e))
+PY
+    PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1 || true)
+    rm -f "$PATCH_PY"
+    echo "$PATCH_SALIDA"
+    log "$PATCH_SALIDA"
+}
+
+# Aplica el parche de Storage con respaldo, verificación y escritura atómica.
+aplicar_parche_storage() {
+    local PATCH_PY PATCH_SALIDA
+    PATCH_PY=$(mktemp)
+    cat << 'PY' > "$PATCH_PY"
+import gzip, os, shutil, time
+
+path = "/usr/share/cockpit/storaged/storaged.js.gz"
+if os.path.exists(path):
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            contenido = f.read()
+        target1 = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path))return;"
+        repl1    = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path)||o.HintIgnore)return;"
+        target2 = "function yT(e,t){if(Zr(b,t.path))return;"
+        repl2    = "function yT(e,t){if(Zr(b,t.path)||t.HintIgnore)return;"
+        if target1 not in contenido and target2 not in contenido:
+            print("  [!] Parche Storage omitido (patrones no encontrados).")
+        else:
+            respaldo = "%s.bak-%s" % (path, time.strftime("%Y%m%d_%H%M%S"))
+            shutil.copy2(path, respaldo)
+            contenido = contenido.replace(target1, repl1).replace(target2, repl2)
+            tmp = "%s.tmp" % path
+            with gzip.open(tmp, "wt", encoding="utf-8") as f:
+                f.write(contenido)
+            os.replace(tmp, path)
+            print("  [OK] Parche Storage aplicado (respaldo: %s)." % respaldo)
+    except Exception as e:
+        print("  [!] No se pudo parchear %s: %s" % (path, e))
+PY
+    PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1 || true)
+    rm -f "$PATCH_PY"
+    echo "$PATCH_SALIDA"
+    log "$PATCH_SALIDA"
+}
+
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=src/lib/colors.sh
 source "$LIB_DIR/colors.sh"
@@ -285,22 +376,7 @@ ACCOUNTS_EOF
 fi
 
 # 2. Parche Cockpit Identities (Filtrar exclusivamente grupos grp_* y usuarios reales 1000 <= UID < 60000)
-
-python3 -c '
-import glob, os
-
-for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
-    try:
-        with open(js, "r", encoding="utf-8") as f:
-            c = f.read()
-        c = c.replace("l.value=f.split(\"\\n\").filter(w=>!/^\\s*$/.test(w))", "l.value=f.split(\"\\n\").filter(w=>w.startsWith(\"grp_\"))")
-        c = c.replace("if(u<1e3&&u!==0)return null;", "if(u<1e3||u>=6e4)return null;")
-        c = c.replace("if(u<1e3)return null;", "if(u<1e3||u>=6e4)return null;")
-        with open(js, "w", encoding="utf-8") as f:
-            f.write(c)
-    except:
-        pass
-' 2>/dev/null || true
+aplicar_parche_identities
 
 # 3. Instalar Módulo Web Nativo de Backups (EAD) en Cockpit
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -327,25 +403,7 @@ UDEV_EOF
     systemctl restart udisks2 2>/dev/null || true
 
     # Parche Cockpit Storage (Ocultar unidades con HintIgnore)
-    python3 -c '
-import gzip, os
-
-path = "/usr/share/cockpit/storaged/storaged.js.gz"
-if os.path.exists(path):
-    try:
-        with gzip.open(path, "rt", encoding="utf-8") as f:
-            content = f.read()
-        target1 = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path))return;"
-        repl1    = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path)||o.HintIgnore)return;"
-        target2 = "function yT(e,t){if(Zr(b,t.path))return;"
-        repl2    = "function yT(e,t){if(Zr(b,t.path)||t.HintIgnore)return;"
-        if target1 in content or target2 in content:
-            content = content.replace(target1, repl1).replace(target2, repl2)
-            with gzip.open(path, "wt", encoding="utf-8") as f:
-                f.write(content)
-    except:
-        pass
-' 2>/dev/null || true
+    aplicar_parche_storage
 fi
 
 # Parche WSDD2
