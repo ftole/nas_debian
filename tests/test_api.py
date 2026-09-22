@@ -150,3 +150,42 @@ def test_test_cifs_no_filtra_contrasena(monkeypatch, capsys):
     api.test_cifs("10.0.0.1", "docs", "usuario", "supersecreta")
     out = capsys.readouterr().out
     assert "supersecreta" not in out
+
+
+def test_runner_generado_tiene_contenido_esperado(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_local",
+        "proto": "local",
+        "cron": "0 23 * * *",
+        "retention": 30,
+        "path": "/srv/nas/datos",
+    })
+    capsys.readouterr()
+    runner = tmp_path / "bin" / "backup_t_local.sh"
+    contenido = runner.read_text()
+    assert "StrictHostKeyChecking=no" not in contenido
+    assert "RETENTION=30" in contenido
+    assert (os.stat(runner).st_mode & 0o777) == 0o750
+
+
+def test_runner_ssh_usa_known_hosts_sin_secretos(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_ssh",
+        "proto": "ssh",
+        "ip": "10.0.0.20",
+        "port": 22,
+        "path": "/var/www",
+        "user": "backup",
+        "password": "secreto",
+        "cron": "0 2 * * *",
+        "retention": 15,
+    })
+    capsys.readouterr()
+    runner = tmp_path / "bin" / "backup_t_ssh.sh"
+    contenido = runner.read_text()
+    assert "StrictHostKeyChecking=accept-new" in contenido
+    assert "UserKnownHostsFile=" in contenido
+    assert "secreto" not in contenido
+    assert (os.stat(runner).st_mode & 0o777) == 0o750
