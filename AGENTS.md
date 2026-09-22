@@ -51,6 +51,7 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
 | `SMB_DEBIAN.md` | Markdown | **Manual Técnico y Guía de Replicación** para usuarios y administradores. |
+| `SECURITY.md` | Markdown | **Modelo de seguridad**, rollback de actualizaciones, identidades SSH, credenciales y parches de Cockpit. |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
 
 ---
