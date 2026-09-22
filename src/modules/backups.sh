@@ -231,7 +231,19 @@ LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-trap 'umount "$MOUNT_POINT" 2>/dev/null || true' EXIT
+SNAPSHOT_OK=false
+cleanup() {
+    local status=$?
+    umount "$MOUNT_POINT" 2>/dev/null || true
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
@@ -263,12 +275,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
 fi
 
 if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
-    echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
-        rm -rf "$TARGET_SNAPSHOT"
-    fi
+    echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+SNAPSHOT_OK=true
 
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -441,6 +451,8 @@ cleanup() {
     exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
@@ -578,6 +590,8 @@ cleanup() {
     exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
