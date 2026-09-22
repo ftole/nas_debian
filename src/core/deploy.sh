@@ -14,7 +14,10 @@ fi
 # Registro de despliegue y conteo de advertencias para el resumen final
 # -----------------------------------------------------------------------------
 NAS_WARNINGS=0
-NAS_LOG=$(mktemp /tmp/nas_deploy.XXXXXX.log)
+NAS_LOG_DIR="/var/log/nas"
+install -d -m 0750 -o root -g root "$NAS_LOG_DIR" 2>/dev/null || mkdir -p "$NAS_LOG_DIR"
+NAS_LOG="$NAS_LOG_DIR/deploy_$(date +%Y%m%d_%H%M%S).log"
+: > "$NAS_LOG"
 chmod 600 "$NAS_LOG"
 
 log() {
@@ -27,7 +30,7 @@ advertir() {
     log "[ADVERTENCIA] $*"
 }
 
-trap 'log "[ERROR] Fallo en la línea $LINENO: $BASH_COMMAND"' ERR
+trap 'log "[ERROR] Fallo en la línea $LINENO"' ERR
 
 # Restaura los parches de Cockpit desde la copia de seguridad más reciente.
 restaurar_parches_cockpit() {
@@ -552,6 +555,18 @@ cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
     compress
     delaycompress
     copytruncate
+}
+LOGROTATE_EOF
+
+# Rotación de los registros de despliegue
+cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-deploy
+/var/log/nas/*.log {
+    monthly
+    rotate 6
+    missingok
+    notifempty
+    compress
+    delaycompress
 }
 LOGROTATE_EOF
 
