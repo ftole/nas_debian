@@ -66,8 +66,11 @@ echo -e " ${C_BOLD}[2/4]${C_RESET} Descargando y sincronizando componentes en ${
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
     git remote set-url origin "$REPO_URL" 2>/dev/null || true
-    git fetch -q origin main >/dev/null 2>&1 || true
-    git reset -q --hard origin/main >/dev/null 2>&1 || true
+    if git fetch -q origin main 2>/dev/null; then
+        git reset -q --hard origin/main
+    else
+        echo -e "${C_YELLOW}  [!] No se pudo sincronizar con GitHub; se conserva la versión instalada.${C_RESET}"
+    fi
 elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ] && [ -d "$SCRIPT_DIR/.git" ]; then
     rm -rf "$INSTALL_DIR"
     if ! git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null; then
