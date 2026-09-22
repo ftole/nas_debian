@@ -68,3 +68,25 @@ resolver_discos_raiz() {
     dev="${dev%%[*}"
     lsblk -s -n -o NAME,TYPE "$dev" 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'
 }
+
+# Determina si un disco (o alguna de sus particiones) está en uso:
+# montado, usado como PV de LVM o miembro de RAID (md).
+disco_en_uso() {
+    local disk="$1" dev
+    [ -b "$disk" ] || return 1
+    if lsblk -ln -o MOUNTPOINT "$disk" 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    if command -v pvs >/dev/null 2>&1 && pvs --noheadings -o pv_name 2>/dev/null | awk '{print $1}' | grep -qx "$disk"; then
+        return 0
+    fi
+    if [ -r /proc/mdstat ]; then
+        while read -r dev; do
+            [ -z "$dev" ] && continue
+            if grep -q "\b${dev##*/}\b" /proc/mdstat 2>/dev/null; then
+                return 0
+            fi
+        done < <(lsblk -ln -o NAME "$disk" 2>/dev/null)
+    fi
+    return 1
+}
