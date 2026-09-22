@@ -85,6 +85,11 @@ for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
                 os.remove(viejo)
             except OSError:
                 pass
+        for viejo in glob.glob(js + ".tmp"):
+            try:
+                os.remove(viejo)
+            except OSError:
+                pass
         tmp = "%s.tmp" % js
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(contenido)
@@ -133,6 +138,11 @@ if os.path.exists(path):
                 except OSError:
                     pass
             contenido = contenido.replace(target1, repl1).replace(target2, repl2)
+            for viejo in glob.glob(path + ".tmp"):
+                try:
+                    os.remove(viejo)
+                except OSError:
+                    pass
             tmp = "%s.tmp" % path
             with gzip.open(tmp, "wt", encoding="utf-8") as f:
                 f.write(contenido)
