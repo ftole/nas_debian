@@ -173,7 +173,7 @@ def list_tasks():
                 
                 m_ret = re.search(r'RETENTION=(\d+)', content)
                 if m_ret: ret = int(m_ret.group(1))
-        except Exception as e:
+        except Exception:
             continue
 
         cron_file = f"{CRON_DIR}/backup_{tname}"
@@ -683,6 +683,7 @@ def _read_payload():
         return json.loads(raw)
     except ValueError:
         return {}
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
