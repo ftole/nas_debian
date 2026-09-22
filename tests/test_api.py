@@ -211,6 +211,39 @@ def test_read_logs_rechaza_symlink(tmp_path, monkeypatch, capsys):
     assert data["status"] == "error"
 
 
+def test_abort_task_sin_ejecucion_activa(monkeypatch, capsys):
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0
+            stdout = "inactive\n"
+            stderr = ""
+        return R()
+    monkeypatch.setattr(api.subprocess, "run", fake_run)
+    api.abort_task("tarea")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+
+
+def test_abort_task_detiene_unidad_activa(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        calls.append(cmd)
+        if cmd[:2] == ["systemctl", "is-active"]:
+            R.stdout = "active\n"
+        return R()
+
+    monkeypatch.setattr(api.subprocess, "run", fake_run)
+    api.abort_task("tarea")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "ok"
+    assert any(c[:2] == ["systemctl", "stop"] for c in calls)
+
+
 def test_read_payload_desde_stdin(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"a": 1}'))
     assert api._read_payload() == {"a": 1}
