@@ -140,4 +140,5 @@ Para restaurar archivos o carpetas de cualquier fecha conservada por la retenci�
 ## 5. Acceso Web y Conexión de Red
 
 * **Panel Web Cockpit:** `https://<IP_DEL_SERVIDOR>:9090`
+* **Credenciales Samba:** conéctate con el usuario administrador definido en el despliegue (o los usuarios creados desde el menú [5]) usando su contraseña de red Samba.
 * **Red Windows:** `\\<IP_DEL_SERVIDOR>` (o `\\<NOMBRE_NETBIOS>`)
