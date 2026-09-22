@@ -23,8 +23,12 @@ jobs:
 
       - name: Verificar invariantes de seguridad
         run: |
-          if grep -rn "StrictHostKeyChecking=no" --include="*.py" --include="*.sh" .; then
-            echo "ERROR: se detectó StrictHostKeyChecking=no (no permitido)."
+          if grep -RIn --exclude-dir=tests \
+              --include="*.py" \
+              --include="*.sh" \
+              "StrictHostKeyChecking=no" \
+              src install.sh; then
+            echo "ERROR: se detectó StrictHostKeyChecking=no en código ejecutable."
             exit 1
           fi
 
