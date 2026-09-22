@@ -273,15 +273,15 @@ function guardarTarea() {
 /* =================== Acciones =================== */
 
 function ejecutarAhora(taskId) {
+	if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
+		alert("Identificador de tarea inválido.");
+		return;
+	}
 	if (!confirm("¿Ejecutar backup [" + taskId + "] ahora en segundo plano?")) return;
-	var unit = "backup-manual-" + taskId + "-" + Date.now();
-	cockpit.spawn([
-		"systemd-run", "--collect", "--unit=" + unit, "--slice=backups.slice",
-		"-p", "CPUSchedulingPolicy=batch", "-p", "IOSchedulingClass=idle",
-		"bash", "/usr/local/bin/backup_" + taskId + ".sh"
-	], { superuser: "try" })
-		.then(function () { alert("✔ Tarea [" + taskId + "] lanzada en segundo plano."); cargarTareas(); })
-		.catch(function (err) { alert("Error: " + (err.message || err)); cargarTareas(); });
+	runApi(["run", taskId]).then(function (res) {
+		alert(res.message || (res.status === "ok" ? "Tarea lanzada en segundo plano." : "Error al lanzar la tarea."));
+		cargarTareas();
+	});
 }
 
 function eliminarTarea(taskId) {
