@@ -117,3 +117,33 @@ def test_test_ssh_rechaza_datos_invalidos(capsys):
 def test_read_payload_desde_stdin(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"a": 1}'))
     assert api._read_payload() == {"a": 1}
+
+
+def test_redact_oculta_el_secreto():
+    assert api._redact("Error con clave supersecreta", "supersecreta") == "Error con clave ***"
+    assert api._redact("sin secreto", "") == "sin secreto"
+    assert api._redact(None, "x") is None
+
+
+def test_test_ssh_no_filtra_contrasena(monkeypatch, capsys):
+    class FakeRes:
+        returncode = 1
+        stderr = "auth failed for password supersecreta"
+        stdout = ""
+
+    monkeypatch.setattr(api.subprocess, "run", lambda *a, **k: FakeRes())
+    api.test_ssh("10.0.0.1", "22", "root", "supersecreta")
+    out = capsys.readouterr().out
+    assert "supersecreta" not in out
+
+
+def test_test_cifs_no_filtra_contrasena(monkeypatch, capsys):
+    class FakeRes:
+        returncode = 1
+        stderr = "NT_STATUS_LOGON_FAILURE supersecreta"
+        stdout = ""
+
+    monkeypatch.setattr(api.subprocess, "run", lambda *a, **k: FakeRes())
+    api.test_cifs("10.0.0.1", "docs", "usuario", "supersecreta")
+    out = capsys.readouterr().out
+    assert "supersecreta" not in out
