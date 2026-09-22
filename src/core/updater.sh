@@ -89,6 +89,22 @@ _verificar_firma_tag() {
     return 0
 }
 
+# Devuelve la tag firmada mas reciente (esquema vMAJOR.MINOR.PATCH) alcanzable
+# desde la referencia dada. Imprime la tag o devuelve 1 si no hay ninguna valida.
+seleccionar_tag_firmada() {
+    local esperado="$1" ref="$2" tag
+    while IFS= read -r tag; do
+        [ -z "$tag" ] && continue
+        [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        git merge-base --is-ancestor "$tag" "$ref" 2>/dev/null || continue
+        if _verificar_firma_tag "$tag" "$esperado"; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    done < <(git tag --sort=-version:refname 2>/dev/null)
+    return 1
+}
+
 actualizar_desde_git() {
     local FORCE_FLAG RAMA_ACTUAL REMOTO_ACTUAL REMOTO_NORM
     local CAMBIOS_LOCALES CURRENT_REV REMOTE_REV changelog BACKUP_DIR fallos
@@ -168,8 +184,8 @@ actualizar_desde_git() {
     local LATEST_TAG CANDIDATE_TAG VERIFICADO
     CANDIDATE_TAG=""
     VERIFICADO="no"
-    LATEST_TAG=$(git describe --tags --abbrev=0 "origin/$EXPECTED_BRANCH" 2>/dev/null || echo "")
-    if [ -n "$LATEST_TAG" ] && _verificar_firma_tag "$LATEST_TAG" "$NAS_UPDATE_SIGNER"; then
+    LATEST_TAG=""
+    if LATEST_TAG=$(seleccionar_tag_firmada "$NAS_UPDATE_SIGNER" "origin/$EXPECTED_BRANCH"); then
         CANDIDATE_TAG="$LATEST_TAG"
         REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
         VERIFICADO="sí ($LATEST_TAG)"
