@@ -400,7 +400,19 @@ LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-trap 'umount "$MOUNT_POINT" 2>/dev/null || true' EXIT
+SNAPSHOT_OK=false
+cleanup() {{
+    local status=$?
+    umount "$MOUNT_POINT" 2>/dev/null || true
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
+    exit "$status"
+}}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
 flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
@@ -430,12 +442,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
 fi
 
 if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
-    echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
-        rm -rf "$TARGET_SNAPSHOT"
-    fi
+    echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+SNAPSHOT_OK=true
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -507,6 +517,8 @@ cleanup() {{
     exit "$status"
 }}
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 echo "=== INICIANDO BACKUP SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
@@ -577,6 +589,8 @@ cleanup() {{
     exit "$status"
 }}
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
@@ -715,6 +729,44 @@ def run_task(tname):
         return
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' lanzada en segundo plano."}))
 
+
+def abort_task(tname):
+    """Detiene las ejecuciones en curso de una tarea (unidades systemd transitorias)."""
+    tname = _sanitize_name(tname)
+    if not tname:
+        print(json.dumps({"status": "error", "message": "Identificador de tarea inválido."}))
+        return
+    unidades = [f"backup-{tname}.service"]
+    try:
+        res = subprocess.run(
+            ["systemctl", "list-units", "--all", "--no-legend", "--plain",
+             f"backup-manual-{tname}-*.service"],
+            capture_output=True, text=True)
+        for linea in res.stdout.splitlines():
+            partes = linea.split()
+            if partes:
+                unidades.append(partes[0])
+    except Exception:
+        pass
+    detenidas = []
+    for u in unidades:
+        try:
+            activa = subprocess.run(["systemctl", "is-active", u], capture_output=True, text=True)
+        except Exception:
+            continue
+        if activa.stdout.strip() != "active":
+            continue
+        try:
+            r = subprocess.run(["systemctl", "stop", u], capture_output=True, text=True)
+        except Exception:
+            continue
+        if r.returncode == 0:
+            detenidas.append(u)
+    if detenidas:
+        print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' abortada ({len(detenidas)} ejecución(es) detenida(s))."}))
+    else:
+        print(json.dumps({"status": "error", "message": f"No había ninguna ejecución activa para '{tname}'."}))
+
 def read_logs(tname):
     tname = _sanitize_name(tname)
     if not _secure_directory(LOG_ROOT, allow_group_write=True):
@@ -759,7 +811,7 @@ if __name__ == "__main__":
 
     try:
         action = sys.argv[1]
-        if action in {"create", "delete", "run"} and not _is_root():
+        if action in {"create", "delete", "run", "abort"} and not _is_root():
             print(json.dumps({"status": "error", "message": "La operación requiere privilegios de root."}))
             sys.exit(1)
         if action == "list":
@@ -770,6 +822,8 @@ if __name__ == "__main__":
             read_logs(sys.argv[2])
         elif action == "run":
             run_task(sys.argv[2])
+        elif action == "abort":
+            abort_task(sys.argv[2])
         elif action == "create":
             create_task(_read_payload())
         elif action == "test_cifs":
