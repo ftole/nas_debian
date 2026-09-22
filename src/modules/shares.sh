@@ -5,10 +5,10 @@
 
 gestionar_recursos_compartidos() {
     local OPC_SHARE TABLA_SHARES NOMBRE_SHARE OPC_VIS BROWSEABLE VIS_TXT OPC_PUB GUEST_OK
-    local NOMBRE_DIR COMENTARIO RUTA_SHARE TIPO_PERM GRUPOS_DISP LISTA_OPC GRUPOS_SEL TODOS_GRPS
+    local NOMBRE_DIR COMENTARIO RUTA_SHARE RUTA_REAL TIPO_PERM GRUPOS_DISP LISTA_OPC GRUPOS_SEL TODOS_GRPS
     local VALID_USERS WRITE_LIST READ_ONLY MASK GRUPO_DUENO TIPO_TXT GRUPOS_RO GRUPOS_RO_ESTRICTO
     local GRUPO_RW MENU_RW STATUS LISTA_SHARES MENU_ITEMS TARGET_SHARE NUEVO_ESTADO
-    local LISTA_ELIMINAR MENU_DEL SHARE_A_BORRAR g
+    local LISTA_ELIMINAR MENU_DEL SHARE_A_BORRAR BACKUP_SMB TMP_SMB g
     
     if [ ! -f /etc/samba/smb.conf ]; then
         whiptail --title "Samba no configurado" --ok-button "< Aceptar >" \
@@ -140,6 +140,31 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         --msgbox "La ruta debe ser absoluta y sin espacios ni caracteres especiales." 9 68
                     continue
                 fi
+
+                if [[ "$RUTA_SHARE" != /srv/nas/* ]]; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La ruta debe estar dentro de /srv/nas." 9 60
+                    continue
+                fi
+
+                RUTA_REAL=$(realpath -m -- "$RUTA_SHARE")
+                case "$RUTA_REAL" in
+                    /srv/nas/*)
+                        ;;
+                    *)
+                        whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                            --msgbox "La ruta no puede salir de /srv/nas." 9 60
+                        continue
+                        ;;
+                esac
+
+                if [ "$RUTA_REAL" = "/srv/nas" ]; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "No se puede utilizar la raíz de almacenamiento como recurso." 9 60
+                    continue
+                fi
+
+                RUTA_SHARE="$RUTA_REAL"
 
                 COMENTARIO=$(whiptail --title "$APP_TITLE" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -305,6 +330,10 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         fi
                     fi
 
+                    BACKUP_SMB="/etc/samba/smb.conf.bak-$(date +%Y%m%d_%H%M%S)"
+                    cp -a /etc/samba/smb.conf "$BACKUP_SMB"
+                    TMP_SMB=$(mktemp)
+                    cp -a /etc/samba/smb.conf "$TMP_SMB"
                     {
                         printf '\n# ==============================================================================\n'
                         printf '# RECURSO COMPARTIDO: %s\n' "$NOMBRE_SHARE"
@@ -328,8 +357,14 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         printf '   directory mask = %s\n' "$MASK"
                         printf '   force create mode = %s\n' "$MASK"
                         printf '   force directory mode = %s\n' "$MASK"
-                    } >> /etc/samba/smb.conf
-                    testparm -s &>/dev/null || true
+                    } >> "$TMP_SMB"
+                    mv -f "$TMP_SMB" /etc/samba/smb.conf
+                    if ! testparm -s >/dev/null 2>&1; then
+                        cp -a "$BACKUP_SMB" /etc/samba/smb.conf
+                        whiptail --title "Error de Samba" --ok-button "< Aceptar >" \
+                            --msgbox "La configuración generada no es válida. Se restauró la copia anterior." 10 70
+                        continue
+                    fi
                     smbcontrol all reload-config 2>/dev/null || systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
                     whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
                         --msgbox "✔ ¡Recurso \"[$NOMBRE_SHARE]\" creado con éxito!\n\n• Visibilidad: $VIS_TXT\n• Ruta Disco:  $RUTA_SHARE\n• Esquema:    $TIPO_TXT\n\nAccesible desde Windows en: \\\\${SERVER_IP}\\$NOMBRE_SHARE" 14 72
@@ -371,6 +406,8 @@ for m in re.finditer(r"\[([^\]]+)\]", text):
                         --yes-button "< Sí, Cambiar Estado >" --no-button "< Cancelar >" \
                         --yesno "¿Estás seguro de que deseas conmutar el estado del recurso \"[$TARGET_SHARE]\" en la red?" 10 68); then
                         
+                        BACKUP_SMB="/etc/samba/smb.conf.bak-$(date +%Y%m%d_%H%M%S)"
+                        cp -a /etc/samba/smb.conf "$BACKUP_SMB"
                         NUEVO_ESTADO=$(python3 -c '
 import sys, re
 target = sys.argv[1]
@@ -392,7 +429,12 @@ if m:
         f.write(text)
     print(msg)
 ' "$TARGET_SHARE")
-                        testparm -s &>/dev/null || true
+                        if ! testparm -s >/dev/null 2>&1; then
+                            cp -a "$BACKUP_SMB" /etc/samba/smb.conf
+                            whiptail --title "Error de Samba" --ok-button "< Aceptar >" \
+                                --msgbox "La configuración generada no es válida. Se restauró la copia anterior." 10 70
+                            continue
+                        fi
                         smbcontrol all reload-config 2>/dev/null || systemctl reload smbd 2>/dev/null || true
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" --msgbox "✔ El recurso \"[$TARGET_SHARE]\" ahora está:\n$NUEVO_ESTADO" 9 55
                     fi
@@ -430,6 +472,8 @@ for line in lines:
                         --yes-button "< Sí, Eliminar Recurso >" --no-button "< Cancelar >" \
                         --yesno "¿Estás 100% seguro de eliminar la definición del recurso \"[$SHARE_A_BORRAR]\" de la red Samba?\n\n(Nota: Los archivos físicos en el disco se mantendrán protegidos)." 11 68); then
                         
+                        BACKUP_SMB="/etc/samba/smb.conf.bak-$(date +%Y%m%d_%H%M%S)"
+                        cp -a /etc/samba/smb.conf "$BACKUP_SMB"
                         python3 -c '
 import sys, re
 target = sys.argv[1]
@@ -442,7 +486,12 @@ text = re.sub(rf"\[{re.escape(target)}\][\s\S]*?(?=\n\[|\Z)", "", text)
 with open("/etc/samba/smb.conf", "w", encoding="utf-8") as f:
     f.write(text.strip() + "\n")
 ' "$SHARE_A_BORRAR"
-                        testparm -s &>/dev/null || true
+                        if ! testparm -s >/dev/null 2>&1; then
+                            cp -a "$BACKUP_SMB" /etc/samba/smb.conf
+                            whiptail --title "Error de Samba" --ok-button "< Aceptar >" \
+                                --msgbox "La configuración generada no es válida. Se restauró la copia anterior." 10 70
+                            continue
+                        fi
                         smbcontrol all reload-config 2>/dev/null || systemctl reload smbd 2>/dev/null || true
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" --msgbox "✔ El recurso \"[$SHARE_A_BORRAR]\" ha sido eliminado de la red Samba." 8 60
                     fi
