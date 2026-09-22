@@ -172,7 +172,7 @@ ADMIN_USER="${4:-$(detect_default_user)}"
 ADMIN_PASS="${5:-}"
 if [ -n "${5:-}" ] && [ "$5" != "-" ]; then
     echo "[-] Por seguridad, la contraseña debe recibirse por stdin usando '-' en lugar del argumento."
-    echo "    Ejemplo: printf '%s\n' \"\$CLAVE\" | bash deploy.sh ... usuario - ARCHIVOS"
+    printf '    Ejemplo: printf %s "$CLAVE" | bash deploy.sh ... usuario - ARCHIVOS\n' "'%s\\n'"
     exit 1
 fi
 if [ "$ADMIN_PASS" == "-" ]; then
