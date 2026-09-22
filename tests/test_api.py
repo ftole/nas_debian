@@ -111,6 +111,13 @@ def test_create_task_valido_escribe_runner(tmp_path, monkeypatch, capsys):
     assert os.path.exists(str(tmp_path / "bin" / "backup_t_local.sh"))
 
 
+def test_run_task_rechaza_tarea_inexistente(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.run_task("noexiste")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+
+
 def test_test_cifs_rechaza_datos_invalidos(capsys):
     api.test_cifs("1.1.1.1; rm", "docs", "usuario", "x")
     data = json.loads(capsys.readouterr().out)
