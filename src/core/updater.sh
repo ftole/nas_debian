@@ -17,6 +17,10 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXPECTED_REPO="${NAS_UPDATE_REPO:-ftole/nas_debian}"
 EXPECTED_BRANCH="${NAS_UPDATE_BRANCH:-main}"
 
+# Huella GPG del firmante de confianza para tags firmados (40 hex, sin espacios).
+# Vacío = sin verificación criptográfica (se advierte y se pide confirmación).
+NAS_UPDATE_SIGNER="${NAS_UPDATE_SIGNER:-}"
+
 # Normaliza la URL del remoto a la forma "propietario/repositorio" para admitir
 # tanto el formato HTTPS como el formato SSH sin comparaciones frágiles.
 _normalizar_remoto() {
@@ -56,6 +60,34 @@ _validar_sintaxis() {
         fi
     done < <(find "$PROJECT_ROOT" -type f -name "*.sh" -print)
     [ "$fallos" -eq 0 ]
+}
+
+# Verifica la firma GPG de un tag y que el firmante coincida con el esperado.
+# Devuelve 0 si la firma es válida y confiable.
+_verificar_firma_tag() {
+    local tag="$1" esperado="$2" salida keyid
+    if ! salida=$(git verify-tag "$tag" 2>&1); then
+        return 1
+    fi
+    if ! echo "$salida" | grep -q "Good signature"; then
+        return 1
+    fi
+    if [ -n "$esperado" ]; then
+        keyid=$(echo "$salida" | grep -o '[0-9A-F]\{16,\}' | head -n1)
+        if [ -z "$keyid" ]; then
+            return 1
+        fi
+        local esperado_norm
+        esperado_norm=$(printf '%s' "$esperado" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+        # Acepta huella completa (40) o key ID largo (16, sufijo).
+        if [ "${#esperado_norm}" -gt 16 ]; then
+            esperado_norm=$(printf '%s' "$esperado_norm" | tail -c 17)
+        fi
+        if [ "$keyid" != "$esperado_norm" ]; then
+            return 1
+        fi
+    fi
+    return 0
 }
 
 actualizar_desde_git() {
@@ -132,6 +164,34 @@ actualizar_desde_git() {
         return 1
     fi
 
+    # Preferir el último tag firmado y verificado como candidato.
+    git fetch origin --tags 2>/dev/null || true
+    local LATEST_TAG CANDIDATE_TAG VERIFICADO
+    CANDIDATE_TAG=""
+    VERIFICADO="no"
+    LATEST_TAG=$(git describe --tags --abbrev=0 "origin/$EXPECTED_BRANCH" 2>/dev/null || echo "")
+    if [ -n "$LATEST_TAG" ] && _verificar_firma_tag "$LATEST_TAG" "$NAS_UPDATE_SIGNER"; then
+        CANDIDATE_TAG="$LATEST_TAG"
+        REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
+        VERIFICADO="sí ($LATEST_TAG)"
+    elif [ -n "$NAS_UPDATE_SIGNER" ]; then
+        _aviso "No se encontró una versión firmada válida. Actualización cancelada por seguridad."
+        return 1
+    fi
+
+    # Evitar degradar si la rama local está por delante del tag firmado.
+    if [ -n "$CANDIDATE_TAG" ] && [ "$CURRENT_REV" != "$REMOTE_REV" ]; then
+        if ! git merge-base --is-ancestor "$CURRENT_REV" "$REMOTE_REV" 2>/dev/null; then
+            if [ -t 0 ] && command -v whiptail &>/dev/null; then
+                whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Aceptar >" \
+                    --msgbox "✔ Ya estás en una versión posterior al último tag firmado ($CANDIDATE_TAG).\n\nNo hay actualización firmada pendiente." 9 70
+            else
+                echo -e "${C_GREEN}✔ Ya estás en una versión posterior al último tag firmado ($CANDIDATE_TAG).${C_RESET}"
+            fi
+            return 0
+        fi
+    fi
+
     if [ "$CURRENT_REV" == "$REMOTE_REV" ]; then
         if [ -t 0 ] && command -v whiptail &>/dev/null; then
             whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Aceptar >" \
@@ -148,12 +208,13 @@ actualizar_desde_git() {
     if [ -t 0 ] && command -v whiptail &>/dev/null; then
         if ! (whiptail --title "Actualización Disponible" \
             --yes-button "< Actualizar Ahora >" --no-button "< Cancelar >" \
-            --yesno "Hay una nueva versión disponible en GitHub.\n\nVersión instalada: $(git log -1 --format='%h - %s' "$CURRENT_REV")\nVersión candidata : $(git log -1 --format='%h - %s' "$REMOTE_REV")\n\nCambios principales:\n$changelog\n\n¿Deseas descargar e instalar la actualización ahora?" 18 74); then
+            --yesno "Hay una nueva versión disponible en GitHub.\n\nVersión instalada: $(git log -1 --format='%h - %s' "$CURRENT_REV")\nVersión candidata : $(git log -1 --format='%h - %s' "$REMOTE_REV")\nVerificación GPG : $VERIFICADO\n\nCambios principales:\n$changelog\n\n¿Deseas descargar e instalar la actualización ahora?" 19 74); then
             return 0
         fi
     elif [ "$FORCE_FLAG" == "1" ]; then
         echo -e "${C_CYAN}Versión instalada: $(git log -1 --format='%h - %s' "$CURRENT_REV")${C_RESET}"
         echo -e "${C_CYAN}Versión candidata : $(git log -1 --format='%h - %s' "$REMOTE_REV")${C_RESET}"
+        echo -e "${C_CYAN}Verificación GPG : $VERIFICADO${C_RESET}"
         echo -e "${C_CYAN}Cambios principales:${C_RESET}"
         echo "$changelog"
         echo ""
@@ -163,6 +224,7 @@ actualizar_desde_git() {
         echo ""
         echo -e "${C_CYAN}Versión instalada: $(git log -1 --format='%h - %s' "$CURRENT_REV")${C_RESET}"
         echo -e "${C_CYAN}Versión candidata : $(git log -1 --format='%h - %s' "$REMOTE_REV")${C_RESET}"
+        echo -e "${C_CYAN}Verificación GPG : $VERIFICADO${C_RESET}"
         echo "$changelog"
         return 1
     fi
