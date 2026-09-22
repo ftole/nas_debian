@@ -166,6 +166,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
 
                 RUTA_SHARE="$RUTA_REAL"
 
+                if ! ruta_sin_symlinks "$RUTA_SHARE"; then
+                    whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La ruta no puede contener enlaces simbolicos." 9 60
+                    continue
+                fi
+
                 COMENTARIO=$(whiptail --title "$APP_TITLE" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
                     --inputbox "Descripción o comentario del recurso:" 10 65 "Carpeta compartida $NOMBRE_DIR" 3>&1 1>&2 2>&3)
@@ -303,7 +309,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 if (whiptail --title "Confirmar Creación de Recurso" \
                     --yes-button "< Sí, Crear Recurso >" --no-button "< Cancelar >" \
                     --yesno "¿Confirmas la creación del recurso con los siguientes parámetros?\n\n• Nombre:      [$NOMBRE_SHARE]\n• Visibilidad: $VIS_TXT\n• Ruta Disco:   $RUTA_SHARE\n• Esquema:     $TIPO_TXT\n• Acceso:      ${VALID_USERS:-Invitados (Público)}\n• Escritura:   ${WRITE_LIST:-Según Permisos Generales}\n\n• Ruta de red: \\\\${SERVER_IP}\\$NOMBRE_SHARE" 17 72); then
-                    
+                    if ! ruta_sin_symlinks "$RUTA_SHARE"; then
+                        whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                            --msgbox "La ruta no puede contener enlaces simbolicos." 9 60
+                        continue
+                    fi
                     mkdir -p "$RUTA_SHARE"
                     if [ "$TIPO_PERM" == "1" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
