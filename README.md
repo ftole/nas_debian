@@ -254,7 +254,7 @@ FAILURE_MODES.md           Modos de fallo y su verificación
 
 - **`curl: (60) certificate problem`**: instala `ca-certificates` (`apt install -y ca-certificates`).
 - **El asistente no abre**: ejecútalo con `sudo` y en una terminal de al menos 72x20 caracteres.
-- **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Si deseas formatearlo de todos modos, añade `--force` al despliegue por consola.
+- **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Un PV de LVM o un miembro de RAID activo **nunca** se puede formatear. Para un disco simplemente montado, el despliegue por consola permite continuar con `--ignore-in-use` y la confirmación textual `SI-FORMATEAR`.
 - **Una tarea de backup no se ejecuta**: comprueba que `cron` esté activo (`systemctl status cron`) y revisa el log en `/srv/nas/LOGS_BACKUP/`.
 - **Windows no ve el servidor**: verifica `smbd`, `wsdd2` y las reglas de UFW.
 
