@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, glob, json, subprocess, re, tempfile
+import sys, os, glob, json, subprocess, re, tempfile, shutil
 from datetime import datetime
 
 CRED_DIR = "/etc/backup-credentials"
@@ -12,12 +12,16 @@ KNOWN_HOSTS = "/root/.ssh/known_hosts_backup"
 
 def ensure_dirs():
     try:
-        os.makedirs(CRED_DIR, exist_ok=True)
-        os.makedirs(BKP_ROOT, exist_ok=True)
-        os.makedirs(LOG_ROOT, exist_ok=True)
-        return True
+        os.makedirs(CRED_DIR, mode=0o700, exist_ok=True)
+        os.makedirs(BKP_ROOT, mode=0o750, exist_ok=True)
+        os.makedirs(LOG_ROOT, mode=0o750, exist_ok=True)
     except OSError:
         return False
+    # Verifica propietario y permisos de los directorios criticos (solo como root).
+    for _path, _gw in ((CRED_DIR, False), (BKP_ROOT, True), (LOG_ROOT, True)):
+        if not _secure_directory(_path, _gw):
+            return False
+    return True
 
 def _is_root():
     return hasattr(os, "geteuid") and os.geteuid() == 0
@@ -73,15 +77,26 @@ def _read_text(path):
         return None
 
 
-def _restore(path, content, mode):
+def _restore(path, content, mode, uid=None, gid=None):
     try:
         if content is None:
             if os.path.exists(path):
                 os.remove(path)
         else:
-            _atomic_write(path, content, mode)
+            _atomic_write(path, content, mode, uid=uid, gid=gid)
     except OSError:
         pass
+
+
+def _secure_secret(path):
+    """Comprueba que un archivo de credenciales sea root:root y no accesible por otros."""
+    if not _is_root():
+        return True
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    return st.st_uid == 0 and st.st_gid == 0 and not (st.st_mode & 0o077)
 
 
 def _secure_directory(path, allow_group_write=False):
@@ -107,14 +122,7 @@ def _write_secret(path, content):
         _atomic_write(path, content, 0o600, uid=0, gid=0)
     except OSError:
         return False
-    if _is_root():
-        try:
-            st = os.stat(path)
-        except OSError:
-            return False
-        if st.st_uid != 0 or st.st_gid != 0 or (st.st_mode & 0o077):
-            return False
-    return True
+    return _secure_secret(path)
 
 
 def ensure_known_hosts():
@@ -145,6 +153,16 @@ def list_tasks():
     runners = sorted(glob.glob(f"{BIN_DIR}/backup_*.sh"))
     
     for r in runners:
+        # Ignorar runners no confiables (symlink, propietario o permisos inseguros).
+        if os.path.islink(r) or not os.path.isfile(r):
+            continue
+        if _is_root():
+            try:
+                st = os.stat(r)
+            except OSError:
+                continue
+            if st.st_uid != 0 or (st.st_mode & 0o022):
+                continue
         tname = os.path.basename(r).replace("backup_", "").replace(".sh", "")
         proto = "Local"
         src = "N/A"
@@ -331,10 +349,10 @@ def create_task(data):
     cred_file = f"{CRED_DIR}/{tname}.cred"
     existed = os.path.exists(runner)
 
-    # Los directorios del sistema deben ser seguros (propiedad de root, sin escritura ajena).
-    for _d in (BIN_DIR, CRON_DIR, CRED_DIR):
-        if not _secure_directory(_d):
-            print(json.dumps({"status": "error", "message": f"Directorio con permisos inseguros: {_d}"}))
+    # Los directorios usados por runners root deben existir y ser seguros.
+    for _d, _gw in ((BIN_DIR, False), (CRON_DIR, False), (CRED_DIR, False), (BKP_ROOT, True), (LOG_ROOT, True)):
+        if not os.path.isdir(_d) or not _secure_directory(_d, _gw):
+            print(json.dumps({"status": "error", "message": f"Directorio ausente o con permisos inseguros: {_d}"}))
             return
 
     cred_content = None
@@ -599,9 +617,15 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
         _atomic_write(runner, script, 0o750)
         _atomic_write(cron_file, cron_line, 0o644)
     except Exception:
-        _restore(cred_file, prev_cred, 0o600)
+        _restore(cred_file, prev_cred, 0o600, uid=0, gid=0)
         _restore(runner, prev_runner, 0o750)
         _restore(cron_file, prev_cron, 0o644)
+        # Si la credencial restaurada no queda segura, se elimina.
+        if prev_cred is not None and not _secure_secret(cred_file):
+            try:
+                os.remove(cred_file)
+            except OSError:
+                pass
         print(json.dumps({"status": "error", "message": "No se pudo guardar la tarea; se revirtieron los cambios."}))
         return
 
@@ -612,13 +636,34 @@ def delete_task(tname, confirmed=False):
         print(json.dumps({"status": "error", "message": "Se requiere confirmación explícita para eliminar la tarea."}))
         return
     tname = _sanitize_name(tname)
-    runner = f"{BIN_DIR}/backup_{tname}.sh"
-    cron_file = f"{CRON_DIR}/backup_{tname}"
-    cred_file = f"{CRED_DIR}/{tname}.cred"
+    targets = [
+        f"{BIN_DIR}/backup_{tname}.sh",
+        f"{CRON_DIR}/backup_{tname}",
+        f"{CRED_DIR}/{tname}.cred",
+    ]
+    existing = [t for t in targets if os.path.exists(t)]
 
-    if os.path.exists(runner): os.remove(runner)
-    if os.path.exists(cron_file): os.remove(cron_file)
-    if os.path.exists(cred_file): os.remove(cred_file)
+    # Cuarentena: mover cada archivo a un temporal en su propio directorio y
+    # eliminarlo. Si un movimiento falla, se restauran los anteriores
+    # (eliminacion transaccional).
+    moved = []
+    try:
+        for t in existing:
+            qdir = tempfile.mkdtemp(dir=os.path.dirname(t), prefix=".nas-del-")
+            dest = os.path.join(qdir, os.path.basename(t))
+            os.replace(t, dest)
+            moved.append((t, dest, qdir))
+    except OSError:
+        for t, dest, qdir in moved:
+            try:
+                os.replace(dest, t)
+            except OSError:
+                pass
+            shutil.rmtree(qdir, ignore_errors=True)
+        print(json.dumps({"status": "error", "message": "No se pudo eliminar la tarea; se revirtieron los cambios."}))
+        return
+    for _t, _dest, qdir in moved:
+        shutil.rmtree(qdir, ignore_errors=True)
 
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' eliminada."}))
 
@@ -659,7 +704,16 @@ def run_task(tname):
 
 def read_logs(tname):
     tname = _sanitize_name(tname)
+    if not _secure_directory(LOG_ROOT, allow_group_write=True):
+        print(json.dumps({"status": "error", "logs": "Directorio de registros con permisos inseguros."}))
+        return
     log_file = f"{LOG_ROOT}/backup_{tname}.log"
+    if os.path.islink(log_file) or (os.path.exists(log_file) and not os.path.isfile(log_file)):
+        print(json.dumps({"status": "error", "logs": "Registro no válido."}))
+        return
+    if os.path.exists(log_file) and os.path.dirname(os.path.realpath(log_file)) != os.path.realpath(LOG_ROOT):
+        print(json.dumps({"status": "error", "logs": "Ruta de registro no permitida."}))
+        return
     if os.path.exists(log_file):
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
