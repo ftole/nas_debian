@@ -1,147 +1,125 @@
-# Guía de Implementación y Replicación: Servidor NAS & Central de Backup Multiplataforma (Debian Linux)
+# Manual Técnico: Servidor NAS y Central de Respaldos (Debian 13)
 
-Esta guía documenta el procedimiento completo, probado y replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
-1. **Servidor de Archivos (NAS Principal):** Almacenamiento en red departamental para clientes Windows con Samba, WSDD2 y Cockpit.
-2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots versionados) para respaldar servidores Windows, servidores Linux, estaciones de trabajo y carpetas locales mediante snapshots incrementales y deduplicación.
+Este documento describe la arquitectura, el motor de copias de seguridad, el modelo de seguridad y los procedimientos de operación del proyecto. Está dirigido a administradores que necesiten entender el funcionamiento interno o replicar el despliegue. Para la instalación y el uso general, consulta el `README.md`.
 
----
+## 1. Introducción y alcance
 
-## 1. Arquitectura y Métodos de Respaldo
+El sistema cubre dos funciones excluyentes:
 
-### A. Método de Copia de Seguridad y Deduplicación:
-* **Incremental Versionada con Snapshots y Hardlinks:**
-  * Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`).
-  * Los archivos que no han sido modificados **comparten el mismo bloque físico en el disco** (*hardlinks*).
-  * **Ahorro de espacio:** Significativo (típicamente superior al **85%**) frente a copias completas repetitivas, gracias a los hardlinks.
-  * **Retención histórica:** El snapshot más reciente siempre refleja el origen; las versiones anteriores se conservan hasta que la rotación elimina los snapshots más antiguos que excedan la retención configurada (N snapshots).
-* **Exactitud punto en el tiempo:**
-  * Cada snapshot es una réplica exacta del origen en el instante de la ejecución (`rsync -a --delete`); las versiones previas se conservan como snapshots anteriores.
+1. **Servidor de archivos (NAS departamental):** almacenamiento en red para clientes Windows mediante Samba, con descubrimiento WSDD2 y panel Cockpit.
+2. **Central de copias de seguridad:** repositorio dedicado a respaldar servidores Windows, servidores Linux, estaciones de trabajo y carpetas locales, con snapshots deduplicados y retención configurable.
 
-> [!NOTE]
-> Antes de crear una tarea, el asistente **prueba la conexión** (CIFS/SSH) con las credenciales ingresadas. Las ejecuciones programadas se lanzan con `systemd-run` y un bloqueo `flock` que evita solapamientos.
+El despliegue base es idéntico para ambos roles: crea el grupo `grp_sistemas` y el directorio `/srv/nas`, sin recursos compartidos. Los grupos y recursos se añaden después desde el asistente según las necesidades del entorno.
 
----
+## 2. Arquitectura
 
-### B. Respaldo de Servidores Windows (Active Directory, SQL, File Server):
-* **Alcance:** copia a nivel de archivos del recurso compartido SMB. Para aplicaciones como AD o SQL usa herramientas nativas/conscientes de VSS.
-* **Protocolo:** SMB / CIFS con montaje en modo **Solo Lectura (`ro`)**.
-* **Versión de SMB:** el montaje usa `vers=3.0,sec=ntlmssp` (fijo). Si el servidor exige otra versión, edita el runner generado (`/usr/local/bin/backup_<tarea>.sh`); al recrear la tarea se regenera con el valor por defecto.
-* **Seguridad de Credenciales:** El usuario y contraseña de Windows se almacenan en `/etc/backup-credentials/<tarea>.cred` con permisos estrictos `0600 root:root` (inaccesible para usuarios normales).
-* **Flujo de Ejecución:**
-  1. El servidor de backup monta temporalmente la carpeta de Windows en `/mnt/backup_sources/<tarea>`.
-  2. Ejecuta el snapshot incremental con deduplicación.
-  3. Desmonta el recurso inmediatamente (`umount`).
-  4. Genera el registro detallado en `/srv/nas/LOGS_BACKUP/`.
-
----
-
-### C. Respaldo de Servidores Linux / NAS Principal:
-* **Protocolo:** Túnel SSH cifrado con `rsync` y `sshpass` (autenticación por contraseña).
-* **Verificación de host:** el runner desactiva la validación de la clave del host remoto (`StrictHostKeyChecking=no`); úsalo solo en redes de confianza (riesgo de *man-in-the-middle*).
-* **Flujo de Ejecución:**
-  1. Conexión por SSH cifrada con un usuario autorizado (configurable; por defecto `root`).
-  2. Preservación exacta de permisos POSIX, propietarios, grupos y fechas de modificación.
-
----
-
-### D. Respaldo de Carpetas Locales del Servidor:
-* **Protocolo:** `rsync` local (sin credenciales de red).
-* **Origen:** cualquier ruta absoluta del propio servidor (p. ej. `/srv/nas/SISTEMAS`).
-* **Uso típico:** proteger directorios locales o consolidar copias ya presentes en el NAS.
-
----
-
-## 2. Métodos de Gestión y Despliegue
-
-### Método 1: Asistente Gráfico Interactivo en Terminal (Recomendado)
-```bash
-sudo nas
-```
-* **Detección Automática del Entorno:**
-  * Escanea dinámicamente los discos del servidor, identifica el disco del sistema operativo (`/`, incluidos LVM/RAID/LUKS) para protegerlo contra formateo accidental, y ofrece discos secundarios o la partición local.
-  * **Aviso:** el disco dedicado seleccionado se **formatea por completo** (BTRFS) y se borran sus datos; el asistente solicita confirmación explícita antes de hacerlo.
-  * Detecta la dirección IP real del servidor en la red local para paneles web y accesos SMB.
-  * Detecta el usuario administrador actual para asignarle permisos en Cockpit y Samba.
-* **Otros comandos del CLI:** `sudo nas update` (actualiza desde GitHub), `sudo nas status` (diagnóstico) y `sudo nas version` (versión/commit instalado).
-
----
-
-### Método 2: Panel Web Cockpit (Backups)
-Accede a `https://<IP_DEL_SERVIDOR>:9090` → módulo **Backups** para crear, probar la conexión, listar, ejecutar y eliminar tareas y consultar sus registros desde el navegador (usa la misma API que el asistente).
-
----
-
-### Método 3: Despliegue Automatizado por Línea de Comandos
-```bash
-# Sintaxis (los parámetros son opcionales con auto-detección):
-sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]
-
-# Ejemplo para Servidor NAS de Archivos:
-sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin <CLAVE_ADMIN> ARCHIVOS
-
-# Ejemplo para Servidor de Backup con disco secundario:
-sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BACKUP
+```text
+                         +---------------------------+
+                         |     Debian 13 (Trixie)    |
+                         +-------------+-------------+
+                                       |
+          +----------------------------+----------------------------+
+          |                            |                            |
+  +-------+-------+          +---------+---------+        +---------+---------+
+  |  Samba/WSDD2  |          |  Cockpit + web    |        |  Motor de backups |
+  |  (SMB / WSD)  |          |  (panel Backups)  |        |  (CIFS/SSH/local) |
+  +---------------+          +-------------------+        +-------------------+
 ```
 
-> [!TIP]
-> Pasar la clave como argumento la expone temporalmente en `ps`. Para evitarlo, usa `-` en el campo de contraseña y envíala por `stdin`:
-> ```bash
-> printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS
-> ```
+Componentes:
 
-> [!NOTE]
-> Por seguridad, el despliegue **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); añade `--force` al final del comando para forzar el formateo.
+- **Instalador y CLI `nas`** (`install.sh`): despliega el proyecto en `/opt/nas_debian` y crea el comando global.
+- **Asistente de terminal** (`src/asistente.sh` y `src/modules/`): menú de 9 módulos.
+- **Motor de despliegue** (`src/core/deploy.sh`): prepara almacenamiento, Samba, Cockpit y parches.
+- **Motor de backups** (`src/modules/backups.sh` y `src/web/backups/`): crea y ejecuta las tareas.
+- **Panel web** (`src/web/backups/`): interfaz Cockpit para gestionar las tareas.
 
-### Método 4: Desinstalación y Limpieza Rápida
-```bash
-sudo nas uninstall
-```
+## 3. Motor de copias de seguridad
 
----
+### 3.1 Snapshots y deduplicación
 
-## 3. ¿Cómo Restaurar Archivos desde un Backup?
+- Cada ejecución crea una carpeta `snapshot_YYYY-MM-DD_HHMMSS` dentro de `/srv/nas/BACKUPS_HISTORICOS/<tarea>/`.
+- `rsync --link-dest` reutiliza los inodos (enlaces duros) de los archivos sin cambios, por lo que cada snapshot ocupa poco espacio adicional.
+- La retención conserva los últimos N snapshots y elimina los más antiguos. El orden se determina por el nombre (cronológico), no por la fecha de modificación.
 
-Para restaurar archivos o carpetas de cualquier fecha conservada por la retención:
+### 3.2 Orígenes soportados
 
-1. **Ingresar a la carpeta de snapshots:**
+- **Windows (CIFS):** montaje en solo lectura con credenciales en `/etc/backup-credentials/<tarea>.cred` (`0600`). El montaje usa `vers=3.0,sec=ntlmssp`.
+- **Linux (SSH):** `rsync` sobre un túnel `sshpass`, preservando permisos POSIX, propietarios, grupos y fechas.
+- **Local:** `rsync` sobre una ruta del propio servidor.
+
+### 3.3 Programación y concurrencia
+
+- `cron` lanza cada tarea mediante `systemd-run --collect` con prioridad baja.
+- Un bloqueo `flock` por tarea evita ejecuciones simultáneas.
+- Antes de copiar, se comprueba el espacio libre disponible.
+
+## 4. Modelo de seguridad
+
+- **Validación de entradas:** IP, recurso, ruta, usuario, puerto y expresión cron se validan tanto en el asistente como en la API web.
+- **Manejo de secretos:** las contraseñas no se pasan como argumentos; se envían por `stdin` o variables de entorno, y las credenciales se guardan en archivos con permisos `0600`.
+- **Samba:** `map to guest = Bad User`, cifrado negociado (`desired`) y protocolo mínimo SMB2.
+- **Recursos de respaldo ocultos:** sufijo `$` y, opcionalmente, `browseable = no`.
+- **Permisos:** ACL de POSIX (`setfacl`) para el esquema de escritura por varios grupos.
+- **Integridad del sistema:** protección del disco del sistema operativo (LVM, RAID, LUKS y Btrfs), aviso ante discos en uso, respaldo de `smb.conf` antes de regenerarlo y `dpkg-divert` para binarios del sistema.
+- **Cadena de suministro:** verificación SHA256 de las extensiones descargadas y CI con acciones fijadas por SHA.
+
+## 5. Métodos de despliegue
+
+- **Asistente:** `sudo nas` (recomendado).
+- **Panel web:** `https://<IP_DEL_SERVIDOR>:9090`, en el módulo Backups.
+- **Línea de comandos:** `sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]`.
+  - La clave puede enviarse por `stdin` usando `-` en el campo de contraseña.
+  - El despliegue aborta si el disco dedicado está en uso; añade `--force` para forzarlo.
+- **Desinstalación:** `sudo nas uninstall`.
+
+## 6. Gestión
+
+- **Grupos (`grp_*`):** se crean desde el módulo [2]; `grp_sistemas` es el grupo maestro.
+- **Recursos compartidos:** módulo [3], con cuatro esquemas de permisos:
+  1. Lectura y escritura por grupo.
+  2. Solo lectura general con escritura exclusiva.
+  3. Solo lectura estricta.
+  4. Acceso público o de invitados.
+- **Usuarios:** módulo [5]. Quienes pertenecen a `grp_sistemas` obtienen shell y acceso web; el resto solo tiene acceso de red.
+
+## 7. Restauración de archivos
+
+1. Ingresar a la carpeta de snapshots:
+
    ```bash
    cd /srv/nas/BACKUPS_HISTORICOS/<nombre_tarea>/
    ls -la
    ```
-2. **Seleccionar el snapshot deseado:**
-   * Cada carpeta corresponde a un punto exacto en el tiempo (ej. `snapshot_2026-08-28_230000`).
-3. **Copiar el archivo hacia el servidor de destino:**
+
+2. Seleccionar el snapshot deseado (por ejemplo `snapshot_2026-08-28_230000`).
+
+3. Copiar el archivo o la carpeta al destino:
+
    ```bash
-   # Ejemplo restaurando un archivo hacia Windows o NAS:
    cp snapshot_2026-08-28_230000/Contabilidad/Reporte.xlsx /srv/nas/VENTAS/
    ```
 
----
+## 8. Operación y mantenimiento
 
-## 4. Diferencias de Arquitectura: Servidor NAS vs Servidor de Backup
+- **Registros:** `/srv/nas/LOGS_BACKUP/backup_<tarea>.log`, con rotación semanal mediante `logrotate`.
+- **Diagnóstico:** `sudo nas status`.
+- **Actualización:** `sudo nas update`.
+- **Verificación de servicios:** `systemctl status smbd nmbd wsdd2 cockpit.socket cron`.
 
-> [!IMPORTANT]
-> El despliegue base es **idéntico y limpio** para ambos roles: crea únicamente `grp_sistemas` y `/srv/nas`, con **0 recursos compartidos**. Los grupos y carpetas de ejemplo siguientes se crean después desde el asistente (menús [2] y [3]) según las necesidades del entorno.
+## 9. Solución de problemas y glosario
 
-> [!NOTE]
-> El asistente ofrece **4 esquemas de permisos** por recurso (Lectura/Escritura por grupo, Solo Lectura + Escritura exclusiva, Solo Lectura estricta y Público/Invitados) y una **retención por defecto** de 30 snapshots (15 para tareas Linux por SSH).
+**Problemas frecuentes**
 
-### Rol ARCHIVOS (NAS Departamental):
-* **Grupos de ejemplo:** `grp_sistemas`, `grp_c1_admin`, `grp_c1_analista`, `grp_c2_admin`, etc. (creados por el administrador).
-* **Carpetas Visibles de ejemplo:** `[SISTEMAS]`, `[C1_*]`, `[C2_*]` accesibles según matriz de permisos.
+- **El montaje CIFS falla:** el servidor puede exigir otra versión de SMB; edita el runner generado en `/usr/local/bin/backup_<tarea>.sh`.
+- **El backup se omite:** hay otra ejecución en curso (bloqueo `flock`) o el espacio libre es inferior a 500 MB.
+- **La tarea no se ejecuta:** verifica el servicio `cron` y el registro de la tarea.
+- **Un disco aparece como "EN USO":** está montado, es un volumen LVM o un miembro de RAID.
 
-### Rol BACKUP (100% Oculto y Resistente a Ransomware):
-* **Grupos de ejemplo:** `grp_sistemas` (TI) y, opcionalmente, `grp_backups` (servicio técnico). Ningún usuario común debería existir en este servidor.
-* **Recursos Ocultos:** Se crean con el sufijo `$` (y opcionalmente `browseable = no`) para quedar **invisibles en el explorador de Windows**:
-  * `[BACKUPS_WINDOWS$]`: Destino oculto para agentes Windows (Veeam / Windows Backup).
-  * `[BACKUPS_LINUX$]`: Destino oculto para servidores Linux.
-  * `[BACKUPS_SERVIDORES$]`: Repositorio de imágenes y snapshots.
-* **Acceso Estricto:** Solo accesible por credenciales autorizadas escribiendo la ruta UNC directa (ej. `\\<IP_SERVIDOR>\BACKUPS_WINDOWS$`).
+**Glosario**
 
----
-
-## 5. Acceso Web y Conexión de Red
-
-* **Panel Web Cockpit:** `https://<IP_DEL_SERVIDOR>:9090`
-* **Credenciales Samba:** conéctate con el usuario administrador definido en el despliegue (o los usuarios creados desde el menú [5]) usando su contraseña de red Samba.
-* **Red Windows:** `\\<IP_DEL_SERVIDOR>` (o `\\<NOMBRE_NETBIOS>`)
+- **Snapshot:** copia de un origen en un instante concreto.
+- **Enlace duro (hardlink):** referencia adicional a un mismo bloque de datos; no duplica el espacio.
+- **`--link-dest`:** opción de `rsync` que reutiliza los archivos ya presentes en un snapshot anterior.
+- **Retención:** número de snapshots que se conservan antes de eliminar los más antiguos.
+- **WSDD2:** servicio de descubrimiento de equipos en redes Windows (WSD/LLMNR).
