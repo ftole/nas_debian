@@ -29,12 +29,23 @@ Para producción, configura la huella del firmante de confianza:
 export NAS_UPDATE_SIGNER="<huella-GPG-de-40-hex>"
 ```
 
-Con `NAS_UPDATE_SIGNER` definido, el actualizador exige un tag firmado válido y
-aborta si no lo encuentra. Además, `NAS_REQUIRE_SIGNED_TAGS=true` exige un tag
-firmado aunque no se configure un firmante concreto (útil en producción para no
-depender solo de HTTPS y GitHub). Sin ninguna de las dos variables, se usa la rama
-(con advertencia de "sin verificación"). Publica versiones con
-`git tag -s vX.Y.Z -m "..."`.
+Para producción, configura **ambas** variables:
+
+```bash
+export NAS_REQUIRE_SIGNED_TAGS=true
+export NAS_UPDATE_SIGNER="<huella-GPG-de-40-hex>"
+```
+
+`NAS_REQUIRE_SIGNED_TAGS=true` sin firmante exige una firma válida, pero **acepta
+cualquier clave** que el sistema considere de confianza; por eso la huella del
+firmante es un **requisito**, no una opción.
+
+Con `NAS_UPDATE_SIGNER` definido (o `NAS_REQUIRE_SIGNED_TAGS=true`), la
+**instalación inicial**, la **reinstalación** y `nas update` exigen una tag firmada
+con esquema `vMAJOR.MINOR.PATCH` y fijan el árbol en la tag exacta (se elige la
+más reciente por versión que sea alcanzable desde la rama). Sin ninguna de las dos
+variables, se usa la rama (con advertencia de "sin verificación"). Publica versiones
+con `git tag -s vX.Y.Z -m "..."`.
 
 ### Rollback manual
 
