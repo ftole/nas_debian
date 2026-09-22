@@ -37,7 +37,7 @@ restaurar_parches_cockpit() {
         case "$orig" in
             *.bak-*) continue ;;
         esac
-            ultimo=$(find "$(dirname "$orig")" -maxdepth 1 -type f -name "$(basename "$orig").bak-*" 2>/dev/null | sort | tail -n 1)
+        ultimo=$(find "$(dirname "$orig")" -maxdepth 1 -type f -name "$(basename "$orig").bak-*" 2>/dev/null | sort | tail -n 1)
         if [ -n "$ultimo" ] && [ -f "$ultimo" ]; then
             cp -p "$ultimo" "$orig"
             echo "  [•] Parche restaurado en $orig desde $ultimo"
