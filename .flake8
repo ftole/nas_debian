@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 200
+# Se ignoran unicamente reglas de estilo/formato; se mantienen los errores
+# logicos (F-codes), de sintaxis (E9) y de complejidad.
+extend-ignore = E203, E302, E401, E501, E701, W293, W503, E741
+exclude = .git, __pycache__, .github
