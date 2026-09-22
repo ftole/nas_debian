@@ -68,12 +68,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install flake8
           
-      - name: Analizar codigo de Cockpit
+      - name: Analizar codigo Python
         run: |
-          # Analizamos errores criticos de sintaxis en el backend web de backups
-          if [ -f "src/web/backups/backup_api.py" ]; then
-            flake8 src/web/backups/backup_api.py --select=E9,F63,F7,F82,E722 --show-source
-          fi
+          # Analisis amplio con la configuracion del proyecto (.flake8)
+          flake8 src/web/backups/backup_api.py tests/
 
   test-python:
     name: Pruebas Unitarias Python (pytest)
