@@ -147,6 +147,9 @@ sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin <CLAVE_ADMIN> ARCHI
 sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BACKUP
 ```
 
+> [!IMPORTANT]
+> Por seguridad, `deploy.sh` **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); añade `--force` al final para forzarlo. La clave puede enviarse por `stdin` usando `-` en su lugar (evita exponerla en `ps`).
+
 ### Limpieza y Desinstalación Total:
 ```bash
 sudo nas uninstall
