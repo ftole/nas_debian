@@ -66,10 +66,27 @@ echo -e " ${C_BOLD}[2/4]${C_RESET} Descargando y sincronizando componentes en ${
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
     git remote set-url origin "$REPO_URL" 2>/dev/null || true
-    if git fetch -q origin main 2>/dev/null; then
-        git reset -q --hard origin/main
+    if ! git fetch -q origin main 2>/dev/null; then
+        echo -e "${C_YELLOW}  [!] No se pudo contactar con GitHub; se conserva la versión instalada.${C_RESET}"
     else
-        echo -e "${C_YELLOW}  [!] No se pudo sincronizar con GitHub; se conserva la versión instalada.${C_RESET}"
+        CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
+        REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "")
+        if [ -n "$CURRENT_REV" ] && [ -n "$REMOTE_REV" ] && [ "$CURRENT_REV" != "$REMOTE_REV" ]; then
+            BACKUP_DIR=$(mktemp -d "${INSTALL_DIR}.install_backup_XXXXXX")
+            if ! cp -a "$INSTALL_DIR/." "$BACKUP_DIR/" 2>/dev/null; then
+                echo -e "${C_RED}[-] No se pudo crear el backup de la instalación.${C_RESET}"
+                exit 1
+            fi
+            if ! git merge --ff-only origin/main; then
+                echo -e "${C_RED}[-] La actualización no es fast-forward. Backup disponible en: $BACKUP_DIR${C_RESET}"
+                exit 1
+            fi
+            if ! find "$INSTALL_DIR" -type f -name "*.sh" -exec bash -n {} \;; then
+                echo -e "${C_RED}[-] La nueva versión no superó la validación; restaurando la anterior.${C_RESET}"
+                git reset --hard "$CURRENT_REV"
+                exit 1
+            fi
+        fi
     fi
 elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ] && [ -d "$SCRIPT_DIR/.git" ]; then
     rm -rf "$INSTALL_DIR"
