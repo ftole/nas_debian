@@ -125,7 +125,12 @@ function cargarTareas() {
 	tbody.innerHTML = '<tr><td class="empty-msg" colspan="9"><i class="fas fa-spinner fa-spin"></i> Cargando tareas...</td></tr>';
 
 	runApi(["list"]).then(function (res) {
-		if (res.status !== "ok" || !res.tasks || res.tasks.length === 0) {
+		if (res.status !== "ok") {
+			tbody.innerHTML = '<tr><td class="empty-msg" colspan="9">Error al cargar las tareas: ' + esc(res.message || "desconocido") + "</td></tr>";
+			if (logSelect) logSelect.innerHTML = '<option value="">(Error)</option>';
+			return;
+		}
+		if (!res.tasks || res.tasks.length === 0) {
 			tbody.innerHTML = '<tr><td class="empty-msg" colspan="9">No hay tareas de backup programadas. Haz clic en "Nueva Tarea" para crear una.</td></tr>';
 			if (logSelect) logSelect.innerHTML = '<option value="">(Sin tareas)</option>';
 			return;
