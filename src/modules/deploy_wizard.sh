@@ -145,7 +145,7 @@ ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus 
         printf "  ╰──────────────────────────────────────────────────────────────────────╯%b\n\n" "${C_RESET}"
         
         CORE_DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../core" && pwd)/deploy.sh"
-        printf '%s\n' "$ADMIN_PASS" | bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "-" "$ROL_SERVER"
+        printf '%s\n' "$ADMIN_PASS" | bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "-" "$ROL_SERVER" --confirm
         local ret_exec=$?
         
         if [ $ret_exec -eq 0 ]; then
