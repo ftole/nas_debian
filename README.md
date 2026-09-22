@@ -52,7 +52,10 @@ curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | 
 
 ### Preparación manual (opcional)
 
-Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos.
+Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos **en orden y como `root`**.
+
+> [!IMPORTANT]
+> Ejecuta todos los pasos dentro de la **misma sesión de `root`** (Paso 1). **No ejecutes `exit` hasta el final.** Si vuelves a tu usuario normal, los pasos siguientes fallarán con `Permiso denegado` u `orden no encontrada`, porque requieren privilegios de administrador y el `PATH` de `root` (que incluye `/usr/sbin`).
 
 #### Paso 1: Acceso como `root`
 
@@ -126,14 +129,8 @@ ping -c 4 google.com   # resolución DNS
    chmod 0440 /etc/sudoers.d/90-<nombre_usuario>
    ```
 
-3. Salir de `root`:
-
-   ```bash
-   exit
-   ```
-
 > [!NOTE]
-> La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión.
+> La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión. **Continúa en esta misma sesión de `root`** para los pasos siguientes (no ejecutes `exit` todavía).
 
 > [!TIP]
 > `sudo` ignora los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (por ejemplo `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
@@ -185,6 +182,16 @@ cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
 systemctl enable --now fail2ban
 systemctl status fail2ban
 ```
+
+#### Paso 12: Ejecutar el asistente
+
+Ya puedes abrir el asistente (sigue como `root`):
+
+```bash
+sudo nas
+```
+
+Si deseas volver a tu usuario normal, ejecuta `exit` **solo al terminar**.
 
 ## Comandos del CLI `nas`
 
@@ -253,6 +260,7 @@ FAILURE_MODES.md           Modos de fallo y su verificación
 ## Solución de problemas
 
 - **`curl: (60) certificate problem`**: instala `ca-certificates` (`apt install -y ca-certificates`).
+- **`Permiso denegado` u `orden no encontrada`** al seguir la preparación manual: **no estás como `root`**. Ejecuta `su -` y repite los pasos desde donde falló (no uses `exit` hasta el final).
 - **El asistente no abre**: ejecútalo con `sudo` y en una terminal de al menos 72x20 caracteres.
 - **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Un PV de LVM o un miembro de RAID activo **nunca** se puede formatear. Para un disco simplemente montado, el despliegue por consola permite continuar con `--ignore-in-use` y la confirmación textual `SI-FORMATEAR`.
 - **Una tarea de backup no se ejecuta**: comprueba que `cron` esté activo (`systemctl status cron`) y revisa el log en `/srv/nas/LOGS_BACKUP/`.
