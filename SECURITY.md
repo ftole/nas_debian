@@ -30,8 +30,11 @@ export NAS_UPDATE_SIGNER="<huella-GPG-de-40-hex>"
 ```
 
 Con `NAS_UPDATE_SIGNER` definido, el actualizador exige un tag firmado válido y
-aborta si no lo encuentra. Sin firmante configurado, se usa la rama (con advertencia
-de "sin verificación"). Publica versiones con `git tag -s vX.Y.Z -m "..."`.
+aborta si no lo encuentra. Además, `NAS_REQUIRE_SIGNED_TAGS=true` exige un tag
+firmado aunque no se configure un firmante concreto (útil en producción para no
+depender solo de HTTPS y GitHub). Sin ninguna de las dos variables, se usa la rama
+(con advertencia de "sin verificación"). Publica versiones con
+`git tag -s vX.Y.Z -m "..."`.
 
 ### Rollback manual
 
