@@ -547,6 +547,38 @@ def delete_task(tname):
 
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' eliminada."}))
 
+
+def run_task(tname):
+    """Lanza una tarea de backup de forma controlada (sin ejecutar rutas arbitrarias)."""
+    tname = _sanitize_name(tname)
+    if not tname:
+        print(json.dumps({"status": "error", "message": "Identificador de tarea inválido."}))
+        return
+    runner = f"{BIN_DIR}/backup_{tname}.sh"
+    if not os.path.isfile(runner) or os.path.islink(runner):
+        print(json.dumps({"status": "error", "message": f"La tarea '{tname}' no existe."}))
+        return
+    # La ruta real debe quedar dentro del directorio de runners.
+    if os.path.dirname(os.path.realpath(runner)) != os.path.realpath(BIN_DIR):
+        print(json.dumps({"status": "error", "message": "Ruta de tarea no permitida."}))
+        return
+    if _is_root():
+        st = os.stat(runner)
+        if st.st_uid != 0 or (st.st_mode & 0o022):
+            print(json.dumps({"status": "error", "message": "Permisos de la tarea inseguros."}))
+            return
+    unit = f"backup-manual-{tname}-{int(datetime.now().timestamp())}"
+    try:
+        subprocess.Popen(
+            ["systemd-run", "--collect", f"--unit={unit}", "--slice=backups.slice",
+             "-p", "CPUSchedulingPolicy=batch", "-p", "IOSchedulingClass=idle",
+             "bash", runner],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        print(json.dumps({"status": "error", "message": f"No se pudo lanzar la tarea: {str(e)}"}))
+        return
+    print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' lanzada en segundo plano."}))
+
 def read_logs(tname):
     tname = _sanitize_name(tname)
     log_file = f"{LOG_ROOT}/backup_{tname}.log"
@@ -587,6 +619,8 @@ if __name__ == "__main__":
             delete_task(sys.argv[2])
         elif action == "logs":
             read_logs(sys.argv[2])
+        elif action == "run":
+            run_task(sys.argv[2])
         elif action == "create":
             create_task(_read_payload())
         elif action == "test_cifs":
