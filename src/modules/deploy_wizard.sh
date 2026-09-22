@@ -45,7 +45,11 @@ instalar_nas() {
         if [ "$type" == "disk" ]; then
             dev_path="/dev/$name"
             if ! printf '%s\n' "$ROOT_DEVS" | grep -qx "$dev_path"; then
-                MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato BTRFS automático (auto-tuning)")
+                if disco_en_uso "$dev_path"; then
+                    MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - EN USO (no recomendado)")
+                else
+                    MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato BTRFS automático (auto-tuning)")
+                fi
             fi
         fi
     done < <(lsblk -dn -o NAME,SIZE,TYPE,MOUNTPOINT)
@@ -123,6 +127,12 @@ INCLUYE PARCHES AUTOMATICOS:
 - Herramientas multiplataforma de Backup (CIFS, Rsync, SSHPass, Cron)
 
 ¿Confirmas la configuracion y el despliegue completo?"
+
+    if [ "$DISCO_SELECCIONADO" != "LOCAL" ]; then
+        RESUMEN="$RESUMEN
+
+ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus datos."
+    fi
 
     if (whiptail --title "Paso 5 de 5: Confirmación Crítica" \
         --yes-button "< Sí, Iniciar Despliegue >" --no-button "< Cancelar >" \
