@@ -77,10 +77,17 @@ for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
     except Exception as e:
         print("  [!] No se pudo parchear %s: %s" % (js, e))
 PY
-    PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1 || true)
+    if ! PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1); then
+        rm -f "$PATCH_PY"
+        advertir "Falló el parche de Cockpit Identities."
+        return 0
+    fi
     rm -f "$PATCH_PY"
     echo "$PATCH_SALIDA"
     log "$PATCH_SALIDA"
+    if echo "$PATCH_SALIDA" | grep -q "omitido"; then
+        advertir "El parche de Cockpit Identities se omitió (patrones no encontrados)."
+    fi
 }
 
 # Aplica el parche de Storage con respaldo, verificación y escritura atómica.
@@ -113,10 +120,17 @@ if os.path.exists(path):
     except Exception as e:
         print("  [!] No se pudo parchear %s: %s" % (path, e))
 PY
-    PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1 || true)
+    if ! PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1); then
+        rm -f "$PATCH_PY"
+        advertir "Falló el parche de Cockpit Storage."
+        return 0
+    fi
     rm -f "$PATCH_PY"
     echo "$PATCH_SALIDA"
     log "$PATCH_SALIDA"
+    if echo "$PATCH_SALIDA" | grep -q "omitido"; then
+        advertir "El parche de Cockpit Storage se omitió (patrones no encontrados)."
+    fi
 }
 
 # Permite restaurar los parches de Cockpit y salir sin ejecutar el despliegue.
