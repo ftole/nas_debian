@@ -52,6 +52,44 @@ verificar_firma_tag() {
     return 0
 }
 
+# Devuelve la tag firmada mas reciente (esquema vMAJOR.MINOR.PATCH) alcanzable
+# desde la referencia dada. Imprime la tag o devuelve 1 si no hay ninguna valida.
+seleccionar_tag_firmada() {
+    local esperado="$1" ref="$2" tag
+    while IFS= read -r tag; do
+        [ -z "$tag" ] && continue
+        [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+        git merge-base --is-ancestor "$tag" "$ref" 2>/dev/null || continue
+        if verificar_firma_tag "$tag" "$esperado"; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    done < <(git tag --sort=-version:refname 2>/dev/null)
+    return 1
+}
+
+# Aplica la politica de tags firmadas tras clonar. Devuelve 1 si se exige firma
+# y no existe una tag valida (la instalacion debe abortarse).
+aplicar_politica_tags() {
+    local esperado="${NAS_UPDATE_SIGNER:-}"
+    local obligatorio="${NAS_REQUIRE_SIGNED_TAGS:-false}"
+    if [ "$obligatorio" != "true" ] && [ -z "$esperado" ]; then
+        return 0
+    fi
+    git fetch -q origin --tags 2>/dev/null || true
+    local tag
+    if tag=$(seleccionar_tag_firmada "$esperado" "origin/main"); then
+        if git checkout -q -B main "$tag" 2>/dev/null; then
+            echo -e "${C_GREEN}  [✔] Instalación fijada a la tag firmada: $tag${C_RESET}"
+            return 0
+        fi
+        echo -e "${C_YELLOW}  [!] No se pudo posicionar el árbol en $tag.${C_RESET}"
+        return 1
+    fi
+    echo -e "${C_RED}[-] No se encontró una tag firmada válida. Abortando por seguridad.${C_RESET}"
+    return 1
+}
+
 # 1. Comprobación de permisos de superusuario
 if [ "$EUID" -ne 0 ]; then
     echo -e "${C_RED}[-] Este instalador requiere privilegios de administrador.${C_RESET}"
@@ -94,8 +132,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
         CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "")
         REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "")
         if [ -n "${NAS_UPDATE_SIGNER:-}" ] || [ "${NAS_REQUIRE_SIGNED_TAGS:-false}" == "true" ]; then
-            LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "")
-            if [ -z "$LATEST_TAG" ] || ! verificar_firma_tag "$LATEST_TAG" "${NAS_UPDATE_SIGNER:-}"; then
+            if ! LATEST_TAG=$(seleccionar_tag_firmada "${NAS_UPDATE_SIGNER:-}" "origin/main"); then
                 echo -e "${C_RED}[-] No se encontró una versión firmada válida. Abortando por seguridad.${C_RESET}"
                 exit 1
             fi
@@ -132,10 +169,14 @@ elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" 
     fi
     if cd "$INSTALL_DIR"; then
         git remote set-url origin "$REPO_URL" 2>/dev/null || true
+        aplicar_politica_tags || exit 1
     fi
 else
     rm -rf "$INSTALL_DIR"
     git clone -q "$REPO_URL" "$INSTALL_DIR"
+    if cd "$INSTALL_DIR"; then
+        aplicar_politica_tags || exit 1
+    fi
 fi
 
 find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
