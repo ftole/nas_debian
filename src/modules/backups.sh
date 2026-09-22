@@ -262,20 +262,25 @@ fi
 
 if ! rsync -a --delete $LINK_DEST_OPT "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    rm -rf "$TARGET_SNAPSHOT"
+    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
     exit 1
 fi
 
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 # Rotación de snapshots antiguos
-SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
-    for old in $OLDEST; do
+    while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        if [ "${old#"$BKP_DIR"/}" = "$old" ]; then
+            continue
+        fi
         echo " -> Rotando y eliminando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
-    done
+    done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
@@ -445,17 +450,22 @@ if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
 fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    rm -rf "$TARGET_SNAPSHOT"
+    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
     exit 1
 fi
 
-SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
-    for old in $OLDEST; do
+    while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        if [ "${old#"$BKP_DIR"/}" = "$old" ]; then
+            continue
+        fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
-    done
+    done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
@@ -562,17 +572,22 @@ fi
 
 if ! rsync -a --delete $LINK_DEST_OPT "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    rm -rf "$TARGET_SNAPSHOT"
+    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
     exit 1
 fi
 
-SNAPSHOT_COUNT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | wc -l)
+SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
-    OLDEST=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | head -n -"$RETENTION")
-    for old in $OLDEST; do
+    while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        if [ "${old#"$BKP_DIR"/}" = "$old" ]; then
+            continue
+        fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
         rm -rf "$old"
-    done
+    done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO: $DATE_STR ===" >> "$LOG_FILE"
