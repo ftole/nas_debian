@@ -23,7 +23,15 @@ actualizar_desde_git() {
     if [ -d "$PROJECT_ROOT/.git" ]; then
         cd "$PROJECT_ROOT" || return
         echo -e " [•] Conectando con GitHub..."
-        git fetch origin main 2>/dev/null || true
+        if ! git fetch origin main 2>/dev/null; then
+            if [ -t 0 ] && command -v whiptail &>/dev/null; then
+                whiptail --title "Sin conexión" --ok-button "< Aceptar >" \
+                    --msgbox "No se pudo contactar con GitHub. Verifica tu conexión e inténtalo de nuevo." 9 68
+            else
+                echo -e "${C_YELLOW}[!] No se pudo contactar con GitHub (sin conexión).${C_RESET}"
+            fi
+            return
+        fi
         CURRENT_REV=$(git rev-parse HEAD 2>/dev/null || echo "1")
         REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "2")
 
