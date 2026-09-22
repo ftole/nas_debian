@@ -18,6 +18,7 @@ Este documento describe cómo se comporta el sistema ante fallos y cómo verific
 | Montaje CIFS falla | Sale con error; no queda ningún punto de montaje colgado. | `failure_runners.bats` |
 | Credenciales SSH rechazadas | Sale con error y lo registra. | `failure_runners.bats` |
 | Ejecución simultánea de la misma tarea | La segunda ejecución se omite ("BACKUP OMITIDO") y sale sin error. | `failure_runners.bats` |
+| Aborto manual de una ejecución | Se detiene la unidad `systemd`, se descarta el snapshot parcial y se libera el bloqueo. | Manual (asistente/panel) |
 | Interrupción abrupta (corte de energía) | El bloqueo `flock` se libera al terminar el proceso; el snapshot parcial no se usa como referencia. | Manual (VM) |
 | Servidor remoto inalcanzable | El montaje o el `rsync` fallan; se registra y no se altera el último snapshot válido. | Manual (VM) |
 | Retención mal configurada (0) | Se normaliza a un valor mínimo de 1. | `validar_cron` / revisión de código |
