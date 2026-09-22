@@ -26,3 +26,8 @@ setup() {
     run _validar_sintaxis
     [ "$status" -eq 0 ]
 }
+
+@test "_verificar_firma_tag rechaza un tag inexistente" {
+    run _verificar_firma_tag "tag-que-no-existe-xyz" ""
+    [ "$status" -ne 0 ]
+}
