@@ -69,9 +69,11 @@ Componentes:
 
 - **Asistente:** `sudo nas` (recomendado).
 - **Panel web:** `https://<IP_DEL_SERVIDOR>:9090`, en el módulo Backups.
-- **Línea de comandos:** `sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] [ADMIN_PASS] [ROL]`.
-  - La clave puede enviarse por `stdin` usando `-` en el campo de contraseña.
-  - El despliegue aborta si el disco dedicado está en uso; añade `--force` para forzarlo.
+- **Línea de comandos:** `sudo bash src/core/deploy.sh [DISCO/LOCAL] [WORKGROUP] [NETBIOS] [ADMIN_USER] - [ROL]`.
+  - La contraseña se envía por `stdin` usando `-` en su campo (nunca como argumento):
+    `printf '%s\n' '<CLAVE>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS`.
+  - `--force` confirma sin preguntar pero **no** omite los chequeos de seguridad.
+  - Un disco en uso (montado, PV de LVM o miembro de RAID) aborta el despliegue. Un PV o un miembro de RAID activo **nunca** se puede formatear; para un disco solo montado puede usarse `--ignore-in-use` con la confirmación textual `SI-FORMATEAR`.
 - **Desinstalación:** `sudo nas uninstall`.
 
 ## 6. Gestión
