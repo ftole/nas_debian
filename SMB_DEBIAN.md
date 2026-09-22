@@ -54,6 +54,7 @@ Componentes:
 - `cron` lanza cada tarea mediante `systemd-run --collect` con prioridad baja.
 - Un bloqueo `flock` por tarea evita ejecuciones simultáneas.
 - Antes de copiar, se comprueba el espacio libre disponible.
+- Las ejecuciones en curso pueden **abortarse** (asistente o panel web): se detiene la unidad `systemd`, se descarta el snapshot parcial y se libera el bloqueo.
 
 ## 4. Modelo de seguridad
 
