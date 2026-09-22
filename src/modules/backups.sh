@@ -231,6 +231,7 @@ LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
+trap 'umount "$MOUNT_POINT" 2>/dev/null || true' EXIT
 
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
@@ -434,7 +435,7 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=no" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
     rm -rf "$TARGET_SNAPSHOT"
     exit 1
