@@ -166,6 +166,7 @@ function cargarTareas() {
 				"<td>" + badge + "</td>" +
 				'<td class="bkp-actions-row">' +
 				'<button class="pf-c-button pf-m-secondary bkp-btn-exec" data-id="' + esc(t.id) + '"><i class="fas fa-bolt"></i></button>' +
+				'<button class="pf-c-button pf-m-secondary bkp-btn-abort" data-id="' + esc(t.id) + '" title="Abortar ejecución en curso"><i class="fas fa-stop"></i></button>' +
 				'<button class="pf-c-button pf-m-secondary bkp-btn-logs" data-id="' + esc(t.id) + '"><i class="fas fa-file-alt"></i></button>' +
 				'<button class="pf-c-button pf-m-danger bkp-btn-del" data-id="' + esc(t.id) + '"><i class="fas fa-trash-alt"></i></button>' +
 				"</td>";
@@ -192,6 +193,10 @@ function attachTableListeners() {
 	var logs = document.querySelectorAll(".bkp-btn-logs");
 	for (var i = 0; i < logs.length; i++) {
 		logs[i].addEventListener("click", function () { abrirModalLogs(this.getAttribute("data-id")); });
+	}
+	var aborts = document.querySelectorAll(".bkp-btn-abort");
+	for (var i = 0; i < aborts.length; i++) {
+		aborts[i].addEventListener("click", function () { abortarTarea(this.getAttribute("data-id")); });
 	}
 	var dels = document.querySelectorAll(".bkp-btn-del");
 	for (var i = 0; i < dels.length; i++) {
@@ -294,6 +299,18 @@ function eliminarTarea(taskId) {
 	if (!confirm("¿Eliminar tarea [" + taskId + "]? Los respaldos en disco se conservarán.")) return;
 	runApi(["delete", taskId, "--confirm"]).then(function (res) {
 		alert(res.message);
+		cargarTareas();
+	});
+}
+
+function abortarTarea(taskId) {
+	if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
+		alert("Identificador de tarea inválido.");
+		return;
+	}
+	if (!confirm("¿Abortar la ejecución en curso de [" + taskId + "]?")) return;
+	runApi(["abort", taskId]).then(function (res) {
+		alert(res.message || (res.status === "ok" ? "Tarea abortada." : "No se pudo abortar."));
 		cargarTareas();
 	});
 }
