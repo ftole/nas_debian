@@ -1,60 +1,71 @@
-# Servidor NAS & Central de Respaldos Multiplataforma (Debian 13)
+# Servidor NAS y Central de Respaldos Multiplataforma (Debian 13)
 
 [![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Cockpit](https://img.shields.io/badge/Web%20UI-Cockpit-FF6600?style=for-the-badge)](https://github.com/ftole/nas_debian)
 
-Este repositorio contiene la suite de scripts interactivos y automatizados para desplegar y administrar servidores de almacenamiento en red (**NAS Departamental**) y **Centrales de Copias de Seguridad** inmunes a ransomware bajo **Debian 13 (Trixie)**.
+Este repositorio contiene los scripts para desplegar y administrar, sobre Debian 13 (Trixie), un servidor de archivos en red (NAS departamental) y una central de copias de seguridad pensada para resistir ransomware. El despliegue se realiza desde la terminal, mediante un asistente interactivo o por línea de comandos, y la operación diaria puede gestionarse también desde un panel web basado en Cockpit.
 
-## ⚡ Instalación Rápida en 1 Línea (One-Liner Remoto)
+## Características principales
 
-> [!TIP]
-> Este instalador verifica dependencias, descarga el entorno y te presenta el menú interactivo sin tocar tus particiones hasta que lo autorices.
-> Requiere `curl` (o `wget`) y `ca-certificates` para la descarga por HTTPS.
+- Asistente de despliegue con detección automática de discos, dirección IP y usuario administrador.
+- Dos roles excluyentes: `ARCHIVOS` (recursos compartidos visibles) y `BACKUP` (repositorios ocultos).
+- Copias de seguridad deduplicadas mediante enlaces duros para Windows (CIFS), Linux (SSH) y carpetas locales.
+- Gestión de grupos, recursos compartidos, usuarios y tareas desde el asistente o desde el panel web.
+- Base limpia: el despliegue no crea recursos de prueba; se añaden según las necesidades del entorno.
+- Desinstalación total que devuelve el servidor a su estado base.
 
-Puedes instalar y desplegar todo el entorno en cualquier servidor Debian 13 ejecutando una sola línea en tu terminal:
+## Tecnologías utilizadas
+
+| Área | Tecnología |
+| :--- | :--- |
+| Sistema operativo | Debian 13 (Trixie) |
+| Automatización | Bash 5 y `whiptail` (interfaz de terminal) |
+| Compartición de archivos | Samba (`smbd`/`nmbd`) y WSDD2 |
+| Panel web | Cockpit con PatternFly 4 |
+| Extensiones web | Plugins de 45Drives (File Sharing, Identities, Navigator) |
+| Backend web | Python 3 (`backup_api.py`) |
+| Frontend web | JavaScript ES5, HTML y CSS |
+| Almacenamiento | Btrfs (`parted`, `mkfs.btrfs`) |
+| Copias de seguridad | `rsync` con enlaces duros, CIFS (`cifs-utils`) y SSH (`sshpass`) |
+| Programación de tareas | `cron`, `systemd-run` y `flock` |
+| Seguridad de red | UFW, fail2ban y `unattended-upgrades` |
+| Calidad | ShellCheck, BATS y Flake8 sobre GitHub Actions |
+
+## Requisitos
+
+- Debian 13 (Trixie) x86_64, con acceso `root` o `sudo`.
+- Conexión a Internet durante la instalación (paquetes y extensiones).
+- `curl` (o `wget`) y `ca-certificates` para el instalador remoto.
+- Disco dedicado opcional para `/srv/nas`. Si se elige uno, se formatea por completo.
+
+## Instalación
+
+### Instalador remoto
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
 ```
-*(o si dispones de `wget`: `wget -qO- https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`)*
 
-### 🎮 Comandos Globales del CLI `nas`:
+*(o con `wget`: `wget -qO- https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`)*
 
-Una vez instalado, el comando **`nas`** queda registrado en el sistema para uso local y offline:
+> [!TIP]
+> El instalador verifica dependencias, descarga el proyecto en `/opt/nas_debian` y presenta el asistente. No modifica particiones hasta que lo autorices.
 
-| Comando | Acción |
-| :--- | :--- |
-| `sudo nas` | Abre el **Asistente Visual Interactivo** con todos sus módulos. |
-| `sudo nas update` | Sincroniza el proyecto con la última versión de GitHub. |
-| `sudo nas status` | Diagnóstico en tiempo real de servicios (Samba/Cockpit), almacenamiento, recursos compartidos y tareas de backup. |
-| `sudo nas version` | Muestra la versión actual y el último commit instalado. |
-| `sudo nas uninstall` | Desinstala el comando `nas` y limpia el servidor por completo. |
+### Preparación manual (opcional)
 
-> [!NOTE]
-> El instalador despliega el proyecto en `/opt/nas_debian` y crea el comando global `/usr/local/bin/nas`. El comando `nas help` muestra la ayuda.
+Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos.
 
----
-
-## 📋 Guía de Puesta a Punto Manual del Servidor (Paso a Paso)
-
-Si prefieres preparar el servidor manualmente paso a paso antes de lanzar el asistente:
-
----
-
-### Paso 1: Cambiar a usuario `root`
-
-Para realizar configuraciones administrativas a nivel de sistema:
+#### Paso 1: Acceso como `root`
 
 ```bash
 su -
 ```
+
 > [!IMPORTANT]
-> Es fundamental incluir el espacio y el guion (`su -`). Esto asegura que Debian cargue el entorno completo de `root`, incluyendo el directorio de utilidades del sistema (`/usr/sbin/`) en tu `$PATH`.
+> Incluye el espacio y el guion (`su -`). Así Debian carga el entorno completo de `root`, incluido `/usr/sbin/` en el `$PATH`.
 
----
+#### Paso 2: Repositorios APT (formato deb822)
 
-### Paso 2: Configurar los Repositorios APT (Debian 13 Trixie)
-
-Debian 12+ usa por defecto el formato **deb822** en `/etc/apt/sources.list.d/debian.sources`. Configúralo ahí (y vacía `sources.list`) para evitar fuentes duplicadas:
+Debian 12 y posteriores usan el formato deb822 en `/etc/apt/sources.list.d/debian.sources`. Configúralo ahí (y vacía `sources.list`) para evitar fuentes duplicadas:
 
 ```bash
 cat << 'SOURCES' > /etc/apt/sources.list.d/debian.sources
@@ -72,97 +83,65 @@ SOURCES
 : > /etc/apt/sources.list
 ```
 
----
-
-### Paso 3: Actualizar el Sistema
-
-Actualiza la lista de paquetes e instala las últimas actualizaciones disponibles:
+#### Paso 3: Actualizar el sistema
 
 ```bash
 apt update && apt upgrade -y
 ```
 
----
-
-### Paso 4: Instalar Paquetes Base Esenciales
-
-Instala utilidades clave de diagnóstico, descarga, certificados TLS y firewall (necesarios para el one-liner por HTTPS):
+#### Paso 4: Paquetes base
 
 ```bash
 apt install -y curl wget ca-certificates htop ufw
 ```
 
----
-
-### Paso 5: Verificar el Estado de Red
-
-Comprueba las interfaces y direcciones IP asignadas:
+#### Paso 5: Estado de red
 
 ```bash
-ip a
+ip a     # interfaces y direcciones
+ip r     # puerta de enlace predeterminada
 ```
 
-Para verificar la puerta de enlace predeterminada:
+#### Paso 6: Conectividad y DNS
+
 ```bash
-ip r
+ping -c 4 8.8.8.8      # conexión directa por IP
+ping -c 4 google.com   # resolución DNS
 ```
 
----
+#### Paso 7: Usuarios y permisos de administrador
 
-### Paso 6: Comprobar Conectividad a Internet y DNS
+1. Listar usuarios con shell interactivo:
 
-Prueba de conexión directa por IP:
-```bash
-ping -c 4 8.8.8.8
-```
-
-Prueba de resolución DNS:
-```bash
-ping -c 4 google.com
-```
-
----
-
-### Paso 7: Listar Usuarios y Otorgar Permisos de Administrador (`sudo`)
-
-1. **Listar usuarios con shell interactivo:**
    ```bash
    grep -E '/bin/bash|/bin/sh' /etc/passwd
    ```
 
-2. **Instalar `sudo` y conceder permisos directos e inmediatos:**
+2. Instalar `sudo` y conceder permisos:
+
    ```bash
    apt install -y sudo
    usermod -aG sudo <nombre_usuario>
    echo "<nombre_usuario> ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-<nombre_usuario>
    chmod 0440 /etc/sudoers.d/90-<nombre_usuario>
    ```
-   *Ejemplo para el usuario `jose`:*
-   ```bash
-   usermod -aG sudo jose
-   echo "jose ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-jose
-   chmod 0440 /etc/sudoers.d/90-jose
-   ```
 
-3. **Salir de root:**
+3. Salir de `root`:
+
    ```bash
    exit
    ```
 
 > [!NOTE]
-> La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
+> La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión.
 
 > [!TIP]
-> `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
+> `sudo` ignora los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (por ejemplo `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
 
----
-
-### Paso 8: Desactivar el Acceso de `root` por SSH
-
-Por seguridad, restringe el acceso directo de root vía SSH para obligar a usar un usuario estándar con escalado de privilegios:
+#### Paso 8: Desactivar el acceso de `root` por SSH
 
 ```bash
-# Aplicar en el archivo principal y en los drop-ins (tienen mayor precedencia)
+# Archivo principal y drop-ins (tienen mayor precedencia)
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
 systemctl restart ssh || systemctl restart sshd
@@ -171,57 +150,34 @@ systemctl restart ssh || systemctl restart sshd
 sshd -T 2>/dev/null | grep -i permitrootlogin
 ```
 
----
-
-### Paso 9: Activar Actualizaciones de Seguridad Automáticas
-
-Mantén el servidor protegido contra vulnerabilidades instalando `unattended-upgrades`:
+#### Paso 9: Actualizaciones de seguridad automáticas
 
 ```bash
 apt install -y unattended-upgrades
 dpkg-reconfigure -plow unattended-upgrades
 ```
 
----
-
-### Paso 10: Configurar el Firewall (`ufw`)
-
-Configura la política base restrictiva y habilita los puertos necesarios para administración (SSH, Cockpit) y servicios de red (Samba, WSDD2):
+#### Paso 10: Firewall (UFW)
 
 ```bash
-# Políticas base: bloquear entrante, permitir saliente
 ufw default deny incoming
 ufw default allow outgoing
 
-# SSH (Acceso remoto)
 ufw allow 22/tcp comment 'SSH'
-
-# Panel Web Cockpit
 ufw allow 9090/tcp comment 'Cockpit Web Admin'
-
-# Samba (Compartición de Archivos)
 ufw allow 137,138/udp comment 'Samba NetBIOS'
 ufw allow 139,445/tcp comment 'Samba SMB'
-
-# WSDD2 y LLMNR (Detección de equipos en red Windows WSD/LLMNR)
 ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP'
 ufw allow 3702/tcp comment 'WSDD2 WSD Discovery TCP'
 ufw allow 5355/udp comment 'WSDD2 LLMNR UDP'
 ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP'
 ufw allow 5357/tcp comment 'WSDD2 WSD HTTP'
 
-# Activar firewall
 ufw --force enable
-
-# Verificar estado
 ufw status verbose
 ```
 
----
-
-### Paso 11: Instalar y Configurar `fail2ban`
-
-Protege el servidor contra ataques de fuerza bruta en SSH:
+#### Paso 11: fail2ban
 
 ```bash
 apt install -y fail2ban
@@ -230,24 +186,75 @@ systemctl enable --now fail2ban
 systemctl status fail2ban
 ```
 
----
+## Comandos del CLI `nas`
 
-### Paso 12: Ejecución del Asistente NAS
+Una vez instalado, el comando `nas` queda registrado en el sistema:
 
-Una vez preparado el servidor, simplemente ejecuta el comando global del sistema:
+| Comando | Acción |
+| :--- | :--- |
+| `sudo nas` | Abre el asistente interactivo. |
+| `sudo nas update` | Sincroniza el proyecto con la última versión de GitHub. |
+| `sudo nas status` | Diagnóstico de servicios, almacenamiento, recursos y tareas de backup. |
+| `sudo nas version` | Muestra la versión y el commit instalado. |
+| `sudo nas uninstall` | Desinstala el comando y limpia el servidor. |
 
-```bash
-sudo nas
+> [!NOTE]
+> El instalador despliega el proyecto en `/opt/nas_debian` y crea el comando `/usr/local/bin/nas`. El comando `nas help` muestra la ayuda.
+
+## Asistente interactivo
+
+| Opción | Módulo | Descripción |
+| :--- | :--- | :--- |
+| 1 | Desplegar servidor | Asistente en 5 pasos para el rol `ARCHIVOS` o `BACKUP`. |
+| 2 | Gestión de grupos | Crear, listar y eliminar grupos de seguridad (`grp_*`). |
+| 3 | Recursos compartidos | Crear, listar, habilitar/deshabilitar y eliminar recursos, con 4 esquemas de permisos. |
+| 4 | Tareas de backup | Programar copias para Windows (CIFS), Linux (SSH) o carpetas locales. |
+| 5 | Usuarios | Crear usuarios, asignar grupos y gestionar contraseñas de red. |
+| 6 | Diagnóstico | Estado de servicios, almacenamiento, recursos y tareas programadas. |
+| 7 | Reiniciar servicios | Recarga de Samba, WSDD2 y Cockpit. |
+| 8 | Buscar actualizaciones | Sincronización con GitHub. |
+| 9 | Desinstalar | Restablecimiento total del sistema. |
+
+## Copias de seguridad
+
+Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`). Los archivos que no cambiaron se comparten mediante enlaces duros, de modo que el consumo de disco es muy inferior al de copias completas repetidas. La retención conserva los últimos N snapshots y elimina los más antiguos.
+
+Se admiten tres orígenes: Windows (CIFS, con montaje en solo lectura), Linux (SSH con `rsync`) y carpetas locales. Las tareas se programan con `cron` y se lanzan con `systemd-run`; un bloqueo `flock` evita ejecuciones simultáneas. El detalle técnico está en `SMB_DEBIAN.md`.
+
+## Seguridad
+
+El proyecto aplica varias medidas para reducir el riesgo de errores y de accesos no autorizados:
+
+- Validación estricta de los datos introducidos en el asistente y en la API web.
+- Las contraseñas no viajan en la línea de comandos: se envían por `stdin` o mediante variables de entorno, y las credenciales de red se guardan en archivos con permisos `0600`.
+- Samba con cifrado negociado, protocolo mínimo SMB2 y mapeo de invitados controlado; los recursos de respaldo son ocultos.
+- Montajes CIFS en modo solo lectura y permisos gestionados con ACL de POSIX.
+- Protección del disco del sistema (incluye LVM, RAID, LUKS y subvolúmenes Btrfs) y aviso ante discos en uso.
+- Rotación de logs, comprobación de espacio libre y verificación de integridad (SHA256) de las extensiones descargadas.
+
+## Estructura del proyecto
+
+```text
+install.sh                 Instalador remoto y CLI `nas`
+src/asistente.sh           Asistente interactivo (menú principal)
+src/lib/                   Funciones auxiliares (colores, entorno, discos)
+src/core/deploy.sh         Motor de despliegue
+src/core/uninstall.sh      Desinstalación total
+src/core/updater.sh        Actualización desde GitHub
+src/modules/               Módulos del asistente (grupos, recursos, backups, usuarios, diagnóstico)
+src/web/backups/           Panel web de backups (Cockpit)
+tests/helpers.bats         Pruebas unitarias
+.github/workflows/ci.yml   Integración continua
 ```
-*(O si estás dentro de la carpeta del proyecto: `sudo bash src/asistente.sh`)*
 
-#### Módulos de Gestión del Asistente:
-* **[1] Desplegar Servidor:** Asistente en 5 pasos para **Servidor de Archivos (NAS)** o **Central de Backup (Inmune a Ransomware)**.
-* **[2] Gestión de Grupos:** Creación y asignación de grupos departamentales (`grp_*`).
-* **[3] Gestión de Recursos Compartidos:** Creación de recursos visibles u ocultos (`$`) con 4 esquemas de permisos granulares.
-* **[4] Gestión de Tareas de Backup:** Programación de copias incrementales deduplicadas (con *hardlinks*) para servidores Windows (CIFS), Linux (SSH) o carpetas locales.
-* **[5] Gestión de Usuarios:** Creación y asignación de grupos mediante checklist dinámico y contraseñas de red Samba.
-* **[6] Diagnóstico, Discos y Recursos:** Monitoreo en tiempo real de servicios, almacenamiento, recursos compartidos y tareas cron.
-* **[7] Reiniciar Servicios:** Recarga limpia de Samba, WSDD2 y Cockpit.
-* **[8] Buscar Actualizaciones:** Sincronización automática con las últimas mejoras de GitHub.
-* **[9] Desinstalar y Limpiar:** Restablecimiento total del sistema a su estado base.
+## Solución de problemas
+
+- **`curl: (60) certificate problem`**: instala `ca-certificates` (`apt install -y ca-certificates`).
+- **El asistente no abre**: ejecútalo con `sudo` y en una terminal de al menos 72x20 caracteres.
+- **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Si deseas formatearlo de todos modos, añade `--force` al despliegue por consola.
+- **Una tarea de backup no se ejecuta**: comprueba que `cron` esté activo (`systemctl status cron`) y revisa el log en `/srv/nas/LOGS_BACKUP/`.
+- **Windows no ve el servidor**: verifica `smbd`, `wsdd2` y las reglas de UFW.
+
+## Licencia
+
+Este proyecto es propiedad exclusiva de su autor. Todos los derechos reservados. Consulta el archivo [LICENSE](LICENSE).
