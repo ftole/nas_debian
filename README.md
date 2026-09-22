@@ -120,20 +120,24 @@ ping -c 4 google.com   # resolución DNS
    grep -E '/bin/bash|/bin/sh' /etc/passwd
    ```
 
-2. Instalar `sudo` y conceder permisos:
+2. Instalar `sudo` y conceder permisos (el usuario administrador se **detecta automáticamente**, no hay que editar nada):
 
    ```bash
    apt install -y sudo
-   usermod -aG sudo <nombre_usuario>
-   echo "<nombre_usuario> ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-<nombre_usuario>
-   chmod 0440 /etc/sudoers.d/90-<nombre_usuario>
+   ADMIN_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1; exit}' /etc/passwd)"
+   ADMIN_USER="${ADMIN_USER:-nas}"
+   SUDO_NAME="$(printf '%s' "$ADMIN_USER" | tr -c 'A-Za-z0-9_-' '_')"
+   usermod -aG sudo "$ADMIN_USER"
+   echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-$SUDO_NAME"
+   chmod 0440 "/etc/sudoers.d/90-$SUDO_NAME"
+   echo "Administrador configurado: $ADMIN_USER"
    ```
 
 > [!NOTE]
 > La creación del archivo en `/etc/sudoers.d/` hace que los permisos de `sudo` surtan efecto de inmediato, sin cerrar sesión. **Continúa en esta misma sesión de `root`** para los pasos siguientes (no ejecutes `exit` todavía).
 
 > [!TIP]
-> `sudo` ignora los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (por ejemplo `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
+> `sudo` ignora los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto; el bloque anterior reemplaza esos caracteres por guion bajo de forma automática. Para comprobar la sintaxis, ejecuta `visudo -c`.
 
 #### Paso 8: Desactivar el acceso de `root` por SSH
 
