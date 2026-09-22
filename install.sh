@@ -65,7 +65,7 @@ if [ "$1" == "--uninstall" ] || [ "$1" == "uninstall" ]; then
     rm -f "$BIN_PATH" /usr/local/bin/asistente_nas /usr/local/bin/asistente-nas
     if [ -d "$INSTALL_DIR" ]; then
         if [ -f "$INSTALL_DIR/src/core/uninstall.sh" ]; then
-            bash "$INSTALL_DIR/src/core/uninstall.sh"
+            bash "$INSTALL_DIR/src/core/uninstall.sh" --yes
         fi
         rm -rf "$INSTALL_DIR"
     fi
