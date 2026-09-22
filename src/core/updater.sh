@@ -202,9 +202,15 @@ actualizar_desde_git() {
     fi
 
     if [ -t 0 ] && command -v whiptail &>/dev/null; then
-        whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Reiniciar Asistente >" \
-            --msgbox "✔ ¡Actualización instalada con éxito!\n\nEl asistente se reiniciará con las nuevas mejoras.\n\n(Respaldo conservado en $BACKUP_DIR)" 11 68
-        exec bash "$PROJECT_ROOT/src/asistente.sh"
+        if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+            # Invocado desde el asistente: reiniciar para cargar el código nuevo.
+            whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Reiniciar Asistente >" \
+                --msgbox "✔ ¡Actualización instalada con éxito!\n\nEl asistente se reiniciará con las nuevas mejoras.\n\n(Respaldo conservado en $BACKUP_DIR)" 11 68
+            exec bash "$PROJECT_ROOT/src/asistente.sh"
+        else
+            whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Aceptar >" \
+                --msgbox "✔ ¡Actualización instalada con éxito!\n\n(Respaldo conservado en $BACKUP_DIR)" 11 68
+        fi
     else
         echo -e "${C_GREEN}✔ ¡Actualización completada con éxito a la versión $(git log -1 --format='%h - %s')!${C_RESET}"
         echo -e "${C_GREEN}   Respaldo conservado en: $BACKUP_DIR${C_RESET}"
