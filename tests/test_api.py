@@ -171,6 +171,20 @@ def test_list_tasks_ignora_symlinks(tmp_path, monkeypatch, capsys):
     assert all(t["id"] != "enlace" for t in data["tasks"])
 
 
+def test_list_tasks_reporta_advertencias_por_symlink(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    target = tmp_path / "real.sh"
+    target.write_text("#!/bin/bash\n")
+    link = tmp_path / "bin" / "backup_enlace.sh"
+    try:
+        os.symlink(str(target), str(link))
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks no disponibles en este entorno")
+    api.list_tasks()
+    data = json.loads(capsys.readouterr().out)
+    assert any("enlace" in w for w in data["warnings"])
+
+
 def test_delete_task_elimina_los_artefactos(tmp_path, monkeypatch, capsys):
     _patch_dirs(monkeypatch, tmp_path)
     api.create_task({"id": "t_del", "proto": "local", "cron": "0 23 * * *", "path": "/srv/nas/x"})
