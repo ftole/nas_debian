@@ -111,6 +111,34 @@ def test_create_task_valido_escribe_runner(tmp_path, monkeypatch, capsys):
     assert os.path.exists(str(tmp_path / "bin" / "backup_t_local.sh"))
 
 
+def test_create_task_revierte_si_falla_la_escritura(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({"id": "t_rb", "proto": "local", "cron": "0 23 * * *", "path": "/srv/nas/datos"})
+    capsys.readouterr()
+    runner = tmp_path / "bin" / "backup_t_rb.sh"
+    cron_file = tmp_path / "cron" / "backup_t_rb"
+    original = runner.read_text()
+    real_atomic = api._atomic_write
+
+    def fail_cron(path, content, mode, uid=None, gid=None):
+        if os.path.basename(path) == "backup_t_rb":
+            raise OSError("fallo simulado")
+        return real_atomic(path, content, mode, uid, gid)
+
+    monkeypatch.setattr(api, "_atomic_write", fail_cron)
+    api.create_task({"id": "t_rb", "proto": "local", "cron": "0 1 * * *", "path": "/srv/nas/otros"})
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+    assert runner.read_text() == original
+
+
+def test_delete_task_requiere_confirmacion(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.delete_task("t")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+
+
 def test_run_task_rechaza_tarea_inexistente(tmp_path, monkeypatch, capsys):
     _patch_dirs(monkeypatch, tmp_path)
     api.run_task("noexiste")
