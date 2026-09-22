@@ -23,13 +23,31 @@ def _is_root():
     return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
+def _fsync_dir(path):
+    """Sincroniza el directorio para asegurar la durabilidad del rename."""
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    try:
+        dir_fd = os.open(path, os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
 def _atomic_write(path, content, mode, uid=None, gid=None):
-    """Escribe un archivo de forma atomica (temporal + os.replace)."""
+    """Escribe un archivo de forma atomica y duradera (temporal + fsync + os.replace)."""
     directory = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
         os.chmod(tmp, mode)
         if uid is not None and hasattr(os, "chown"):
             try:
@@ -38,12 +56,49 @@ def _atomic_write(path, content, mode, uid=None, gid=None):
                 if _is_root():
                     raise
         os.replace(tmp, path)
+        _fsync_dir(directory)
     except Exception:
         try:
             os.remove(tmp)
         except OSError:
             pass
         raise
+
+
+def _read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _restore(path, content, mode):
+    try:
+        if content is None:
+            if os.path.exists(path):
+                os.remove(path)
+        else:
+            _atomic_write(path, content, mode)
+    except OSError:
+        pass
+
+
+def _secure_directory(path, allow_group_write=False):
+    """Comprueba que un directorio sea propiedad de root y no escribible de forma insegura."""
+    if not _is_root():
+        return True
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    if st.st_uid != 0 or st.st_gid != 0:
+        return False
+    if st.st_mode & 0o002:
+        return False
+    if not allow_group_write and (st.st_mode & 0o020):
+        return False
+    return True
 
 
 def _write_secret(path, content):
@@ -276,6 +331,14 @@ def create_task(data):
     cred_file = f"{CRED_DIR}/{tname}.cred"
     existed = os.path.exists(runner)
 
+    # Los directorios del sistema deben ser seguros (propiedad de root, sin escritura ajena).
+    for _d in (BIN_DIR, CRON_DIR, CRED_DIR):
+        if not _secure_directory(_d):
+            print(json.dumps({"status": "error", "message": f"Directorio con permisos inseguros: {_d}"}))
+            return
+
+    cred_content = None
+
     if proto == "cifs":
         ip = (data.get("ip") or "").strip()
         share = (data.get("share") or "").replace("/", "").strip()
@@ -292,9 +355,7 @@ def create_task(data):
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
-        if not _write_secret(cred_file, f"username={user}\npassword={pwd}\n"):
-            print(json.dumps({"status": "error", "message": "No se pudieron crear las credenciales con permisos seguros."}))
-            return
+        cred_content = f"username={user}\npassword={pwd}\n"
 
         script = f"""#!/bin/bash
 set -e
@@ -386,9 +447,7 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
             print(json.dumps({"status": "error", "message": "No se pudo preparar el archivo de huellas SSH."}))
             return
 
-        if not _write_secret(cred_file, pwd):
-            print(json.dumps({"status": "error", "message": "No se pudieron crear las credenciales con permisos seguros."}))
-            return
+        cred_content = pwd
 
         script = f"""#!/bin/bash
 set -e
@@ -524,18 +583,34 @@ fi
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
 """
 
-    _atomic_write(runner, script, 0o750)
-
     cron_line = (
         f"{cron_expr} root systemd-run --collect --unit=backup-{tname} "
         f"--slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle "
         f"bash {runner} >/dev/null 2>&1\n"
     )
-    _atomic_write(cron_file, cron_line, 0o644)
+
+    # Escritura transaccional: si alguna etapa falla, se revierte al estado anterior.
+    prev_cred = _read_text(cred_file)
+    prev_runner = _read_text(runner)
+    prev_cron = _read_text(cron_file)
+    try:
+        if cred_content is not None and not _write_secret(cred_file, cred_content):
+            raise OSError("no se pudieron crear las credenciales con permisos seguros")
+        _atomic_write(runner, script, 0o750)
+        _atomic_write(cron_file, cron_line, 0o644)
+    except Exception:
+        _restore(cred_file, prev_cred, 0o600)
+        _restore(runner, prev_runner, 0o750)
+        _restore(cron_file, prev_cron, 0o644)
+        print(json.dumps({"status": "error", "message": "No se pudo guardar la tarea; se revirtieron los cambios."}))
+        return
 
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' {'actualizada' if existed else 'programada'} exitosamente."}))
 
-def delete_task(tname):
+def delete_task(tname, confirmed=False):
+    if not confirmed:
+        print(json.dumps({"status": "error", "message": "Se requiere confirmación explícita para eliminar la tarea."}))
+        return
     tname = _sanitize_name(tname)
     runner = f"{BIN_DIR}/backup_{tname}.sh"
     cron_file = f"{CRON_DIR}/backup_{tname}"
@@ -562,9 +637,12 @@ def run_task(tname):
     if os.path.dirname(os.path.realpath(runner)) != os.path.realpath(BIN_DIR):
         print(json.dumps({"status": "error", "message": "Ruta de tarea no permitida."}))
         return
+    if not _secure_directory(BIN_DIR):
+        print(json.dumps({"status": "error", "message": "Directorio de tareas con permisos inseguros."}))
+        return
     if _is_root():
         st = os.stat(runner)
-        if st.st_uid != 0 or (st.st_mode & 0o022):
+        if st.st_uid != 0 or (st.st_mode & 0o777) != 0o750:
             print(json.dumps({"status": "error", "message": "Permisos de la tarea inseguros."}))
             return
     unit = f"backup-manual-{tname}-{int(datetime.now().timestamp())}"
@@ -613,10 +691,13 @@ if __name__ == "__main__":
 
     try:
         action = sys.argv[1]
+        if action in {"create", "delete", "run"} and not _is_root():
+            print(json.dumps({"status": "error", "message": "La operación requiere privilegios de root."}))
+            sys.exit(1)
         if action == "list":
             list_tasks()
         elif action == "delete":
-            delete_task(sys.argv[2])
+            delete_task(sys.argv[2], len(sys.argv) > 3 and sys.argv[3] == "--confirm")
         elif action == "logs":
             read_logs(sys.argv[2])
         elif action == "run":
