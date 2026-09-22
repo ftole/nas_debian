@@ -415,6 +415,8 @@ else
 
     FSTAB_BAK="/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
     cp -a /etc/fstab "$FSTAB_BAK"
+    FSTAB_TMP=$(mktemp /etc/fstab.nas.XXXXXX)
+    trap 'rm -f "$FSTAB_TMP"' EXIT
     # Construir el nuevo fstab en un temporal: se elimina el bloque administrado
     # y cualquier entrada heredada cuyo punto de montaje sea exactamente /srv/nas
     # (no otras lineas que lo mencionen), y se agrega el bloque nuevo.
@@ -423,7 +425,7 @@ else
         /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
         skip {next}
         $2 != "/srv/nas"
-    ' /etc/fstab > /etc/fstab.nas.tmp
+    ' /etc/fstab > "$FSTAB_TMP"
     {
         echo "# BEGIN NAS_DEBIAN /srv/nas"
         if [ -n "$UUID_NAS" ]; then
@@ -432,8 +434,8 @@ else
             echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
         fi
         echo "# END NAS_DEBIAN /srv/nas"
-    } >> /etc/fstab.nas.tmp
-    mv /etc/fstab.nas.tmp /etc/fstab
+    } >> "$FSTAB_TMP"
+    mv "$FSTAB_TMP" /etc/fstab
     if ! findmnt --verify --verbose >/dev/null 2>&1; then
         echo "[-] ERROR CRITICO: /etc/fstab quedó inválido; restaurando el respaldo."
         log "[ERROR] findmnt --verify falló; restaurando $FSTAB_BAK."
