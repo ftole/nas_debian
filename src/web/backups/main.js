@@ -173,6 +173,12 @@ function cargarTareas() {
 			tbody.appendChild(tr);
 		}
 
+		if (res.warnings && res.warnings.length > 0) {
+			var wr = document.createElement("tr");
+			wr.innerHTML = '<td colspan="9" class="empty-msg">Tareas omitidas por seguridad: ' + esc(res.warnings.join(" | ")) + "</td>";
+			tbody.appendChild(wr);
+		}
+
 		// Attach listeners
 		attachTableListeners();
 	});
