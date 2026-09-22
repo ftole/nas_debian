@@ -32,6 +32,12 @@ SMB_WORKGROUP=$(printf '%s' "$SMB_WORKGROUP" | tr -cd 'A-Za-z0-9_-' | tr '[:lowe
 SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')
 [ -z "$SERVER_ROLE" ] && SERVER_ROLE="ARCHIVOS"
 
+# Permite forzar el formateo de un disco en uso con --force
+FORCE=false
+for _arg in "$@"; do
+    [ "$_arg" == "--force" ] && FORCE=true
+done
+
 SERVER_IP=$(obtener_ip_local)
 
 echo "=============================================================================="
@@ -103,6 +109,9 @@ EOF
 
 echo " [2/9] Configurando almacenamiento (/srv/nas) en $TARGET_DISK..."
 mkdir -p /srv/nas
+if mountpoint -q /srv/nas 2>/dev/null; then
+    echo "  [!] Aviso: /srv/nas ya estaba montado; se reconfigurará el almacenamiento."
+fi
 
 ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
 ROOT_DISK="/dev/$(resolver_disco_base "$ROOT_DEV")"
@@ -113,9 +122,17 @@ if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TAR
     auto_tune_hardware "$ROOT_DEV"
 else
     echo "  -> Inicializando y formateando disco dedicado: $TARGET_DISK"
+    if [ "$FORCE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
+        echo "[-] ERROR: $TARGET_DISK parece estar en uso (montado, PV de LVM o miembro de RAID)."
+        echo "    Abortando por seguridad. Usa --force si realmente deseas formatearlo."
+        exit 1
+    fi
     auto_tune_hardware "$TARGET_DISK"
-    
-    umount "$TARGET_DISK"* 2>/dev/null || true
+
+    while read -r _part; do
+        [ -z "$_part" ] && continue
+        umount "/dev/$_part" 2>/dev/null || true
+    done < <(lsblk -ln -o NAME "$TARGET_DISK" 2>/dev/null | tail -n +2)
     parted -s "$TARGET_DISK" mklabel gpt mkpart primary btrfs 0% 100%
     partprobe "$TARGET_DISK" 2>/dev/null || true
     udevadm settle 2>/dev/null || true
@@ -307,6 +324,19 @@ chown -R root:grp_sistemas /srv/nas
 find /srv/nas -type d -exec chmod 2775 {} +
 find /srv/nas -type f -exec chmod 664 {} +
 
+# Rotación de logs de backup para evitar llenar el disco
+cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
+/srv/nas/LOGS_BACKUP/*.log {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+LOGROTATE_EOF
+
 VFS_IOURING_LINE=""
 if find /usr/lib -path "*samba/vfs/io_uring.so" -print -quit 2>/dev/null | grep -q .; then
     VFS_IOURING_LINE="   vfs objects = io_uring"
@@ -314,6 +344,9 @@ fi
 
 echo " [6/9] Configurando /etc/samba/smb.conf (Infraestructura Limpia)..."
 mkdir -p /etc/samba
+if [ -f /etc/samba/smb.conf ]; then
+    cp -f /etc/samba/smb.conf "/etc/samba/smb.conf.bak-$(date +%Y%m%d_%H%M%S)"
+fi
 cat << SMBCONF > /etc/samba/smb.conf
 [global]
    workgroup = $SMB_WORKGROUP
@@ -397,6 +430,16 @@ testparm -s &>/dev/null || true
 systemctl daemon-reload
 systemctl restart smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null || systemctl restart smbd nmbd wsdd2 cockpit.socket 2>/dev/null || true
 systemctl enable smbd nmbd wsdd2 cockpit.socket 2>/dev/null || true
+systemctl enable cron 2>/dev/null || true
+systemctl start cron 2>/dev/null || true
+
+for _svc in smbd nmbd wsdd2 cockpit.socket cron; do
+    if systemctl is-active "$_svc" &>/dev/null; then
+        echo "  [OK]  $_svc activo"
+    else
+        echo "  [!]   $_svc NO está activo"
+    fi
+done
 
 echo " [9/9] Verificando y asegurando reglas de Firewall (UFW)..."
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; then
