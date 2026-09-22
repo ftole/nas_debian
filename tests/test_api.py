@@ -76,6 +76,7 @@ def _patch_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "CRED_DIR", str(tmp_path / "cred"))
     monkeypatch.setattr(api, "BKP_ROOT", str(tmp_path / "bkp"))
     monkeypatch.setattr(api, "LOG_ROOT", str(tmp_path / "log"))
+    monkeypatch.setattr(api, "KNOWN_HOSTS", str(tmp_path / "known_hosts"))
 
 
 def test_create_task_rechaza_ruta_con_traversal(tmp_path, monkeypatch, capsys):
@@ -125,7 +126,9 @@ def test_redact_oculta_el_secreto():
     assert api._redact(None, "x") is None
 
 
-def test_test_ssh_no_filtra_contrasena(monkeypatch, capsys):
+def test_test_ssh_no_filtra_contrasena(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(api, "KNOWN_HOSTS", str(tmp_path / "known_hosts"))
+
     class FakeRes:
         returncode = 1
         stderr = "auth failed for password supersecreta"
