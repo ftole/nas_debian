@@ -2,7 +2,7 @@
 
 Esta guía documenta el procedimiento completo, probado y replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
 1. **Servidor de Archivos (NAS Principal):** Almacenamiento en red departamental para clientes Windows con Samba, WSDD2 y Cockpit.
-2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots versionados) para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
+2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots versionados) para respaldar servidores Windows, servidores Linux, estaciones de trabajo y carpetas locales mediante snapshots incrementales y deduplicación.
 
 ---
 
@@ -13,7 +13,7 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
   * Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`).
   * Los archivos que no han sido modificados **comparten el mismo bloque físico en el disco** (*hardlinks*).
   * **Ahorro de espacio:** Significativo (típicamente superior al **85%**) frente a copias completas repetitivas, gracias a los hardlinks.
-  * **Retención histórica:** Tus archivos actuales nunca se borran; solo se eliminan los snapshots más antiguos que excedan la retención configurada (N snapshots).
+  * **Retención histórica:** El snapshot más reciente siempre refleja el origen; las versiones anteriores se conservan hasta que la rotación elimina los snapshots más antiguos que excedan la retención configurada (N snapshots).
 * **Exactitud punto en el tiempo:**
   * Cada snapshot es una réplica exacta del origen en el instante de la ejecución (`rsync -a --delete`); las versiones previas se conservan como snapshots anteriores.
 
@@ -39,6 +39,13 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
 * **Flujo de Ejecución:**
   1. Conexión segura por SSH con un usuario autorizado (configurable; por defecto `root`).
   2. Preservación exacta de permisos POSIX, propietarios, grupos y fechas de modificación.
+
+---
+
+### D. Respaldo de Carpetas Locales del Servidor:
+* **Protocolo:** `rsync` local (sin credenciales de red).
+* **Origen:** cualquier ruta absoluta del propio servidor (p. ej. `/srv/nas/SISTEMAS`).
+* **Uso típico:** proteger directorios locales o consolidar copias ya presentes en el NAS.
 
 ---
 
@@ -124,6 +131,8 @@ Para restaurar archivos o carpetas de cualquier fecha conservada por la retenci�
   * `[BACKUPS_LINUX$]`: Destino oculto para servidores Linux.
   * `[BACKUPS_SERVIDORES$]`: Repositorio de imágenes y snapshots.
 * **Acceso Estricto:** Solo accesible por credenciales autorizadas escribiendo la ruta UNC directa (ej. `\\<IP_SERVIDOR>\BACKUPS_WINDOWS$`).
+
+---
 
 ## 5. Acceso Web y Conexión de Red
 
