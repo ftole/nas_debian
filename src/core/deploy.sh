@@ -10,6 +10,24 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# -----------------------------------------------------------------------------
+# Registro de despliegue y conteo de advertencias para el resumen final
+# -----------------------------------------------------------------------------
+NAS_WARNINGS=0
+NAS_LOG="/tmp/nas_deploy_$(date +%Y%m%d_%H%M%S).log"
+
+log() {
+    printf '%s\n' "$*" >> "$NAS_LOG"
+}
+
+advertir() {
+    NAS_WARNINGS=$((NAS_WARNINGS + 1))
+    echo "  [!] $*" >&2
+    log "[ADVERTENCIA] $*"
+}
+
+trap 'log "[ERROR] Fallo en la línea $LINENO: $BASH_COMMAND"' ERR
+
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=src/lib/colors.sh
 source "$LIB_DIR/colors.sh"
@@ -44,13 +62,20 @@ echo "==========================================================================
 echo " INICIANDO DESPLIEGUE: $SERVER_ROLE (IP: $SERVER_IP)"
 echo " Servidor: $SMB_NETBIOS | Workgroup: $SMB_WORKGROUP | Admin: $ADMIN_USER"
 echo "=============================================================================="
+log "Inicio de despliegue: rol=$SERVER_ROLE disco=$TARGET_DISK netbios=$SMB_NETBIOS"
 
 echo " [1/9] Actualizando repositorios e instalando paquetes base..."
-DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
+    advertir "No se pudieron actualizar los repositorios (apt-get update)."
+fi
+if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
     cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
-    cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1
+    cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
+    echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
+    log "[ERROR] Fallo en la instalación de paquetes base."
+    exit 1
+fi
 
 auto_tune_hardware() {
     local DISCO="$1"
@@ -315,7 +340,9 @@ fi
 
 if [ -n "$ADMIN_PASS" ]; then
     echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
-    printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
+    if ! printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null; then
+        advertir "No se pudo registrar la contraseña Samba de $ADMIN_USER (quizá ya existe una cuenta Samba)."
+    fi
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
@@ -426,12 +453,26 @@ MOTD
 cp /etc/motd /etc/issue.net
 
 echo " [8/9] Recargando systemd y reiniciando servicios..."
-testparm -s &>/dev/null || true
+if ! testparm -s >/dev/null 2>&1; then
+    echo "[-] ERROR CRITICO: la configuración de Samba no es válida (testparm falló)."
+    log "[ERROR] testparm detectó errores en /etc/samba/smb.conf."
+    exit 1
+fi
 systemctl daemon-reload
-systemctl restart smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null || systemctl restart smbd nmbd wsdd2 cockpit.socket 2>/dev/null || true
-systemctl enable smbd nmbd wsdd2 cockpit.socket 2>/dev/null || true
-systemctl enable cron 2>/dev/null || true
-systemctl start cron 2>/dev/null || true
+if ! systemctl restart smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null; then
+    if ! systemctl restart smbd nmbd wsdd2 cockpit.socket 2>/dev/null; then
+        advertir "No se pudieron reiniciar todos los servicios Samba/Cockpit."
+    fi
+fi
+if ! systemctl enable smbd nmbd wsdd2 cockpit.socket 2>/dev/null; then
+    advertir "No se pudieron habilitar todos los servicios Samba/Cockpit."
+fi
+if ! systemctl enable cron 2>/dev/null; then
+    advertir "No se pudo habilitar el servicio cron."
+fi
+if ! systemctl start cron 2>/dev/null; then
+    advertir "No se pudo iniciar el servicio cron."
+fi
 
 for _svc in smbd nmbd wsdd2 cockpit.socket cron; do
     if systemctl is-active "$_svc" &>/dev/null; then
@@ -456,7 +497,12 @@ fi
 
 echo ""
 echo "=============================================================================="
-echo " ✔ ¡DESPLIEGUE DEL SERVIDOR $SERVER_ROLE COMPLETADO CON ÉXITO!"
+if [ "$NAS_WARNINGS" -gt 0 ]; then
+    echo " [~] DESPLIEGUE DEL SERVIDOR $SERVER_ROLE COMPLETADO CON ADVERTENCIAS ($NAS_WARNINGS)."
+    echo "     Revisa el log: $NAS_LOG"
+else
+    echo " ✔ ¡DESPLIEGUE DEL SERVIDOR $SERVER_ROLE COMPLETADO CON ÉXITO!"
+fi
 echo "=============================================================================="
 echo " Rol del Servidor: $SERVER_ROLE"
 echo " Almacenamiento  : /srv/nas ($TARGET_DISK)"
