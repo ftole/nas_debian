@@ -99,6 +99,12 @@ instalar_nas() {
         if [ $RET -ne 0 ] || [ -z "$ADMIN_USER" ]; then return; fi
     fi
 
+    if ! [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        whiptail --title "Usuario Invalido" --ok-button "< Aceptar >" \
+            --msgbox "El nombre de administrador '$ADMIN_USER' no es válido.\n\nDebe iniciar con letra minúscula o guion bajo y contener solo letras, números, guion y guion bajo." 10 68
+        return
+    fi
+
     while true; do
         ADMIN_PASS=$(whiptail --title "Contraseña de Red Samba ($ADMIN_USER)" \
             --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
