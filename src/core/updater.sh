@@ -239,7 +239,13 @@ actualizar_desde_git() {
 
     # 6. Actualizar únicamente con avance rápido (fast-forward). No se usa
     #    `git reset --hard` para evitar sobrescribir cambios sin control.
-    if ! git merge --ff-only "origin/$EXPECTED_BRANCH"; then
+    #    Si hay un tag firmado verificado, se fusiona el tag exacto, no la rama.
+    local TARGET_REF
+    TARGET_REF="origin/$EXPECTED_BRANCH"
+    if [ -n "$CANDIDATE_TAG" ]; then
+        TARGET_REF="$CANDIDATE_TAG"
+    fi
+    if ! git merge --ff-only "$TARGET_REF"; then
         echo -e "${C_RED}[X] No se pudo aplicar la actualización (la historia no es de avance rápido).${C_RESET}"
         echo -e "${C_RED}    El estado previo se conserva en: $BACKUP_DIR${C_RESET}"
         return 1
