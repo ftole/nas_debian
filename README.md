@@ -244,7 +244,7 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 | 1 | Desplegar servidor | Asistente en 5 pasos para el rol `ARCHIVOS` o `BACKUP`. |
 | 2 | Gestión de grupos | Crear, listar y eliminar grupos de seguridad (`grp_*`). |
 | 3 | Recursos compartidos | Crear, listar, habilitar/deshabilitar y eliminar recursos, con 4 esquemas de permisos. |
-| 4 | Tareas de backup | Programar copias para Windows (CIFS), Linux (SSH) o carpetas locales. |
+| 4 | Tareas de backup | Programar y **abortar** copias para Windows (CIFS), Linux (SSH) o carpetas locales. |
 | 5 | Usuarios | Crear usuarios, asignar grupos y gestionar contraseñas de red. |
 | 6 | Diagnóstico | Estado de servicios, almacenamiento, recursos y tareas programadas. |
 | 7 | Reiniciar servicios | Recarga de Samba, WSDD2 y Cockpit. |
@@ -255,7 +255,7 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 
 Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`). Los archivos que no cambiaron se comparten mediante enlaces duros, de modo que el consumo de disco es muy inferior al de copias completas repetidas. La retención conserva los últimos N snapshots y elimina los más antiguos.
 
-Se admiten tres orígenes: Windows (CIFS, con montaje en solo lectura), Linux (SSH con `rsync`) y carpetas locales. Las tareas se programan con `cron` y se lanzan con `systemd-run`; un bloqueo `flock` evita ejecuciones simultáneas. El detalle técnico está en `SMB_DEBIAN.md`.
+Se admiten tres orígenes: Windows (CIFS, con montaje en solo lectura), Linux (SSH con `rsync`) y carpetas locales. Las tareas se programan con `cron` y se lanzan con `systemd-run`; un bloqueo `flock` evita ejecuciones simultáneas. Una ejecución en curso puede **abortarse** desde el asistente (opción [4]) o desde el panel web (botón de detener); al hacerlo se detiene la unidad, se descarta el snapshot parcial y se libera el bloqueo. El detalle técnico está en `SMB_DEBIAN.md`.
 
 ## Seguridad
 
