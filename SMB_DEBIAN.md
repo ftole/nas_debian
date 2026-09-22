@@ -25,7 +25,7 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
 ### B. Respaldo de Servidores Windows (Active Directory, SQL, File Server):
 * **Alcance:** copia a nivel de archivos del recurso compartido SMB. Para aplicaciones como AD o SQL usa herramientas nativas/conscientes de VSS.
 * **Protocolo:** SMB / CIFS con montaje en modo **Solo Lectura (`ro`)**.
-* **Versión de SMB:** el montaje usa `vers=3.0,sec=ntlmssp`; si el servidor exige otra versión, edita el runner generado (`/usr/local/bin/backup_<tarea>.sh`).
+* **Versión de SMB:** el montaje usa `vers=3.0,sec=ntlmssp` (fijo). Si el servidor exige otra versión, edita el runner generado (`/usr/local/bin/backup_<tarea>.sh`); al recrear la tarea se regenera con el valor por defecto.
 * **Seguridad de Credenciales:** El usuario y contraseña de Windows se almacenan en `/etc/backup-credentials/<tarea>.cred` con permisos estrictos `0600 root:root` (inaccesible para usuarios normales).
 * **Flujo de Ejecución:**
   1. El servidor de backup monta temporalmente la carpeta de Windows en `/mnt/backup_sources/<tarea>`.
