@@ -84,5 +84,7 @@ sudo bash /opt/nas_debian/src/core/deploy.sh --restore-patches
 
 - Muestra el dispositivo, modelo, tamaño, particiones y puntos de montaje (`lsblk`).
 - Verifica que no sea el disco raíz ni un disco en uso (montado, PV de LVM o RAID).
-- Requiere `--confirm` (asistente), `--force` (bajo responsabilidad) o confirmación
-  interactiva. En modo no interactivo sin confirmación, aborta.
+- Requiere `--confirm` (asistente), `--force` (confirma sin preguntar, sin saltar
+  chequeos) o confirmación interactiva.
+- `--force` **no** permite formatear un disco en uso; para eso se exige
+  `--ignore-in-use` con confirmación textual explícita (`SI-FORMATEAR`). En modo no interactivo sin confirmación, aborta.
