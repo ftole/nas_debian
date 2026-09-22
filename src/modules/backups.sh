@@ -16,7 +16,7 @@ validar_cron() {
 
 gestionar_backups() {
     local OPC_BKP TABLA_BKPS TASK_NAME WIN_IP WIN_SHARE WIN_USER WIN_PASS LNX_IP LNX_PORT LNX_USER LNX_PASS LNX_PATH LOC_SRC
-    local CRON_SCHED CRON_EXPR RETENTION CRED_FILE RUNNER TAREAS_DEL MENU_DEL TASK_DEL_SEL TEST_CONN
+    local CRON_SCHED CRON_EXPR RETENTION CRED_FILE RUNNER TAREAS_DEL MENU_DEL TASK_DEL_SEL TEST_CONN UNIDAD_ABORTAR
     while true; do
         OPC_BKP=$(whiptail --title "$APP_TITLE" \
             --ok-button "< Seleccionar >" --cancel-button "< Volver >" \
@@ -26,10 +26,11 @@ gestionar_backups() {
             "3" "[+] Nueva Tarea: Servidor Linux Remoto (SSH + Rsync)" \
             "4" "[+] Nueva Tarea: Carpeta Local del Servidor" \
             "5" "[-] Eliminar una Tarea de Backup Programada" \
-            "6" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
+            "6" "[!] Abortar una Tarea en Ejecución" \
+            "7" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
 
         RET=$?
-        if [ $RET -ne 0 ] || [ "$OPC_BKP" == "6" ]; then
+        if [ $RET -ne 0 ] || [ "$OPC_BKP" == "7" ]; then
             break
         fi
 
@@ -668,6 +669,38 @@ RUNNER_EOF
                         rm -f "/usr/local/bin/backup_${TASK_DEL_SEL}.sh" "/etc/cron.d/backup_${TASK_DEL_SEL}" "/etc/backup-credentials/${TASK_DEL_SEL}.cred" "/mnt/backup_sources/${TASK_DEL_SEL}" 2>/dev/null || true
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
                             --msgbox "✔ Tarea [$TASK_DEL_SEL] eliminada exitosamente." 8 50
+                    fi
+                fi
+                ;;
+
+            6)
+                # Abortar una tarea en ejecución (unidades systemd transitorias)
+                local -a MENU_ABORT=()
+                while read -r unidad; do
+                    [ -z "$unidad" ] && continue
+                    MENU_ABORT+=("$unidad" "En_ejecucion")
+                done < <(systemctl list-units --all --no-legend --plain 'backup-*.service' 'backup-manual-*.service' 2>/dev/null | awk '$4=="running"{print $1}')
+                if [ "${#MENU_ABORT[@]}" -eq 0 ]; then
+                    whiptail --title "Sin ejecuciones" --ok-button "< Aceptar >" \
+                        --msgbox "No hay ninguna tarea de backup en ejecución." 8 55
+                    continue
+                fi
+                UNIDAD_ABORTAR=$(whiptail --title "Abortar Tarea en Ejecución" \
+                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona la ejecución que deseas abortar:" 16 70 6 \
+                    "${MENU_ABORT[@]}" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$UNIDAD_ABORTAR" ]; then
+                    if (whiptail --title "Confirmar Aborto" \
+                        --yes-button "< Sí, Abortar >" --no-button "< Cancelar >" \
+                        --yesno "¿Abortar la ejecución \"$UNIDAD_ABORTAR\"?\n\nSe descartará el snapshot parcial y se liberará el bloqueo." 11 68); then
+                        if systemctl stop "$UNIDAD_ABORTAR" 2>/dev/null; then
+                            whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
+                                --msgbox "✔ Ejecución \"$UNIDAD_ABORTAR\" abortada." 8 60
+                        else
+                            whiptail --title "Error" --ok-button "< Aceptar >" \
+                                --msgbox "No se pudo abortar la ejecución (¿ya terminó?)." 8 60
+                        fi
                     fi
                 fi
                 ;;
