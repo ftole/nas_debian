@@ -7,6 +7,8 @@ BIN_DIR = "/usr/local/bin"
 CRON_DIR = "/etc/cron.d"
 BKP_ROOT = "/srv/nas/BACKUPS_HISTORICOS"
 LOG_ROOT = "/srv/nas/LOGS_BACKUP"
+# known_hosts dedicado y protegido para las tareas de backup por SSH.
+KNOWN_HOSTS = "/root/.ssh/known_hosts_backup"
 
 def ensure_dirs():
     try:
@@ -134,7 +136,10 @@ def test_ssh(ip, port, user, password):
     try:
         env = os.environ.copy()
         env["SSHPASS"] = password
-        cmd = ["sshpass", "-e", "ssh", "-p", str(port), "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=7", f"{user}@{ip}", "echo OK"]
+        cmd = ["sshpass", "-e", "ssh", "-p", str(port),
+               "-o", "StrictHostKeyChecking=accept-new",
+               "-o", "UserKnownHostsFile=" + KNOWN_HOSTS,
+               "-o", "ConnectTimeout=7", f"{user}@{ip}", "echo OK"]
         res = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if res.returncode == 0 and "OK" in res.stdout:
             print(json.dumps({"status": "ok", "message": "Conexión SSH exitosa."}))
@@ -225,6 +230,7 @@ LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
+trap 'umount "$MOUNT_POINT" 2>/dev/null || true' EXIT
 
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
 flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
@@ -324,7 +330,7 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=no" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
     rm -rf "$TARGET_SNAPSHOT"
     exit 1
