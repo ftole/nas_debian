@@ -413,15 +413,17 @@ else
     mkfs.btrfs -f -L "NAS_DATA" "$PART_NAS"
     UUID_NAS=$(blkid -s UUID -o value "$PART_NAS")
 
-    cp -a /etc/fstab "/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
-    # Eliminar el bloque administrado y cualquier entrada heredada cuyo punto de
-    # montaje sea exactamente /srv/nas (no otras lineas que lo mencionen).
+    FSTAB_BAK="/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
+    cp -a /etc/fstab "$FSTAB_BAK"
+    # Construir el nuevo fstab en un temporal: se elimina el bloque administrado
+    # y cualquier entrada heredada cuyo punto de montaje sea exactamente /srv/nas
+    # (no otras lineas que lo mencionen), y se agrega el bloque nuevo.
     awk '
         /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
         /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
         skip {next}
         $2 != "/srv/nas"
-    ' /etc/fstab > /etc/fstab.nas.tmp && mv /etc/fstab.nas.tmp /etc/fstab
+    ' /etc/fstab > /etc/fstab.nas.tmp
     {
         echo "# BEGIN NAS_DEBIAN /srv/nas"
         if [ -n "$UUID_NAS" ]; then
@@ -430,10 +432,12 @@ else
             echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
         fi
         echo "# END NAS_DEBIAN /srv/nas"
-    } >> /etc/fstab
+    } >> /etc/fstab.nas.tmp
+    mv /etc/fstab.nas.tmp /etc/fstab
     if ! findmnt --verify --verbose >/dev/null 2>&1; then
-        echo "[-] ERROR CRITICO: /etc/fstab quedó inválido tras la modificación."
-        log "[ERROR] findmnt --verify falló para /etc/fstab."
+        echo "[-] ERROR CRITICO: /etc/fstab quedó inválido; restaurando el respaldo."
+        log "[ERROR] findmnt --verify falló; restaurando $FSTAB_BAK."
+        cp -a "$FSTAB_BAK" /etc/fstab
         exit 1
     fi
     MOUNT_OK=false
