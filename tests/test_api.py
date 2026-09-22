@@ -95,6 +95,14 @@ def test_create_task_rechaza_cron_invalido(tmp_path, monkeypatch, capsys):
     assert not os.path.exists(str(tmp_path / "bin" / "backup_t2.sh"))
 
 
+def test_create_task_rechaza_protocolo_invalido(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({"id": "t3", "proto": "desconocido", "path": "/srv/nas/x"})
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+    assert not os.path.exists(str(tmp_path / "bin" / "backup_t3.sh"))
+
+
 def test_create_task_valido_escribe_runner(tmp_path, monkeypatch, capsys):
     _patch_dirs(monkeypatch, tmp_path)
     api.create_task({"id": "t_local", "proto": "local", "cron": "0 23 * * *", "retention": 30, "path": "/srv/nas/datos"})
@@ -166,7 +174,8 @@ def test_runner_generado_tiene_contenido_esperado(tmp_path, monkeypatch, capsys)
     contenido = runner.read_text()
     assert "StrictHostKeyChecking=no" not in contenido
     assert "RETENTION=30" in contenido
-    assert (os.stat(runner).st_mode & 0o777) == 0o750
+    if os.name != "nt":
+        assert (os.stat(runner).st_mode & 0o777) == 0o750
 
 
 def test_runner_ssh_usa_known_hosts_sin_secretos(tmp_path, monkeypatch, capsys):
@@ -188,4 +197,5 @@ def test_runner_ssh_usa_known_hosts_sin_secretos(tmp_path, monkeypatch, capsys):
     assert "StrictHostKeyChecking=accept-new" in contenido
     assert "UserKnownHostsFile=" in contenido
     assert "secreto" not in contenido
-    assert (os.stat(runner).st_mode & 0o777) == 0o750
+    if os.name != "nt":
+        assert (os.stat(runner).st_mode & 0o777) == 0o750
