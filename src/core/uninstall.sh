@@ -81,12 +81,14 @@ if [ "$DRY_RUN" == "true" ]; then
     echo "  [dry-run] desmontar /srv/nas y quitar su línea de /etc/fstab"
 else
     umount /srv/nas 2>/dev/null || true
+    FSTAB_TMP=$(mktemp /etc/fstab.nas.XXXXXX)
+    trap 'rm -f "$FSTAB_TMP"' EXIT
     awk '
         /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
         /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
         skip {next}
         $2 != "/srv/nas"
-    ' /etc/fstab > /etc/fstab.nas.tmp && mv /etc/fstab.nas.tmp /etc/fstab
+    ' /etc/fstab > "$FSTAB_TMP" && mv "$FSTAB_TMP" /etc/fstab
     if ! findmnt --verify >/dev/null 2>&1; then
         echo "  [!] /etc/fstab quedó inválido; restaurando el respaldo."
         if [ -f "$BACKUP_DIR/fstab.$STAMP" ]; then
