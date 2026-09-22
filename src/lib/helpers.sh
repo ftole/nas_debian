@@ -91,6 +91,22 @@ disco_en_uso() {
     return 1
 }
 
+# Verifica que ningun componente de una ruta absoluta sea un enlace simbolico.
+# Devuelve 0 si la ruta es segura, 1 si algun componente es un symlink.
+ruta_sin_symlinks() {
+    local ruta="$1" comp="" p
+    local -a partes
+    IFS='/' read -r -a partes <<< "${ruta#/}"
+    for p in "${partes[@]}"; do
+        [ -z "$p" ] && continue
+        comp="${comp}/${p}"
+        if [ -L "$comp" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 # Determina si un disco es un PV de LVM o un miembro de RAID (md) activo.
 # Estos casos NO deben permitirse ni con --ignore-in-use: formatearlos puede
 # dañar otros volúmenes o arreglos del sistema.
