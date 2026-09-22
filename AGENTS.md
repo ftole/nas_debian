@@ -44,6 +44,9 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente: `deploy_wizard`, `groups`, `shares`, `backups`, `users`, `diagnostics`. |
 | `src/web/backups/` | Web (Cockpit) | Plugin de respaldos: `index.html`, `main.js`, `style.css`, `backup_api.py` y FontAwesome. |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
+| `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
+| `tests/test_api.py` | pytest | Pruebas de validación y fallos del backend web. |
+| `FAILURE_MODES.md` | Markdown | Modos de fallo y su verificación (FMEA). |
 | `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS y Flake8. |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
