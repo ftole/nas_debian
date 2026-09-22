@@ -16,7 +16,18 @@ jobs:
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      
+
+      - name: Verificar sintaxis Bash (bash -n)
+        run: |
+          find . -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Verificar invariantes de seguridad
+        run: |
+          if grep -rn "StrictHostKeyChecking=no" --include="*.py" --include="*.sh" .; then
+            echo "ERROR: se detectó StrictHostKeyChecking=no (no permitido)."
+            exit 1
+          fi
+
       - name: Ejecutar ShellCheck en todos los scripts
         run: |
           # Buscar recursivamente todos los archivos .sh y analizarlos
