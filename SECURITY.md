@@ -18,6 +18,20 @@ El actualizador (`sudo nas update` o la opción [8] del asistente) ya **no** apl
 6. Aplica la actualización con `git merge --ff-only` (avance rápido).
 7. Valida la integridad del repositorio (`git fsck`) y la sintaxis de los scripts
    (`bash -n`). Si falla, restaura automáticamente la versión anterior.
+8. Si hay tags firmados, prefiere el último tag con firma GPG válida y fusiona el
+   tag exacto (no la punta de la rama).
+
+### Verificación criptográfica (tags GPG)
+
+Para producción, configura la huella del firmante de confianza:
+
+```bash
+export NAS_UPDATE_SIGNER="<huella-GPG-de-40-hex>"
+```
+
+Con `NAS_UPDATE_SIGNER` definido, el actualizador exige un tag firmado válido y
+aborta si no lo encuentra. Sin firmante configurado, se usa la rama (con advertencia
+de "sin verificación"). Publica versiones con `git tag -s vX.Y.Z -m "..."`.
 
 ### Rollback manual
 
@@ -35,6 +49,10 @@ protegido:
 - Ruta: `/root/.ssh/known_hosts_backup` (propietario root, permisos 0600).
 - `accept-new` registra la huella en la primera conexión y **rechaza** las conexiones
   posteriores si la huella cambia (protección frente a ataques de intermediario).
+
+> **Nota:** `accept-new` confía en el primer contacto (TOFU). Para producción,
+> registra la huella explícitamente con `ssh-keyscan` verificado antes del primer
+> backup, en lugar de aceptar la primera conexión automáticamente.
 
 ### Registrar o cambiar la huella de un servidor remoto
 
