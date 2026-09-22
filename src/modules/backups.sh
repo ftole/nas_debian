@@ -431,6 +431,17 @@ TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
+SNAPSHOT_OK=false
+cleanup() {
+    local status=$?
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
@@ -453,12 +464,10 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     exit 1
 fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
-    echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
-        rm -rf "$TARGET_SNAPSHOT"
-    fi
+    echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -559,6 +568,17 @@ TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
+SNAPSHOT_OK=false
+cleanup() {
+    local status=$?
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+        echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        rm -rf "$TARGET_SNAPSHOT"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
@@ -575,12 +595,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
 fi
 
 if ! rsync -a --delete $LINK_DEST_OPT "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
-    echo "=== BACKUP FALLIDO: se descarta el snapshot parcial ===" >> "$LOG_FILE"
-    if [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
-        rm -rf "$TARGET_SNAPSHOT"
-    fi
+    echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
