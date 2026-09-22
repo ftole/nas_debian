@@ -50,10 +50,13 @@ SMB_WORKGROUP=$(printf '%s' "$SMB_WORKGROUP" | tr -cd 'A-Za-z0-9_-' | tr '[:lowe
 SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')
 [ -z "$SERVER_ROLE" ] && SERVER_ROLE="ARCHIVOS"
 
-# Permite forzar el formateo de un disco en uso con --force
+# Permite forzar el formateo de un disco en uso con --force.
+# --confirm indica que el llamador ya obtuvo confirmación explícita del usuario.
 FORCE=false
+CONFIRM=false
 for _arg in "$@"; do
     [ "$_arg" == "--force" ] && FORCE=true
+    [ "$_arg" == "--confirm" ] && CONFIRM=true
 done
 
 SERVER_IP=$(obtener_ip_local)
@@ -152,6 +155,37 @@ else
         echo "    Abortando por seguridad. Usa --force si realmente deseas formatearlo."
         exit 1
     fi
+
+    # Mostrar la información completa del disco antes de formatear.
+    echo "  ╔══════════════════════════════════════════════════════════════════╗"
+    echo "  ║  DISCO A FORMATEAR: $TARGET_DISK"
+    echo "  ╚══════════════════════════════════════════════════════════════════╝"
+    if ! lsblk -o NAME,SIZE,MODEL,TYPE,MOUNTPOINT "$TARGET_DISK" 2>/dev/null; then
+        echo "[-] ERROR: no se pudo obtener la información del disco $TARGET_DISK."
+        echo "    Abortando para no formatear un dispositivo desconocido."
+        exit 1
+    fi
+
+    # Confirmación explícita antes de una operación destructiva.
+    if [ "$FORCE" == "true" ]; then
+        echo "  [!] ADVERTENCIA FUERTE: se está forzando (--force) el formateo de $TARGET_DISK."
+        echo "      TODOS los datos del disco serán eliminados de forma irreversible."
+    elif [ "$CONFIRM" == "true" ]; then
+        echo "  [•] Confirmación recibida del llamador. Continuando con el formateo."
+    elif [ -t 0 ]; then
+        echo "  [!] ADVERTENCIA: se formateará $TARGET_DISK y se borrarán TODOS sus datos."
+        read -r -p "  ¿Deseas continuar con el formateo? [s/N]: " RESP
+        if [[ ! "$RESP" =~ ^[sSyY]$ ]]; then
+            echo "[-] Formateo cancelado por el usuario."
+            exit 1
+        fi
+    else
+        echo "[-] ERROR: se requiere confirmación explícita para formatear $TARGET_DISK."
+        echo "    Usa --confirm (si ya confirmaste en el asistente) o --force bajo tu responsabilidad."
+        exit 1
+    fi
+    log "Formateo confirmado para el disco $TARGET_DISK"
+
     auto_tune_hardware "$TARGET_DISK"
 
     while read -r _part; do
