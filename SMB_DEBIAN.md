@@ -110,6 +110,7 @@ Componentes:
 - **Diagnóstico:** `sudo nas status`.
 - **Actualización:** `sudo nas update`.
 - **Verificación de servicios:** `systemctl status smbd nmbd wsdd2 cockpit.socket cron`.
+- **Resiliencia:** los modos de fallo y su verificación están en `FAILURE_MODES.md`.
 
 ## 9. Solución de problemas y glosario
 
