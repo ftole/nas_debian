@@ -28,7 +28,8 @@ Una vez instalado, el comando **`nas`** queda registrado en el sistema para uso 
 | `sudo nas version` | Muestra la versión actual y el último commit instalado. |
 | `sudo nas uninstall` | Desinstala el comando `nas` y limpia el servidor por completo. |
 
-> **Nota:** El instalador despliega el proyecto en `/opt/nas_debian` y crea el comando global `/usr/local/bin/nas`. El comando `nas help` muestra la ayuda.
+> [!NOTE]
+> El instalador despliega el proyecto en `/opt/nas_debian` y crea el comando global `/usr/local/bin/nas`. El comando `nas help` muestra la ayuda.
 
 ---
 
@@ -45,7 +46,8 @@ Para realizar configuraciones administrativas a nivel de sistema:
 ```bash
 su -
 ```
-> **IMPORTANTE:** Es fundamental incluir el espacio y el guion (`su -`). Esto asegura que Debian cargue el entorno completo de `root`, incluyendo el directorio de utilidades del sistema (`/usr/sbin/`) en tu `$PATH`.
+> [!IMPORTANT]
+> Es fundamental incluir el espacio y el guion (`su -`). Esto asegura que Debian cargue el entorno completo de `root`, incluyendo el directorio de utilidades del sistema (`/usr/sbin/`) en tu `$PATH`.
 
 ---
 
@@ -140,8 +142,13 @@ ping -c 4 google.com
    echo "jose ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-jose
    chmod 0440 /etc/sudoers.d/90-jose
    ```
-   > **Nota:** La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
-   > **Aviso:** `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
+   
+   > [!NOTE]
+   > La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
+
+   > [!TIP]
+   > `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
+
 
 3. **Salir de root:**
    ```bash
