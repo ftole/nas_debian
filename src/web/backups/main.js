@@ -286,7 +286,7 @@ function ejecutarAhora(taskId) {
 
 function eliminarTarea(taskId) {
 	if (!confirm("¿Eliminar tarea [" + taskId + "]? Los respaldos en disco se conservarán.")) return;
-	runApi(["delete", taskId]).then(function (res) {
+	runApi(["delete", taskId, "--confirm"]).then(function (res) {
 		alert(res.message);
 		cargarTareas();
 	});
