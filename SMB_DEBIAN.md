@@ -36,6 +36,7 @@ Esta guía documenta el procedimiento completo, probado y replicable para desple
 
 ### C. Respaldo de Servidores Linux / NAS Principal:
 * **Protocolo:** Túnel SSH cifrado con `rsync` y `sshpass` (autenticación por contraseña).
+* **Verificación de host:** el runner desactiva la validación de la clave del host remoto (`StrictHostKeyChecking=no`); úsalo solo en redes de confianza (riesgo de *man-in-the-middle*).
 * **Flujo de Ejecución:**
   1. Conexión segura por SSH con un usuario autorizado (configurable; por defecto `root`).
   2. Preservación exacta de permisos POSIX, propietarios, grupos y fechas de modificación.
@@ -60,11 +61,12 @@ sudo nas
   * **Aviso:** el disco dedicado seleccionado se **formatea por completo** (BTRFS) y se borran sus datos; el asistente solicita confirmación explícita antes de hacerlo.
   * Detecta la dirección IP real del servidor en la red local para paneles web y accesos SMB.
   * Detecta el usuario administrador actual para asignarle permisos en Cockpit y Samba.
+* **Otros comandos del CLI:** `sudo nas update` (actualiza desde GitHub), `sudo nas status` (diagnóstico) y `sudo nas version` (versión/commit instalado).
 
 ---
 
 ### Método 2: Panel Web Cockpit (Backups)
-Accede a `https://<IP_DEL_SERVIDOR>:9090` → módulo **Backups** para crear, listar y ejecutar tareas y consultar sus registros desde el navegador (usa la misma API que el asistente).
+Accede a `https://<IP_DEL_SERVIDOR>:9090` → módulo **Backups** para crear, probar la conexión, listar, ejecutar y eliminar tareas y consultar sus registros desde el navegador (usa la misma API que el asistente).
 
 ---
 
