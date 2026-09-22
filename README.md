@@ -144,16 +144,16 @@ ping -c 4 google.com
    chmod 0440 /etc/sudoers.d/90-jose
    ```
 
-   > [!NOTE]
-   > La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
-
-   > [!TIP]
-   > `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
-
 3. **Salir de root:**
    ```bash
    exit
    ```
+
+> [!NOTE]
+> La creación del archivo en `/etc/sudoers.d/` garantiza que los permisos de `sudo` surtan efecto **inmediatamente** en todas las terminales activas sin necesidad de cerrar sesión o reiniciar.
+
+> [!TIP]
+> `sudo` **ignora** los archivos de `/etc/sudoers.d/` cuyo nombre contenga un punto. Si el usuario tiene punto (p. ej. `jose.perez`), reemplázalo por guion bajo en el nombre del archivo (`90-jose_perez`) y valida con `visudo -c`.
 
 ---
 
