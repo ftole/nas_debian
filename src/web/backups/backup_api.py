@@ -219,14 +219,14 @@ TASK="{tname}"
 SRC_IP="{ip}"
 SRC_SHARE="{share}"
 CRED_FILE="{cred_file}"
-MOUNT_POINT="/mnt/backup_sources/$TASK"
+MOUNT_POINT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
 BKP_DIR="{BKP_ROOT}/$TASK"
 LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${{TASK}}.lock"
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
 flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
 
 echo "=== INICIANDO BACKUP CIFS: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
@@ -302,7 +302,7 @@ RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${{TASK}}.lock"
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
 flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
 
 echo "=== INICIANDO BACKUP SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
@@ -348,7 +348,7 @@ RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${{TASK}}.lock"
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
 flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
