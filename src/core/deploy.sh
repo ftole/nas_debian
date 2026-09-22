@@ -119,6 +119,14 @@ PY
     log "$PATCH_SALIDA"
 }
 
+# Permite restaurar los parches de Cockpit y salir sin ejecutar el despliegue.
+for _arg in "$@"; do
+    if [ "$_arg" == "--restore-patches" ]; then
+        restaurar_parches_cockpit
+        exit 0
+    fi
+done
+
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=src/lib/colors.sh
 source "$LIB_DIR/colors.sh"
