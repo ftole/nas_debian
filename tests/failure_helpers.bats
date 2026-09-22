@@ -17,6 +17,7 @@ setup() {
 
 teardown() {
     export PATH="$ORIG_PATH"
+    unset MDSTAT
     rm -rf "$MOCK_BIN"
 }
 
@@ -47,4 +48,33 @@ mock_cmd() {
     chmod +x "$MOCK_BIN/pvs"
     run disco_en_uso "$REAL_DEV"
     [ "$status" -eq 0 ]
+}
+
+@test "disco_en_uso_critico detecta un PV de LVM" {
+    [ -n "$REAL_DEV" ] || skip "sin dispositivos de bloque en este entorno"
+    mock_cmd lsblk ':'
+    printf '#!/bin/bash\necho "%s"\n' "$REAL_DEV" > "$MOCK_BIN/pvs"
+    chmod +x "$MOCK_BIN/pvs"
+    run disco_en_uso_critico "$REAL_DEV"
+    [ "$status" -eq 0 ]
+}
+
+@test "disco_en_uso_critico detecta un miembro de RAID" {
+    [ -n "$REAL_DEV" ] || skip "sin dispositivos de bloque en este entorno"
+    mock_cmd lsblk "echo $(basename "$REAL_DEV")"
+    mock_cmd pvs ':'
+    printf 'md0 : active raid1 %s[0]\n' "$(basename "$REAL_DEV")" > "$MOCK_BIN/mdstat"
+    export MDSTAT="$MOCK_BIN/mdstat"
+    run disco_en_uso_critico "$REAL_DEV"
+    [ "$status" -eq 0 ]
+}
+
+@test "disco_en_uso_critico marca libre un disco sin PV ni RAID" {
+    [ -n "$REAL_DEV" ] || skip "sin dispositivos de bloque en este entorno"
+    mock_cmd lsblk "echo $(basename "$REAL_DEV")"
+    mock_cmd pvs ':'
+    : > "$MOCK_BIN/mdstat"
+    export MDSTAT="$MOCK_BIN/mdstat"
+    run disco_en_uso_critico "$REAL_DEV"
+    [ "$status" -eq 1 ]
 }
