@@ -191,6 +191,7 @@ def create_task(data):
     runner = f"{BIN_DIR}/backup_{tname}.sh"
     cron_file = f"{CRON_DIR}/backup_{tname}"
     cred_file = f"{CRED_DIR}/{tname}.cred"
+    existed = os.path.exists(runner)
 
     if proto == "cifs":
         ip = (data.get("ip") or "").strip()
@@ -230,6 +231,11 @@ flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_
 
 echo "=== INICIANDO BACKUP CIFS: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
@@ -301,6 +307,11 @@ flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_
 
 echo "=== INICIANDO BACKUP SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 
 LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
@@ -342,6 +353,11 @@ flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
+DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
+if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
+    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
+    exit 1
+fi
 
 LAST_SNAPSHOT=$(ls -d "$BKP_DIR"/snapshot_* 2>/dev/null | sort | tail -n 1 || echo "")
 LINK_DEST_OPT=""
@@ -377,7 +393,7 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
         f.write(cron_line)
     os.chmod(cron_file, 0o644)
 
-    print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' programada exitosamente."}))
+    print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' {'actualizada' if existed else 'programada'} exitosamente."}))
 
 def delete_task(tname):
     tname = _sanitize_name(tname)
