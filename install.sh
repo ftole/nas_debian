@@ -31,6 +31,27 @@ C_YELLOW="\033[1;33m"
 C_RED="\033[1;31m"
 C_WHITE="\033[1;37m"
 
+# Verifica la firma GPG de un tag contra la huella esperada (misma lógica que updater.sh).
+verificar_firma_tag() {
+    local tag="$1" esperado="$2" salida fp
+    if ! salida=$(git verify-tag --raw "$tag" 2>&1); then
+        return 1
+    fi
+    fp=$(echo "$salida" | awk '/^\[GNUPG:\] VALIDSIG /{print $3; exit}')
+    if [ -z "$fp" ]; then
+        return 1
+    fi
+    if [ -n "$esperado" ]; then
+        local esperado_norm fp_norm
+        esperado_norm=$(printf '%s' "$esperado" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+        fp_norm=$(printf '%s' "$fp" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+        if [ "$fp_norm" != "$esperado_norm" ] && [ "${fp_norm: -16}" != "$esperado_norm" ] && [ "$fp_norm" != "${esperado_norm: -16}" ]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # 1. Comprobación de permisos de superusuario
 if [ "$EUID" -ne 0 ]; then
     echo -e "${C_RED}[-] Este instalador requiere privilegios de administrador.${C_RESET}"
@@ -74,8 +95,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
         REMOTE_REV=$(git rev-parse origin/main 2>/dev/null || echo "")
         if [ -n "${NAS_UPDATE_SIGNER:-}" ]; then
             LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "")
-            VERIFY_OUT=$(git verify-tag "$LATEST_TAG" 2>&1 || echo "VERIFY_FAILED")
-            if [ -z "$LATEST_TAG" ] || ! echo "$VERIFY_OUT" | grep -q "Good signature"; then
+            if [ -z "$LATEST_TAG" ] || ! verificar_firma_tag "$LATEST_TAG" "$NAS_UPDATE_SIGNER"; then
                 echo -e "${C_RED}[-] No se encontró una versión firmada válida. Abortando por seguridad.${C_RESET}"
                 exit 1
             fi
