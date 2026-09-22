@@ -34,6 +34,7 @@ m.CRON_DIR = root + '/cron'
 m.CRED_DIR = root + '/cred'
 m.BKP_ROOT = root + '/bkp'
 m.LOG_ROOT = root + '/log'
+m.KNOWN_HOSTS = root + '/known_hosts'
 m.create_task({"id": "t_local", "proto": "local", "cron": "0 23 * * *", "retention": 30, "path": root + "/src"})
 m.create_task({"id": "t_cifs", "proto": "cifs", "cron": "0 23 * * *", "retention": 30, "ip": "10.0.0.1", "share": "docs", "user": "Administrador", "password": "x"})
 m.create_task({"id": "t_ssh", "proto": "ssh", "cron": "0 2 * * *", "retention": 15, "ip": "10.0.0.2", "port": "22", "path": "/var/www", "user": "root", "password": "x"})
