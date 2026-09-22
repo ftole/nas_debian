@@ -89,6 +89,9 @@ sudo bash src/core/deploy.sh /dev/sda EAD-COL SRV-EAD-BKP admin <CLAVE_ADMIN> BA
 > printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS
 > ```
 
+> [!NOTE]
+> Por seguridad, el despliegue **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); añade `--force` al final del comando para forzar el formateo.
+
 ### Método 4: Desinstalación y Limpieza Rápida
 ```bash
 sudo nas uninstall
