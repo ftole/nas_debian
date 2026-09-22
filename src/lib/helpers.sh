@@ -73,6 +73,7 @@ resolver_discos_raiz() {
 # montado, usado como PV de LVM o miembro de RAID (md).
 disco_en_uso() {
     local disk="$1" dev
+    local mdstat="${MDSTAT:-/proc/mdstat}"
     [ -b "$disk" ] || return 1
     if lsblk -ln -o MOUNTPOINT "$disk" 2>/dev/null | grep -q .; then
         return 0
@@ -80,10 +81,10 @@ disco_en_uso() {
     if command -v pvs >/dev/null 2>&1 && pvs --noheadings -o pv_name 2>/dev/null | awk '{print $1}' | grep -qx "$disk"; then
         return 0
     fi
-    if [ -r /proc/mdstat ]; then
+    if [ -r "$mdstat" ]; then
         while read -r dev; do
             [ -z "$dev" ] && continue
-            if grep -q "\b${dev##*/}\b" /proc/mdstat 2>/dev/null; then
+            if grep -q "\b${dev##*/}\b" "$mdstat" 2>/dev/null; then
                 return 0
             fi
         done < <(lsblk -ln -o NAME "$disk" 2>/dev/null)
@@ -112,14 +113,15 @@ ruta_sin_symlinks() {
 # dañar otros volúmenes o arreglos del sistema.
 disco_en_uso_critico() {
     local disk="$1" dev
+    local mdstat="${MDSTAT:-/proc/mdstat}"
     [ -b "$disk" ] || return 1
     if command -v pvs >/dev/null 2>&1 && pvs --noheadings -o pv_name 2>/dev/null | awk '{print $1}' | grep -qx "$disk"; then
         return 0
     fi
-    if [ -r /proc/mdstat ]; then
+    if [ -r "$mdstat" ]; then
         while read -r dev; do
             [ -z "$dev" ] && continue
-            if grep -q "\b${dev##*/}\b" /proc/mdstat 2>/dev/null; then
+            if grep -q "\b${dev##*/}\b" "$mdstat" 2>/dev/null; then
                 return 0
             fi
         done < <(lsblk -ln -o NAME "$disk" 2>/dev/null)
