@@ -2,20 +2,23 @@
 
 Esta guía documenta el procedimiento completo, probado y replicable para desplegar servidores empresariales bajo Debian 13 para dos funciones principales:
 1. **Servidor de Archivos (NAS Principal):** Almacenamiento en red departamental para clientes Windows con Samba, WSDD2 y Cockpit.
-2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots inmutables) para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
+2. **Servidor de Copias de Seguridad (Backup Centralizado):** Repositorio dedicado diseñado para resistir ransomware (montajes de solo lectura, recursos ocultos y snapshots versionados) para respaldar servidores Windows, servidores Linux y estaciones de trabajo mediante snapshots incrementales y deduplicación.
 
 ---
 
 ## 1. Arquitectura y Métodos de Respaldo
 
 ### A. Método de Copia de Seguridad y Deduplicación:
-* **Incremental Versionada con Snapshots y Hardlinks (Recomendada):**
+* **Incremental Versionada con Snapshots y Hardlinks:**
   * Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`).
   * Los archivos que no han sido modificados **comparten el mismo bloque físico en el disco** (*hardlinks*).
   * **Ahorro de espacio:** Significativo (típicamente superior al **85%**) frente a copias completas repetitivas, gracias a los hardlinks.
   * **Retención histórica:** Tus archivos actuales nunca se borran; solo se eliminan los snapshots más antiguos que excedan la retención configurada (N snapshots).
 * **Exactitud punto en el tiempo:**
   * Cada snapshot es una réplica exacta del origen en el instante de la ejecución (`rsync -a --delete`); las versiones previas se conservan como snapshots anteriores.
+
+> [!NOTE]
+> Antes de crear una tarea, el asistente **prueba la conexión** (CIFS/SSH) con las credenciales ingresadas. Las ejecuciones programadas se lanzan con `systemd-run` y un bloqueo `flock` que evita solapamientos.
 
 ---
 
@@ -85,7 +88,7 @@ sudo nas uninstall
 
 ## 3. ¿Cómo Restaurar Archivos desde un Backup?
 
-Para restaurar archivos o carpetas de cualquier fecha histórica:
+Para restaurar archivos o carpetas de cualquier fecha conservada por la retención:
 
 1. **Ingresar a la carpeta de snapshots:**
    ```bash
@@ -114,7 +117,7 @@ Para restaurar archivos o carpetas de cualquier fecha histórica:
 * **Grupos de ejemplo:** `grp_sistemas`, `grp_c1_admin`, `grp_c1_analista`, `grp_c2_admin`, etc. (creados por el administrador).
 * **Carpetas Visibles de ejemplo:** `[SISTEMAS]`, `[C1_*]`, `[C2_*]` accesibles según matriz de permisos.
 
-### Rol BACKUP (100% Oculto e Inmune a Ransomware):
+### Rol BACKUP (100% Oculto y Resistente a Ransomware):
 * **Grupos de ejemplo:** `grp_sistemas` (TI) y, opcionalmente, `grp_backups` (servicio técnico). Ningún usuario común debería existir en este servidor.
 * **Recursos Ocultos:** Se crean con el sufijo `$` (y opcionalmente `browseable = no`) para quedar **invisibles en el explorador de Windows**:
   * `[BACKUPS_WINDOWS$]`: Destino oculto para agentes Windows (Veeam / Windows Backup).
