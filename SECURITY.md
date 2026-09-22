@@ -75,6 +75,16 @@ Si la huella no está registrada o cambió, la tarea falla con un mensaje claro 
 - Las contraseñas viajan por variables de entorno o archivos protegidos, nunca como
   argumentos de línea de comandos, y se redactan de los mensajes de error y logs.
 
+### Deuda de seguridad conocida
+
+- Las credenciales se guardan en **texto plano** en `/etc/backup-credentials/`
+  (protegidas por permisos `0600` y propietario `root`). Es una compatibilidad con
+  `mount.cifs` y `sshpass`. Cuando sea posible, se recomienda migrar los respaldos
+  por SSH a **llaves SSH** para no depender de `sshpass` ni de contraseñas en disco.
+- La escritura de credenciales, runners y archivos de cron es **atómica y duradera**
+  (temporal + `fsync` + `os.replace`), y la creación/actualización de una tarea es
+  **transaccional** (se revierte al estado anterior si alguna etapa falla).
+
 ## 4. Parches de Cockpit y actualizaciones de paquetes
 
 Los parches de Cockpit (Identities y Storage) se aplican con:
