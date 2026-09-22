@@ -246,8 +246,10 @@ if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
-if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
-    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
+CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
+if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
 # Montaje en solo lectura
@@ -444,8 +446,10 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if [ "$(stat -c '%a' "$CRED_FILE" 2>/dev/null)" != "600" ]; then
-    echo "=== ABORTADO: permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
+CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
+CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
+if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync -avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup" --delete $LINK_DEST_OPT "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
