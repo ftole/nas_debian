@@ -225,14 +225,14 @@ TASK="TASK_NAME_PLACEHOLDER"
 SRC_IP="WIN_IP_PLACEHOLDER"
 SRC_SHARE="WIN_SHARE_PLACEHOLDER"
 CRED_FILE="CRED_FILE_PLACEHOLDER"
-MOUNT_POINT="/mnt/backup_sources/$TASK"
+MOUNT_POINT="${MOUNT_ROOT:-/mnt/backup_sources}/$TASK"
 BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${TASK}.lock"
+exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
 echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
@@ -412,7 +412,7 @@ RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${TASK}.lock"
+exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
@@ -525,7 +525,7 @@ RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 
-exec 9>"/var/lock/backup_${TASK}.lock"
+exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
 flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
