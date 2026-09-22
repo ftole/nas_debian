@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | 
 Si prefieres preparar el servidor antes de ejecutar el asistente, realiza estos pasos **en orden**.
 
 > [!IMPORTANT]
-> Los **Pasos 1–7** se ejecutan como `root` (bootstrap: repositorios, paquetes y creación del usuario administrador). Tras el Paso 7 **sal de `root`** y ejecuta los **Pasos 8–12 con `sudo`** desde tu usuario administrador. `sudo` usa `secure_path` (que incluye `/usr/sbin`), por lo que `ufw` y `dpkg-reconfigure` se encuentran sin problema.
+> Los **Pasos 1–7** se ejecutan como `root` (bootstrap: repositorios, paquetes y creación del usuario administrador). Tras el Paso 7 **sal de `root`** y ejecuta los **Pasos 8–13 con `sudo`** desde tu usuario administrador. `sudo` usa `secure_path` (que incluye `/usr/sbin`), por lo que `ufw` y `dpkg-reconfigure` se encuentran sin problema.
 
 #### Paso 1: Acceso como `root`
 
@@ -185,7 +185,27 @@ sudo ufw --force enable
 sudo ufw status verbose
 ```
 
-#### Paso 11: fail2ban
+#### Paso 11: Evitar suspensión del servidor
+
+El servidor NAS debe permanecer siempre encendido. Bloquea la suspensión e hibernación y configura `logind` para ignorar la tecla de suspender y el cierre de tapa:
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+sudo mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\nHandleSuspendKey=ignore\nHandleHibernateKey=ignore\nHandleLidSwitch=ignore\n' | sudo tee /etc/systemd/logind.conf.d/99-nas.conf >/dev/null
+sudo systemctl restart systemd-logind
+```
+
+Para comprobar que quedó bloqueado:
+
+```bash
+systemctl is-enabled sleep.target     # debe responder: masked
+```
+
+> [!NOTE]
+> Para revertir: `sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target` y `sudo rm /etc/systemd/logind.conf.d/99-nas.conf`.
+
+#### Paso 12: fail2ban
 
 ```bash
 sudo apt install -y fail2ban
@@ -194,7 +214,7 @@ sudo systemctl enable --now fail2ban
 sudo systemctl status fail2ban
 ```
 
-#### Paso 12: Ejecutar el asistente
+#### Paso 13: Ejecutar el asistente
 
 Ya puedes abrir el asistente como tu usuario administrador:
 
@@ -269,7 +289,7 @@ FAILURE_MODES.md           Modos de fallo y su verificación
 ## Solución de problemas
 
 - **`curl: (60) certificate problem`**: instala `ca-certificates` (`apt install -y ca-certificates`).
-- **`Permiso denegado` u `orden no encontrada`** en la preparación manual: te faltó anteponer `sudo` (Pasos 8–12) o no ejecutaste como `root` (Pasos 1–7).
+- **`Permiso denegado` u `orden no encontrada`** en la preparación manual: te faltó anteponer `sudo` (Pasos 8–13) o no ejecutaste como `root` (Pasos 1–7).
 - **El asistente no abre**: ejecútalo con `sudo` y en una terminal de al menos 72x20 caracteres.
 - **Un disco aparece como "EN USO"**: está montado, es un volumen LVM o un miembro de RAID. Un PV de LVM o un miembro de RAID activo **nunca** se puede formatear. Para un disco simplemente montado, el despliegue por consola permite continuar con `--ignore-in-use` y la confirmación textual `SI-FORMATEAR`.
 - **Una tarea de backup no se ejecuta**: comprueba que `cron` esté activo (`systemctl status cron`) y revisa el log en `/srv/nas/LOGS_BACKUP/`.
