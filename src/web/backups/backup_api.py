@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, glob, json, subprocess, re
+import sys, os, glob, json, subprocess, re, tempfile
 from datetime import datetime
 
 CRED_DIR = "/etc/backup-credentials"
@@ -19,8 +19,51 @@ def ensure_dirs():
     except OSError:
         return False
 
+def _is_root():
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+def _atomic_write(path, content, mode, uid=None, gid=None):
+    """Escribe un archivo de forma atomica (temporal + os.replace)."""
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.chmod(tmp, mode)
+        if uid is not None and hasattr(os, "chown"):
+            try:
+                os.chown(tmp, uid, gid)
+            except OSError:
+                if _is_root():
+                    raise
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _write_secret(path, content):
+    """Crea un archivo de credenciales (0600, root:root) de forma atomica y lo verifica."""
+    try:
+        _atomic_write(path, content, 0o600, uid=0, gid=0)
+    except OSError:
+        return False
+    if _is_root():
+        try:
+            st = os.stat(path)
+        except OSError:
+            return False
+        if st.st_uid != 0 or st.st_gid != 0 or (st.st_mode & 0o077):
+            return False
+    return True
+
+
 def ensure_known_hosts():
-    """Inicializa el known_hosts dedicado con propietario root y permisos 0600."""
+    """Inicializa el known_hosts dedicado (root:root, 0600). Estricto si se ejecuta como root."""
     try:
         ssh_dir = os.path.dirname(KNOWN_HOSTS)
         os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
@@ -28,14 +71,18 @@ def ensure_known_hosts():
         if not os.path.exists(KNOWN_HOSTS):
             with open(KNOWN_HOSTS, "a"):
                 pass
-        try:
-            os.chown(KNOWN_HOSTS, 0, 0)
-        except OSError:
-            pass
-        os.chmod(KNOWN_HOSTS, 0o600)
-        return True
     except OSError:
         return False
+    if _is_root():
+        try:
+            os.chown(KNOWN_HOSTS, 0, 0)
+            os.chmod(KNOWN_HOSTS, 0o600)
+            st = os.stat(KNOWN_HOSTS)
+        except OSError:
+            return False
+        if st.st_uid != 0 or st.st_gid != 0 or (st.st_mode & 0o077):
+            return False
+    return True
 
 def list_tasks():
     ensure_dirs()
@@ -211,6 +258,9 @@ def create_task(data):
         return
 
     proto = data.get("proto", "cifs")
+    if proto not in ("cifs", "ssh", "local"):
+        print(json.dumps({"status": "error", "message": "Protocolo de backup inválido."}))
+        return
     cron_expr = data.get("cron", "0 23 * * *")
     try:
         retention = int(data.get("retention", 30))
@@ -242,17 +292,9 @@ def create_task(data):
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
-        old_umask = os.umask(0o177)
-        try:
-            with open(cred_file, "w", encoding="utf-8") as f:
-                f.write(f"username={user}\npassword={pwd}\n")
-        finally:
-            os.umask(old_umask)
-        try:
-            os.chown(cred_file, 0, 0)
-        except OSError:
-            pass
-        os.chmod(cred_file, 0o600)
+        if not _write_secret(cred_file, f"username={user}\npassword={pwd}\n"):
+            print(json.dumps({"status": "error", "message": "No se pudieron crear las credenciales con permisos seguros."}))
+            return
 
         script = f"""#!/bin/bash
 set -e
@@ -344,17 +386,9 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
             print(json.dumps({"status": "error", "message": "No se pudo preparar el archivo de huellas SSH."}))
             return
 
-        old_umask = os.umask(0o177)
-        try:
-            with open(cred_file, "w", encoding="utf-8") as f:
-                f.write(pwd)
-        finally:
-            os.umask(old_umask)
-        try:
-            os.chown(cred_file, 0, 0)
-        except OSError:
-            pass
-        os.chmod(cred_file, 0o600)
+        if not _write_secret(cred_file, pwd):
+            print(json.dumps({"status": "error", "message": "No se pudieron crear las credenciales con permisos seguros."}))
+            return
 
         script = f"""#!/bin/bash
 set -e
@@ -490,18 +524,14 @@ fi
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
 """
 
-    with open(runner, "w") as f:
-        f.write(script)
-    os.chmod(runner, 0o750)
+    _atomic_write(runner, script, 0o750)
 
     cron_line = (
         f"{cron_expr} root systemd-run --collect --unit=backup-{tname} "
         f"--slice=backups.slice -p CPUSchedulingPolicy=batch -p IOSchedulingClass=idle "
         f"bash {runner} >/dev/null 2>&1\n"
     )
-    with open(cron_file, "w") as f:
-        f.write(cron_line)
-    os.chmod(cron_file, 0o644)
+    _atomic_write(cron_file, cron_line, 0o644)
 
     print(json.dumps({"status": "ok", "message": f"Tarea '{tname}' {'actualizada' if existed else 'programada'} exitosamente."}))
 
