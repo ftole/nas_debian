@@ -82,7 +82,7 @@ def list_tasks():
                     parts = cf.read().strip().split()
                     if len(parts) >= 5:
                         cron_sched = " ".join(parts[:5])
-            except:
+            except OSError:
                 pass
 
         log_file = f"{LOG_ROOT}/backup_{tname}.log"
@@ -101,7 +101,7 @@ def list_tasks():
                         last_status = "Fallo"
                     else:
                         last_status = "En progreso"
-            except:
+            except OSError:
                 pass
 
         # Conteo de snapshots
