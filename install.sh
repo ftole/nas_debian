@@ -108,7 +108,10 @@ case "$1" in
         echo "=============================================================================="
         if [ -d "$INSTALL_DIR/.git" ]; then
             cd "$INSTALL_DIR"
-            git fetch origin main
+            if ! git fetch origin main; then
+                echo "[-] No se pudo contactar con GitHub (sin conexión). Inténtalo de nuevo más tarde."
+                exit 1
+            fi
             CURRENT_REV=$(git rev-parse HEAD)
             REMOTE_REV=$(git rev-parse origin/main)
             if [ "$CURRENT_REV" == "$REMOTE_REV" ]; then
