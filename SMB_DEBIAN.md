@@ -9,7 +9,8 @@ El sistema cubre dos funciones excluyentes:
 1. **Servidor de archivos (NAS departamental):** almacenamiento en red para clientes Windows mediante Samba, con descubrimiento WSDD2 y panel Cockpit.
 2. **Central de copias de seguridad:** repositorio dedicado a respaldar servidores Windows, servidores Linux, estaciones de trabajo y carpetas locales, con snapshots deduplicados y retención configurable.
 
-El despliegue base es idéntico para ambos roles: crea el grupo `grp_sistemas` y el directorio `/srv/nas`, sin recursos compartidos. Los grupos y recursos se añaden después desde el asistente según las necesidades del entorno.
+> [!IMPORTANT]
+> El despliegue base es idéntico para ambos roles: crea el grupo `grp_sistemas` y el directorio `/srv/nas`, sin recursos compartidos. Los grupos y recursos se añaden después desde el asistente según las necesidades del entorno.
 
 ## 2. Arquitectura
 
@@ -82,6 +83,9 @@ Componentes:
   3. Solo lectura estricta.
   4. Acceso público o de invitados.
 - **Usuarios:** módulo [5]. Quienes pertenecen a `grp_sistemas` obtienen shell y acceso web; el resto solo tiene acceso de red.
+
+> [!NOTE]
+> La retención por defecto es de 30 snapshots (15 para las tareas Linux por SSH).
 
 ## 7. Restauración de archivos
 
