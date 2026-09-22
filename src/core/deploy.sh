@@ -14,7 +14,8 @@ fi
 # Registro de despliegue y conteo de advertencias para el resumen final
 # -----------------------------------------------------------------------------
 NAS_WARNINGS=0
-NAS_LOG="/tmp/nas_deploy_$(date +%Y%m%d_%H%M%S).log"
+NAS_LOG=$(mktemp /tmp/nas_deploy.XXXXXX.log)
+chmod 600 "$NAS_LOG"
 
 log() {
     printf '%s\n' "$*" >> "$NAS_LOG"
@@ -169,6 +170,11 @@ SMB_WORKGROUP="${2:-$(obtener_workgroup_defecto)}"
 SMB_NETBIOS="${3:-$(obtener_netbios_defecto)}"
 ADMIN_USER="${4:-$(detect_default_user)}"
 ADMIN_PASS="${5:-}"
+if [ -n "${5:-}" ] && [ "$5" != "-" ]; then
+    echo "[-] Por seguridad, la contraseña debe recibirse por stdin usando '-' en lugar del argumento."
+    echo "    Ejemplo: printf '%s\n' \"\$CLAVE\" | bash deploy.sh ... usuario - ARCHIVOS"
+    exit 1
+fi
 if [ "$ADMIN_PASS" == "-" ]; then
     IFS= read -r ADMIN_PASS || true
 fi
@@ -290,6 +296,29 @@ if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TAR
     auto_tune_hardware "$ROOT_DEV"
 else
     echo "  -> Inicializando y formateando disco dedicado: $TARGET_DISK"
+    if [ ! -b "$TARGET_DISK" ]; then
+        echo "[-] ERROR: $TARGET_DISK no es un dispositivo de bloque válido."
+        exit 1
+    fi
+    if [ "$(lsblk -dn -o TYPE "$TARGET_DISK" 2>/dev/null)" != "disk" ]; then
+        echo "[-] ERROR: $TARGET_DISK no es un disco completo (se requiere TYPE=disk)."
+        exit 1
+    fi
+    if printf '%s\n' "$ROOT_DEVS" | grep -qx "$TARGET_DISK"; then
+        echo "[-] ERROR CRITICO: $TARGET_DISK respalda el sistema raíz. Abortando."
+        exit 1
+    fi
+    if blkid "$TARGET_DISK"* 2>/dev/null | grep -q 'TYPE="crypto_LUKS"'; then
+        echo "[-] ERROR: $TARGET_DISK contiene volúmenes cifrados LUKS. Abortando."
+        exit 1
+    fi
+    if findmnt -n -o SOURCE /srv/nas 2>/dev/null | grep -q .; then
+        NAS_SRC=$(findmnt -n -o SOURCE /srv/nas 2>/dev/null)
+        if [ "/dev/$(resolver_disco_base "$NAS_SRC")" == "$TARGET_DISK" ]; then
+            echo "[-] ERROR CRITICO: $TARGET_DISK es el almacenamiento actual de /srv/nas. Abortando."
+            exit 1
+        fi
+    fi
     if [ "$IGNORE_IN_USE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
         echo "[-] ERROR: $TARGET_DISK parece estar en uso (montado, PV de LVM o miembro de RAID)."
         echo "    Abortando por seguridad. Usa --ignore-in-use bajo tu responsabilidad si realmente deseas formatearlo."
@@ -366,11 +395,17 @@ else
     mkfs.btrfs -f -L "NAS_DATA" "$PART_NAS"
     UUID_NAS=$(blkid -s UUID -o value "$PART_NAS")
 
+    cp -a /etc/fstab "/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
     sed -i '\|/srv/nas|d' /etc/fstab
     if [ -n "$UUID_NAS" ]; then
         echo "UUID=$UUID_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2" >> /etc/fstab
     else
         echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2" >> /etc/fstab
+    fi
+    if ! findmnt --verify --verbose >/dev/null 2>&1; then
+        echo "[-] ERROR CRITICO: /etc/fstab quedó inválido tras la modificación."
+        log "[ERROR] findmnt --verify falló para /etc/fstab."
+        exit 1
     fi
     MOUNT_OK=false
     if mount -o "$BTRFS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null; then
