@@ -30,12 +30,19 @@ trap 'log "[ERROR] Fallo en la línea $LINENO: $BASH_COMMAND"' ERR
 
 # Restaura los parches de Cockpit desde la copia de seguridad más reciente.
 restaurar_parches_cockpit() {
-    local f orig
-    for f in /usr/share/cockpit/identities/assets/*.js.bak-* /usr/share/cockpit/storaged/storaged.js.gz.bak-*; do
-        [ -f "$f" ] || continue
-        orig="${f%.bak-*}"
-        cp -p "$f" "$orig"
-        echo "  [•] Parche restaurado en $orig"
+    local orig ultimo
+    for orig in /usr/share/cockpit/identities/assets/*.js /usr/share/cockpit/storaged/storaged.js.gz; do
+        [ -f "$orig" ] || continue
+        case "$orig" in
+            *.bak-*) continue ;;
+        esac
+        ultimo=$(ls -1 "$orig".bak-* 2>/dev/null | sort | tail -n 1)
+        if [ -n "$ultimo" ] && [ -f "$ultimo" ]; then
+            cp -p "$ultimo" "$orig"
+            echo "  [•] Parche restaurado en $orig desde $ultimo"
+        else
+            echo "  [!] Sin respaldo disponible para $orig"
+        fi
     done
 }
 
@@ -69,6 +76,11 @@ for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
             continue
         respaldo = "%s.bak-%s" % (js, time.strftime("%Y%m%d_%H%M%S"))
         shutil.copy2(js, respaldo)
+        for viejo in sorted(glob.glob(js + ".bak-*"))[:-3]:
+            try:
+                os.remove(viejo)
+            except OSError:
+                pass
         tmp = "%s.tmp" % js
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(contenido)
@@ -95,7 +107,7 @@ aplicar_parche_storage() {
     local PATCH_PY PATCH_SALIDA
     PATCH_PY=$(mktemp)
     cat << 'PY' > "$PATCH_PY"
-import gzip, os, shutil, time
+import gzip, os, shutil, time, glob
 
 path = "/usr/share/cockpit/storaged/storaged.js.gz"
 if os.path.exists(path):
@@ -111,6 +123,11 @@ if os.path.exists(path):
         else:
             respaldo = "%s.bak-%s" % (path, time.strftime("%Y%m%d_%H%M%S"))
             shutil.copy2(path, respaldo)
+            for viejo in sorted(glob.glob(path + ".bak-*"))[:-3]:
+                try:
+                    os.remove(viejo)
+                except OSError:
+                    pass
             contenido = contenido.replace(target1, repl1).replace(target2, repl2)
             tmp = "%s.tmp" % path
             with gzip.open(tmp, "wt", encoding="utf-8") as f:
