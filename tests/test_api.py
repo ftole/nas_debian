@@ -157,6 +157,46 @@ def test_test_ssh_rechaza_datos_invalidos(capsys):
     assert data["status"] == "error"
 
 
+def test_list_tasks_ignora_symlinks(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    target = tmp_path / "real.sh"
+    target.write_text("#!/bin/bash\n")
+    link = tmp_path / "bin" / "backup_enlace.sh"
+    try:
+        os.symlink(str(target), str(link))
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks no disponibles en este entorno")
+    api.list_tasks()
+    data = json.loads(capsys.readouterr().out)
+    assert all(t["id"] != "enlace" for t in data["tasks"])
+
+
+def test_delete_task_elimina_los_artefactos(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({"id": "t_del", "proto": "local", "cron": "0 23 * * *", "path": "/srv/nas/x"})
+    capsys.readouterr()
+    runner = tmp_path / "bin" / "backup_t_del.sh"
+    assert runner.exists()
+    api.delete_task("t_del", confirmed=True)
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "ok"
+    assert not runner.exists()
+
+
+def test_read_logs_rechaza_symlink(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    target = tmp_path / "real.log"
+    target.write_text("contenido")
+    link = tmp_path / "log" / "backup_enlace.log"
+    try:
+        os.symlink(str(target), str(link))
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks no disponibles en este entorno")
+    api.read_logs("enlace")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+
+
 def test_read_payload_desde_stdin(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"a": 1}'))
     assert api._read_payload() == {"a": 1}
