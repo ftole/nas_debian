@@ -315,6 +315,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         continue
                     fi
                     mkdir -p "$RUTA_SHARE"
+                    # Re-verificacion tras crear la ruta (ventana TOCTOU).
+                    if ! ruta_sin_symlinks "$RUTA_SHARE"; then
+                        whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
+                            --msgbox "La ruta cambio y ahora contiene enlaces simbolicos. Operacion cancelada." 9 68
+                        continue
+                    fi
                     if [ "$TIPO_PERM" == "1" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
                         chmod -R 2770 "$RUTA_SHARE"
