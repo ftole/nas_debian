@@ -232,6 +232,8 @@ El proyecto aplica varias medidas para reducir el riesgo de errores y de accesos
 - Protección del disco del sistema (incluye LVM, RAID, LUKS y subvolúmenes Btrfs) y aviso ante discos en uso.
 - Rotación de logs, comprobación de espacio libre y verificación de integridad (SHA256) de las extensiones descargadas.
 
+El análisis de modos de fallo y las pruebas de resiliencia están documentados en `FAILURE_MODES.md`.
+
 ## Estructura del proyecto
 
 ```text
@@ -243,7 +245,8 @@ src/core/uninstall.sh      Desinstalación total
 src/core/updater.sh        Actualización desde GitHub
 src/modules/               Módulos del asistente (grupos, recursos, backups, usuarios, diagnóstico)
 src/web/backups/           Panel web de backups (Cockpit)
-tests/helpers.bats         Pruebas unitarias
+tests/                     Pruebas unitarias y de fallo
+FAILURE_MODES.md           Modos de fallo y su verificación
 .github/workflows/ci.yml   Integración continua
 ```
 
