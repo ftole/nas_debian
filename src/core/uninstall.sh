@@ -100,17 +100,19 @@ fi
 
 echo "[4/7] Eliminando tareas de backup, credenciales y puntos de montaje..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar runners, cron, credenciales y /mnt/backup_sources"
+    echo "  [dry-run] eliminar runners, cron, credenciales, locks y /mnt/backup_sources"
 else
     rm -f /usr/local/bin/backup_*.sh
     rm -f /etc/cron.d/backup_*
+    rm -f /etc/cron.d/nas-btrfs-scrub
+    rm -f /var/lock/backup_*.lock
     rm -rf /etc/backup-credentials
     rm -rf /mnt/backup_sources
 fi
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, wrappers, parches y overrides"
+    echo "  [dry-run] eliminar /etc/samba, wrappers, parches, overrides, logrotate y udev"
 else
     rm -rf /etc/samba
     rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
@@ -120,7 +122,9 @@ else
     fi
     rm -rf /usr/share/cockpit/file-sharing /usr/share/cockpit/identities /usr/share/cockpit/navigator /usr/share/cockpit/backups
     rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
+    rm -f /etc/udev/rules.d/60-nas-readahead.rules
     rm -f /etc/sysctl.d/99-nas-tuning.conf
+    rm -f /etc/logrotate.d/nas-backups /etc/logrotate.d/nas-deploy
     rm -f /etc/default/wsdd2
     rm -rf /etc/systemd/system/wsdd2.service.d
     udevadm control --reload-rules 2>/dev/null || true
