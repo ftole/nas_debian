@@ -252,25 +252,26 @@ auto_tune_hardware() {
     # 1. Configuración de Filesystem por Rol y Hardware
     if [ "$SERVER_ROLE" == "BACKUP" ]; then
         FS_TYPE="btrfs"
-        if [ "$ES_HDD" -eq 1 ]; then
-            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
-            READAHEAD_KB=4096
-        else
+        if [ "$ES_HDD" = "0" ]; then
             FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async"
             READAHEAD_KB=1024
+        else
+            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+            READAHEAD_KB=4096
         fi
     else
         FS_TYPE="ext4"
-        if [ "$ES_HDD" -eq 1 ]; then
-            FS_OPTS="rw,noatime,commit=2"
-            READAHEAD_KB=4096
-        else
+        if [ "$ES_HDD" = "0" ]; then
             FS_OPTS="rw,noatime,commit=5"
             READAHEAD_KB=1024
+        else
+            FS_OPTS="rw,noatime,commit=2"
+            READAHEAD_KB=4096
         fi
     fi
 
     # 2. Kernel Tuning Persistente (/etc/sysctl.d/99-nas-tuning.conf)
+    mkdir -p /etc/sysctl.d
     cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-nas-tuning.conf
 fs.inotify.max_user_instances = 2048
 fs.inotify.max_user_watches = 524288
@@ -286,6 +287,7 @@ SYSCTL_EOF
 
     # 3. Readahead Tuning Persistente en udev
     if [ -n "$DISCO_BASE" ]; then
+        mkdir -p /etc/udev/rules.d
         cat << UDEV_EOF > /etc/udev/rules.d/60-nas-readahead.rules
 # Readahead tuning persistente para disco NAS ($DISCO_BASE)
 ACTION=="add|change", KERNEL=="$DISCO_BASE", ATTR{bdi/read_ahead_kb}="$READAHEAD_KB"
@@ -313,7 +315,7 @@ ROOT_DEVS="$(resolver_discos_raiz "$ROOT_DEV")"
 if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TARGET_DISK" == "$ROOT_DISK" ] || printf '%s\n' "$ROOT_DEVS" | grep -qx "$TARGET_DISK"; then
     echo "  -> Almacenamiento local configurado en la partición raíz."
     auto_tune_hardware "$ROOT_DEV"
-    if [ "$ES_HDD" -eq 0 ]; then
+    if [ "$ES_HDD" = "0" ]; then
         systemctl enable --now fstrim.timer 2>/dev/null || true
     fi
     if [ "$SERVER_ROLE" == "BACKUP" ]; then
@@ -343,7 +345,7 @@ else
         echo "[-] ERROR: $TARGET_DISK contiene volúmenes cifrados LUKS. Abortando."
         exit 1
     fi
-    if findmnt -n -o SOURCE /srv/nas 2>/dev/null | grep -q .; then
+    if [ "$KEEP_DATA" != "true" ] && findmnt -n -o SOURCE /srv/nas 2>/dev/null | grep -q .; then
         NAS_SRC=$(findmnt -n -o SOURCE /srv/nas 2>/dev/null)
         if [ "/dev/$(resolver_disco_base "$NAS_SRC")" == "$TARGET_DISK" ]; then
             echo "[-] ERROR CRITICO: $TARGET_DISK es el almacenamiento actual de /srv/nas. Abortando."
@@ -408,12 +410,37 @@ else
     if [ "$KEEP_DATA" == "true" ]; then
         echo "  -> Conservando datos existentes en $TARGET_DISK..."
         PART_NAS=""
-        while read -r _pname _ptype; do
-            if [ "$_ptype" == "part" ]; then
-                PART_NAS="/dev/$_pname"
-                break
-            fi
-        done < <(lsblk -ln -o NAME,TYPE "$TARGET_DISK" 2>/dev/null)
+        NAS_CURRENT_SRC=$(findmnt -n -o SOURCE /srv/nas 2>/dev/null || echo "")
+        if [ -n "$NAS_CURRENT_SRC" ] && [ "/dev/$(resolver_disco_base "$NAS_CURRENT_SRC")" == "$TARGET_DISK" ]; then
+            PART_NAS="$NAS_CURRENT_SRC"
+        fi
+        if [ -z "$PART_NAS" ]; then
+            for _p in $(lsblk -ln -o NAME,TYPE "$TARGET_DISK" 2>/dev/null | awk '$2=="part"{print $1}'); do
+                if [ "$(blkid -s LABEL -o value "/dev/$_p" 2>/dev/null)" == "NAS_DATA" ]; then
+                    PART_NAS="/dev/$_p"
+                    break
+                fi
+            done
+        fi
+        if [ -z "$PART_NAS" ]; then
+            while read -r _pname _ptype; do
+                [ "$_ptype" == "part" ] || continue
+                _pdev="/dev/$_pname"
+                _ptype_fs=$(blkid -s TYPE -o value "$_pdev" 2>/dev/null || echo "")
+                if [ -n "$_ptype_fs" ] && [ "$_ptype_fs" != "vfat" ] && [ "$_ptype_fs" != "swap" ]; then
+                    PART_NAS="$_pdev"
+                    break
+                fi
+            done < <(lsblk -ln -o NAME,TYPE "$TARGET_DISK" 2>/dev/null)
+        fi
+        if [ -z "$PART_NAS" ]; then
+            while read -r _pname _ptype; do
+                if [ "$_ptype" == "part" ]; then
+                    PART_NAS="/dev/$_pname"
+                    break
+                fi
+            done < <(lsblk -ln -o NAME,TYPE "$TARGET_DISK" 2>/dev/null)
+        fi
         if [ -z "$PART_NAS" ]; then
             PART_NAS="$TARGET_DISK"
         fi
@@ -424,13 +451,17 @@ else
         fi
         FS_TYPE="$FS_DETECTED"
         if [ "$FS_TYPE" == "ext4" ]; then
-            if [ "$ES_HDD" -eq 1 ]; then
-                FS_OPTS="rw,noatime,commit=2"
-            else
+            if [ "$ES_HDD" = "0" ]; then
                 FS_OPTS="rw,noatime,commit=5"
+            else
+                FS_OPTS="rw,noatime,commit=2"
             fi
         elif [ "$FS_TYPE" == "btrfs" ]; then
-            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2"
+            if [ "$ES_HDD" = "0" ]; then
+                FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async"
+            else
+                FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+            fi
         else
             FS_OPTS="defaults,noatime"
         fi
@@ -496,6 +527,9 @@ else
         cp -a "$FSTAB_BAK" /etc/fstab
         exit 1
     fi
+    if mountpoint -q /srv/nas 2>/dev/null; then
+        umount /srv/nas 2>/dev/null || true
+    fi
     MOUNT_OK=false
     if mount -o "$FS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null; then
         MOUNT_OK=true
@@ -508,7 +542,7 @@ else
         exit 1
     fi
 
-    if [ "$ES_HDD" -eq 0 ]; then
+    if [ "$ES_HDD" = "0" ]; then
         systemctl enable --now fstrim.timer 2>/dev/null || true
     fi
     if [ "$SERVER_ROLE" == "BACKUP" ] && [ "$FS_TYPE" == "btrfs" ]; then
