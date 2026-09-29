@@ -6,7 +6,7 @@
 instalar_nas() {
     local SERVER_IP DEFAULT_USER DEFAULT_NETBIOS DEFAULT_WG ROL_OPCION ROL_SERVER ROL_NETBIOS ROOT_DEV ROOT_DEVS
     local MENU_DISCOS DISCO_SELECCIONADO SMB_NETBIOS SMB_WORKGROUP USUARIO_ACTUAL OPCION_USER ADMIN_USER ADMIN_PASS
-    local RESUMEN CORE_DEPLOY name size type dev_path
+    local RESUMEN CORE_DEPLOY name size type dev_path rot d_media DISCO_BASE ES_HDD MEDIA_TIPO FS_DESC HAS_PARTS OPCION_CONSERVAR KEEP_DATA EXTRA_ARGS
     
     SERVER_IP=$(obtener_ip_local)
     DEFAULT_USER=$(detect_default_user)
@@ -45,10 +45,20 @@ instalar_nas() {
         if [ "$type" == "disk" ]; then
             dev_path="/dev/$name"
             if ! printf '%s\n' "$ROOT_DEVS" | grep -qx "$dev_path"; then
-                if disco_en_uso "$dev_path"; then
-                    MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - EN USO (no recomendado)")
+                rot=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null || echo "1")
+                if [ "$rot" -eq 1 ]; then
+                    d_media="HDD"
                 else
-                    MENU_DISCOS+=("$dev_path" "Disco dedicado ($size) - Formato BTRFS automático (auto-tuning)")
+                    d_media="SSD"
+                fi
+                if disco_en_uso "$dev_path"; then
+                    MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - EN USO (no recomendado)")
+                else
+                    if [ "$ROL_SERVER" == "BACKUP" ]; then
+                        MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - BTRFS + ZSTD")
+                    else
+                        MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - EXT4 optimizado")
+                    fi
                 fi
             fi
         fi
@@ -60,6 +70,55 @@ instalar_nas() {
         "${MENU_DISCOS[@]}" 3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -ne 0 ] || [ -z "$DISCO_SELECCIONADO" ]; then return; fi
+
+    KEEP_DATA=false
+    if [ "$DISCO_SELECCIONADO" == "LOCAL" ]; then
+        DISCO_BASE=$(resolver_disco_base "$ROOT_DEV")
+        ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
+        if [ "$ES_HDD" -eq 1 ]; then
+            MEDIA_TIPO="HDD Mecánico"
+        else
+            MEDIA_TIPO="SSD / NVMe"
+        fi
+        KEEP_DATA=true
+        FS_DESC="Partición raíz del sistema ($(findmnt -n -o FSTYPE / 2>/dev/null || echo 'local'))"
+    else
+        DISCO_BASE=$(resolver_disco_base "$DISCO_SELECCIONADO")
+        ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
+        if [ "$ES_HDD" -eq 1 ]; then
+            MEDIA_TIPO="HDD Mecánico"
+        else
+            MEDIA_TIPO="SSD / NVMe"
+        fi
+
+        HAS_PARTS=false
+        if lsblk -ln -o TYPE "$DISCO_SELECCIONADO" 2>/dev/null | grep -qw part; then
+            HAS_PARTS=true
+        elif blkid "$DISCO_SELECCIONADO"* 2>/dev/null | grep -q .; then
+            HAS_PARTS=true
+        fi
+
+        if [ "$HAS_PARTS" == "true" ]; then
+            OPCION_CONSERVAR=$(whiptail --title "Particiones Existentes Detectadas" \
+                --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                --menu "Se detectaron particiones o datos previos en $DISCO_SELECCIONADO.\n\n¿Deseas conservar los datos existentes o formatear el disco completo?" 16 76 2 \
+                "1" "Conservar datos existentes (montar sin formatear, --keep-data)" \
+                "2" "Formatear disco completo (eliminar todos los datos)" 3>&1 1>&2 2>&3)
+            RET=$?
+            if [ $RET -ne 0 ] || [ -z "$OPCION_CONSERVAR" ]; then return; fi
+            if [ "$OPCION_CONSERVAR" == "1" ]; then
+                KEEP_DATA=true
+            fi
+        fi
+
+        if [ "$KEEP_DATA" == "true" ]; then
+            FS_DESC="Preservar sistema de archivos existente (sin formatear)"
+        elif [ "$ROL_SERVER" == "BACKUP" ]; then
+            FS_DESC="BTRFS (compresión zstd:3, scrub mensual, $MEDIA_TIPO)"
+        else
+            FS_DESC="EXT4 (optimizado commit, noatime, $MEDIA_TIPO)"
+        fi
+    fi
 
     # --------------------------------------------------------------------------
     # PASO 3: IDENTIFICADORES DE RED (NETBIOS Y WORKGROUP / DOMINIO)
@@ -119,10 +178,19 @@ instalar_nas() {
     # --------------------------------------------------------------------------
     # PASO 5: RESUMEN Y CONFIRMACIÓN
     # --------------------------------------------------------------------------
+    local MODO_ALM
+    if [ "$KEEP_DATA" == "true" ]; then
+        MODO_ALM="Conservar datos existentes (--keep-data)"
+    else
+        MODO_ALM="Formateo completo del disco"
+    fi
+
     RESUMEN="PARAMETROS DE CONFIGURACION:
 * Funcion Principal    : $ROL_SERVER
 * Direccion IP Red     : $SERVER_IP
-* Disco Almacenamiento : $DISCO_SELECCIONADO
+* Disco Almacenamiento : $DISCO_SELECCIONADO ($MEDIA_TIPO)
+* Sistema de Archivos  : $FS_DESC
+* Modo Almacenamiento  : $MODO_ALM
 * Nombre del Servidor  : $SMB_NETBIOS
 * Grupo / Dominio      : $SMB_WORKGROUP
 * Administrador Web    : $ADMIN_USER (Permisos sudo y Samba)
@@ -135,14 +203,20 @@ INCLUYE PARCHES AUTOMATICOS:
 ¿Confirmas la configuracion y el despliegue completo?"
 
     if [ "$DISCO_SELECCIONADO" != "LOCAL" ]; then
-        RESUMEN="$RESUMEN
+        if [ "$KEEP_DATA" == "true" ]; then
+            RESUMEN="$RESUMEN
+
+AVISO: Se preservaran los datos existentes en $DISCO_SELECCIONADO. No se realizara formateo."
+        else
+            RESUMEN="$RESUMEN
 
 ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus datos."
+        fi
     fi
 
     if (whiptail --title "Paso 5 de 5: Confirmación Crítica" \
         --yes-button "< Sí, Iniciar Despliegue >" --no-button "< Cancelar >" \
-        --yesno "$RESUMEN" 20 74); then
+        --yesno "$RESUMEN" 22 76); then
         
         clear 2>/dev/null || true
         printf "%b" "${C_CYAN}"
@@ -151,7 +225,11 @@ ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus 
         printf "  ╰──────────────────────────────────────────────────────────────────────╯%b\n\n" "${C_RESET}"
         
         CORE_DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../core" && pwd)/deploy.sh"
-        printf '%s\n' "$ADMIN_PASS" | bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "-" "$ROL_SERVER" --confirm
+        EXTRA_ARGS=()
+        if [ "$KEEP_DATA" == "true" ] && [ "$DISCO_SELECCIONADO" != "LOCAL" ]; then
+            EXTRA_ARGS+=("--keep-data")
+        fi
+        printf '%s\n' "$ADMIN_PASS" | bash "$CORE_DEPLOY" "$DISCO_SELECCIONADO" "$SMB_WORKGROUP" "$SMB_NETBIOS" "$ADMIN_USER" "-" "$ROL_SERVER" --confirm "${EXTRA_ARGS[@]}"
         local ret_exec=$?
         
         if [ $ret_exec -eq 0 ]; then
