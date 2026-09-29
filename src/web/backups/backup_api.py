@@ -157,10 +157,12 @@ def _read_tail(path, max_bytes=65536, max_lines=None):
                 f.seek(size - max_bytes)
             raw = f.read()
         text = raw.decode("utf-8", errors="ignore")
+        lines = text.splitlines(keepends=True)
+        if size > max_bytes and len(lines) > 1 and not raw.startswith(b"\n"):
+            lines = lines[1:]
         if max_lines is not None:
-            lines = text.splitlines(keepends=True)
-            text = "".join(lines[-max_lines:])
-        return text
+            lines = lines[-max_lines:]
+        return "".join(lines)
     except OSError:
         return None
 
@@ -277,15 +279,13 @@ def test_cifs(ip, share, user, password):
         return
     try:
         env = os.environ.copy()
-        if "\\" in user:
-            domain_part, user_part = user.split("\\", 1)
-            env["USER"] = user_part
-            env["PASSWD"] = password
-            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-W", domain_part, "-c", "dir"]
+        env["PASSWD"] = password
+        if "\\" in user or "/" in user:
+            sep = "\\" if "\\" in user else "/"
+            domain_part, user_part = user.split(sep, 1)
+            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-U", user_part, "-W", domain_part, "-c", "dir"]
         else:
-            env["USER"] = user
-            env["PASSWD"] = password
-            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-c", "dir"]
+            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-U", user, "-c", "dir"]
         res = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if res.returncode == 0:
             print(json.dumps({"status": "ok", "message": "Conexión CIFS/SMB exitosa."}))
@@ -343,7 +343,7 @@ def _sanitize_name(name):
     return re.sub(r'[^A-Za-z0-9_-]', '_', name or "")
 
 def _valid_user(value):
-    return bool(re.fullmatch(r'[A-Za-z0-9._@\\]+', value or ""))
+    return bool(re.fullmatch(r'[A-Za-z0-9._@\\/]+', value or ""))
 
 def _valid_cron(value):
     parts = (value or "").split()
@@ -408,8 +408,9 @@ def create_task(data):
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
-        if "\\" in user:
-            domain_part, user_part = user.split("\\", 1)
+        if "\\" in user or "/" in user:
+            sep = "\\" if "\\" in user else "/"
+            domain_part, user_part = user.split(sep, 1)
             cred_content = f"username={user_part}\npassword={pwd}\ndomain={domain_part}\n"
         else:
             cred_content = f"username={user}\npassword={pwd}\n"
@@ -448,9 +449,8 @@ echo "=== INICIANDO BACKUP CIFS: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
-DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
         exit 1
@@ -466,7 +466,7 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30,sec=ntlmssp 2>> "$LOG_FILE"
+mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
@@ -560,9 +560,8 @@ echo "=== INICIANDO BACKUP SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
-DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
         exit 1
@@ -641,9 +640,8 @@ echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
-DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
         exit 1
