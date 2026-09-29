@@ -148,12 +148,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
 
                 WIN_USER=$(whiptail --title "Paso 4 de 5: Credenciales de Acceso" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-                    --inputbox "Usuario de Windows con permisos de lectura (ej. Administrador o usuario@dominio):" 10 65 "Administrador" 3>&1 1>&2 2>&3)
+                    --inputbox "Usuario de Windows con permisos de lectura (ej. Administrador o DOMINIO\\usuario):" 10 65 "Administrador" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$WIN_USER" ]; then continue; fi
-                if [[ ! "$WIN_USER" =~ ^[A-Za-z0-9._@-]+$ ]]; then
+                if [[ ! "$WIN_USER" =~ ^[A-Za-z0-9._@\\]+$ ]]; then
                     whiptail --title "Usuario Invalido" --ok-button "< Aceptar >" \
-                        --msgbox "El usuario contiene caracteres no permitidos. Usa el formato usuario@dominio." 9 68
+                        --msgbox "El usuario contiene caracteres no permitidos. Usa el formato usuario@dominio o DOMINIO\\usuario." 9 68
                     continue
                 fi
 
@@ -162,10 +162,19 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     --passwordbox "Contraseña para el usuario $WIN_USER:" 10 65 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
+                if [[ "$WIN_PASS" =~ [$'\r\n'] ]]; then
+                    whiptail --title "Contraseña Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La contraseña no puede contener saltos de línea." 9 65
+                    continue
+                fi
 
                 # Test de conexión en vivo con smbclient
                 if command -v smbclient &>/dev/null; then
-                    TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -c "dir" 2>&1 || true)
+                    if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]]; then
+                        TEST_CONN=$(USER="${BASH_REMATCH[2]}" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -W "${BASH_REMATCH[1]}" -c "dir" 2>&1 || true)
+                    else
+                        TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -c "dir" 2>&1 || true)
+                    fi
                     if echo "$TEST_CONN" | grep -qiE "NT_STATUS_LOGON_FAILURE|NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_UNSUCCESSFUL|NT_STATUS_ACCESS_DENIED|NT_STATUS_ACCOUNT_DISABLED|NT_STATUS_PASSWORD_EXPIRED|NT_STATUS_NO_LOGON_SERVERS|NT_STATUS_HOST_UNREACHABLE|NT_STATUS_CONNECTION_REFUSED|Connection to .* failed"; then
                         whiptail --title "Error de Conexión Remota" --ok-button "< Corregir >" \
                             --msgbox "✖ No se pudo conectar al servidor Windows con los datos ingresados:\n\n$TEST_CONN\n\nVerifica la IP, el recurso compartido o las credenciales." 14 72
@@ -214,7 +223,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 # Crear credenciales protegidas
                 mkdir -p /etc/backup-credentials /mnt/backup_sources/"$TASK_NAME" /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 CRED_FILE="/etc/backup-credentials/${TASK_NAME}.cred"
-                printf 'username=%s\npassword=%s\n' "$WIN_USER" "$WIN_PASS" > "$CRED_FILE"
+                if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]]; then
+                    printf 'username=%s\npassword=%s\ndomain=%s\n' "${BASH_REMATCH[2]}" "$WIN_PASS" "${BASH_REMATCH[1]}" > "$CRED_FILE"
+                else
+                    printf 'username=%s\npassword=%s\n' "$WIN_USER" "$WIN_PASS" > "$CRED_FILE"
+                fi
                 chmod 600 "$CRED_FILE"
 
                 # Generar script de respaldo
@@ -231,14 +244,15 @@ BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }
@@ -252,10 +266,17 @@ flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_S
 echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
+DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -266,19 +287,21 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     exit 1
 fi
 # Montaje en solo lectura
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
+mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30,sec=ntlmssp 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --delete)
+RSYNC_OPTS=(-a --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 
 umount "$MOUNT_POINT" 2>/dev/null || true
@@ -382,6 +405,11 @@ RUNNER_EOF
                     --passwordbox "Contraseña SSH para el usuario $LNX_USER:" 10 65 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ]; then continue; fi
+                if [[ "$LNX_PASS" =~ [$'\r\n'] ]]; then
+                    whiptail --title "Contraseña Invalida" --ok-button "< Aceptar >" \
+                        --msgbox "La contraseña no puede contener saltos de línea." 9 65
+                    continue
+                fi
 
                 CRON_SCHED=$(whiptail --title "Paso 5 de 5: Frecuencia de Ejecución" \
                     --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
@@ -437,17 +465,14 @@ BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-
-exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
-flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
-
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }
@@ -455,16 +480,26 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
+DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup" --delete)
+RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
@@ -476,10 +511,12 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
-if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${RSYNC_OPTS[@]}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${RSYNC_OPTS[@]}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -576,17 +613,14 @@ BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-
-exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
-flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
-
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }
@@ -594,25 +628,37 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
+DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --delete)
+RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync "${RSYNC_OPTS[@]}" "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${RSYNC_OPTS[@]}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -627,7 +673,7 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
-echo "=== BACKUP FINALIZADO: $DATE_STR ===" >> "$LOG_FILE"
+echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
 RUNNER_EOF
 
                 sed -i "s|TASK_NAME_PLACEHOLDER|$TASK_NAME|g" "$RUNNER"
