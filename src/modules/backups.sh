@@ -151,9 +151,9 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     --inputbox "Usuario de Windows con permisos de lectura (ej. Administrador o DOMINIO\\usuario):" 10 65 "Administrador" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$WIN_USER" ]; then continue; fi
-                if [[ ! "$WIN_USER" =~ ^[A-Za-z0-9._@\\]+$ ]]; then
+                if [[ ! "$WIN_USER" =~ ^[A-Za-z0-9._@\\/]+$ ]]; then
                     whiptail --title "Usuario Invalido" --ok-button "< Aceptar >" \
-                        --msgbox "El usuario contiene caracteres no permitidos. Usa el formato usuario@dominio o DOMINIO\\usuario." 9 68
+                        --msgbox "El usuario contiene caracteres no permitidos. Usa el formato usuario@dominio, DOMINIO\\usuario o DOMINIO/usuario." 9 68
                     continue
                 fi
 
@@ -170,10 +170,10 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
 
                 # Test de conexión en vivo con smbclient
                 if command -v smbclient &>/dev/null; then
-                    if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]]; then
-                        TEST_CONN=$(USER="${BASH_REMATCH[2]}" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -W "${BASH_REMATCH[1]}" -c "dir" 2>&1 || true)
+                    if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]] || [[ "$WIN_USER" =~ ^([^/]+)/(.+)$ ]]; then
+                        TEST_CONN=$(USER="${BASH_REMATCH[2]}" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -U "${BASH_REMATCH[2]}" -W "${BASH_REMATCH[1]}" -c "dir" 2>&1 || true)
                     else
-                        TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -c "dir" 2>&1 || true)
+                        TEST_CONN=$(USER="$WIN_USER" PASSWD="$WIN_PASS" smbclient "//$WIN_IP/$WIN_SHARE" -U "$WIN_USER" -c "dir" 2>&1 || true)
                     fi
                     if echo "$TEST_CONN" | grep -qiE "NT_STATUS_LOGON_FAILURE|NT_STATUS_BAD_NETWORK_NAME|NT_STATUS_UNSUCCESSFUL|NT_STATUS_ACCESS_DENIED|NT_STATUS_ACCOUNT_DISABLED|NT_STATUS_PASSWORD_EXPIRED|NT_STATUS_NO_LOGON_SERVERS|NT_STATUS_HOST_UNREACHABLE|NT_STATUS_CONNECTION_REFUSED|Connection to .* failed"; then
                         whiptail --title "Error de Conexión Remota" --ok-button "< Corregir >" \
@@ -223,7 +223,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 # Crear credenciales protegidas
                 mkdir -p /etc/backup-credentials /mnt/backup_sources/"$TASK_NAME" /srv/nas/BACKUPS_HISTORICOS/"$TASK_NAME" /srv/nas/LOGS_BACKUP
                 CRED_FILE="/etc/backup-credentials/${TASK_NAME}.cred"
-                if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]]; then
+                if [[ "$WIN_USER" =~ ^([^\\]+)\\(.+)$ ]] || [[ "$WIN_USER" =~ ^([^/]+)/(.+)$ ]]; then
                     printf 'username=%s\npassword=%s\ndomain=%s\n' "${BASH_REMATCH[2]}" "$WIN_PASS" "${BASH_REMATCH[1]}" > "$CRED_FILE"
                 else
                     printf 'username=%s\npassword=%s\n' "$WIN_USER" "$WIN_PASS" > "$CRED_FILE"
@@ -268,9 +268,8 @@ echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
-DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
@@ -287,7 +286,7 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     exit 1
 fi
 # Montaje en solo lectura
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30,sec=ntlmssp 2>> "$LOG_FILE"
+mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
@@ -487,9 +486,8 @@ echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
-DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
@@ -635,9 +633,8 @@ echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
 DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $4, $5}')
-DISPONIBLE_KB=$(awk '{print $1}' <<< "$DF_INFO")
-USO_PORCENTAJE=$(awk '{print $2}' <<< "$DF_INFO")
-if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
+if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
