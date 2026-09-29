@@ -333,6 +333,17 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     elif [ "$TIPO_PERM" == "2" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
                         chmod -R 2775 "$RUTA_SHARE"
+                        local -a GRPS_RO_ACL=()
+                        read -r -a GRPS_RO_ACL <<< "$(echo "$GRUPOS_RO" | tr -d '"')"
+                        for g in "${GRPS_RO_ACL[@]}"; do
+                            [ -n "$g" ] || continue
+                            setfacl -R -m "g:$g:r-x" "$RUTA_SHARE" 2>/dev/null || true
+                            find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$g:r-x" {} + 2>/dev/null || true
+                        done
+                        if [ -n "$GRUPO_RW" ]; then
+                            setfacl -R -m "g:$GRUPO_RW:rwx" "$RUTA_SHARE" 2>/dev/null || true
+                            find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$GRUPO_RW:rwx" {} + 2>/dev/null || true
+                        fi
                     elif [ "$TIPO_PERM" == "3" ]; then
                         chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
                         chmod -R 2755 "$RUTA_SHARE"
@@ -360,9 +371,8 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         printf '   browseable = %s\n' "$BROWSEABLE"
                         printf '   read only = %s\n' "$READ_ONLY"
                         printf '   guest ok = %s\n' "$GUEST_OK"
-                        if [ "$TIPO_PERM" == "1" ]; then
-                            printf '   inherit acls = yes\n'
-                        fi
+                        printf '   inherit acls = yes\n'
+                        printf '   inherit permissions = yes\n'
                         if [ -n "$VALID_USERS" ]; then
                             printf '   valid users = %s\n' "$VALID_USERS"
                         fi
