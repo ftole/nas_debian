@@ -320,3 +320,33 @@ def test_runner_ssh_usa_known_hosts_sin_secretos(tmp_path, monkeypatch, capsys):
     assert "secreto" not in contenido
     if os.name != "nt":
         assert (os.stat(runner).st_mode & 0o777) == 0o750
+
+
+def test_create_task_cifs_soporta_dominio_usuario(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_cifs_dom",
+        "proto": "cifs",
+        "ip": "192.168.1.100",
+        "share": "datos",
+        "user": r"EMPRESA\operador",
+        "password": "clave",
+        "cron": "0 23 * * *",
+        "retention": 10,
+    })
+    capsys.readouterr()
+    cred = (tmp_path / "cred" / "t_cifs_dom.cred").read_text()
+    assert "username=operador" in cred
+    assert "domain=EMPRESA" in cred
+    assert "password=clave" in cred
+
+
+def test_read_tail_archivo_grande(tmp_path):
+    log_file = tmp_path / "grande.log"
+    lineas = [f"Linea {i:05d}\n" for i in range(10000)]
+    log_file.write_text("".join(lineas), encoding="utf-8")
+    tail = api._read_tail(str(log_file), max_bytes=1024, max_lines=5)
+    assert tail is not None
+    tail_lines = tail.strip().splitlines()
+    assert len(tail_lines) == 5
+    assert tail_lines[-1] == "Linea 09999"
