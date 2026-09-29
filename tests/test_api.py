@@ -350,3 +350,40 @@ def test_read_tail_archivo_grande(tmp_path):
     tail_lines = tail.strip().splitlines()
     assert len(tail_lines) == 5
     assert tail_lines[-1] == "Linea 09999"
+
+
+def test_create_task_cifs_soporta_dominio_barra_usuario(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_cifs_dom_slash",
+        "proto": "cifs",
+        "ip": "192.168.1.100",
+        "share": "datos",
+        "user": "EMPRESA/operador",
+        "password": "clave",
+        "cron": "0 23 * * *",
+        "retention": 10,
+    })
+    capsys.readouterr()
+    cred = (tmp_path / "cred" / "t_cifs_dom_slash.cred").read_text()
+    assert "username=operador" in cred
+    assert "domain=EMPRESA" in cred
+    assert "password=clave" in cred
+
+
+def test_create_task_cifs_clave_caracteres_especiales(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_cifs_spec",
+        "proto": "cifs",
+        "ip": "192.168.1.100",
+        "share": "datos",
+        "user": "operador",
+        "password": "p@ss#w0rd$123!*()&",
+        "cron": "0 23 * * *",
+        "retention": 10,
+    })
+    capsys.readouterr()
+    cred = (tmp_path / "cred" / "t_cifs_spec.cred").read_text()
+    assert "username=operador" in cred
+    assert "password=p@ss#w0rd$123!*()&" in cred
