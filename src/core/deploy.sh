@@ -212,10 +212,12 @@ fi
 FORCE=false
 CONFIRM=false
 IGNORE_IN_USE=false
+KEEP_DATA=false
 for _arg in "$@"; do
     [ "$_arg" == "--force" ] && FORCE=true
     [ "$_arg" == "--confirm" ] && CONFIRM=true
     [ "$_arg" == "--ignore-in-use" ] && IGNORE_IN_USE=true
+    [ "$_arg" == "--keep-data" ] && KEEP_DATA=true
 done
 
 SERVER_IP=$(obtener_ip_local)
@@ -246,52 +248,56 @@ auto_tune_hardware() {
     DISCO_BASE=$(resolver_disco_base "$DISCO")
     local ES_HDD
     ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
-    local RAM_KB
-    RAM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-    local CORES
-    CORES=$(nproc)
 
-    # 1. Ajuste de CPU (Compresión Zstd)
-    local BTRFS_COMPRESS="zstd:1"
-    if [ "$CORES" -ge 8 ]; then
-        BTRFS_COMPRESS="zstd:5"
-    elif [ "$CORES" -ge 3 ]; then
-        BTRFS_COMPRESS="zstd:3"
-    fi
-
-    # 2. Ajuste de Disco (HDD vs SSD)
-    BTRFS_OPTS="rw,noatime,compress=$BTRFS_COMPRESS,space_cache=v2"
-    if [ "$ES_HDD" -eq 1 ]; then
-        BTRFS_OPTS="$BTRFS_OPTS,autodefrag"
-        READAHEAD_KB=4096
+    # 1. Configuración de Filesystem por Rol y Hardware
+    if [ "$SERVER_ROLE" == "BACKUP" ]; then
+        FS_TYPE="btrfs"
+        if [ "$ES_HDD" -eq 1 ]; then
+            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+            READAHEAD_KB=4096
+        else
+            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async"
+            READAHEAD_KB=1024
+        fi
     else
-        BTRFS_OPTS="$BTRFS_OPTS,ssd,discard=async"
-        READAHEAD_KB=1024
+        FS_TYPE="ext4"
+        if [ "$ES_HDD" -eq 1 ]; then
+            FS_OPTS="rw,noatime,commit=2"
+            READAHEAD_KB=4096
+        else
+            FS_OPTS="rw,noatime,commit=5"
+            READAHEAD_KB=1024
+        fi
     fi
 
-    # 3. Ajuste de RAM (Sysctl Dirty Bytes)
-    local DIRTY_BYTES=$((256 * 1024 * 1024)) # Default 256MB
-    if [ "$RAM_KB" -gt 8388608 ]; then # > 8GB
-        DIRTY_BYTES=$((1024 * 1024 * 1024)) # 1GB
-    elif [ "$RAM_KB" -gt 4194304 ]; then # > 4GB
-        DIRTY_BYTES=$((512 * 1024 * 1024)) # 512MB
-    fi
-    local DIRTY_BG_BYTES=$((DIRTY_BYTES / 2))
-
-    # Escribir Sysctl Dinámico
-    cat <<EOF > /etc/sysctl.d/99-nas-tuning.conf
-vm.swappiness = 10
-vm.vfs_cache_pressure = 50
-vm.dirty_bytes = $DIRTY_BYTES
-vm.dirty_background_bytes = $DIRTY_BG_BYTES
-EOF
+    # 2. Kernel Tuning Persistente (/etc/sysctl.d/99-nas-tuning.conf)
+    cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-nas-tuning.conf
+fs.inotify.max_user_instances = 2048
+fs.inotify.max_user_watches = 524288
+net.ipv4.tcp_keepalive_time = 120
+net.ipv4.tcp_keepalive_intvl = 15
+net.ipv4.tcp_keepalive_probes = 4
+vm.vfs_cache_pressure = 30
+vm.dirty_background_bytes = 67108864
+vm.dirty_bytes = 268435456
+vm.dirty_expire_centisecs = 300
+SYSCTL_EOF
     sysctl -p /etc/sysctl.d/99-nas-tuning.conf >/dev/null 2>&1 || true
 
-    # Aplicar Readahead
+    # 3. Readahead Tuning Persistente en udev
+    if [ -n "$DISCO_BASE" ]; then
+        cat << UDEV_EOF > /etc/udev/rules.d/60-nas-readahead.rules
+# Readahead tuning persistente para disco NAS ($DISCO_BASE)
+ACTION=="add|change", KERNEL=="$DISCO_BASE", ATTR{bdi/read_ahead_kb}="$READAHEAD_KB"
+ACTION=="add|change", KERNEL=="$DISCO_BASE", ATTR{queue/read_ahead_kb}="$READAHEAD_KB"
+UDEV_EOF
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger 2>/dev/null || true
+    fi
     blockdev --setra $((READAHEAD_KB * 2)) "$DISCO" 2>/dev/null || true
 
-    # Exportar variables para usarlas en el formateo
-    export BTRFS_OPTS
+    # Exportar variables para usarlas en el formateo y montaje
+    export FS_TYPE FS_OPTS ES_HDD
 }
 
 echo " [2/9] Configurando almacenamiento (/srv/nas) en $TARGET_DISK..."
@@ -307,8 +313,20 @@ ROOT_DEVS="$(resolver_discos_raiz "$ROOT_DEV")"
 if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TARGET_DISK" == "$ROOT_DISK" ] || printf '%s\n' "$ROOT_DEVS" | grep -qx "$TARGET_DISK"; then
     echo "  -> Almacenamiento local configurado en la partición raíz."
     auto_tune_hardware "$ROOT_DEV"
+    if [ "$ES_HDD" -eq 0 ]; then
+        systemctl enable --now fstrim.timer 2>/dev/null || true
+    fi
+    if [ "$SERVER_ROLE" == "BACKUP" ]; then
+        ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
+        if [ "$ROOT_FS" == "btrfs" ]; then
+            cat << 'CRON_SCRUB' > /etc/cron.d/nas-btrfs-scrub
+0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
+CRON_SCRUB
+            chmod 644 /etc/cron.d/nas-btrfs-scrub
+        fi
+    fi
 else
-    echo "  -> Inicializando y formateando disco dedicado: $TARGET_DISK"
+    echo "  -> Inicializando y configurando disco dedicado: $TARGET_DISK"
     if [ ! -b "$TARGET_DISK" ]; then
         echo "[-] ERROR: $TARGET_DISK no es un dispositivo de bloque válido."
         exit 1
@@ -337,15 +355,15 @@ else
         echo "    Formatearlo puede dañar otros volúmenes o arreglos. Abortando (no se omite con --ignore-in-use)."
         exit 1
     fi
-    if [ "$IGNORE_IN_USE" != "true" ] && disco_en_uso "$TARGET_DISK"; then
+    if [ "$IGNORE_IN_USE" != "true" ] && [ "$KEEP_DATA" != "true" ] && disco_en_uso "$TARGET_DISK"; then
         echo "[-] ERROR: $TARGET_DISK parece estar en uso (montado, PV de LVM o miembro de RAID)."
         echo "    Abortando por seguridad. Usa --ignore-in-use bajo tu responsabilidad si realmente deseas formatearlo."
         exit 1
     fi
 
-    # Mostrar la información completa del disco antes de formatear.
+    # Mostrar la información completa del disco antes de formatear/configurar.
     echo "  ╔══════════════════════════════════════════════════════════════════╗"
-    echo "  ║  DISCO A FORMATEAR: $TARGET_DISK"
+    echo "  ║  DISCO DE ALMACENAMIENTO: $TARGET_DISK"
     echo "  ╚══════════════════════════════════════════════════════════════════╝"
     if ! lsblk -o NAME,SIZE,MODEL,TYPE,MOUNTPOINT "$TARGET_DISK" 2>/dev/null; then
         echo "[-] ERROR: no se pudo obtener la información del disco $TARGET_DISK."
@@ -354,7 +372,9 @@ else
     fi
 
     # Confirmación explícita antes de una operación destructiva.
-    if [ "$IGNORE_IN_USE" == "true" ]; then
+    if [ "$KEEP_DATA" == "true" ]; then
+        echo "  [•] Modo --keep-data activado: se preservarán los datos del disco $TARGET_DISK."
+    elif [ "$IGNORE_IN_USE" == "true" ]; then
         echo "  [!] ADVERTENCIA EXTREMA: --ignore-in-use permite formatear un disco EN USO."
         echo "      TODOS los datos serán eliminados. Esta acción puede dañar el sistema."
         if [ -t 0 ]; then
@@ -381,45 +401,79 @@ else
         echo "    Usa --confirm (si ya confirmaste en el asistente) o --force bajo tu responsabilidad."
         exit 1
     fi
-    log "Formateo confirmado para el disco $TARGET_DISK"
+    log "Configuración de almacenamiento para el disco $TARGET_DISK (keep_data=$KEEP_DATA)"
 
     auto_tune_hardware "$TARGET_DISK"
 
-    while read -r _part; do
-        [ -z "$_part" ] && continue
-        umount "/dev/$_part" 2>/dev/null || true
-    done < <(lsblk -ln -o NAME "$TARGET_DISK" 2>/dev/null | tail -n +2)
-    parted -s "$TARGET_DISK" mklabel gpt mkpart primary btrfs 0% 100%
-    partprobe "$TARGET_DISK" 2>/dev/null || true
-    udevadm settle 2>/dev/null || true
-
-    PART_NAS=""
-    for _ in {1..10}; do
-        if [ -b "${TARGET_DISK}1" ]; then
-            PART_NAS="${TARGET_DISK}1"
-            break
-        elif [ -b "${TARGET_DISK}p1" ]; then
-            PART_NAS="${TARGET_DISK}p1"
-            break
+    if [ "$KEEP_DATA" == "true" ]; then
+        echo "  -> Conservando datos existentes en $TARGET_DISK..."
+        PART_NAS=""
+        while read -r _pname _ptype; do
+            if [ "$_ptype" == "part" ]; then
+                PART_NAS="/dev/$_pname"
+                break
+            fi
+        done < <(lsblk -ln -o NAME,TYPE "$TARGET_DISK" 2>/dev/null)
+        if [ -z "$PART_NAS" ]; then
+            PART_NAS="$TARGET_DISK"
         fi
-        sleep 1
-    done
-    if [ -z "$PART_NAS" ]; then
-        echo "[-] ERROR CRITICO: No se detecto la particion en $TARGET_DISK tras el particionado."
-        echo "    Abortando para no formatear el disco completo por error."
-        exit 1
-    fi
+        FS_DETECTED=$(blkid -s TYPE -o value "$PART_NAS" 2>/dev/null || echo "")
+        if [ -z "$FS_DETECTED" ]; then
+            echo "[-] ERROR: no se pudo detectar el sistema de archivos en $PART_NAS para conservar datos."
+            exit 1
+        fi
+        FS_TYPE="$FS_DETECTED"
+        if [ "$FS_TYPE" == "ext4" ]; then
+            if [ "$ES_HDD" -eq 1 ]; then
+                FS_OPTS="rw,noatime,commit=2"
+            else
+                FS_OPTS="rw,noatime,commit=5"
+            fi
+        elif [ "$FS_TYPE" == "btrfs" ]; then
+            FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2"
+        else
+            FS_OPTS="defaults,noatime"
+        fi
+        UUID_NAS=$(blkid -s UUID -o value "$PART_NAS" 2>/dev/null || echo "")
+    else
+        while read -r _part; do
+            [ -z "$_part" ] && continue
+            umount "/dev/$_part" 2>/dev/null || true
+        done < <(lsblk -ln -o NAME "$TARGET_DISK" 2>/dev/null | tail -n +2)
+        parted -s "$TARGET_DISK" mklabel gpt mkpart primary "$FS_TYPE" 0% 100%
+        partprobe "$TARGET_DISK" 2>/dev/null || true
+        udevadm settle 2>/dev/null || true
 
-    mkfs.btrfs -f -L "NAS_DATA" "$PART_NAS"
-    UUID_NAS=$(blkid -s UUID -o value "$PART_NAS")
+        PART_NAS=""
+        for _ in {1..10}; do
+            if [ -b "${TARGET_DISK}1" ]; then
+                PART_NAS="${TARGET_DISK}1"
+                break
+            elif [ -b "${TARGET_DISK}p1" ]; then
+                PART_NAS="${TARGET_DISK}p1"
+                break
+            fi
+            sleep 1
+        done
+        if [ -z "$PART_NAS" ]; then
+            echo "[-] ERROR CRITICO: No se detecto la particion en $TARGET_DISK tras el particionado."
+            echo "    Abortando para no formatear el disco completo por error."
+            exit 1
+        fi
+
+        if [ "$FS_TYPE" == "ext4" ]; then
+            mkfs.ext4 -F -L "NAS_DATA" "$PART_NAS"
+            tune2fs -m 1 "$PART_NAS" >/dev/null 2>&1 || true
+        else
+            mkfs.btrfs -f -L "NAS_DATA" "$PART_NAS"
+        fi
+        UUID_NAS=$(blkid -s UUID -o value "$PART_NAS" 2>/dev/null || echo "")
+    fi
 
     FSTAB_BAK="/etc/fstab.bak-$(date +%Y%m%d_%H%M%S)"
     cp -a /etc/fstab "$FSTAB_BAK"
     FSTAB_TMP=$(mktemp /etc/fstab.nas.XXXXXX)
     trap 'rm -f "$FSTAB_TMP"' EXIT
-    # Construir el nuevo fstab en un temporal: se elimina el bloque administrado
-    # y cualquier entrada heredada cuyo punto de montaje sea exactamente /srv/nas
-    # (no otras lineas que lo mencionen), y se agrega el bloque nuevo.
     awk '
         /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
         /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
@@ -429,9 +483,9 @@ else
     {
         echo "# BEGIN NAS_DEBIAN /srv/nas"
         if [ -n "$UUID_NAS" ]; then
-            echo "UUID=$UUID_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
+            echo "UUID=$UUID_NAS /srv/nas $FS_TYPE defaults,$FS_OPTS 0 2"
         else
-            echo "$PART_NAS /srv/nas btrfs defaults,$BTRFS_OPTS 0 2"
+            echo "$PART_NAS /srv/nas $FS_TYPE defaults,$FS_OPTS 0 2"
         fi
         echo "# END NAS_DEBIAN /srv/nas"
     } >> "$FSTAB_TMP"
@@ -443,7 +497,7 @@ else
         exit 1
     fi
     MOUNT_OK=false
-    if mount -o "$BTRFS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null; then
+    if mount -o "$FS_OPTS" "$PART_NAS" /srv/nas 2>/dev/null; then
         MOUNT_OK=true
     elif mount /srv/nas 2>/dev/null; then
         MOUNT_OK=true
@@ -452,6 +506,16 @@ else
         echo "[-] ERROR CRITICO: No se pudo montar $PART_NAS en /srv/nas."
         echo "    Abortando para evitar escribir los respaldos en la particion del sistema."
         exit 1
+    fi
+
+    if [ "$ES_HDD" -eq 0 ]; then
+        systemctl enable --now fstrim.timer 2>/dev/null || true
+    fi
+    if [ "$SERVER_ROLE" == "BACKUP" ] && [ "$FS_TYPE" == "btrfs" ]; then
+        cat << 'CRON_SCRUB' > /etc/cron.d/nas-btrfs-scrub
+0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
+CRON_SCRUB
+        chmod 644 /etc/cron.d/nas-btrfs-scrub
     fi
 fi
 
@@ -576,6 +640,7 @@ find /srv/nas -type f -exec chmod 664 {} +
 cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
 /srv/nas/LOGS_BACKUP/*.log {
     weekly
+    maxsize 10M
     rotate 8
     missingok
     notifempty
@@ -597,11 +662,6 @@ cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-deploy
 }
 LOGROTATE_EOF
 
-VFS_IOURING_LINE=""
-if find /usr/lib -path "*samba/vfs/io_uring.so" -print -quit 2>/dev/null | grep -q .; then
-    VFS_IOURING_LINE="   vfs objects = io_uring"
-fi
-
 echo " [6/9] Configurando /etc/samba/smb.conf (Infraestructura Limpia)..."
 mkdir -p /etc/samba
 if [ -f /etc/samba/smb.conf ]; then
@@ -620,13 +680,16 @@ cat << SMBCONF > /etc/samba/smb.conf
    dns proxy = no
    include = registry
 
-   # Optimizaciones de Rendimiento y Red (Auto-Tuning)
+   # Optimizaciones de Rendimiento y Red (Office +100 usuarios)
+   store dos attributes = yes
+   vfs objects = acl_xattr streams_xattr
+   inherit permissions = yes
+   strict sync = yes
+   max open files = 65535
    use sendfile = yes
    min receivefile size = 16384
    aio read size = 16384
    aio write size = 16384
-$VFS_IOURING_LINE
-   socket options = TCP_NODELAY IPTOS_LOWDELAY
 
    log file = /var/log/samba/log.%m
    max log size = 1000
