@@ -46,10 +46,10 @@ instalar_nas() {
             dev_path="/dev/$name"
             if ! printf '%s\n' "$ROOT_DEVS" | grep -qx "$dev_path"; then
                 rot=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null || echo "1")
-                if [ "$rot" -eq 1 ]; then
-                    d_media="HDD"
-                else
+                if [ "$rot" = "0" ]; then
                     d_media="SSD"
+                else
+                    d_media="HDD"
                 fi
                 if disco_en_uso "$dev_path"; then
                     MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - EN USO (no recomendado)")
@@ -75,20 +75,20 @@ instalar_nas() {
     if [ "$DISCO_SELECCIONADO" == "LOCAL" ]; then
         DISCO_BASE=$(resolver_disco_base "$ROOT_DEV")
         ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
-        if [ "$ES_HDD" -eq 1 ]; then
-            MEDIA_TIPO="HDD Mecánico"
-        else
+        if [ "$ES_HDD" = "0" ]; then
             MEDIA_TIPO="SSD / NVMe"
+        else
+            MEDIA_TIPO="HDD Mecánico"
         fi
         KEEP_DATA=true
         FS_DESC="Partición raíz del sistema ($(findmnt -n -o FSTYPE / 2>/dev/null || echo 'local'))"
     else
         DISCO_BASE=$(resolver_disco_base "$DISCO_SELECCIONADO")
         ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
-        if [ "$ES_HDD" -eq 1 ]; then
-            MEDIA_TIPO="HDD Mecánico"
-        else
+        if [ "$ES_HDD" = "0" ]; then
             MEDIA_TIPO="SSD / NVMe"
+        else
+            MEDIA_TIPO="HDD Mecánico"
         fi
 
         HAS_PARTS=false
