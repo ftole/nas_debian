@@ -147,6 +147,24 @@ def ensure_known_hosts():
             return False
     return True
 
+
+def _read_tail(path, max_bytes=65536, max_lines=None):
+    """Lee retrospectivamente los ultimos bytes de un archivo mediante seek."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            raw = f.read()
+        text = raw.decode("utf-8", errors="ignore")
+        if max_lines is not None:
+            lines = text.splitlines(keepends=True)
+            text = "".join(lines[-max_lines:])
+        return text
+    except OSError:
+        return None
+
+
 def list_tasks():
     ensure_dirs()
     tasks = []
@@ -220,15 +238,13 @@ def list_tasks():
             try:
                 mtime = os.path.getmtime(log_file)
                 last_run = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-                with open(log_file, "r", encoding="utf-8", errors="ignore") as lf:
-                    lines = lf.readlines()[-10:]
-                    full_log = "".join(lines)
-                    if "FINALIZADO CON ÉXITO" in full_log or "FINALIZADO:" in full_log:
-                        last_status = "Éxito"
-                    elif "error" in full_log.lower() or "failed" in full_log.lower():
-                        last_status = "Fallo"
-                    else:
-                        last_status = "En progreso"
+                full_log = _read_tail(log_file, max_bytes=65536, max_lines=10) or ""
+                if "FINALIZADO CON ÉXITO" in full_log or "FINALIZADO:" in full_log:
+                    last_status = "Éxito"
+                elif "error" in full_log.lower() or "failed" in full_log.lower():
+                    last_status = "Fallo"
+                else:
+                    last_status = "En progreso"
             except OSError:
                 pass
 
@@ -261,9 +277,15 @@ def test_cifs(ip, share, user, password):
         return
     try:
         env = os.environ.copy()
-        env["USER"] = user
-        env["PASSWD"] = password
-        cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-c", "dir"]
+        if "\\" in user:
+            domain_part, user_part = user.split("\\", 1)
+            env["USER"] = user_part
+            env["PASSWD"] = password
+            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-W", domain_part, "-c", "dir"]
+        else:
+            env["USER"] = user
+            env["PASSWD"] = password
+            cmd = ["timeout", "7", "smbclient", f"//{ip}/{share}", "-c", "dir"]
         res = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if res.returncode == 0:
             print(json.dumps({"status": "ok", "message": "Conexión CIFS/SMB exitosa."}))
@@ -321,7 +343,7 @@ def _sanitize_name(name):
     return re.sub(r'[^A-Za-z0-9_-]', '_', name or "")
 
 def _valid_user(value):
-    return bool(re.fullmatch(r'[A-Za-z0-9._@-]+', value or ""))
+    return bool(re.fullmatch(r'[A-Za-z0-9._@\\]+', value or ""))
 
 def _valid_cron(value):
     parts = (value or "").split()
@@ -386,7 +408,11 @@ def create_task(data):
             print(json.dumps({"status": "error", "message": "La contraseña contiene caracteres inválidos."}))
             return
 
-        cred_content = f"username={user}\npassword={pwd}\n"
+        if "\\" in user:
+            domain_part, user_part = user.split("\\", 1)
+            cred_content = f"username={user_part}\npassword={pwd}\ndomain={domain_part}\n"
+        else:
+            cred_content = f"username={user}\npassword={pwd}\n"
 
         script = f"""#!/bin/bash
 set -e
@@ -399,14 +425,15 @@ BKP_DIR="{BKP_ROOT}/$TASK"
 LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }}
@@ -419,10 +446,17 @@ flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_
 
 echo "=== INICIANDO BACKUP CIFS: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
+DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${{USO_PORCENTAJE}}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -432,19 +466,21 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.0,sec=ntlmssp 2>> "$LOG_FILE"
+mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30,sec=ntlmssp 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --delete)
+RSYNC_OPTS=(-a --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -502,17 +538,14 @@ BKP_DIR="{BKP_ROOT}/$TASK"
 LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-
-exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
-flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
-
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }}
@@ -520,16 +553,26 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
+flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
+
 echo "=== INICIANDO BACKUP SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
+DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${{USO_PORCENTAJE}}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-avz -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS}" --delete)
+RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS} -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
@@ -541,10 +584,12 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
-if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${{RSYNC_OPTS[@]}}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${{RSYNC_OPTS[@]}}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -574,17 +619,14 @@ BKP_DIR="{BKP_ROOT}/$TASK"
 LOG_FILE="{LOG_ROOT}/backup_${{TASK}}.log"
 RETENTION={retention}
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-TARGET_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
-
-exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
-flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
-
+STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
+FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ] && [ -n "$TARGET_SNAPSHOT" ] && [ "$TARGET_SNAPSHOT" != "/" ]; then
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
-        rm -rf "$TARGET_SNAPSHOT"
+        rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
 }}
@@ -592,25 +634,37 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_${{TASK}}.lock"
+flock -n 9 || {{ echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }}
+
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
-DISPONIBLE_KB=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $4}}')
-if [ -n "$DISPONIBLE_KB" ] && [ "$DISPONIBLE_KB" -lt 524288 ]; then
-    echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB) ===" >> "$LOG_FILE"
-    exit 1
+rm -rf "$BKP_DIR"/.inprogress_*
+DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub(/%/, "", $5); print $4, $5}}')
+DISPONIBLE_KB=$(awk '{{print $1}}' <<< "$DF_INFO")
+USO_PORCENTAJE=$(awk '{{print $2}}' <<< "$DF_INFO")
+if [ -n "$DISPONIBLE_KB" ] && [ -n "$USO_PORCENTAJE" ]; then
+    if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${{USO_PORCENTAJE}}% en uso) ===" >> "$LOG_FILE"
+        exit 1
+    elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${{USO_PORCENTAJE}}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    fi
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --delete)
+RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
-if ! rsync "${{RSYNC_OPTS[@]}}" "$SRC_PATH/" "$TARGET_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+if ! rsync "${{RSYNC_OPTS[@]}}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+rm -rf "$FINAL_SNAPSHOT"
+mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -781,8 +835,9 @@ def read_logs(tname):
         return
     if os.path.exists(log_file):
         try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                content = "".join(f.readlines()[-100:])
+            content = _read_tail(log_file, max_bytes=65536, max_lines=100)
+            if content is None:
+                content = ""
             print(json.dumps({"status": "ok", "logs": content}))
         except Exception as e:
             print(json.dumps({"status": "error", "logs": str(e)}))
