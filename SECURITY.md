@@ -82,12 +82,26 @@ ssh-keyscan -H <IP_o_nombre> >> /root/.ssh/known_hosts_backup
 Si la huella no está registrada o cambió, la tarea falla con un mensaje claro y
 **no** se conecta silenciosamente.
 
-## 3. Credenciales de backup
+## 3. Credenciales y ejecución de backup
 
 - Ubicación: `/etc/backup-credentials/<tarea>.cred` (propietario root, permisos 0600).
 - Los runners verifican que los permisos sigan siendo `600` antes de usarlas.
 - Las contraseñas viajan por variables de entorno o archivos protegidos, nunca como
   argumentos de línea de comandos, y se redactan de los mensajes de error y logs.
+- **Soporte para dominios Active Directory:** El parser del asistente y de la API web
+  desglosa automáticamente formatos `DOMINIO\usuario` y `DOMINIO/usuario`, almacenando
+  los campos `username`, `password` y `domain` de forma separada en el archivo protegido.
+  Esto previene inyecciones de comandos, evita fallos de autenticación NTLM/Kerberos y
+  elimina cualquier exposición de claves en la lista global de procesos (`ps`).
+- **Resiliencia en montaje CIFS:** El conector de respaldo Windows opera con montaje en
+  solo lectura (`ro`), dialecto `vers=3.1.1`, `noserverino`, `cache=none` y temporizador
+  blando `soft,timeo=30`. Si el host Windows se apaga o reinicia durante el proceso, el
+  kernel del NAS no se bloquea indefinidamente en operaciones de I/O.
+- **Staging atómico y control de interrupciones:** Cada respaldo escribe inicialmente en
+  `$BKP_DIR/.inprogress_$DATE_STR`. Los interceptores de señales (`trap cleanup EXIT TERM INT`)
+  aseguran que ante interrupción manual, corte eléctrico o falla de red, el punto de
+  montaje se desmonte de inmediato y el snapshot parcial se destruya. Solo tras un código
+  de salida exitoso (0) se ejecuta la promoción atómica mediante `mv` a `snapshot_$DATE_STR`.
 
 ### Deuda de seguridad conocida
 
@@ -120,13 +134,17 @@ de seguridad más reciente sin ejecutar el despliegue:
 sudo bash /opt/nas_debian/src/core/deploy.sh --restore-patches
 ```
 
-## 5. Formateo de discos
+## 5. Formateo y reutilización de almacenamiento
 
-`deploy.sh` exige confirmación explícita antes de formatear un disco dedicado:
+El motor de despliegue (`deploy.sh`) contempla dos políticas para los discos de datos:
 
-- Muestra el dispositivo, modelo, tamaño, particiones y puntos de montaje (`lsblk`).
-- Verifica que no sea el disco raíz ni un disco en uso (montado, PV de LVM o RAID).
-- Requiere `--confirm` (asistente), `--force` (confirma sin preguntar, sin saltar
-  chequeos) o confirmación interactiva.
-- `--force` **no** permite formatear un disco en uso; para eso se exige
-  `--ignore-in-use` con confirmación textual explícita (`SI-FORMATEAR`). En modo no interactivo sin confirmación, aborta.
+1. **Reutilización segura de datos (`--keep-data`):**
+   - Permite asociar una unidad o partición existente al punto de montaje `/srv/nas` sin formatear ni destruir datos preexistentes.
+   - Detecta la partición adecuada (buscando etiqueta `NAS_DATA` o partición válida preexistente), comprueba el sistema de archivos (`ext4`, `btrfs`, etc.) y aplica las directivas de montaje optimizadas según el hardware.
+
+2. **Formateo de disco dedicado:**
+   - Exige confirmación explícita antes de formatear cualquier unidad:
+     - Muestra el dispositivo, modelo, tamaño, particiones y puntos de montaje (`lsblk`).
+     - Excluye el disco raíz del sistema operativo mediante comprobación del kernel y udev (`80-udisks2-hide-os.rules`).
+     - **Discos en uso crítico (RAID / LVM PV):** Se bloquean de forma incondicional para impedir la destrucción de volúmenes compartidos.
+     - **Discos montados:** Requieren obligatoriamente `--ignore-in-use` y confirmación interactiva textual (`SI-FORMATEAR`). La bandera `--force` **no** ignora el estado de uso; únicamente confirma sin preguntar en unidades libres.
