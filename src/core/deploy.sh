@@ -620,8 +620,8 @@ install_deb_pkg() {
     fi
 }
 
-install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v3.3.4/cockpit-file-sharing_3.3.4-1focal_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing" "fd75ee1690159642de3663870b46efc5bb25dddf983e1a1726c0089d4b0cf27e"
-install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.12/cockpit-identities_0.1.12-1focal_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities" "85d1412da210c86d0ebad35624fc512d895fd52f09ee0a8629cc1bc3bd0e825a"
+install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v4.6.1/cockpit-file-sharing_4.6.1-1trixie_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing" "5e807f5c61a6c18a7f2095e2917ff501c2540e207a460b188765f517a6ecb5a0"
+install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.14-1/cockpit-identities_0.1.14-1trixie_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities" "320e6607e288060222717507ffc9f9fe2b46c6e2b8bb88226549bef46982eb6a"
 install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator" "784b8b1d7e02224594d34e6d60945c72b54a557692a37fefbb0046146b74040e"
 
 cd /
