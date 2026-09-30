@@ -150,12 +150,12 @@ La sección `[global]` de `/etc/samba/smb.conf` incorpora directivas críticas p
 
 ### 4.6 Control de acceso y herencia de ACLs POSIX
 
-En el **Esquema 2 (Solo lectura general + escritura exclusiva)**, el sistema aplica tanto permisos octales `2775` como ACLs POSIX por defecto (`default ACL`):
+En el **Esquema 2 (Solo lectura general + escritura exclusiva)**, el sistema aplica tanto permisos octales `2770` como ACLs POSIX por defecto (`default ACL`):
 ```bash
 setfacl -R -m "g:$GRUPO_RO:r-x" "$RUTA_SHARE"
-find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$GRUPO_RO:r-x" {} +
+find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$GRUPO_RO:r-x" {} +
 setfacl -R -m "g:$GRUPO_RW:rwx" "$RUTA_SHARE"
-find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$GRUPO_RW:rwx" {} +
+find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$GRUPO_RW:rwx" {} +
 ```
 Esto garantiza que cualquier documento o subcarpeta creada por un usuario del grupo de escritura herede automáticamente la regla de lectura para el resto de los grupos departamentales sin requerir reajustes periódicos.
 
