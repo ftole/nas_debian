@@ -241,6 +241,14 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     exit 1
 fi
 
+# Comprobación de versión de Cockpit para seguridad conocida (H-02)
+COCKPIT_VER=$(dpkg-query -W -f='${Version}' cockpit 2>/dev/null || echo "")
+if [ -n "$COCKPIT_VER" ]; then
+    if dpkg --compare-versions "$COCKPIT_VER" lt "337-1+deb13u2" 2>/dev/null; then
+        advertir "La versión de Cockpit instalada ($COCKPIT_VER) es inferior a 337-1+deb13u2. Se recomienda actualizar para corregir posibles vulnerabilidades."
+    fi
+fi
+
 auto_tune_hardware() {
     local DISCO="$1"
     local DISCO_BASE
@@ -562,19 +570,31 @@ install_deb_pkg() {
     local filename="$2"
     local plugin_dir="$3"
     local expected_sha="$4"
+    if [ -z "$expected_sha" ]; then
+        echo "  [!] Aviso: no se especificó checksum SHA256 para $filename. Se omite por seguridad."
+        return
+    fi
     if wget -q --spider "$url" 2>/dev/null; then
         wget -q "$url" -O "$filename"
         if [ ! -s "$filename" ]; then
             echo "  [!] Aviso: la descarga de $filename quedo vacia."
             return
         fi
-        if [ -n "$expected_sha" ]; then
-            local actual_sha
-            actual_sha=$(sha256sum "$filename" | awk '{print $1}')
-            if [ "$actual_sha" != "$expected_sha" ]; then
-                echo "  [!] Aviso: checksum SHA256 invalido para $filename. Se omite por seguridad."
-                return
-            fi
+        local actual_sha
+        actual_sha=$(sha256sum "$filename" 2>/dev/null | awk '{print $1}')
+        if [ "$actual_sha" != "$expected_sha" ]; then
+            echo "  [!] Aviso: checksum SHA256 invalido para $filename. Se omite por seguridad."
+            return
+        fi
+        if ! dpkg-deb -I "$filename" >/dev/null 2>&1; then
+            echo "  [!] Aviso: el archivo descargado $filename no es un paquete Debian válido."
+            return
+        fi
+        local pkg_arch
+        pkg_arch=$(dpkg-deb -f "$filename" Architecture 2>/dev/null || echo "")
+        if [ "$pkg_arch" != "all" ] && [ "$pkg_arch" != "amd64" ]; then
+            echo "  [!] Aviso: arquitectura '$pkg_arch' de $filename incompatible con Debian 13."
+            return
         fi
         if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./"$filename" >/dev/null 2>&1; then
             echo "  [!] Aviso: no se pudo instalar $filename (posibles dependencias incompatibles). Se omitira el modulo."
@@ -666,9 +686,15 @@ fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
 mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-chown -R root:grp_sistemas /srv/nas
-find /srv/nas -type d -exec chmod 2775 {} +
-find /srv/nas -type f -exec chmod 664 {} +
+if [ "$KEEP_DATA" = true ]; then
+    chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    chmod 2770 /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+else
+    chown -h -R --preserve-root root:grp_sistemas /srv/nas
+    chmod 2770 /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    find -P /srv/nas -type d ! -type l -exec chmod 2770 {} +
+    find -P /srv/nas -type f ! -type l -exec chmod 660 {} +
+fi
 
 # Rotación de logs de backup para evitar llenar el disco
 cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
@@ -815,7 +841,12 @@ done
 echo " [9/9] Verificando y asegurando reglas de Firewall (UFW)..."
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
-    ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
+    LOCAL_SUBNET=$(ip -o -f inet addr show 2>/dev/null | awk '/scope global/ {print $4}' | head -n1)
+    if [ -n "$LOCAL_SUBNET" ]; then
+        ufw allow from "$LOCAL_SUBNET" to any port 9090 proto tcp comment 'Cockpit Web Admin (Subred Local)' 2>/dev/null || ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
+    else
+        ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
+    fi
     ufw allow 137,138/udp comment 'Samba NetBIOS' 2>/dev/null || true
     ufw allow 139,445/tcp comment 'Samba SMB' 2>/dev/null || true
     ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP' 2>/dev/null || true
