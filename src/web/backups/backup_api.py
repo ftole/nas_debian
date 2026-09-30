@@ -14,6 +14,7 @@ try:
 except ImportError:
     grp = None
 import ipaddress
+import posixpath
 
 CRED_DIR = "/etc/backup-credentials"
 BIN_DIR = "/usr/local/bin"
@@ -309,19 +310,19 @@ def _redact(msg, secret):
 
 
 def _is_forbidden_dest(host):
-    """Rechaza destinos loopback (127.0.0.0/8, ::1, localhost) y link-local (169.254.0.0/16)."""
+    """Rechaza destinos loopback (127.0.0.0/8, ::1, localhost), link-local (169.254.0.0/16) y no especificados."""
     h = (host or "").strip().lower()
     if not h:
         return True
-    if h in ("localhost", "ip6-localhost", "ip6-loopback") or h.endswith(".localhost"):
+    if h in ("localhost", "ip6-localhost", "ip6-loopback", "0.0.0.0", "::") or h.endswith(".localhost"):
         return True
     if h.startswith("127.") or h.startswith("169.254."):
         return True
     try:
-        ip_obj = ipaddress.ip_address(h)
-        if ip_obj.is_loopback or ip_obj.is_link_local:
+        ip_obj = ipaddress.ip_address(int(h) if h.isdigit() else h)
+        if ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_unspecified:
             return True
-    except ValueError:
+    except (ValueError, OverflowError):
         pass
     return False
 
@@ -389,7 +390,10 @@ def _valid_share(value):
 
 def _valid_path(value):
     value = value or ""
-    if value == "/" or not re.fullmatch(r'/[A-Za-z0-9._/-]*', value):
+    if not re.fullmatch(r'/[A-Za-z0-9._/-]+', value):
+        return False
+    norm = posixpath.normpath(value)
+    if norm == "/" or not norm.rstrip("/"):
         return False
     return ".." not in value.split("/")
 
@@ -486,6 +490,10 @@ SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
+    if [ -n "${{LAST_SNAPSHOT:-}}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -527,6 +535,8 @@ mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -534,6 +544,10 @@ fi
 if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
@@ -605,6 +619,10 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
+    if [ -n "${{LAST_SNAPSHOT:-}}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -637,6 +655,8 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile={KNOWN_HOSTS} -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -650,6 +670,10 @@ fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${{RSYNC_OPTS[@]}}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
@@ -693,6 +717,10 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {{
     local status=$?
+    if [ -n "${{LAST_SNAPSHOT:-}}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -725,6 +753,8 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -732,6 +762,10 @@ fi
 if ! rsync "${{RSYNC_OPTS[@]}}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
