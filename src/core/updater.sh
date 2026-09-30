@@ -25,20 +25,27 @@ NAS_UPDATE_SIGNER="${NAS_UPDATE_SIGNER:-}"
 # Con "true", si no existe un tag con firma válida, la actualización se cancela.
 NAS_REQUIRE_SIGNED_TAGS="${NAS_REQUIRE_SIGNED_TAGS:-false}"
 
-# Normaliza la URL del remoto a la forma "propietario/repositorio" para admitir
-# tanto el formato HTTPS como el formato SSH sin comparaciones frágiles.
+# Normaliza la URL del remoto a la forma "propietario/repositorio" validando
+# estrictamente que el host sea github.com (HTTPS o SSH).
 _normalizar_remoto() {
-    local url="$1" repo
-    if [[ "$url" == *"://"* ]]; then
-        # Formato HTTPS: https://github.com/propietario/repo.git
-        repo="${url#*://}"
-        repo="${repo#*/}"
+    local url="$1" repo=""
+    if [[ "$url" == "https://github.com/"* ]]; then
+        repo="${url#https://github.com/}"
+    elif [[ "$url" == "http://github.com/"* ]]; then
+        repo="${url#http://github.com/}"
+    elif [[ "$url" == "git@github.com:"* ]]; then
+        repo="${url#git@github.com:}"
+    elif [[ "$url" == "ssh://git@github.com/"* ]]; then
+        repo="${url#ssh://git@github.com/}"
     else
-        # Formato SSH: git@github.com:propietario/repo.git
-        repo="${url#*:}"
+        return 1
     fi
     repo="${repo%.git}"
-    printf '%s\n' "$repo"
+    if [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        printf '%s\n' "$repo"
+        return 0
+    fi
+    return 1
 }
 
 # Muestra un aviso respetando el contexto TUI o consola.
@@ -138,7 +145,7 @@ actualizar_desde_git() {
         _aviso "No se detectó el remoto 'origin'. Actualización cancelada."
         return 1
     fi
-    REMOTO_NORM=$(_normalizar_remoto "$REMOTO_ACTUAL")
+    REMOTO_NORM=$(_normalizar_remoto "$REMOTO_ACTUAL" 2>/dev/null || echo "")
     if [ "$REMOTO_NORM" != "$EXPECTED_REPO" ]; then
         _aviso "El remoto 'origin' ($REMOTO_NORM) no coincide con el esperado ($EXPECTED_REPO). Actualización cancelada."
         return 1
