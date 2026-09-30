@@ -117,7 +117,7 @@ Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grup
   * **Creación de Grupos (Menú [2]):** Grupos departamentales o técnicos según las necesidades del entorno.
   * **Creación de Recursos (Menú [3]):** Configuración guiada con elección de visibilidad (Oculto `$` por defecto o Visible) y 4 esquemas de permisos granulares:
     1. *Lectura y Escritura por Grupo:* Todos los grupos autorizados (`read only = no`, `mask 0770`).
-    2. *Solo Lectura General + Escritura Exclusiva:* Acceso general de lectura con escritura restringida (`read only = yes`, `write list = @grupo_escritura`, `mask 0775`).
+    2. *Solo Lectura General + Escritura Exclusiva:* Acceso general de lectura con escritura restringida (`read only = yes`, `write list = +grupo_escritura`, `mask 0775`).
     3. *Solo Lectura Estricta:* Consulta histórica sin modificación (`read only = yes`, `mask 0755`).
     4. *Acceso Público / Invitados:* Libre acceso con o sin clave (`guest ok = yes`).
 
@@ -233,4 +233,3 @@ sudo nas uninstall
 ls -la /etc/cron.d/backup_*
 tail -f /srv/nas/LOGS_BACKUP/backup_*.log
 ```
-
