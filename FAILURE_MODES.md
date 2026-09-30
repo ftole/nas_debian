@@ -13,13 +13,13 @@ Este documento describe cómo se comporta el sistema ante fallos y cómo verific
 
 | Fallo | Comportamiento esperado | Verificación |
 | :--- | :--- | :--- |
-| Espacio libre insuficiente | El runner aborta antes de copiar y registra "espacio libre insuficiente". | `failure_runners.bats` |
-| `rsync` falla a mitad | Sale con error, registra el fallo y **descarta el snapshot parcial**. | `failure_runners.bats` |
-| Montaje CIFS falla | Sale con error; no queda ningún punto de montaje colgado. | `failure_runners.bats` |
+| Espacio libre insuficiente | El runner aborta antes de copiar y registra "espacio libre insuficiente" (<2 GB o >95%). | `failure_runners.bats` |
+| `rsync` falla a mitad | Sale con error, registra el fallo y descarta el staging temporal (`.inprogress_*`) vía `trap cleanup`. | `failure_runners.bats` |
+| Montaje CIFS falla o host se desconecta | Sale con error; con `soft,timeo=30` y `trap cleanup` no se bloquea el kernel ni queda montaje colgado. | `failure_runners.bats` |
 | Credenciales SSH rechazadas | Sale con error y lo registra. | `failure_runners.bats` |
 | Ejecución simultánea de la misma tarea | La segunda ejecución se omite ("BACKUP OMITIDO") y sale sin error. | `failure_runners.bats` |
 | Aborto manual de una ejecución | Se detiene la unidad `systemd`, se descarta el snapshot parcial y se libera el bloqueo. | Manual (asistente/panel) |
-| Interrupción abrupta (corte de energía) | El bloqueo `flock` se libera al terminar el proceso; el snapshot parcial no se usa como referencia. | Manual (VM) |
+| Interrupción abrupta (corte de energía o red) | El staging `.inprogress_*` queda aislado sin promocionarse a snapshot definitivo; solo copias al 100% se exponen. | Manual (VM) |
 | Servidor remoto inalcanzable | El montaje o el `rsync` fallan; se registra y no se altera el último snapshot válido. | Manual (VM) |
 | Retención mal configurada (0) | Se normaliza a un valor mínimo de 1. | `validar_cron` / revisión de código |
 
@@ -27,8 +27,10 @@ Este documento describe cómo se comporta el sistema ante fallos y cómo verific
 
 | Fallo | Comportamiento esperado | Verificación |
 | :--- | :--- | :--- |
-| Disco dedicado en uso (montado, PV o RAID) | El despliegue aborta salvo que se use `--force`. | `failure_helpers.bats` (`disco_en_uso`) |
-| Disco del sistema operativo (LVM/RAID/LUKS/Btrfs) | Se identifica y se excluye del menú. | `helpers.bats` (`resolver_discos_raiz`) |
+| Disco en uso crítico (PV de LVM o miembro de RAID) | Aborta incondicionalmente sin opción a formateo ni alteración. | `failure_helpers.bats` (`disco_en_uso_critico`) |
+| Disco montado en otra ruta | Aborta salvo que se use `--ignore-in-use` y confirmación explícita `SI-FORMATEAR` (`--force` solo confirma discos libres). | `failure_helpers.bats` (`disco_en_uso`) |
+| Reutilización con datos (`--keep-data`) | Detecta partición `NAS_DATA` o válida con filesystem reconocido y monta sin formatear ni destruir datos. | Manual (VM) / `deploy.sh` |
+| Disco del sistema operativo (LVM/RAID/LUKS/Btrfs) | Se identifica, se excluye del menú y se oculta en Cockpit vía udev (`80-udisks2-hide-os.rules`). | `helpers.bats` (`resolver_discos_raiz`) |
 | Partición no detectada tras el particionado | Aborta para no formatear el disco completo. | Manual (VM) |
 | Re-despliegue sobre un servidor configurado | Se respalda `smb.conf` antes de regenerarlo y se avisa si `/srv/nas` ya está montado. | Manual (VM) |
 | Servicio que no arranca (`smbd`, `wsdd2`, `cockpit`) | Se reporta `[OK]`/`[!]` por servicio al finalizar. | Manual (VM) |
