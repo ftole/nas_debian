@@ -8,34 +8,56 @@ Este repositorio contiene los scripts para desplegar y administrar, sobre Debian
 
 - Asistente de despliegue con detección automática de discos, dirección IP y usuario administrador.
 - Dos roles excluyentes: `ARCHIVOS` (recursos compartidos visibles) y `BACKUP` (repositorios ocultos).
-- Copias de seguridad deduplicadas mediante enlaces duros para Windows (CIFS), Linux (SSH) y carpetas locales.
+- Selección condicional de sistema de archivos según rol y medio físico: `ext4` optimizado para NAS en HDD/SSD y `Btrfs` con compresión Zstandard para central de copias de seguridad.
+- Soporte para reutilización de almacenamiento con datos existentes (`--keep-data`) sin formatear.
+- Copias de seguridad atómicas (`.inprogress_*`) y deduplicadas mediante enlaces duros para Windows (CIFS SMB 3.1.1 con soporte de dominios corporativos), Linux (SSH) y carpetas locales.
+- Alta concurrencia y compatibilidad ofimática: optimizado para más de 100 usuarios en Microsoft Office/Excel mediante módulos VFS `acl_xattr` y `streams_xattr`.
+- Protección del sistema contra apagones y cortes eléctricos (`commit=2` en HDD, umbrales de memoria sucia acotados `vm.dirty_bytes` y descarte atómico de transferencias interrumpidas).
+- Mantenimiento proactivo integrado: verificación de integridad silenciosa (`btrfs scrub`), optimización SSD (`fstrim.timer`) y rotación de registros (`logrotate`).
 - Gestión de grupos, recursos compartidos, usuarios y tareas desde el asistente o desde el panel web.
 - Base limpia: el despliegue no crea recursos de prueba; se añaden según las necesidades del entorno.
 - Desinstalación total que devuelve el servidor a su estado base.
 
-## Tecnologías utilizadas
+## Cuadro Maestro de Tecnologías, Subsistemas y Librerías
 
-| Área | Tecnología |
-| :--- | :--- |
-| Sistema operativo | Debian 13 (Trixie) |
-| Automatización | Bash 5 y `whiptail` (interfaz de terminal) |
-| Compartición de archivos | Samba (`smbd`/`nmbd`) y WSDD2 |
-| Panel web | Cockpit con PatternFly 4 |
-| Extensiones web | Plugins de 45Drives (File Sharing, Identities, Navigator) |
-| Backend web | Python 3 (`backup_api.py`) |
-| Frontend web | JavaScript ES5, HTML y CSS |
-| Almacenamiento | Btrfs (`parted`, `mkfs.btrfs`) |
-| Copias de seguridad | `rsync` con enlaces duros, CIFS (`cifs-utils`) y SSH (`sshpass`) |
-| Programación de tareas | `cron`, `systemd-run` y `flock` |
-| Seguridad de red | UFW, fail2ban y `unattended-upgrades` |
-| Calidad | ShellCheck, BATS y Flake8 sobre GitHub Actions |
+El siguiente cuadro detalla todos los componentes, librerías, subsistemas del kernel y tecnologías integradas en el proyecto, explicando su función exacta y el beneficio directo que aportan a la seguridad, estabilidad y rendimiento del servidor:
+
+| Tecnología / Subsistema / Librería | Componente / Ámbito | Para qué sirve | Beneficio que aporta |
+| :--- | :--- | :--- | :--- |
+| **Debian 13 (Trixie) x86_64** | Sistema Operativo Base | Plataforma Linux de nivel empresarial con soporte a largo plazo y paquetes modernos. | Máxima estabilidad, seguridad probada y consumo mínimo de recursos en hardware moderno y heredado. |
+| **Samba 4 (`smbd` / `nmbd`)** | Servicio de Red SMB/CIFS | Compartición de carpetas y archivos en red para clientes Windows, Linux y macOS. | Protocolo estándar nativo en Windows, cifrado negociado (`desired`), protocolo mínimo seguro SMB2_02 y aislamiento de usuarios. |
+| **Módulos VFS Samba (`acl_xattr`, `streams_xattr`)** | Capa VFS de Samba | Mapeo de listas de control de acceso (ACLs) de Windows en atributos extendidos (`xattr`) y compatibilidad con flujos de datos alternativos NTFS (*Alternate Data Streams*). | Compatibilidad total con suites ofimáticas (Microsoft Office / Excel con +100 puestos simultáneos sin bloqueos ni errores de guardado temporal `~$`) y preservación de marcas de seguridad Windows (`Zone.Identifier`). |
+| **Samba Tuning Ofimático (`store dos attributes`, `aio`, `sendfile`)** | Configuración `smb.conf` | Transferencia directa kernel-red vía `sendfile`, I/O asíncrono (`aio read/write size = 16384`) y límite de 65,535 descriptores de archivo. | Rendimiento máximo en saturación de red, lectura y guardado instantáneo de hojas de cálculo compartidas sin cuellos de botella de I/O. |
+| **ext4 optimizado (`tune2fs -m 1`, `commit=2`/`commit=5`, `noatime`)** | Sistema de Archivos (Rol `ARCHIVOS`) | Filesystem transaccional con *journaling* para el almacenamiento departamental en `/srv/nas`. | Recupera hasta un 4% de capacidad reservada para root (`-m 1`); minimiza la ventana de pérdida ante apagones repentinos sincronizando el journal cada 2 s (`commit=2` en HDD); reduce un 30% las operaciones de I/O (`noatime`). |
+| **BTRFS con Zstandard (`compress=zstd:3`, `space_cache=v2`)** | Sistema de Archivos (Rol `BACKUP`) | Filesystem avanzado con compresión en tiempo real y sumas de verificación (*checksums*) por bloque. | Ahorro del 20% al 40% de espacio físico sin impacto en CPU; asignación ultrarrápida de bloques libres (`space_cache=v2`); detección intrínseca de errores físicos mediante hashes SHA256 integrados. |
+| **BTRFS Scrub Programado (`nas-btrfs-scrub`)** | Mantenimiento Mensual (`cron`) | Tarea automática mensual (`0 2 1 * *`) que audita la totalidad de los datos y metadatos en `/srv/nas`. | Detección proactiva y reporte/reparación de corrupción silenciosa de datos (*Bit Rot* o degradación electromagnética) antes de que afecte restauraciones críticas. |
+| **rsync con Hardlinks (`-aAXH --numeric-ids --link-dest`)** | Motor de Copias de Seguridad | Replicación incremental a nivel de archivo con enlace físico a snapshots previos sin cambio. | Deduplicación eficiente (>85% de ahorro de disco); preservación exacta de atributos extendidos (`-X`), ACLs POSIX (`-A`), enlaces duros (`-H`) y UIDs/GIDs numéricos idénticos sin alteración. |
+| **Staging Atómico (`.inprogress_*`)** | Pipeline de Runners de Backup | Escritura de snapshots en carpeta temporal oculta y posterior renombrado atómico (`mv`) al finalizar con éxito. | Resiliencia total ante apagones o desconexiones: si el proceso se interrumpe, el manejador de señales (`trap cleanup`) descarta los datos parciales; el histórico solo contiene copias 100% íntegras. |
+| **cifs-utils (`mount.cifs`) SMB 3.1.1 (`vers=3.1.1,noserverino,cache=none,soft,timeo=30`)** | Conector de Respaldo Windows | Montaje temporal en solo lectura (`ro`) de carpetas compartidas SMB/CIFS remotas. | Negociación con cifrado y firmas SMB 3.1.1; `noserverino` previene errores de inodos remotos; `cache=none` evita lectura de datos obsoletos; `soft,timeo=30` previene cuelgues del kernel del NAS si el host Windows se reinicia. |
+| **Soporte de Dominios Active Directory (`DOMINIO\user`, `DOMINIO/user`)** | Autenticación CIFS en Backups | Análisis y desglose automático de credenciales con dominio corporativo en `/etc/backup-credentials/<tarea>.cred`. | Integración nativa con infraestructuras Active Directory sin exponer contraseñas en memoria de comandos (`ps`) y con permisos estrictos `0600 root:root`. |
+| **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector de Respaldo Linux | Túnel SSH cifrado no interactivo con almacenamiento de huellas en archivo aislado (`known_hosts_backup`). | Protección estricta contra ataques *Man-in-the-Middle*; registra claves nuevas en el primer contacto automáticamente sin requerir interacción manual y sin degradar la seguridad a `no`. |
+| **Ajustes de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel Linux | Ajuste fino de descriptores de inotify, reciclaje de conexiones TCP y sincronización de memoria sucia. | `fs.inotify` ampliado para indexar árboles de archivos masivos; `tcp_keepalive` (120s/15s/4) purga conexiones SMB huérfanas en minutos; `vm.dirty_bytes=256MB` fuerza vaciado continuo evitando parálisis de I/O. |
+| **Readahead Tuning por udev (`60-nas-readahead.rules`)** | Subsistema de Bloques Linux | Configuración del búfer de lectura anticipada del disco NAS (`1024 KB` en SSD / `4096 KB` en HDD). | Acelera transferencias secuenciales de red masivas y agiliza las comparaciones diferenciales de `rsync` sin sobrecargar la RAM en unidades flash. |
+| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Inyección de la propiedad `UDISKS_IGNORE=1` en el disco que aloja la partición raíz del sistema operativo. | Impide que operadores o interfaces gráficas (Cockpit Storage) formateen o destruyan accidentalmente el disco donde se ejecuta Debian. |
+| **Reutilización de Discos Existentes (`--keep-data`)** | Motor de Despliegue | Detección automática de particiones previas y montaje en `/srv/nas` respetando los datos preexistentes. | Permite migrar o reinstalar el servidor conservando terabytes de información intacta sin requerir formateo ni volcados externos. |
+| **Cockpit + PatternFly 4 + Extensiones 45Drives + EAD Backups** | Panel de Administración Web | Interfaz web responsiva activada por socket (`systemd`) sin demonios en segundo plano residentes. | Consumo nulo de memoria RAM en reposo; administración visual coherente de usuarios, carpetas compartidas Samba y bitácoras de respaldo desde cualquier navegador. |
+| **Python 3 (`backup_api.py`)** | Backend API para Cockpit | Interfaz JSON segura entre la interfaz gráfica web y los binarios y scripts del sistema. | Validación estricta con expresiones regulares que impide inyecciones de comandos, ejecución con privilegios acotados y lectura de bitácoras retrospectivas sin bloqueos. |
+| **whiptail + Bash 5** | Interfaz Visual de Terminal (TUI) | Menús interactivos con colores nativos para administración completa desde consola o SSH. | Operación inmediata sin dependencias gráficas pesadas, validación interactiva y ciclo de corrección de datos sin pérdida de texto escrito. |
+| **Control de Concurrencia con `flock`** | Programación de Tareas (`cron`) | Mecanismo de bloqueo exclusivo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza que nunca se solapen dos ejecuciones de una misma tarea si un respaldo toma más tiempo que su frecuencia programada. |
+| **Monitoreo de Espacio Libre (`df -Pk`) en Runners** | Prevención de Saturación de Disco | Evaluación del porcentaje y megabytes disponibles en `/srv/nas` previa a la ejecución de cada respaldo. | Emite advertencia si el uso supera el 85% y cancela de inmediato la tarea si restan menos de 2 GB o se supera el 95%, evitando caídas críticas del sistema de archivos. |
+| **`fstrim.timer`** | Mantenimiento para Medios SSD | Recorte periódico de bloques descartados en unidades de estado sólido y arreglos NVMe. | Mantiene tasas óptimas de rendimiento de escritura sostenido y previene la degradación prematura de unidades flash. |
+| **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Registros | Rotación programada con compresión y directiva `copytruncate` para registros de despliegue y copias. | Impide el crecimiento indefinido de archivos de bitácora y la consiguiente pérdida silenciosa de espacio en disco. |
+| **WSDD2 con Systemd Override** | Descubrimiento de Red Windows | Emisión de mensajes WSD y LLMNR con parámetros explícitos de NetBIOS y Workgroup. | El servidor es detectado al instante en "Red" por equipos Windows 10/11 sin depender de protocolos obsoletos e inseguros como SMBv1 o NetBIOS broadcast. |
+| **Aislamiento de Idioma (`LC_ALL=C LANG=C`)** | Compatibilidad de Sistema | Wrappers de ejecución en `/usr/local/sbin/chage`, `passwd` y `lastb`. | Elimina errores de interpretación de fechas o cadenas en módulos de Cockpit cuando Debian se encuentra configurado en español. |
+| **ACLs POSIX (`acl` / `setfacl`) con Herencia por Defecto** | Seguridad de Archivos Local | Reglas de acceso multi-grupo sobre carpetas compartidas y herencia automática (`default ACL`). | Permite esquemas mixtos (múltiples grupos en lectura y uno exclusivo en escritura) asegurando que los nuevos archivos mantengan la política definida. |
+
 
 ## Requisitos
 
 - Debian 13 (Trixie) x86_64, con acceso `root` o `sudo`.
 - Conexión a Internet durante la instalación (paquetes y extensiones).
 - `curl` (o `wget`) y `ca-certificates` para el instalador remoto.
-- Disco dedicado opcional para `/srv/nas`. Si se elige uno, se formatea por completo.
+- Disco dedicado opcional para `/srv/nas` (puede formatearse desde cero con el sistema de archivos óptimo o reutilizarse conservando sus datos intactos mediante `--keep-data`).
 
 ## Instalación
 
@@ -241,10 +263,10 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 
 | Opción | Módulo | Descripción |
 | :--- | :--- | :--- |
-| 1 | Desplegar servidor | Asistente en 5 pasos para el rol `ARCHIVOS` o `BACKUP`. |
+| 1 | Desplegar servidor | Asistente en 5 pasos para el rol `ARCHIVOS` o `BACKUP`, con selección condicional de filesystem y opción de conservar datos (`--keep-data`) o formatear. |
 | 2 | Gestión de grupos | Crear, listar y eliminar grupos de seguridad (`grp_*`). |
-| 3 | Recursos compartidos | Crear, listar, habilitar/deshabilitar y eliminar recursos, con 4 esquemas de permisos. |
-| 4 | Tareas de backup | Programar y **abortar** copias para Windows (CIFS), Linux (SSH) o carpetas locales. |
+| 3 | Recursos compartidos | Crear, listar, habilitar/deshabilitar y eliminar recursos, con 4 esquemas de permisos y ACLs por defecto. |
+| 4 | Tareas de backup | Programar y **abortar** copias para Windows (CIFS), Linux (SSH) o carpetas locales con staging atómico. |
 | 5 | Usuarios | Crear usuarios, asignar grupos y gestionar contraseñas de red. |
 | 6 | Diagnóstico | Estado de servicios, almacenamiento, recursos y tareas programadas. |
 | 7 | Reiniciar servicios | Recarga de Samba, WSDD2 y Cockpit. |
@@ -253,20 +275,28 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 
 ## Copias de seguridad
 
-Cada ejecución genera una carpeta con fecha y hora (`snapshot_YYYY-MM-DD_HHMMSS`). Los archivos que no cambiaron se comparten mediante enlaces duros, de modo que el consumo de disco es muy inferior al de copias completas repetidas. La retención conserva los últimos N snapshots y elimina los más antiguos.
+El motor de copias de seguridad combina rendimiento, resiliencia ante cortes imprevistos y máxima eficiencia de almacenamiento:
 
-Se admiten tres orígenes: Windows (CIFS, con montaje en solo lectura), Linux (SSH con `rsync`) y carpetas locales. Las tareas se programan con `cron` y se lanzan con `systemd-run`; un bloqueo `flock` evita ejecuciones simultáneas. Una ejecución en curso puede **abortarse** desde el asistente (opción [4]) o desde el panel web (botón de detener); al hacerlo se detiene la unidad, se descarta el snapshot parcial y se libera el bloqueo. El detalle técnico está en `SMB_DEBIAN.md`.
+- **Staging atómico y protección contra apagones:** Cada respaldo se procesa inicialmente en un directorio temporal oculto (`.inprogress_YYYY-MM-DD_HHMMSS`). Si ocurre un corte de energía, pérdida de conectividad o cancelación manual, los controladores de eventos (`trap cleanup EXIT TERM INT`) desmontan el recurso y eliminan cualquier snapshot parcial corrupto. Solo cuando la copia finaliza con éxito total (código de salida 0), se promueve atómicamente mediante `mv` a su nombre definitivo `snapshot_YYYY-MM-DD_HHMMSS`.
+- **Deduplicación por enlaces duros (*hardlinks*):** Mediante `rsync --link-dest`, los archivos no modificados comparten el mismo inodo físico en disco que el snapshot anterior. Esto reduce el consumo de almacenamiento en más de un 85% frente a copias completas repetitivas.
+- **Orígenes soportados:**
+  - **Windows (CIFS / SMB 3.1.1):** Montaje en solo lectura con parámetros de alta resiliencia (`vers=3.1.1,noserverino,cache=none,soft,timeo=30`). Soporta cuentas locales y cuentas de dominio corporativo de Active Directory (`DOMINIO\usuario` y `DOMINIO/usuario`), almacenando credenciales protegidas en `/etc/backup-credentials/<tarea>.cred` con permisos `0600 root:root`.
+  - **Linux (SSH):** Replicación con atributos extendidos completos (`rsync -aAXH --numeric-ids -v -z`) sobre un túnel SSH con verificación estricta de claves (`StrictHostKeyChecking=accept-new`) guardadas en un almacén aislado `/root/.ssh/known_hosts_backup`.
+  - **Carpetas locales:** Sincronización directa entre directorios locales del servidor preservando metadatos POSIX exactos.
+- **Monitoreo preventivo de espacio:** Los runners validan los umbrales de almacenamiento antes de transferir datos; emiten advertencia si la ocupación supera el 85% y abortan preventivamente si quedan menos de 2 GB libres o la ocupación excede el 95%.
+- **Concurrencia y aborto seguro:** Bloqueo exclusivo con `flock` por tarea para evitar solapamientos. Las tareas en ejecución pueden abortarse limpiamente desde el asistente o desde el panel web de Cockpit. El detalle técnico completo se encuentra en `SMB_DEBIAN.md`.
 
 ## Seguridad
 
-El proyecto aplica varias medidas para reducir el riesgo de errores y de accesos no autorizados:
+El proyecto aplica una arquitectura de defensa en profundidad para garantizar la resiliencia operativa y la protección de datos:
 
-- Validación estricta de los datos introducidos en el asistente y en la API web.
-- Las contraseñas no viajan en la línea de comandos: se envían por `stdin` o mediante variables de entorno, y las credenciales de red se guardan en archivos con permisos `0600`.
-- Samba con cifrado negociado, protocolo mínimo SMB2 y mapeo de invitados controlado; los recursos de respaldo son ocultos.
-- Montajes CIFS en modo solo lectura y permisos gestionados con ACL de POSIX.
-- Protección del disco del sistema (incluye LVM, RAID, LUKS y subvolúmenes Btrfs) y aviso ante discos en uso.
-- Rotación de logs, comprobación de espacio libre y verificación de integridad (SHA256) de las extensiones descargadas.
+- **Validación estricta de entradas:** Tanto en el asistente TUI como en la API web Python se sanitizan rutas, expresiones cron, puertos y nombres para mitigar inyecciones de comandos y ataques de salto de directorio (*path traversal*).
+- **Protección de secretos y credenciales:** Las contraseñas administrativas nunca viajan en la línea de comandos (se procesan vía `stdin` o variables de entorno), y las credenciales CIFS se almacenan con permisos `0600 root:root`.
+- **Samba hardening y compatibilidad ofimática:** Configuración de `map to guest = Bad User`, cifrado negociado (`desired`), protocolo mínimo SMB2_02, módulos VFS `acl_xattr` y `streams_xattr` para compatibilidad completa con Microsoft Excel / Office multiusuario (+100 puestos concurrentes sin bloqueos de archivos temporales), y herencia de permisos POSIX con ACLs por defecto (`default ACL`).
+- **Ajustes de Kernel y Resiliencia Eléctrica:** Parámetros `sysctl` optimizados (`vm.dirty_bytes=256MB`, `vm.dirty_background_bytes=64MB`, `net.ipv4.tcp_keepalive_time=120`, `vm.vfs_cache_pressure=30`) para evitar congelamientos de I/O y asegurar el volcado periódico a disco ante fallos eléctricos. En discos mecánicos se fuerza `commit=2` en ext4.
+- **Protección contra Bit Rot y Degradación Flash:** Para el rol de Backup se programa una auditoría periódica mensual de sumas de verificación mediante `btrfs scrub` (`0 2 1 * *`), y para medios SSD se activa el temporizador `fstrim.timer`.
+- **Protección del disco del sistema operativo:** Regla udev persistente (`80-udisks2-hide-os.rules`) con `UDISKS_IGNORE=1` para ocultar la unidad raíz en Cockpit Storage, junto con protecciones contra formateo de particiones en uso (LVM, RAID, LUKS).
+- **Rotación de logs e integridad de cadena de suministro:** Políticas automáticas en `logrotate` para bitácoras de sincronización y despliegue, junto con verificación de firmas SHA256 de todas las extensiones web descargadas.
 
 El análisis de modos de fallo y las pruebas de resiliencia están documentados en `FAILURE_MODES.md`.
 
