@@ -27,7 +27,7 @@ El siguiente cuadro detalla todos los componentes, librerías, subsistemas del k
 | **Debian 13 (Trixie) x86_64** | Sistema Operativo Base | Plataforma Linux de nivel empresarial con soporte a largo plazo y paquetes modernos. | Máxima estabilidad, seguridad probada y consumo mínimo de recursos en hardware moderno y heredado. |
 | **Samba 4 (`smbd` / `nmbd`)** | Servicio de Red SMB/CIFS | Compartición de carpetas y archivos en red para clientes Windows, Linux y macOS. | Protocolo estándar nativo en Windows, cifrado negociado (`desired`), protocolo mínimo seguro SMB2_02 y aislamiento de usuarios. |
 | **Módulos VFS Samba (`acl_xattr`, `streams_xattr`)** | Capa VFS de Samba | Mapeo de listas de control de acceso (ACLs) de Windows en atributos extendidos (`xattr`) y compatibilidad con flujos de datos alternativos NTFS (*Alternate Data Streams*). | Compatibilidad total con suites ofimáticas (Microsoft Office / Excel con +100 puestos simultáneos sin bloqueos ni errores de guardado temporal `~$`) y preservación de marcas de seguridad Windows (`Zone.Identifier`). |
-| **Samba Tuning Ofimático (`store dos attributes`, `aio`, `sendfile`)** | Configuración `smb.conf` | Transferencia directa kernel-red vía `sendfile`, I/O asíncrono (`aio read/write size = 16384`) y límite de 65,535 descriptores de archivo. | Rendimiento máximo en saturación de red, lectura y guardado instantáneo de hojas de cálculo compartidas sin cuellos de botella de I/O. |
+| **Directivas Samba para Alto Rendimiento y Ofimática** | Configuración `smb.conf` | `store dos attributes = yes`, `inherit permissions = yes`, `strict sync = yes`, `use sendfile = yes`, `aio read/write size = 16384` y `max open files = 65535`. | Transferencia directa kernel-red sin saltos a memoria de usuario; latencia ultrabaja en apertura de libros contables masivos (Excel), prevención de corrupción de datos y eliminación de cuellos de botella por agotamiento de descriptores con +100 equipos. |
 | **ext4 optimizado (`tune2fs -m 1`, `commit=2`/`commit=5`, `noatime`)** | Sistema de Archivos (Rol `ARCHIVOS`) | Filesystem transaccional con *journaling* para el almacenamiento departamental en `/srv/nas`. | Recupera hasta un 4% de capacidad reservada para root (`-m 1`); minimiza la ventana de pérdida ante apagones repentinos sincronizando el journal cada 2 s (`commit=2` en HDD); reduce un 30% las operaciones de I/O (`noatime`). |
 | **BTRFS con Zstandard (`compress=zstd:3`, `space_cache=v2`)** | Sistema de Archivos (Rol `BACKUP`) | Filesystem avanzado con compresión en tiempo real y sumas de verificación (*checksums*) por bloque. | Ahorro del 20% al 40% de espacio físico sin impacto en CPU; asignación ultrarrápida de bloques libres (`space_cache=v2`); detección intrínseca de errores físicos mediante hashes SHA256 integrados. |
 | **BTRFS Scrub Programado (`nas-btrfs-scrub`)** | Mantenimiento Mensual (`cron`) | Tarea automática mensual (`0 2 1 * *`) que audita la totalidad de los datos y metadatos en `/srv/nas`. | Detección proactiva y reporte/reparación de corrupción silenciosa de datos (*Bit Rot* o degradación electromagnética) antes de que afecte restauraciones críticas. |
@@ -273,6 +273,39 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 | 8 | Buscar actualizaciones | Sincronización con GitHub. |
 | 9 | Desinstalar | Restablecimiento total del sistema. |
 
+## Selección de sistema de archivos según rol y medio
+
+El instalador y el asistente seleccionan y configuran automáticamente el sistema de archivos óptimo según el rol elegido y el tipo de medio físico detectado (`rotational` en `/sys/block/<disco>/queue/rotational`):
+
+| Rol del servidor | Tipo de medio | Sistema de archivos | Opciones de montaje y ajustes | Beneficio técnico |
+| :--- | :--- | :--- | :--- | :--- |
+| **`ARCHIVOS` (NAS)** | HDD mecánico (`rotational=1`) | `ext4` | `rw,noatime,commit=2`, `tune2fs -m 1`, readahead 4096 KB | Recuperación del 4% de espacio reservado; transacciones volcadas cada 2 s para resiliencia ante cortes eléctricos repentinos. |
+| **`ARCHIVOS` (NAS)** | SSD flash (`rotational=0`) | `ext4` | `rw,noatime,commit=5`, readahead 1024 KB, `fstrim.timer` | Minimiza escrituras innecesarias en celdas NAND; optimización continua de bloques no referenciados. |
+| **`BACKUP` (Central)** | HDD mecánico (`rotational=1`) | `Btrfs` | `rw,noatime,compress=zstd:3,space_cache=v2,autodefrag`, readahead 4096 KB, `btrfs scrub` mensual | Compresión transparente con ahorro del 20% al 40% de disco; desfragmentación en segundo plano y verificación periódica contra *Bit Rot*. |
+| **`BACKUP` (Central)** | SSD flash (`rotational=0`) | `Btrfs` | `rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async`, readahead 1024 KB, `fstrim.timer`, `btrfs scrub` mensual | Descarte asíncrono para almacenamiento flash; compresión ZSTD rápida sin latencia de I/O y comprobación criptográfica mensual. |
+
+### Reutilización de almacenamiento con datos existentes (`--keep-data`)
+
+Si el servidor ya cuenta con un disco que contiene información previa, el sistema permite integrarlo sin formatear:
+- **En el asistente visual:** En el Paso 2, seleccione la opción `Conservar datos existentes (montar sin formatear, --keep-data)`.
+- **Por línea de comandos:** Añadiendo el argumento `--keep-data` a la invocación de `deploy.sh`.
+El sistema inspecciona las particiones, identifica la partición de datos (por etiqueta `NAS_DATA` o partición previa válida), verifica el sistema de archivos (`ext4`, `btrfs`, etc.) y la monta en `/srv/nas` aplicando los parámetros de rendimiento correspondientes sin riesgo de pérdida de datos.
+
+### Despliegue automatizado por línea de comandos
+
+Para entornos desatendidos o automatizaciones, `deploy.sh` puede ejecutarse directamente sin interfaz gráfica:
+
+```bash
+# Servidor de Archivos en partición local:
+printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-NAS admin - ARCHIVOS
+
+# Servidor de Archivos conservando datos en disco secundario (/dev/sdb):
+printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SRV-EAD-NAS admin - ARCHIVOS --keep-data
+
+# Servidor de Backup formateando disco secundario desde cero (/dev/sdb):
+printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SRV-EAD-BKP admin - BACKUP
+```
+
 ## Copias de seguridad
 
 El motor de copias de seguridad combina rendimiento, resiliencia ante cortes imprevistos y máxima eficiencia de almacenamiento:
@@ -312,7 +345,10 @@ src/core/updater.sh        Actualización desde GitHub
 src/modules/               Módulos del asistente (grupos, recursos, backups, usuarios, diagnóstico)
 src/web/backups/           Panel web de backups (Cockpit)
 tests/                     Pruebas unitarias y de fallo
-FAILURE_MODES.md           Modos de fallo y su verificación
+SMB_DEBIAN.md              Manual técnico de arquitectura y referencia
+SECURITY.md                Modelo de seguridad, identidades y mitigaciones
+FAILURE_MODES.md           Modos de fallo y su verificación (FMEA)
+AGENTS.md                  Especificación técnica maestra para agentes e ingenieros
 .github/workflows/ci.yml   Integración continua
 ```
 
