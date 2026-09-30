@@ -48,7 +48,7 @@ def test_valid_path_ok(value):
     assert api._valid_path(value)
 
 
-@pytest.mark.parametrize("value", ["/", "/srv/nas/../etc", "relative/path", "", "/a b"])
+@pytest.mark.parametrize("value", ["/", "//", "///", "/.", "/./", "/srv/nas/../etc", "relative/path", "", "/a b"])
 def test_valid_path_reject(value):
     assert not api._valid_path(value)
 
@@ -397,6 +397,9 @@ def test_create_task_cifs_clave_caracteres_especiales(tmp_path, monkeypatch, cap
         "localhost",
         "sub.localhost",
         "::1",
+        "0.0.0.0",
+        "::",
+        "2130706433",
         "169.254.0.1",
         "169.254.169.254",
     ],
@@ -482,6 +485,10 @@ def test_create_task_runners_contain_immutable_commands(tmp_path, monkeypatch, c
     })
     capsys.readouterr()
     runner = (tmp_path / "bin" / "backup_t_inmut.sh").read_text()
+    assert 'btrfs property set "$LAST_SNAPSHOT" ro false' in runner
+    assert 'chattr -R -i "$LAST_SNAPSHOT"' in runner
+    assert 'chattr -R +i "$LAST_SNAPSHOT"' in runner
+    assert 'btrfs property set "$LAST_SNAPSHOT" ro true' in runner
     assert 'chattr -R +i "$FINAL_SNAPSHOT"' in runner
     assert 'btrfs property set "$FINAL_SNAPSHOT" ro true' in runner
     assert 'chattr -R -i "$old"' in runner
