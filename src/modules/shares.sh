@@ -219,7 +219,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         RET=$?
                         if [ $RET -ne 0 ] || [ -z "$GRUPOS_SEL" ]; then continue; fi
 
-                        VALID_USERS=$(echo "$GRUPOS_SEL" | tr -d '\"' | sed 's/^/+/; s/ / +/g; s/,/ +/g')
+                        VALID_USERS=$(echo "$GRUPOS_SEL" | tr -d '\"' | tr ',' ' ')
                         GRUPO_DUENO=$(echo "$GRUPOS_SEL" | tr -d '\"' | awk '{print $1}')
                         READ_ONLY="no"
                         MASK="0770"
@@ -252,12 +252,13 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         if [ $RET -ne 0 ] || [ -z "$GRUPO_RW" ]; then continue; fi
 
                         TODOS_GRPS=$(echo "$GRUPOS_RO $GRUPO_RW" | tr -d '\"' | tr ' ' '\n' | sort -u | tr '\n' ' ')
-                        VALID_USERS=$(echo "$TODOS_GRPS" | sed 's/^/+/; s/ $//; s/ / +/g')
-                        WRITE_LIST="+$GRUPO_RW"
-                        READ_ONLY="yes"
+                        VALID_USERS="$TODOS_GRPS"
+                        WRITE_LIST="$GRUPO_RW"
+                        # Las ACLs POSIX aplicadas debajo restringen escritura al grupo elegido.
+                        READ_ONLY="no"
                         MASK="0770"
                         GRUPO_DUENO="$GRUPO_RW"
-                        TIPO_TXT="Solo Lectura General + Escritura Exclusiva (+$GRUPO_RW)"
+                        TIPO_TXT="Solo Lectura General + Escritura Exclusiva ($GRUPO_RW)"
                         ;;
 
                     3)
@@ -275,7 +276,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         RET=$?
                         if [ $RET -ne 0 ] || [ -z "$GRUPOS_RO_ESTRICTO" ]; then continue; fi
 
-                        VALID_USERS=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | sed 's/^/+/; s/ / +/g')
+                        VALID_USERS=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"')
                         GRUPO_DUENO=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | awk '{print $1}')
                         READ_ONLY="yes"
                         WRITE_LIST=""
@@ -380,12 +381,9 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         printf '   guest ok = %s\n' "$GUEST_OK"
                         printf '   inherit acls = yes\n'
                         printf '   inherit permissions = yes\n'
-                        if [ -n "$VALID_USERS" ]; then
-                            printf '   valid users = %s\n' "$VALID_USERS"
-                        fi
-                        if [ -n "$WRITE_LIST" ]; then
-                            printf '   write list = %s\n' "$WRITE_LIST"
-                        fi
+                        # En este servidor independiente, las ACLs POSIX son la fuente
+                        # de autorización para grupos Unix; Samba puede no resolverlos
+                        # correctamente mediante valid users/write list.
                         printf '   create mask = %s\n' "$MASK"
                         printf '   directory mask = %s\n' "$MASK"
                         printf '   force create mode = %s\n' "$MASK"
