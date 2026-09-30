@@ -26,9 +26,10 @@ obtener_netbios_defecto() {
 
 # Detección del Workgroup o Dominio configurado actualmente
 obtener_workgroup_defecto() {
-    local wg
-    if [ -f /etc/samba/smb.conf ]; then
-        wg=$(grep -i "^\s*workgroup\s*=" /etc/samba/smb.conf | head -n1 | awk -F= '{print $2}' | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+    local conf="${SMB_CONF_PATH:-/etc/samba/smb.conf}"
+    local wg=""
+    if [ -f "$conf" ]; then
+        wg=$(grep -i "^\s*workgroup\s*=" "$conf" | head -n1 | awk -F= '{print $2}' | tr -d ' ' | tr '[:lower:]' '[:upper:]')
     fi
     echo "${wg:-WORKGROUP}"
 }
