@@ -205,7 +205,7 @@ sudo nas uninstall
 - **Gestión de grupos (`grp_*`):** Módulo [2]. El grupo maestro `grp_sistemas` cuenta con privilegios administrativos sobre `/srv/nas`.
 - **Recursos compartidos:** Módulo [3]. Permite visibilidad abierta o recurso oculto (con sufijo `$`), asignando uno de los 4 esquemas de acceso:
   1. *Lectura y Escritura por Grupo:* Todos los grupos autorizados poseen permisos totales (`mask 0770`).
-  2. *Solo Lectura General + Escritura Exclusiva:* Acceso de consulta general con un único grupo habilitado para modificar (`write list = @grupo_escritura`, `mask 0775`, ACLs por defecto).
+  2. *Solo Lectura General + Escritura Exclusiva:* Acceso de consulta general con un único grupo habilitado para modificar (`write list = +grupo_escritura`, `mask 0775`, ACLs por defecto).
   3. *Solo Lectura Estricta:* Contenido histórico inmutable (`mask 0755`).
   4. *Acceso Público / Invitados:* Acceso sin credenciales (`guest ok = yes`).
 - **Gestión de usuarios:** Módulo [5]. Los integrantes de `grp_sistemas` reciben acceso administrativo web y shell interactivo; los demás usuarios disponen exclusivamente de acceso a carpetas compartidas de red.
@@ -259,4 +259,3 @@ sudo nas uninstall
 - **`--link-dest`:** Parámetro de `rsync` que vincula por enlaces duros los archivos idénticos a los del snapshot precedente.
 - **Bit Rot:** Fenómeno de corrupción silenciosa de datos debido a degradación electromagnética en medios de almacenamiento. Mitigado mediante `btrfs scrub`.
 - **WSDD2:** Servicio de descubrimiento dinámico para equipos Windows (Web Services Discovery y LLMNR), eliminando la dependencia de NetBIOS broadcast.
-
