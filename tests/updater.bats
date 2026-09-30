@@ -20,6 +20,21 @@ setup() {
 @test "_normalizar_remoto distingue un repositorio distinto" {
     result=$(_normalizar_remoto "https://github.com/otro/repo.git")
     [ "$result" != "ftole/nas_debian" ]
+    [ "$result" = "otro/repo" ]
+}
+
+@test "_normalizar_remoto rechaza hosts ajenos a github.com" {
+    run _normalizar_remoto "https://gitlab.com/ftole/nas_debian.git"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+
+    run _normalizar_remoto "git@evil.com:ftole/nas_debian.git"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+
+    run _normalizar_remoto "ssh://git@otro.com/ftole/nas_debian.git"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
 }
 
 @test "_validar_sintaxis valida los scripts del proyecto" {
