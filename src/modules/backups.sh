@@ -252,6 +252,8 @@ cleanup() {
     umount "$MOUNT_POINT" 2>/dev/null || true
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -299,9 +301,13 @@ if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -314,6 +320,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando y eliminando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
@@ -471,6 +479,8 @@ cleanup() {
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -513,9 +523,13 @@ if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${RSYNC_OPTS[@]}" "$SRC_USER@
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -525,6 +539,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
@@ -574,9 +590,9 @@ RUNNER_EOF
                     --inputbox "Ruta física absoluta de la carpeta origen a respaldar:" 10 65 "/srv/nas/SISTEMAS" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LOC_SRC" ]; then continue; fi
-                if [[ ! "$LOC_SRC" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+                if [ "$LOC_SRC" = "/" ] || [[ "$LOC_SRC" == *".."* ]] || [[ ! "$LOC_SRC" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
                     whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
-                        --msgbox "La ruta local debe ser absoluta y sin caracteres especiales." 9 68
+                        --msgbox "La ruta local debe ser absoluta, no puede ser la raíz ('/') ni contener '..' o caracteres especiales." 9 68
                     continue
                 fi
 
@@ -618,6 +634,8 @@ cleanup() {
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -654,9 +672,13 @@ if ! rsync "${RSYNC_OPTS[@]}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -666,6 +688,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
