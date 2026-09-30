@@ -250,6 +250,10 @@ SNAPSHOT_OK=false
 cleanup() {
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -293,6 +297,8 @@ mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -300,6 +306,10 @@ fi
 if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
@@ -477,6 +487,10 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -509,6 +523,8 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -522,6 +538,10 @@ fi
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${RSYNC_OPTS[@]}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
@@ -590,7 +610,8 @@ RUNNER_EOF
                     --inputbox "Ruta física absoluta de la carpeta origen a respaldar:" 10 65 "/srv/nas/SISTEMAS" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$LOC_SRC" ]; then continue; fi
-                if [ "$LOC_SRC" = "/" ] || [[ "$LOC_SRC" == *".."* ]] || [[ ! "$LOC_SRC" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+                clean_loc=$(echo "$LOC_SRC" | tr -d '/.')
+                if [ -z "$clean_loc" ] || [[ "$LOC_SRC" == *".."* ]] || [[ ! "$LOC_SRC" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
                     whiptail --title "Ruta Invalida" --ok-button "< Aceptar >" \
                         --msgbox "La ruta local debe ser absoluta, no puede ser la raíz ('/') ni contener '..' o caracteres especiales." 9 68
                     continue
@@ -632,6 +653,10 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
@@ -664,6 +689,8 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
@@ -671,6 +698,10 @@ fi
 if ! rsync "${RSYNC_OPTS[@]}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
+fi
+if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
+    chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
 fi
 btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
