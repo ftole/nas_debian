@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
-import sys, os, glob, json, subprocess, re, tempfile, shutil
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 from datetime import datetime
+
+try:
+    import grp
+except ImportError:
+    grp = None
+import ipaddress
 
 CRED_DIR = "/etc/backup-credentials"
 BIN_DIR = "/usr/local/bin"
@@ -13,8 +26,8 @@ KNOWN_HOSTS = "/root/.ssh/known_hosts_backup"
 def ensure_dirs():
     try:
         os.makedirs(CRED_DIR, mode=0o700, exist_ok=True)
-        os.makedirs(BKP_ROOT, mode=0o750, exist_ok=True)
-        os.makedirs(LOG_ROOT, mode=0o750, exist_ok=True)
+        os.makedirs(BKP_ROOT, mode=0o770, exist_ok=True)
+        os.makedirs(LOG_ROOT, mode=0o770, exist_ok=True)
     except OSError:
         return False
     # Verifica propietario y permisos de los directorios criticos (solo como root).
@@ -99,6 +112,15 @@ def _secure_secret(path):
     return st.st_uid == 0 and st.st_gid == 0 and not (st.st_mode & 0o077)
 
 
+def _get_grp_sistemas_gid():
+    if grp is None:
+        return None
+    try:
+        return grp.getgrnam("grp_sistemas").gr_gid
+    except (KeyError, OSError):
+        return None
+
+
 def _secure_directory(path, allow_group_write=False):
     """Comprueba que un directorio sea propiedad de root y no escribible de forma insegura."""
     if not _is_root():
@@ -107,7 +129,20 @@ def _secure_directory(path, allow_group_write=False):
         st = os.stat(path)
     except OSError:
         return False
-    if st.st_uid != 0 or st.st_gid != 0:
+    if st.st_uid != 0:
+        return False
+
+    allowed_gids = {0}
+    norm_path = os.path.realpath(path)
+    bkp_real = os.path.realpath(BKP_ROOT)
+    log_real = os.path.realpath(LOG_ROOT)
+    if (norm_path == bkp_real or norm_path.startswith(bkp_real + os.sep) or
+            norm_path == log_real or norm_path.startswith(log_real + os.sep)):
+        sistemas_gid = _get_grp_sistemas_gid()
+        if sistemas_gid is not None:
+            allowed_gids.add(sistemas_gid)
+
+    if st.st_gid not in allowed_gids:
         return False
     if st.st_mode & 0o002:
         return False
@@ -273,9 +308,27 @@ def _redact(msg, secret):
     return msg
 
 
+def _is_forbidden_dest(host):
+    """Rechaza destinos loopback (127.0.0.0/8, ::1, localhost) y link-local (169.254.0.0/16)."""
+    h = (host or "").strip().lower()
+    if not h:
+        return True
+    if h in ("localhost", "ip6-localhost", "ip6-loopback") or h.endswith(".localhost"):
+        return True
+    if h.startswith("127.") or h.startswith("169.254."):
+        return True
+    try:
+        ip_obj = ipaddress.ip_address(h)
+        if ip_obj.is_loopback or ip_obj.is_link_local:
+            return True
+    except ValueError:
+        pass
+    return False
+
+
 def test_cifs(ip, share, user, password):
-    if not _valid_host(ip) or not _valid_share(share) or not _valid_user(user):
-        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido."}))
+    if not _valid_host(ip) or not _valid_share(share) or not _valid_user(user) or _is_forbidden_dest(ip):
+        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido o destino no permitido."}))
         return
     try:
         env = os.environ.copy()
@@ -297,9 +350,10 @@ def test_cifs(ip, share, user, password):
     except Exception as e:
         print(json.dumps({"status": "error", "message": f"Excepción: {str(e)}"}))
 
+
 def test_ssh(ip, port, user, password):
-    if not _valid_host(ip) or not _valid_user(user):
-        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido."}))
+    if not _valid_host(ip) or not _valid_user(user) or _is_forbidden_dest(ip):
+        print(json.dumps({"status": "error", "message": "Datos de conexión con formato inválido o destino no permitido."}))
         return
     try:
         port = int(port)
@@ -398,8 +452,8 @@ def create_task(data):
         user = data.get("user", "Administrador")
         pwd = data.get("password", "")
 
-        if not _valid_host(ip) or not _valid_share(share):
-            print(json.dumps({"status": "error", "message": "IP o recurso compartido con formato inválido."}))
+        if not _valid_host(ip) or not _valid_share(share) or _is_forbidden_dest(ip):
+            print(json.dumps({"status": "error", "message": "IP o recurso compartido con formato inválido o destino no permitido."}))
             return
         if not _valid_user(user):
             print(json.dumps({"status": "error", "message": "Usuario con formato inválido."}))
@@ -434,6 +488,8 @@ cleanup() {{
     umount "$MOUNT_POINT" 2>/dev/null || true
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -479,9 +535,13 @@ if ! rsync "${{RSYNC_OPTS[@]}}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 umount "$MOUNT_POINT" 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -492,6 +552,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
@@ -511,8 +573,8 @@ echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
         if port < 1 or port > 65535:
             print(json.dumps({"status": "error", "message": "Puerto SSH inválido."}))
             return
-        if not _valid_host(ip) or not _valid_path(rpath):
-            print(json.dumps({"status": "error", "message": "IP o ruta remota con formato inválido."}))
+        if not _valid_host(ip) or not _valid_path(rpath) or _is_forbidden_dest(ip):
+            print(json.dumps({"status": "error", "message": "IP o ruta remota con formato inválido o destino no permitido."}))
             return
         if not _valid_user(user):
             print(json.dumps({"status": "error", "message": "Usuario con formato inválido."}))
@@ -545,6 +607,8 @@ cleanup() {{
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -587,9 +651,13 @@ if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${{RSYNC_OPTS[@]}}" "$SRC_USE
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -599,6 +667,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
@@ -625,6 +695,8 @@ cleanup() {{
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     exit "$status"
@@ -661,9 +733,13 @@ if ! rsync "${{RSYNC_OPTS[@]}}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
+btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -673,6 +749,8 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
+        btrfs property set "$old" ro false 2>/dev/null || true
+        chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
@@ -864,7 +942,7 @@ if __name__ == "__main__":
 
     try:
         action = sys.argv[1]
-        if action in {"create", "delete", "run", "abort"} and not _is_root():
+        if action in {"create", "delete", "run", "abort", "test_cifs", "test_ssh"} and not _is_root():
             print(json.dumps({"status": "error", "message": "La operación requiere privilegios de root."}))
             sys.exit(1)
         if action == "list":
