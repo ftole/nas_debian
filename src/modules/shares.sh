@@ -255,7 +255,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         VALID_USERS=$(echo "$TODOS_GRPS" | sed 's/^/@/; s/ $//; s/ / @/g')
                         WRITE_LIST="@$GRUPO_RW"
                         READ_ONLY="yes"
-                        MASK="0775"
+                        MASK="0770"
                         GRUPO_DUENO="$GRUPO_RW"
                         TIPO_TXT="Solo Lectura General + Escritura Exclusiva (@$GRUPO_RW)"
                         ;;
@@ -279,7 +279,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         GRUPO_DUENO=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | awk '{print $1}')
                         READ_ONLY="yes"
                         WRITE_LIST=""
-                        MASK="0755"
+                        MASK="0770"
                         TIPO_TXT="Solo Lectura Estricta (Nadie puede modificar)"
                         ;;
 
@@ -322,38 +322,45 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         continue
                     fi
                     if [ "$TIPO_PERM" == "1" ]; then
-                        chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
-                        chmod -R 2770 "$RUTA_SHARE"
+                        chown -h -R --preserve-root root:"$GRUPO_DUENO" "$RUTA_SHARE"
+                        chmod -h -R --preserve-root 2770 "$RUTA_SHARE"
                         local -a GRPS_ACL=()
                         read -r -a GRPS_ACL <<< "$(echo "$GRUPOS_SEL" | tr -d '"')"
                         for g in "${GRPS_ACL[@]}"; do
                             setfacl -R -m "g:$g:rwx" "$RUTA_SHARE" 2>/dev/null || true
-                            find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$g:rwx" {} + 2>/dev/null || true
+                            find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$g:rwx" {} + 2>/dev/null || true
                         done
                     elif [ "$TIPO_PERM" == "2" ]; then
-                        chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
-                        chmod -R 2775 "$RUTA_SHARE"
+                        chown -h -R --preserve-root root:"$GRUPO_DUENO" "$RUTA_SHARE"
+                        chmod -h -R --preserve-root 2770 "$RUTA_SHARE"
                         local -a GRPS_RO_ACL=()
                         read -r -a GRPS_RO_ACL <<< "$(echo "$GRUPOS_RO" | tr -d '"')"
                         for g in "${GRPS_RO_ACL[@]}"; do
                             [ -n "$g" ] || continue
                             setfacl -R -m "g:$g:r-x" "$RUTA_SHARE" 2>/dev/null || true
-                            find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$g:r-x" {} + 2>/dev/null || true
+                            find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$g:r-x" {} + 2>/dev/null || true
                         done
                         if [ -n "$GRUPO_RW" ]; then
                             setfacl -R -m "g:$GRUPO_RW:rwx" "$RUTA_SHARE" 2>/dev/null || true
-                            find "$RUTA_SHARE" -type d -exec setfacl -d -m "g:$GRUPO_RW:rwx" {} + 2>/dev/null || true
+                            find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$GRUPO_RW:rwx" {} + 2>/dev/null || true
                         fi
                     elif [ "$TIPO_PERM" == "3" ]; then
-                        chown -R root:"$GRUPO_DUENO" "$RUTA_SHARE"
-                        chmod -R 2755 "$RUTA_SHARE"
+                        chown -h -R --preserve-root root:"$GRUPO_DUENO" "$RUTA_SHARE"
+                        chmod -h -R --preserve-root 2770 "$RUTA_SHARE"
+                        local -a GRPS_RO_ESTR_ACL=()
+                        read -r -a GRPS_RO_ESTR_ACL <<< "$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '"')"
+                        for g in "${GRPS_RO_ESTR_ACL[@]}"; do
+                            [ -n "$g" ] || continue
+                            setfacl -R -m "g:$g:r-x" "$RUTA_SHARE" 2>/dev/null || true
+                            find -P "$RUTA_SHARE" -type d ! -type l -exec setfacl -d -m "g:$g:r-x" {} + 2>/dev/null || true
+                        done
                     elif [ "$TIPO_PERM" == "4" ]; then
                         if [ "$OPC_PUB" == "1" ]; then
-                            chown -R nobody:nogroup "$RUTA_SHARE"
-                            chmod -R 0755 "$RUTA_SHARE"
+                            chown -h -R --preserve-root nobody:nogroup "$RUTA_SHARE"
+                            chmod -h -R --preserve-root 0755 "$RUTA_SHARE"
                         else
-                            chown -R nobody:nogroup "$RUTA_SHARE"
-                            chmod -R 0777 "$RUTA_SHARE"
+                            chown -h -R --preserve-root nobody:nogroup "$RUTA_SHARE"
+                            chmod -h -R --preserve-root 0777 "$RUTA_SHARE"
                         fi
                     fi
 
