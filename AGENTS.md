@@ -116,9 +116,9 @@ Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grup
 * **Gestión 100% Modular desde el Asistente:**
   * **Creación de Grupos (Menú [2]):** Grupos departamentales o técnicos según las necesidades del entorno.
   * **Creación de Recursos (Menú [3]):** Configuración guiada con elección de visibilidad (Oculto `$` por defecto o Visible) y 4 esquemas de permisos granulares:
-    1. *Lectura y Escritura por Grupo:* Todos los grupos autorizados (`read only = no`, `mask 0770`).
-    2. *Solo Lectura General + Escritura Exclusiva:* Acceso general de lectura con escritura restringida (`read only = yes`, `write list = +grupo_escritura`, `mask 0775`).
-    3. *Solo Lectura Estricta:* Consulta histórica sin modificación (`read only = yes`, `mask 0755`).
+    1. *Lectura y Escritura por Grupo:* Todos los grupos autorizados reciben ACL POSIX de lectura/escritura (`read only = no`, `mask 0770`).
+    2. *Solo Lectura General + Escritura Exclusiva:* Las ACL POSIX conceden lectura a los grupos seleccionados y escritura al grupo designado (`read only = no`, `mask 0770`).
+    3. *Solo Lectura Estricta:* Consulta histórica mediante ACL POSIX de solo lectura (`read only = yes`, `mask 0770`).
     4. *Acceso Público / Invitados:* Libre acceso con o sin clave (`guest ok = yes`).
 
 ### B. Selección Condicional de Filesystem según Rol y Hardware:
