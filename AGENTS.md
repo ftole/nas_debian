@@ -112,7 +112,7 @@ Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grup
 
 ### A. Despliegue Base Limpio (Servidor NAS o Central de Backup):
 * **0 Redes Compartidas Automáticas:** El archivo `smb.conf` se inicializa únicamente con la sección `[global]` optimizada, sin recursos de prueba ni carpetas innecesarias.
-* **Grupo Maestro:** Únicamente se crea `grp_sistemas` (con permisos totales `2775` sobre `/srv/nas`). El administrador del servidor queda asignado a `sudo,adm,grp_sistemas`.
+* **Grupo Maestro:** Únicamente se crea `grp_sistemas` (con permisos totales `2770` sobre `/srv/nas`). El administrador del servidor queda asignado a `sudo,adm,grp_sistemas`.
 * **Gestión 100% Modular desde el Asistente:**
   * **Creación de Grupos (Menú [2]):** Grupos departamentales o técnicos según las necesidades del entorno.
   * **Creación de Recursos (Menú [3]):** Configuración guiada con elección de visibilidad (Oculto `$` por defecto o Visible) y 4 esquemas de permisos granulares:
