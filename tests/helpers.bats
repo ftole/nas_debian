@@ -21,19 +21,18 @@ setup() {
 }
 
 @test "obtener_workgroup_defecto debe retornar WORKGROUP si no hay smb.conf" {
-    # Hacemos un backup temporal de smb.conf si existe
-    if [ -f /etc/samba/smb.conf ]; then
-        mv /etc/samba/smb.conf /tmp/smb.conf.bak || true
-    fi
-
+    export SMB_CONF_PATH="$BATS_TEST_TMPDIR/no_existe.conf"
     run obtener_workgroup_defecto
     [ "$status" -eq 0 ]
     [ "$output" = "WORKGROUP" ]
+}
 
-    # Restaurar
-    if [ -f /tmp/smb.conf.bak ]; then
-        mv /tmp/smb.conf.bak /etc/samba/smb.conf || true
-    fi
+@test "obtener_workgroup_defecto lee correctamente el workgroup desde smb.conf" {
+    export SMB_CONF_PATH="$BATS_TEST_TMPDIR/smb.conf"
+    echo "   workgroup = EMPRESA_TEST" > "$SMB_CONF_PATH"
+    run obtener_workgroup_defecto
+    [ "$status" -eq 0 ]
+    [ "$output" = "EMPRESA_TEST" ]
 }
 
 @test "detect_default_user no debe estar vacio" {
