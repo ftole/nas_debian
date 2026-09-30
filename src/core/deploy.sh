@@ -66,17 +66,24 @@ REEMPLAZOS = [
      "if(u<1e3||u>=6e4)return null;"),
 ]
 
+total_reconocidos = 0
 for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
     try:
         with open(js, "r", encoding="utf-8") as f:
             contenido = f.read()
         aplicados = 0
+        reconocidos = 0
         for origen, destino in REEMPLAZOS:
             if origen in contenido:
                 contenido = contenido.replace(origen, destino)
                 aplicados += 1
+                reconocidos += 1
+            elif destino in contenido:
+                reconocidos += 1
+        if reconocidos == 0:
+            continue
+        total_reconocidos += reconocidos
         if aplicados == 0:
-            print("  [!] Parche Identities omitido (patrones no encontrados): %s" % js)
             continue
         respaldo = "%s.bak-%s" % (js, time.strftime("%Y%m%d_%H%M%S"))
         shutil.copy2(js, respaldo)
@@ -97,6 +104,9 @@ for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
         print("  [OK] Parche Identities aplicado en %s (respaldo: %s)" % (js, respaldo))
     except Exception as e:
         print("  [!] No se pudo parchear %s: %s" % (js, e))
+
+if total_reconocidos == 0:
+    print("  [!] Parche Identities no aplicado: no se encontraron patrones en los recursos instalados.")
 PY
     if ! PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1); then
         rm -f "$PATCH_PY"
@@ -106,7 +116,7 @@ PY
     rm -f "$PATCH_PY"
     echo "$PATCH_SALIDA"
     log "$PATCH_SALIDA"
-    if echo "$PATCH_SALIDA" | grep -q "omitido"; then
+    if echo "$PATCH_SALIDA" | grep -qE "no se encontraron patrones|No se pudo parchear"; then
         advertir "El parche de Cockpit Identities se omitió (patrones no encontrados)."
     fi
 }
@@ -128,7 +138,10 @@ if os.path.exists(path):
         target2 = "function yT(e,t){if(Zr(b,t.path))return;"
         repl2    = "function yT(e,t){if(Zr(b,t.path)||t.HintIgnore)return;"
         if target1 not in contenido and target2 not in contenido:
-            print("  [!] Parche Storage omitido (patrones no encontrados).")
+            if repl1 in contenido or repl2 in contenido:
+                print("  [OK] Parche Storage ya aplicado.")
+            else:
+                print("  [!] Parche Storage omitido (patrones no encontrados).")
         else:
             respaldo = "%s.bak-%s" % (path, time.strftime("%Y%m%d_%H%M%S"))
             shutil.copy2(path, respaldo)
@@ -254,7 +267,8 @@ auto_tune_hardware() {
     local DISCO_BASE
     DISCO="${DISCO%%[*}"
     DISCO_BASE=$(resolver_disco_base "$DISCO")
-    local ES_HDD
+    # El valor lo consumen las ramas de montaje y mantenimiento que llaman a
+    # esta función; debe permanecer visible en el ámbito del despliegue.
     ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
 
     # 1. Configuración de Filesystem por Rol y Hardware
