@@ -219,7 +219,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         RET=$?
                         if [ $RET -ne 0 ] || [ -z "$GRUPOS_SEL" ]; then continue; fi
 
-                        VALID_USERS=$(echo "$GRUPOS_SEL" | tr -d '\"' | sed 's/^/@/; s/ / @/g; s/,/ @/g')
+                        VALID_USERS=$(echo "$GRUPOS_SEL" | tr -d '\"' | sed 's/^/+/; s/ / +/g; s/,/ +/g')
                         GRUPO_DUENO=$(echo "$GRUPOS_SEL" | tr -d '\"' | awk '{print $1}')
                         READ_ONLY="no"
                         MASK="0770"
@@ -252,12 +252,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         if [ $RET -ne 0 ] || [ -z "$GRUPO_RW" ]; then continue; fi
 
                         TODOS_GRPS=$(echo "$GRUPOS_RO $GRUPO_RW" | tr -d '\"' | tr ' ' '\n' | sort -u | tr '\n' ' ')
-                        VALID_USERS=$(echo "$TODOS_GRPS" | sed 's/^/@/; s/ $//; s/ / @/g')
-                        WRITE_LIST="@$GRUPO_RW"
+                        VALID_USERS=$(echo "$TODOS_GRPS" | sed 's/^/+/; s/ $//; s/ / +/g')
+                        WRITE_LIST="+$GRUPO_RW"
                         READ_ONLY="yes"
                         MASK="0770"
                         GRUPO_DUENO="$GRUPO_RW"
-                        TIPO_TXT="Solo Lectura General + Escritura Exclusiva (@$GRUPO_RW)"
+                        TIPO_TXT="Solo Lectura General + Escritura Exclusiva (+$GRUPO_RW)"
                         ;;
 
                     3)
@@ -275,7 +275,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         RET=$?
                         if [ $RET -ne 0 ] || [ -z "$GRUPOS_RO_ESTRICTO" ]; then continue; fi
 
-                        VALID_USERS=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | sed 's/^/@/; s/ / @/g')
+                        VALID_USERS=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | sed 's/^/+/; s/ / +/g')
                         GRUPO_DUENO=$(echo "$GRUPOS_RO_ESTRICTO" | tr -d '\"' | awk '{print $1}')
                         READ_ONLY="yes"
                         WRITE_LIST=""
