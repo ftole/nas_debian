@@ -387,3 +387,102 @@ def test_create_task_cifs_clave_caracteres_especiales(tmp_path, monkeypatch, cap
     cred = (tmp_path / "cred" / "t_cifs_spec.cred").read_text()
     assert "username=operador" in cred
     assert "password=p@ss#w0rd$123!*()&" in cred
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",
+        "127.0.1.1",
+        "localhost",
+        "sub.localhost",
+        "::1",
+        "169.254.0.1",
+        "169.254.169.254",
+    ],
+)
+def test_is_forbidden_dest_rejects_ssrf(host):
+    assert api._is_forbidden_dest(host)
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "192.168.1.50",
+        "10.0.0.1",
+        "172.16.0.5",
+        "srv-backup.lan",
+    ],
+)
+def test_is_forbidden_dest_allows_valid(host):
+    assert not api._is_forbidden_dest(host)
+
+
+def test_test_cifs_rechaza_forbidden_dest(capsys):
+    api.test_cifs("127.0.0.1", "share", "user", "clave")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+    assert "destino no permitido" in data["message"]
+
+
+def test_test_ssh_rechaza_forbidden_dest(capsys):
+    api.test_ssh("169.254.1.1", 22, "root", "clave")
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "error"
+    assert "destino no permitido" in data["message"]
+
+
+def test_secure_directory_root_and_grp_sistemas(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "_is_root", lambda: True)
+    monkeypatch.setattr(api, "_get_grp_sistemas_gid", lambda: 1005)
+
+    test_bkp = tmp_path / "bkp"
+    test_bkp.mkdir(exist_ok=True)
+    test_bin = tmp_path / "bin"
+    test_bin.mkdir(exist_ok=True)
+
+    monkeypatch.setattr(api, "BKP_ROOT", str(test_bkp))
+    monkeypatch.setattr(api, "BIN_DIR", str(test_bin))
+
+    class DummyStat:
+        def __init__(self, uid, gid, mode):
+            self.st_uid = uid
+            self.st_gid = gid
+            self.st_mode = mode
+
+    # BKP_ROOT propiedad de root:grp_sistemas con 2770 -> OK
+    monkeypatch.setattr(os, "stat", lambda p: DummyStat(0, 1005, 0o2770))
+    assert api._secure_directory(str(test_bkp), allow_group_write=True)
+
+    # BKP_ROOT propiedad de root:root con 2770 -> OK
+    monkeypatch.setattr(os, "stat", lambda p: DummyStat(0, 0, 0o2770))
+    assert api._secure_directory(str(test_bkp), allow_group_write=True)
+
+    # BKP_ROOT con permisos de escritura a others -> Rechazado
+    monkeypatch.setattr(os, "stat", lambda p: DummyStat(0, 1005, 0o2772))
+    assert not api._secure_directory(str(test_bkp), allow_group_write=True)
+
+    # BIN_DIR con gid 1005 -> Rechazado (debe ser estrictamente GID 0)
+    monkeypatch.setattr(os, "stat", lambda p: DummyStat(0, 1005, 0o755))
+    assert not api._secure_directory(str(test_bin))
+
+    # BIN_DIR con gid 0 -> OK
+    monkeypatch.setattr(os, "stat", lambda p: DummyStat(0, 0, 0o755))
+    assert api._secure_directory(str(test_bin))
+
+
+def test_create_task_runners_contain_immutable_commands(tmp_path, monkeypatch, capsys):
+    _patch_dirs(monkeypatch, tmp_path)
+    api.create_task({
+        "id": "t_inmut",
+        "proto": "local",
+        "path": "/srv/nas/datos",
+        "cron": "0 2 * * *",
+        "retention": 5,
+    })
+    capsys.readouterr()
+    runner = (tmp_path / "bin" / "backup_t_inmut.sh").read_text()
+    assert 'chattr -R +i "$FINAL_SNAPSHOT"' in runner
+    assert 'btrfs property set "$FINAL_SNAPSHOT" ro true' in runner
+    assert 'chattr -R -i "$old"' in runner
+    assert 'btrfs property set "$old" ro false' in runner
