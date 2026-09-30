@@ -841,8 +841,12 @@ done
 echo " [9/9] Verificando y asegurando reglas de Firewall (UFW)..."
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
-    LOCAL_SUBNET=$(ip -o -f inet addr show 2>/dev/null | awk '/scope global/ {print $4}' | head -n1)
+    LOCAL_SUBNET=$(ip route show 2>/dev/null | awk '/proto kernel.*scope link/ {print $1}' | head -n1)
+    if [ -z "$LOCAL_SUBNET" ]; then
+        LOCAL_SUBNET=$(ip -o -f inet addr show 2>/dev/null | awk '/scope global/ {print $4}' | head -n1)
+    fi
     if [ -n "$LOCAL_SUBNET" ]; then
+        LOCAL_SUBNET=$(python3 -c "import ipaddress; print(ipaddress.ip_network('$LOCAL_SUBNET', strict=False))" 2>/dev/null || echo "$LOCAL_SUBNET")
         ufw allow from "$LOCAL_SUBNET" to any port 9090 proto tcp comment 'Cockpit Web Admin (Subred Local)' 2>/dev/null || ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
     else
         ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
