@@ -31,7 +31,7 @@ function initTheme() {
 /* =================== API =================== */
 
 function runApi(args) {
-	return cockpit.spawn(["python3", API_PATH].concat(args), { superuser: "try", err: "message" })
+	return cockpit.spawn(["python3", API_PATH].concat(args), { superuser: "require", err: "message" })
 		.then(function (out) {
 			try {
 				return JSON.parse(out.trim());
@@ -50,7 +50,7 @@ function runApi(args) {
 
 function runApiInput(action, payloadObj) {
 	return new Promise(function (resolve) {
-		var proc = cockpit.spawn(["python3", API_PATH, action], { superuser: "try", err: "message" });
+		var proc = cockpit.spawn(["python3", API_PATH, action], { superuser: "require", err: "message" });
 		proc.input(JSON.stringify(payloadObj), true);
 		proc.then(function (out) {
 			try {
@@ -274,6 +274,20 @@ function guardarTarea() {
 		btn.innerHTML = '<i class="fas fa-save"></i> Guardar y Programar';
 		if (res.status === "ok") {
 			alert("✔ " + res.message);
+			document.getElementById("task-id").value = "";
+			document.getElementById("task-ip").value = "";
+			document.getElementById("task-share").value = "";
+			document.getElementById("task-port").value = "22";
+			document.getElementById("task-remote-path").value = "";
+			document.getElementById("task-local-path").value = "/srv/nas/SISTEMAS";
+			document.getElementById("task-user").value = "";
+			document.getElementById("task-password").value = "";
+			document.getElementById("task-cron-select").value = "0 23 * * *";
+			document.getElementById("task-cron").value = "0 23 * * *";
+			document.getElementById("task-retention").value = "30";
+			document.getElementById("group-custom-cron").style.display = "none";
+			document.getElementById("alert-test").className = "bkp-alert bkp-alert-info";
+			selectProto("cifs");
 			switchTab("tab-tasks", "tab-btn-tasks");
 		} else {
 			alert("Error: " + res.message);
@@ -320,7 +334,11 @@ function abrirModalLogs(taskId) {
 	document.getElementById("modal-logs").classList.add("visible");
 	document.getElementById("modal-log-console").textContent = "Cargando...";
 	runApi(["logs", taskId]).then(function (res) {
-		document.getElementById("modal-log-console").textContent = res.logs || "(Sin registros)";
+		if (res.status === "ok") {
+			document.getElementById("modal-log-console").textContent = res.logs || "(Sin registros)";
+		} else {
+			document.getElementById("modal-log-console").textContent = "⚠ Error: " + (res.message || res.logs || "Desconocido");
+		}
 	});
 }
 
@@ -328,7 +346,11 @@ function verLogs(taskId) {
 	if (!taskId) return;
 	document.getElementById("log-console").textContent = "Cargando...";
 	runApi(["logs", taskId]).then(function (res) {
-		document.getElementById("log-console").textContent = res.logs || "(Sin registros)";
+		if (res.status === "ok") {
+			document.getElementById("log-console").textContent = res.logs || "(Sin registros)";
+		} else {
+			document.getElementById("log-console").textContent = "⚠ Error: " + (res.message || res.logs || "Desconocido");
+		}
 	});
 }
 
