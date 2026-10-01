@@ -934,14 +934,14 @@ def abort_task(tname):
 def read_logs(tname):
     tname = _sanitize_name(tname)
     if not _secure_directory(LOG_ROOT, allow_group_write=True):
-        print(json.dumps({"status": "error", "logs": "Directorio de registros con permisos inseguros."}))
+        print(json.dumps({"status": "error", "message": "Directorio de registros con permisos inseguros.", "logs": ""}))
         return
     log_file = f"{LOG_ROOT}/backup_{tname}.log"
     if os.path.islink(log_file) or (os.path.exists(log_file) and not os.path.isfile(log_file)):
-        print(json.dumps({"status": "error", "logs": "Registro no válido."}))
+        print(json.dumps({"status": "error", "message": "Registro no válido.", "logs": ""}))
         return
     if os.path.exists(log_file) and os.path.dirname(os.path.realpath(log_file)) != os.path.realpath(LOG_ROOT):
-        print(json.dumps({"status": "error", "logs": "Ruta de registro no permitida."}))
+        print(json.dumps({"status": "error", "message": "Ruta de registro no permitida.", "logs": ""}))
         return
     if os.path.exists(log_file):
         try:
