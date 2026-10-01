@@ -702,11 +702,13 @@ echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistem
 mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
 if [ "$KEEP_DATA" = true ]; then
     chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    chmod 2770 /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    chmod 2771 /srv/nas
+    chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
 else
     chown -h -R --preserve-root root:grp_sistemas /srv/nas
-    chmod 2770 /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    find -P /srv/nas -type d ! -type l -exec chmod 2770 {} +
+    chmod 2771 /srv/nas
+    chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    find -P /srv/nas -mindepth 1 -type d ! -type l -exec chmod 2770 {} +
     find -P /srv/nas -type f ! -type l -exec chmod 660 {} +
 fi
 
