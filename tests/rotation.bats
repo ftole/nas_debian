@@ -15,19 +15,18 @@ setup() {
     echo "contenido de prueba" > "$SANDBOX/src/archivo.txt"
 
     # Generar un runner local con retención baja (2 snapshots)
-    python3 - "$SANDBOX" <<'PY'
-import sys, importlib.util as u
-root = sys.argv[1]
-spec = u.spec_from_file_location('b', 'src/web/backups/backup_api.py')
-m = u.module_from_spec(spec)
-spec.loader.exec_module(m)
-m.BIN_DIR = root + '/runners'
-m.CRON_DIR = root + '/cron'
-m.CRED_DIR = root + '/cred'
-m.BKP_ROOT = root + '/bkp'
-m.LOG_ROOT = root + '/log'
-m.create_task({"id": "t_rot", "proto": "local", "cron": "0 23 * * *", "retention": 2, "path": root + "/src"})
-PY
+    php -- "$SANDBOX" <<'PHP_SCRIPT'
+<?php
+$root = $argv[1];
+require_once 'web/src/Services/BackupService.php';
+$svc = new \App\Services\BackupService();
+$svc->binDir = $root . '/runners';
+$svc->cronDir = $root . '/cron';
+$svc->credDir = $root . '/cred';
+$svc->bkpRoot = $root . '/bkp';
+$svc->logRoot = $root . '/log';
+$svc->createTask(['id' => 't_rot', 'proto' => 'local', 'cron' => '0 23 * * *', 'retention' => 2, 'path' => $root . '/src']);
+PHP_SCRIPT
 
     # df con espacio suficiente
     printf '#!/bin/bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "fake 10000000 1000 9999000 1%% /"\n' > "$SANDBOX/bin/df"
