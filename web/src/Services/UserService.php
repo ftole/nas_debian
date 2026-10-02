@@ -10,6 +10,8 @@ namespace App\Services;
  */
 class UserService
 {
+    public bool $dryRun = false;
+
     /**
      * Lista los usuarios del sistema (UID >= 1000) e identifica si tienen cuenta Samba activa.
      */
@@ -17,7 +19,7 @@ class UserService
     {
         $users = [];
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return [
                 [
                     'username' => 'administrador',
@@ -94,7 +96,7 @@ class UserService
     {
         $groups = [];
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return [
                 ['name' => 'grp_sistemas', 'gid' => 1050, 'members' => ['administrador', 'sistemas'], 'is_master' => true],
                 ['name' => 'grp_campana1', 'gid' => 1051, 'members' => ['operador_c1'], 'is_master' => false],
@@ -140,7 +142,7 @@ class UserService
             return ['success' => false, 'error' => 'La contraseña debe tener al menos 6 caracteres.'];
         }
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Usuario $username creado exitosamente (modo dev)."];
         }
 
@@ -203,7 +205,7 @@ class UserService
             return ['success' => false, 'error' => "Por seguridad no es posible eliminar la cuenta protegida '$username'."];
         }
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Usuario $username eliminado (modo dev)."];
         }
 
@@ -233,7 +235,7 @@ class UserService
             return ['success' => false, 'error' => 'Nombre de grupo inválido. Formato esperado: grp_nombre (2-30 caracteres).'];
         }
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Grupo $groupName creado (modo dev)."];
         }
 
@@ -259,7 +261,7 @@ class UserService
             return ['success' => false, 'error' => 'Solo se pueden eliminar grupos departamentales grp_* creados por el NAS.'];
         }
 
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Grupo $groupName eliminado (modo dev)."];
         }
 
