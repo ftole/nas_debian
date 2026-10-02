@@ -4,6 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <title>Cockpit • SRV-NAS (Debian 13)</title>
+  <script>
+    (function() {
+      try {
+        var savedTheme = localStorage.getItem('nas_theme');
+        if (savedTheme) {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -61,7 +71,7 @@
         <svg class="icon"><use href="#icon-menu"></use></svg>
       </button>
       <div class="masthead-brand">
-        <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-server"></use></svg>
+        <svg class="icon"><use href="#icon-server"></use></svg>
         <span class="brand-logo-text">
           <span>Cockpit</span>
           <span class="brand-divider">|</span>
@@ -477,13 +487,13 @@
 
             <!-- Barra de Particiones -->
             <div class="disk-partition-bar">
-              <div class="disk-partition-seg" style="width: 3.5%; background:#3c3f42;" title="/dev/sda1 (120 GB ext4) - SO Debian 13 (Protegido UDISKS_IGNORE=1)">
+              <div class="disk-partition-seg seg-os" style="width: 3.5%;" title="/dev/sda1 (120 GB ext4) - SO Debian 13 (Protegido UDISKS_IGNORE=1)">
                 SO 120G
               </div>
               <div class="disk-partition-seg" style="width: 35%; background:var(--pf-primary);" title="/dev/sda2 (3.88 TB) - Datos NAS ocupados (1.4 TB Btrfs)">
                 NAS Ocupado (1.4 TB)
               </div>
-              <div class="disk-partition-seg" style="width: 61.5%; background:#292e34; color:#8a8d90;" title="/dev/sda2 - Espacio libre (2.48 TB)">
+              <div class="disk-partition-seg seg-free" style="width: 61.5%;" title="/dev/sda2 - Espacio libre (2.48 TB)">
                 Libre (2.48 TB)
               </div>
             </div>
@@ -780,7 +790,7 @@
                 <span class="status-dot status-ok"></span>
                 <span>root@SRV-NAS: ~ (pts/0)</span>
               </div>
-              <div style="font-size:11px; color:#888;">
+              <div style="font-size:11px; color:var(--text-terminal-bar);">
                 Presiona <code>Enter</code> para ejecutar • <code>↑/↓</code> historial
               </div>
             </div>
