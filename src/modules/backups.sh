@@ -250,15 +250,15 @@ SNAPSHOT_OK=false
 cleanup() {
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
-    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
-        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
-    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
+    fi
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
     fi
     exit "$status"
 }
@@ -292,7 +292,7 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     exit 1
 fi
 # Montaje en solo lectura
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,timeo=30 2>> "$LOG_FILE"
+mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft 2>> "$LOG_FILE"
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
@@ -487,15 +487,15 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
-    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
-        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
-    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
+    fi
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
     fi
     exit "$status"
 }
@@ -653,15 +653,15 @@ FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
 cleanup() {
     local status=$?
-    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
-        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
-    fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
+    fi
+    if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
+        chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
+        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
     fi
     exit "$status"
 }
