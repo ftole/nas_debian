@@ -77,7 +77,7 @@
             <svg class="icon"><use href="#icon-folder"></use></svg>
             <span>Recursos Samba</span>
           </div>
-          <span class="nav-badge">5</span>
+          <span class="nav-badge" id="badge-shares">5</span>
         </div>
 
         <div class="nav-item" data-view="users">
@@ -85,7 +85,7 @@
             <svg class="icon"><use href="#icon-users"></use></svg>
             <span>Usuarios y Grupos</span>
           </div>
-          <span class="nav-badge">6</span>
+          <span class="nav-badge" id="badge-users">6</span>
         </div>
 
         <div class="nav-item" data-view="backups">
@@ -93,7 +93,7 @@
             <svg class="icon"><use href="#icon-shield"></use></svg>
             <span>Central Respaldos</span>
           </div>
-          <span class="nav-badge">3</span>
+          <span class="nav-badge" id="badge-backups">3</span>
         </div>
 
         <div class="nav-item" data-view="diagnostics">
@@ -142,8 +142,8 @@
           <div class="header-meta-pill">
             <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="showToast('Actualizando métricas del servidor...', 'info')">
-            <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" onclick="refreshDashboardMetrics()">
+            <svg class="icon" id="icon-refresh-metrics"><use href="#icon-refresh"></use></svg> Actualizar
           </button>
         </div>
       </header>
@@ -286,35 +286,8 @@
                 <h3><svg class="icon"><use href="#icon-clock"></use></svg> Registro de Actividad en Vivo</h3>
                 <span class="badge badge-ok">En vivo</span>
               </div>
-              <div class="panel-card-body" style="display:flex; flex-direction:column; gap:10px;">
-                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
-                  <span class="badge badge-ok" style="font-size:10px;">Éxito</span>
-                  <div>
-                    <div>Snapshot completado: <b>bkp_win_facturacion</b></div>
-                    <div style="color:var(--text-muted); font-size:11px;">Deduplicación 88.6% • 0 bytes adicionales en inodos compartidos</div>
-                  </div>
-                </div>
-                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
-                  <span class="badge badge-blue" style="font-size:10px;">Samba</span>
-                  <div>
-                    <div>Sesión SMB iniciada por <b>carlos_m</b> desde 10.10.1.34</div>
-                    <div style="color:var(--text-muted); font-size:11px;">Acceso concedido a recurso [CAMPANA_UNO_OPERACIONES]</div>
-                  </div>
-                </div>
-                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
-                  <span class="badge badge-purple" style="font-size:10px;">WSDD2</span>
-                  <div>
-                    <div>Descubrimiento de red WSD respondido para host <b>SRV-NAS</b></div>
-                    <div style="color:var(--text-muted); font-size:11px;">Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto</div>
-                  </div>
-                </div>
-                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px;">
-                  <span class="badge badge-ok" style="font-size:10px;">Scrub</span>
-                  <div>
-                    <div>Auditoría mensual BTRFS: 1,420,892 bloques validados</div>
-                    <div style="color:var(--text-muted); font-size:11px;">0 errores de corrupción silenciosa detectados en /srv/nas</div>
-                  </div>
-                </div>
+              <div class="panel-card-body" id="dashboard-activity-feed" style="display:flex; flex-direction:column; gap:10px;">
+                <!-- Inyectado dinámicamente con JavaScript -->
               </div>
             </div>
 
@@ -340,11 +313,11 @@
           <!-- Barra de Filtros y Búsqueda -->
           <div class="filter-toolbar">
             <div class="filter-chips" id="shares-chips">
-              <button class="chip-btn active" onclick="filterShares('all', this)">Todos (5)</button>
-              <button class="chip-btn" onclick="filterShares('visible', this)">Visibles (3)</button>
-              <button class="chip-btn" onclick="filterShares('hidden', this)">Ocultos $ (2)</button>
-              <button class="chip-btn" onclick="filterShares('active', this)">Activos (5)</button>
-              <button class="chip-btn" onclick="filterShares('disabled', this)">Deshabilitados (0)</button>
+              <button class="chip-btn active" data-filter="all" onclick="filterShares('all', this)">Todos (5)</button>
+              <button class="chip-btn" data-filter="visible" onclick="filterShares('visible', this)">Visibles (3)</button>
+              <button class="chip-btn" data-filter="hidden" onclick="filterShares('hidden', this)">Ocultos $ (2)</button>
+              <button class="chip-btn" data-filter="active" onclick="filterShares('active', this)">Activos (5)</button>
+              <button class="chip-btn" data-filter="disabled" onclick="filterShares('disabled', this)">Deshabilitados (0)</button>
             </div>
             <div class="search-box">
               <svg class="icon"><use href="#icon-search"></use></svg>
@@ -409,10 +382,10 @@
           <!-- Sub-tabs para alternar entre Usuarios y Grupos -->
           <div class="sub-tabs-bar">
             <button class="sub-tab-btn active" id="subtab-users-btn" onclick="switchUserTab('users')">
-              <svg class="icon"><use href="#icon-users"></use></svg> Usuarios del Sistema y Samba (6)
+              <svg class="icon"><use href="#icon-users"></use></svg> <span id="subtab-users-label">Usuarios del Sistema y Samba (6)</span>
             </button>
             <button class="sub-tab-btn" id="subtab-groups-btn" onclick="switchUserTab('groups')">
-              <svg class="icon"><use href="#icon-folder"></use></svg> Grupos de Seguridad `grp_*` (6)
+              <svg class="icon"><use href="#icon-folder"></use></svg> <span id="subtab-groups-label">Grupos de Seguridad `grp_*` (6)</span>
             </button>
           </div>
 
@@ -689,7 +662,7 @@
           <div class="panel-card">
             <div class="panel-card-head">
               <h3><svg class="icon"><use href="#icon-terminal"></use></svg> Visor de Bitácoras del Sistema (/var/log/nas-backups.log & Samba)</h3>
-              <button class="btn btn-secondary btn-sm" onclick="showToast('Copiando log al portapapeles...', 'info')">
+              <button class="btn btn-secondary btn-sm" onclick="copySystemLogs()">
                 <svg class="icon"><use href="#icon-file"></use></svg> Copiar Log
               </button>
             </div>
@@ -800,25 +773,8 @@
           <!-- Selección de Grupos -->
           <div class="form-group" id="new-share-groups-container">
             <label>Grupos Autorizados con Acceso (`grp_*`):</label>
-            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_sistemas" checked> grp_sistemas (Admin)
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_empleados"> grp_empleados
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_c1_cobranzas"> grp_c1_cobranzas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_c2_ventas"> grp_c2_ventas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_finanzas"> grp_finanzas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-share-grp-chk" value="grp_auditoria"> grp_auditoria
-              </label>
+            <div id="new-share-groups-list" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
+              <!-- Inyectado dinámicamente con JavaScript -->
             </div>
           </div>
 
@@ -826,10 +782,7 @@
           <div class="form-group" id="new-share-scheme2-wrapper" style="display:none; margin-top:8px;">
             <label style="color:var(--accent-warning);">Grupo con Permiso de Escritura Exclusiva (write list):</label>
             <select class="form-control" id="new-share-writelist-select">
-              <option value="grp_sistemas">grp_sistemas</option>
-              <option value="grp_finanzas">grp_finanzas</option>
-              <option value="grp_c2_ventas">grp_c2_ventas</option>
-              <option value="grp_c1_cobranzas">grp_c1_cobranzas</option>
+              <!-- Inyectado dinámicamente con JavaScript -->
             </select>
           </div>
 
@@ -872,22 +825,8 @@
 
           <div class="form-group">
             <label>Asignación de Grupos de Seguridad (`grp_*`):</label>
-            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-user-grp-chk" value="grp_empleados" checked> grp_empleados
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-user-grp-chk" value="grp_c1_cobranzas"> grp_c1_cobranzas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-user-grp-chk" value="grp_c2_ventas"> grp_c2_ventas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-user-grp-chk" value="grp_finanzas"> grp_finanzas
-              </label>
-              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
-                <input type="checkbox" class="new-user-grp-chk" value="grp_sistemas"> grp_sistemas
-              </label>
+            <div id="new-user-groups-list" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
+              <!-- Inyectado dinámicamente con JavaScript -->
             </div>
           </div>
 
@@ -1079,23 +1018,53 @@
     </div>
   </div>
 
-  <!-- Modal 8: Cambiar Contraseña -->
+  <!-- Modal 8: Editar Miembros del Grupo -->
+  <div class="modal-overlay" id="modal-edit-group">
+    <div class="modal-box" style="width:520px;">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Miembros del Grupo: <span id="edit-group-name-display"></span></h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="form-edit-group">
+        <div class="modal-body">
+          <input type="hidden" id="edit-group-name">
+          <p style="font-size:12.5px; color:var(--text-secondary); margin-bottom:12px;">
+            Selecciona los usuarios autorizados para pertenecer a este grupo de seguridad en Debian y Samba:
+          </p>
+          <div id="edit-group-members-list" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding:4px;">
+            <!-- Inyectado dinámicamente con checkboxes de usuarios -->
+          </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between;">
+          <button type="button" class="btn btn-danger btn-sm" id="btn-delete-group" onclick="deleteCurrentGroup()">
+            <svg class="icon"><use href="#icon-trash"></use></svg> Eliminar Grupo
+          </button>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Guardar Miembros</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 9: Cambiar Contraseña -->
   <div class="modal-overlay" id="modal-change-password">
     <div class="modal-box" style="width:480px;">
       <div class="modal-head">
         <h3><svg class="icon"><use href="#icon-key"></use></svg> Cambiar Clave: <span id="change-pass-user-display"></span></h3>
         <button class="modal-close">&times;</button>
       </div>
-      <form onsubmit="event.preventDefault(); showToast('Contraseña actualizada en Debian y Samba', 'success'); closeModal('modal-change-password');">
+      <form id="form-change-password">
         <div class="modal-body">
           <input type="hidden" id="change-pass-uid">
           <div class="form-group">
             <label>Nueva Contraseña:</label>
-            <input type="password" class="form-control" required placeholder="••••••••••••">
+            <input type="password" class="form-control" id="change-pass-new" required placeholder="••••••••••••" minlength="6">
           </div>
           <div class="form-group">
             <label>Confirmar Nueva Contraseña:</label>
-            <input type="password" class="form-control" required placeholder="••••••••••••">
+            <input type="password" class="form-control" id="change-pass-confirm" required placeholder="••••••••••••" minlength="6">
           </div>
         </div>
         <div class="modal-footer">
