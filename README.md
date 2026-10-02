@@ -1,8 +1,8 @@
 # Servidor NAS y Central de Respaldos Multiplataforma (Debian 13)
 
-[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Cockpit](https://img.shields.io/badge/Web%20UI-Cockpit-FF6600?style=for-the-badge)](https://github.com/ftole/nas_debian)
+[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Web UI](https://img.shields.io/badge/Web%20UI-Nginx%20%2B%20PHP--FPM-009688?style=for-the-badge)](https://github.com/ftole/nas_debian)
 
-Este repositorio contiene los scripts para desplegar y administrar, sobre Debian 13 (Trixie), un servidor de archivos en red (NAS departamental) y una central de copias de seguridad pensada para resistir ransomware. El despliegue se realiza desde la terminal, mediante un asistente interactivo o por línea de comandos, y la operación diaria puede gestionarse también desde un panel web basado en Cockpit.
+Este repositorio contiene los scripts para desplegar y administrar, sobre Debian 13 (Trixie), un servidor de archivos en red (NAS departamental) y una central de copias de seguridad pensada para resistir ransomware. El despliegue se realiza desde la terminal, mediante un asistente interactivo o por línea de comandos, y la operación diaria puede gestionarse también desde un panel web nativo MVC ultraligero.
 
 ## Características principales
 
@@ -38,17 +38,16 @@ El siguiente cuadro detalla todos los componentes, librerías, subsistemas del k
 | **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector de Respaldo Linux | Túnel SSH cifrado no interactivo con almacenamiento de huellas en archivo aislado (`known_hosts_backup`). | Protección estricta contra ataques *Man-in-the-Middle*; registra claves nuevas en el primer contacto automáticamente sin requerir interacción manual y sin degradar la seguridad a `no`. |
 | **Ajustes de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel Linux | Ajuste fino de descriptores de inotify, reciclaje de conexiones TCP y sincronización de memoria sucia. | `fs.inotify` ampliado para indexar árboles de archivos masivos; `tcp_keepalive` (120s/15s/4) purga conexiones SMB huérfanas en minutos; `vm.dirty_bytes=256MB` fuerza vaciado continuo evitando parálisis de I/O. |
 | **Readahead Tuning por udev (`60-nas-readahead.rules`)** | Subsistema de Bloques Linux | Configuración del búfer de lectura anticipada del disco NAS (`1024 KB` en SSD / `4096 KB` en HDD). | Acelera transferencias secuenciales de red masivas y agiliza las comparaciones diferenciales de `rsync` sin sobrecargar la RAM en unidades flash. |
-| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Inyección de la propiedad `UDISKS_IGNORE=1` en el disco que aloja la partición raíz del sistema operativo. | Impide que operadores o interfaces gráficas (Cockpit Storage) formateen o destruyan accidentalmente el disco donde se ejecuta Debian. |
+| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Inyección de la propiedad `UDISKS_IGNORE=1` en el disco que aloja la partición raíz del sistema operativo. | Impide que operadores o herramientas de disco formateen o destruyan accidentalmente el disco donde se ejecuta Debian. |
 | **Reutilización de Discos Existentes (`--keep-data`)** | Motor de Despliegue | Detección automática de particiones previas y montaje en `/srv/nas` respetando los datos preexistentes. | Permite migrar o reinstalar el servidor conservando terabytes de información intacta sin requerir formateo ni volcados externos. |
-| **Cockpit + PatternFly 4 + Extensiones 45Drives + EAD Backups** | Panel de Administración Web | Interfaz web responsiva activada por socket (`systemd`) sin demonios en segundo plano residentes. | Consumo nulo de memoria RAM en reposo; administración visual coherente de usuarios, carpetas compartidas Samba y bitácoras de respaldo desde cualquier navegador. |
-| **Python 3 (`backup_api.py`)** | Backend API para Cockpit | Interfaz JSON segura entre la interfaz gráfica web y los binarios y scripts del sistema. | Validación estricta con expresiones regulares que impide inyecciones de comandos, ejecución con privilegios acotados y lectura de bitácoras retrospectivas sin bloqueos. |
+| **Nginx-light + PHP-FPM ondemand + MVC PHP 8** | Panel de Administración Web | Interfaz web ultraligera en PHP 8 (`/var/www/nas-web`) con servidor Nginx y pool PHP-FPM ondemand. | Consumo nulo de memoria RAM en reposo (~0 MB); administración visual coherente de usuarios, carpetas compartidas Samba, almacenamiento y bitácoras de respaldo desde cualquier navegador. |
+| **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Arquitectura modular con invocación estricta del sistema mediante `proc_open` con arrays de argumentos y sudoers acotado. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
 | **whiptail + Bash 5** | Interfaz Visual de Terminal (TUI) | Menús interactivos con colores nativos para administración completa desde consola o SSH. | Operación inmediata sin dependencias gráficas pesadas, validación interactiva y ciclo de corrección de datos sin pérdida de texto escrito. |
 | **Control de Concurrencia con `flock`** | Programación de Tareas (`cron`) | Mecanismo de bloqueo exclusivo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza que nunca se solapen dos ejecuciones de una misma tarea si un respaldo toma más tiempo que su frecuencia programada. |
 | **Monitoreo de Espacio Libre (`df -Pk`) en Runners** | Prevención de Saturación de Disco | Evaluación del porcentaje y megabytes disponibles en `/srv/nas` previa a la ejecución de cada respaldo. | Emite advertencia si el uso supera el 85% y cancela de inmediato la tarea si restan menos de 2 GB o se supera el 95%, evitando caídas críticas del sistema de archivos. |
 | **`fstrim.timer`** | Mantenimiento para Medios SSD | Recorte periódico de bloques descartados en unidades de estado sólido y arreglos NVMe. | Mantiene tasas óptimas de rendimiento de escritura sostenido y previene la degradación prematura de unidades flash. |
 | **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Registros | Rotación programada con compresión y directiva `copytruncate` para registros de despliegue y copias. | Impide el crecimiento indefinido de archivos de bitácora y la consiguiente pérdida silenciosa de espacio en disco. |
 | **WSDD2 con Systemd Override** | Descubrimiento de Red Windows | Emisión de mensajes WSD y LLMNR con parámetros explícitos de NetBIOS y Workgroup. | El servidor es detectado al instante en "Red" por equipos Windows 10/11 sin depender de protocolos obsoletos e inseguros como SMBv1 o NetBIOS broadcast. |
-| **Aislamiento de Idioma (`LC_ALL=C LANG=C`)** | Compatibilidad de Sistema | Wrappers de ejecución en `/usr/local/sbin/chage`, `passwd` y `lastb`. | Elimina errores de interpretación de fechas o cadenas en módulos de Cockpit cuando Debian se encuentra configurado en español. |
 | **ACLs POSIX (`acl` / `setfacl`) con Herencia por Defecto** | Seguridad de Archivos Local | Reglas de acceso multi-grupo sobre carpetas compartidas y herencia automática (`default ACL`). | Permite esquemas mixtos (múltiples grupos en lectura y uno exclusivo en escritura) asegurando que los nuevos archivos mantengan la política definida. |
 
 
@@ -194,7 +193,7 @@ sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
 sudo ufw allow 22/tcp comment 'SSH'
-sudo ufw allow 9090/tcp comment 'Cockpit Web Admin'
+sudo ufw allow 80/tcp comment 'Panel Web Admin (Nginx)'
 sudo ufw allow 137,138/udp comment 'Samba NetBIOS'
 sudo ufw allow 139,445/tcp comment 'Samba SMB'
 sudo ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP'
@@ -269,7 +268,7 @@ Una vez instalado, el comando `nas` queda registrado en el sistema:
 | 4 | Tareas de backup | Programar y **abortar** copias para Windows (CIFS), Linux (SSH) o carpetas locales con staging atómico. |
 | 5 | Usuarios | Crear usuarios, asignar grupos y gestionar contraseñas de red. |
 | 6 | Diagnóstico | Estado de servicios, almacenamiento, recursos y tareas programadas. |
-| 7 | Reiniciar servicios | Recarga de Samba, WSDD2 y Cockpit. |
+| 7 | Reiniciar servicios | Recarga de Samba, WSDD2, Nginx y PHP-FPM. |
 | 8 | Buscar actualizaciones | Sincronización con GitHub. |
 | 9 | Desinstalar | Restablecimiento total del sistema. |
 
@@ -317,19 +316,19 @@ El motor de copias de seguridad combina rendimiento, resiliencia ante cortes imp
   - **Linux (SSH):** Replicación con atributos extendidos completos (`rsync -aAXH --numeric-ids -v -z`) sobre un túnel SSH con verificación estricta de claves (`StrictHostKeyChecking=accept-new`) guardadas en un almacén aislado `/root/.ssh/known_hosts_backup`.
   - **Carpetas locales:** Sincronización directa entre directorios locales del servidor preservando metadatos POSIX exactos.
 - **Monitoreo preventivo de espacio:** Los runners validan los umbrales de almacenamiento antes de transferir datos; emiten advertencia si la ocupación supera el 85% y abortan preventivamente si quedan menos de 2 GB libres o la ocupación excede el 95%.
-- **Concurrencia y aborto seguro:** Bloqueo exclusivo con `flock` por tarea para evitar solapamientos. Las tareas en ejecución pueden abortarse limpiamente desde el asistente o desde el panel web de Cockpit. El detalle técnico completo se encuentra en `SMB_DEBIAN.md`.
+- **Concurrencia y aborto seguro:** Bloqueo exclusivo con `flock` por tarea para evitar solapamientos. Las tareas en ejecución pueden abortarse limpiamente desde el asistente o desde el panel web nativo. El detalle técnico completo se encuentra en `SMB_DEBIAN.md`.
 
 ## Seguridad
 
 El proyecto aplica una arquitectura de defensa en profundidad para garantizar la resiliencia operativa y la protección de datos:
 
-- **Validación estricta de entradas:** Tanto en el asistente TUI como en la API web Python se sanitizan rutas, expresiones cron, puertos y nombres para mitigar inyecciones de comandos y ataques de salto de directorio (*path traversal*).
+- **Validación estricta de entradas:** Tanto en el asistente TUI como en la aplicación web MVC se sanitizan rutas, expresiones cron, puertos y nombres para mitigar inyecciones de comandos y ataques de salto de directorio (*path traversal*).
 - **Protección de secretos y credenciales:** Las contraseñas administrativas nunca viajan en la línea de comandos (se procesan vía `stdin` o variables de entorno), y las credenciales CIFS se almacenan con permisos `0600 root:root`.
 - **Samba hardening y compatibilidad ofimática:** Configuración de `map to guest = Bad User`, cifrado negociado (`desired`), protocolo mínimo SMB2_02, módulos VFS `acl_xattr` y `streams_xattr` para compatibilidad completa con Microsoft Excel / Office multiusuario (+100 puestos concurrentes sin bloqueos de archivos temporales), y herencia de permisos POSIX con ACLs por defecto (`default ACL`).
 - **Ajustes de Kernel y Resiliencia Eléctrica:** Parámetros `sysctl` optimizados (`vm.dirty_bytes=256MB`, `vm.dirty_background_bytes=64MB`, `net.ipv4.tcp_keepalive_time=120`, `vm.vfs_cache_pressure=30`) para evitar congelamientos de I/O y asegurar el volcado periódico a disco ante fallos eléctricos. En discos mecánicos se fuerza `commit=2` en ext4.
 - **Protección contra Bit Rot y Degradación Flash:** Para el rol de Backup se programa una auditoría periódica mensual de sumas de verificación mediante `btrfs scrub` (`0 2 1 * *`), y para medios SSD se activa el temporizador `fstrim.timer`.
-- **Protección del disco del sistema operativo:** Regla udev persistente (`80-udisks2-hide-os.rules`) con `UDISKS_IGNORE=1` para ocultar la unidad raíz en Cockpit Storage, junto con protecciones contra formateo de particiones en uso (LVM, RAID, LUKS).
-- **Rotación de logs e integridad de cadena de suministro:** Políticas automáticas en `logrotate` para bitácoras de sincronización y despliegue, junto con verificación de firmas SHA256 de todas las extensiones web descargadas.
+- **Protección del disco del sistema operativo:** Regla udev persistente (`80-udisks2-hide-os.rules`) con `UDISKS_IGNORE=1` para aislar la unidad raíz en UDisks2, junto con protecciones contra formateo de particiones en uso (LVM, RAID, LUKS).
+- **Rotación de logs y aislamiento de servicios:** Políticas automáticas en `logrotate` para bitácoras de sincronización y despliegue, junto con ejecución en `pm = ondemand` y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
 
 El análisis de modos de fallo y las pruebas de resiliencia están documentados en `FAILURE_MODES.md`.
 
@@ -343,8 +342,8 @@ src/core/deploy.sh         Motor de despliegue
 src/core/uninstall.sh      Desinstalación total
 src/core/updater.sh        Actualización desde GitHub
 src/modules/               Módulos del asistente (grupos, recursos, backups, usuarios, diagnóstico)
-src/web/backups/           Panel web de backups (Cockpit)
-tests/                     Pruebas unitarias y de fallo
+web/                       Panel web nativo MVC PHP 8 (Nginx-light + PHP-FPM)
+tests/                     Pruebas unitarias y de fallo (BATS, pytest, PHP)
 SMB_DEBIAN.md              Manual técnico de arquitectura y referencia
 SECURITY.md                Modelo de seguridad, identidades y mitigaciones
 FAILURE_MODES.md           Modos de fallo y su verificación (FMEA)
