@@ -113,26 +113,15 @@ Si la huella no está registrada o cambió, la tarea falla con un mensaje claro 
   (temporal + `fsync` + `os.replace`), y la creación/actualización de una tarea es
   **transaccional** (se revierte al estado anterior si alguna etapa falla).
 
-## 4. Parches de Cockpit y actualizaciones de paquetes
+## 4. Privilegios y Aislamiento del Entorno Web (Nginx + PHP-FPM)
 
-Los parches de Cockpit (Identities y Storage) se aplican con:
+El panel web nativo del servidor opera bajo un modelo de privilegios mínimos y aislamiento estricto:
 
-- Copia de seguridad previa: `<archivo>.bak-<YYYYMMDD_HHMMSS>`.
-- Verificación del patrón esperado: si no existe, el parche se omite y se advierte.
-- Escritura atómica (archivo temporal + `mv`), evitando archivos parcialmente corruptos.
-
-> **Importante:** una actualización de paquetes (`apt upgrade` de `cockpit-identities`
-> o `cockpit-storaged`) puede reemplazar los archivos parcheados. Tras actualizar
-> paquetes, revisa si los parches siguen aplicados.
-
-### Restaurar un parche
-
-`deploy.sh` ofrece un modo de restauración que recupera los archivos desde la copia
-de seguridad más reciente sin ejecutar el despliegue:
-
-```bash
-sudo bash /opt/nas_debian/src/core/deploy.sh --restore-patches
-```
+- **Usuario no privilegiado:** Nginx y PHP-FPM ejecutan bajo la cuenta de sistema `www-data`.
+- **Modo ondemand:** El pool PHP-FPM (`/etc/php/*/fpm/pool.d/nas-web.conf`) opera con `pm = ondemand`, apagando procesos ociosos y reduciendo el consumo de memoria en reposo a ~0 MB.
+- **Escalada acotada mediante Sudoers:** El archivo `/etc/sudoers.d/nas-web` concede acceso administrativo exclusivamente a la lista blanca de comandos necesarios para la operación (`systemctl`, `journalctl`, `smbpasswd`, `pdbedit`, etc.), validado con `visudo -c`.
+- **Prevención de inyección de comandos:** Las clases de servicio en PHP 8 (`SystemService`, `UserService`, `StorageService`, etc.) utilizan obligatoriamente `proc_open` con arrays de parámetros para interactuar con utilidades del sistema operativo, eliminando la interpretación de shell y los riesgos de inyección.
+- **Entorno 100% Offline:** Todas las hojas de estilo, scripts y 36 iconos SVG residen localmente en el servidor, garantizando funcionamiento autónomo y protección contra vectores de ataque basados en CDNs externas o dependencias remotas.
 
 ## 5. Formateo y reutilización de almacenamiento
 
