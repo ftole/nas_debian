@@ -1,12 +1,13 @@
 /**
  * ==============================================================================
  * NAS DEBIAN • LÓGICA DE INTERACTIVIDAD (VANILLA JAVASCRIPT)
- * Prototipo Web a la Medida para TEAM-JOFRATO (Debian 13)
- * 100% Offline • Cero dependencias externas • Rendimiento Instantáneo
+ * Prototipo Web Fiel a Red Hat Cockpit / PatternFly 4 (Debian 13)
+ * Organización: TEAM-JOFRATO
+ * 100% Offline • Cero dependencias externas • 13 Módulos de Administración
  * ==============================================================================
  */
 
-// Estado global de la aplicación
+// Estado Global de la Aplicación
 const AppState = {
   currentView: 'dashboard',
   currentTheme: localStorage.getItem('nas_theme') || 'dark',
@@ -14,7 +15,9 @@ const AppState = {
   isTrimRunning: false,
   activeBackupTimers: [],
 
-  // 1. Datos de Recursos Compartidos (Samba Shares)
+  // ============================================================================
+  // 1. RECURSOS COMPARTIDOS (SAMBA SHARES)
+  // ============================================================================
   shares: [
     {
       id: 'SISTEMAS',
@@ -102,7 +105,9 @@ const AppState = {
     }
   ],
 
-  // 2. Datos de Usuarios del Sistema y Samba
+  // ============================================================================
+  // 2. USUARIOS DEL SISTEMA Y SAMBA
+  // ============================================================================
   users: [
     {
       uid: 'admin_nas',
@@ -154,7 +159,9 @@ const AppState = {
     }
   ],
 
-  // 3. Grupos de Seguridad (grp_*)
+  // ============================================================================
+  // 3. GRUPOS DE SEGURIDAD (grp_*)
+  // ============================================================================
   groups: [
     { name: 'grp_sistemas', level: 'Maestro (2770)', members: ['admin_nas', 'backup_svc'], shares: ['SISTEMAS', 'BACKUPS_WINDOWS$', 'BACKUPS_LINUX$', 'CAMPANA_DOS_FINANZAS'] },
     { name: 'grp_empleados', level: 'General Empleados', members: ['carlos_m', 'laura_s', 'patricia_r'], shares: ['CAMPANA_UNO_OPERACIONES'] },
@@ -164,7 +171,9 @@ const AppState = {
     { name: 'grp_auditoria', level: 'Solo Lectura Auditoría', members: ['mario_v'], shares: ['CAMPANA_UNO_OPERACIONES', 'SISTEMAS'] }
   ],
 
-  // 4. Central de Respaldos (Tareas)
+  // ============================================================================
+  // 4. CENTRAL DE RESPALDOS (TAREAS)
+  // ============================================================================
   backupTasks: [
     {
       id: 'bkp_win_facturacion',
@@ -216,7 +225,7 @@ const AppState = {
     }
   ],
 
-  // 5. Historial simulado de Snapshots por tarea
+  // Snapshots por Tarea
   snapshotsData: {
     'bkp_win_facturacion': [
       { name: 'snapshot_2026-10-02_020000', date: '2026-10-02 02:00:22', apparent: '18.4 GB', real: '142 MB', dedup: '99.2%', status: 'Atómico / Íntegro' },
@@ -235,23 +244,162 @@ const AppState = {
     ]
   },
 
-  // 6. Logs de Sistema y Samba
+  // ============================================================================
+  // 5. REGISTROS DEL SISTEMA (LOGS / JOURNALCTL)
+  // ============================================================================
   systemLogs: [
     { time: '11:15:02', level: 'INFO', src: 'smbd', text: 'smbd[1420]: Conexión exitosa desde 10.10.1.45 (Windows 11) recurso [CAMPANA_DOS_FINANZAS] usuario [patricia_r]' },
     { time: '11:14:58', level: 'INFO', src: 'wsdd2', text: 'wsdd2[812]: Sonda LLMNR/WSD respondida para host SRV-NAS hacia cliente 10.10.1.45' },
     { time: '11:00:00', level: 'OK',   src: 'kernel', text: 'sysctl: vm.dirty_bytes=268435456 (256MB) y vfs_cache_pressure=30 activos sin saturación de I/O' },
+    { time: '08:30:00', level: 'WARN', src: 'smbd', text: 'smbd[1388]: Intento de autenticación fallido para usuario [invitado] desde 10.10.1.88 (NT_STATUS_WRONG_PASSWORD)' },
     { time: '06:00:14', level: 'OK',   src: 'backup', text: 'backup_runner: Tarea [bkp_win_contabilidad] finalizada exitosamente en 14.8s. Snapshots: 14/20' },
     { time: '03:30:18', level: 'OK',   src: 'backup', text: 'backup_runner: Tarea [bkp_lin_servidor_web] rsync con StrictHostKeyChecking=accept-new exitoso' },
     { time: '02:00:25', level: 'OK',   src: 'backup', text: 'backup_runner: Tarea [bkp_win_facturacion] deduplicación 88.6% (0 bytes adicionales en inodos compartidos)' },
     { time: '01:00:00', level: 'INFO', src: 'cron',   text: 'cron[620]: Verificación preventiva de espacio en disco en /srv/nas: 35% de ocupación (umbral seguro <85%)' }
   ],
 
-  // 7. Feed de eventos recientes para el dashboard
+  // ============================================================================
+  // 6. SERVICIOS SYSTEMD
+  // ============================================================================
+  services: [
+    { name: 'smbd.service', desc: 'Samba SMB/CIFS File Server', status: 'active', sub: 'running', enabled: 'enabled', canRestart: true },
+    { name: 'nmbd.service', desc: 'Samba NetBIOS Name Server', status: 'active', sub: 'running', enabled: 'enabled', canRestart: true },
+    { name: 'wsdd2.service', desc: 'Web Services Discovery Daemon (WSD/LLMNR)', status: 'active', sub: 'running', enabled: 'enabled', canRestart: true },
+    { name: 'cron.service', desc: 'Periodic Command Scheduler (nas-backups)', status: 'active', sub: 'running', enabled: 'enabled', canRestart: true },
+    { name: 'cockpit.socket', desc: 'Cockpit Web Console Socket', status: 'active', sub: 'listening', enabled: 'enabled', canRestart: true },
+    { name: 'fstrim.timer', desc: 'Discard Unused Flash Blocks on SSDs', status: 'active', sub: 'waiting', enabled: 'enabled', canRestart: true },
+    { name: 'ssh.service', desc: 'OpenSSH Remote Secure Tunnel Daemon', status: 'active', sub: 'running', enabled: 'enabled', canRestart: true }
+  ],
+
+  // ============================================================================
+  // 7. NAVEGADOR DE ARCHIVOS (/srv/nas)
+  // ============================================================================
+  fileBrowser: {
+    currentPath: '/srv/nas',
+    fileTree: {
+      '/srv/nas': [
+        { name: 'SISTEMAS', type: 'dir', size: '14.2 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' },
+        { name: 'CAMPANA_UNO_OPERACIONES', type: 'dir', size: '28.6 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 17:30' },
+        { name: 'CAMPANA_DOS_FINANZAS', type: 'dir', size: '42.1 GB', owner: 'patricia_r', group: 'grp_finanzas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 08:45' },
+        { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '550.0 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' },
+        { name: 'PUBLICO', type: 'dir', size: '1.2 GB', owner: 'nobody', group: 'nogroup', perms: 'drwxrwxrwx', octal: '0777', mtime: '2026-09-28 14:00' },
+        { name: 'README_ALMACENAMIENTO.txt', type: 'file', size: '3.4 KB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-09-25 11:20' }
+      ],
+      '/srv/nas/SISTEMAS': [
+        { name: 'scripts_mantenimiento', type: 'dir', size: '45 MB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 12:00' },
+        { name: 'politicas_seguridad_2026.pdf', type: 'file', size: '1.8 MB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-20 09:15' },
+        { name: 'inventario_servidores_ead.xlsx', type: 'file', size: '540 KB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 10:10' }
+      ],
+      '/srv/nas/CAMPANA_UNO_OPERACIONES': [
+        { name: 'manuales_procedimientos', type: 'dir', size: '12.4 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 16:20' },
+        { name: 'plantilla_cobranzas_c1.xlsx', type: 'file', size: '2.4 MB', owner: 'carlos_m', group: 'grp_c1_cobranzas', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-10-01 15:40' }
+      ],
+      '/srv/nas/CAMPANA_DOS_FINANZAS': [
+        { name: 'estados_financieros_2026.xlsx', type: 'file', size: '14.8 MB', owner: 'patricia_r', group: 'grp_finanzas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 08:30' },
+        { name: 'balance_general_q3.pdf', type: 'file', size: '3.2 MB', owner: 'patricia_r', group: 'grp_finanzas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-30 18:00' }
+      ],
+      '/srv/nas/BACKUPS_HISTORICOS': [
+        { name: 'windows', type: 'dir', size: '240 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
+        { name: 'linux', type: 'dir', size: '180 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
+        { name: 'facturacion', type: 'dir', size: '130 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
+      ],
+      '/srv/nas/PUBLICO': [
+        { name: 'formatos_vacaciones.docx', type: 'file', size: '120 KB', owner: 'nobody', group: 'nogroup', perms: '-rw-rw-rw-', octal: '0666', mtime: '2026-09-15 10:00' },
+        { name: 'directorio_telefonico_ead.pdf', type: 'file', size: '450 KB', owner: 'nobody', group: 'nogroup', perms: '-rw-rw-rw-', octal: '0666', mtime: '2026-09-10 11:30' }
+      ]
+    }
+  },
+
+  // ============================================================================
+  // 8. ACTUALIZACIONES DE SOFTWARE
+  // ============================================================================
+  updates: [
+    { pkg: 'samba', installed: '4.20.1-Debian', available: '4.20.1-Debian', source: 'debian-trixie-updates', status: 'Actualizado' },
+    { pkg: 'wsdd2', installed: '1.8.8-1', available: '1.8.8-1', source: 'debian-trixie-main', status: 'Actualizado' },
+    { pkg: 'cockpit', installed: '319-1', available: '319-1', source: 'debian-trixie-backports', status: 'Actualizado' },
+    { pkg: 'btrfs-progs', installed: '6.12-1', available: '6.12-1', source: 'debian-trixie-main', status: 'Actualizado' },
+    { pkg: 'rsync', installed: '3.3.0-1', available: '3.3.0-1', source: 'debian-trixie-main', status: 'Actualizado' },
+    { pkg: 'nas_debian (core)', installed: 'v1.2.4-stable (f0eb31e)', available: 'v1.2.4-stable', source: 'github.com/team-jofrato', status: 'Versión Oficial' }
+  ],
+
+  // ============================================================================
+  // 9. APLICACIONES Y MÓDULOS DEL SERVIDOR
+  // ============================================================================
+  applications: [
+    {
+      id: 'samba',
+      name: 'Samba 4 CIFS/SMB Server',
+      version: '4.20.1-Debian',
+      status: 'Activo',
+      desc: 'Servicio central de archivos compartidos para clientes Windows y Linux con soporte de módulos VFS acl_xattr y streams_xattr.',
+      icon: 'icon-folder'
+    },
+    {
+      id: 'wsdd2',
+      name: 'WSDD2 Web Services Discovery',
+      version: '1.8.8-Debian',
+      status: 'Activo',
+      desc: 'Demonio LLMNR y WSD para visibilidad instantánea del servidor en el Explorador de Red de Windows 10/11 sin protocolos obsoletos.',
+      icon: 'icon-network'
+    },
+    {
+      id: 'cockpit_backups',
+      name: 'Cockpit-Backups (EAD-COL)',
+      version: '2.1.0-stable',
+      status: 'Activo',
+      desc: 'Plugin web integrado en Cockpit para réplicas multiplataforma, deduplicación por Hardlinks y staging atómico.',
+      icon: 'icon-shield'
+    },
+    {
+      id: 'cockpit_identities',
+      name: '45Drives File Sharing & Identities',
+      version: '3.2.1-stable',
+      status: 'Activo',
+      desc: 'Módulo gráfico de gestión de ACLs POSIX, usuarios locales, credenciales smbpasswd y grupos de seguridad corporativos.',
+      icon: 'icon-users'
+    },
+    {
+      id: 'udisks2',
+      name: 'UDisks2 Storage Module',
+      version: '2.10.1-Debian',
+      status: 'Activo',
+      desc: 'Monitoreo de almacenamiento con reglas udev de ocultamiento del disco de sistema operativo (UDISKS_IGNORE=1).',
+      icon: 'icon-hard-drive'
+    },
+    {
+      id: 'openssh',
+      name: 'OpenSSH Secure Server',
+      version: '9.2p1-Debian',
+      status: 'Activo',
+      desc: 'Canal cifrado de réplica con verificación de llaves StrictHostKeyChecking=accept-new en /root/.ssh/known_hosts_backup.',
+      icon: 'icon-terminal'
+    }
+  ],
+
+  // ============================================================================
+  // 10. ESTADO DEL DOMINIO ACTIVE DIRECTORY
+  // ============================================================================
+  domain: {
+    isJoined: false,
+    realm: '',
+    workgroup: 'TEAM-JOFRATO',
+    dc: ''
+  },
+
+  // ============================================================================
+  // 11. HISTORIAL Y TERMINAL INTERACTIVA
+  // ============================================================================
+  terminal: {
+    history: [],
+    historyIdx: -1
+  },
+
+  // Feed de eventos del Dashboard
   activityFeed: [
     { badge: 'Éxito', badgeClass: 'badge-ok', title: 'Snapshot completado: bkp_win_facturacion', desc: 'Deduplicación 88.6% • 0 bytes adicionales en inodos compartidos' },
     { badge: 'Samba', badgeClass: 'badge-blue', title: 'Sesión SMB iniciada por carlos_m desde 10.10.1.34', desc: 'Acceso concedido a recurso [CAMPANA_UNO_OPERACIONES]' },
     { badge: 'WSDD2', badgeClass: 'badge-blue', title: 'Descubrimiento de red WSD respondido para host SRV-NAS', desc: 'Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto' },
-    { badge: 'Scrub', badgeClass: 'badge-ok', title: 'Auditoría mensual BTRFS: 1,420,892 bloques validados', desc: '0 errores de corrupción silenciosa detectados en /srv/nas' }
+    { badge: 'Scrub', badgeClass: 'badge-ok', title: 'Auditoría mensual Btrfs: 1,420,892 bloques validados', desc: '0 errores de corrupción silenciosa detectados en /srv/nas' }
   ]
 };
 
@@ -261,16 +409,21 @@ const AppState = {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   setupNavigation();
+  renderDashboardActivityFeed();
+  renderLogsTable();
+  renderServicesTable();
+  renderFileBrowser();
   renderSharesTable();
   renderUsersTable();
   renderGroupsTable();
   renderGroupCheckboxes();
   renderBackupTasksTable();
-  renderSystemLogs();
-  renderDashboardActivityFeed();
+  renderUpdatesTable();
+  renderApplicationsGrid();
   updateAllCounters();
   setupModals();
   setupForms();
+  setupTerminal();
   updateNewSharePreview();
 });
 
@@ -278,7 +431,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // Actualización Dinámica de Contadores y Badges
 // ==============================================================================
 function updateAllCounters() {
-  // 1. Badges del menú lateral (Sidebar)
   const badgeShares = document.getElementById('badge-shares');
   if (badgeShares) badgeShares.innerText = AppState.shares.length;
 
@@ -288,14 +440,19 @@ function updateAllCounters() {
   const badgeBackups = document.getElementById('badge-backups');
   if (badgeBackups) badgeBackups.innerText = AppState.backupTasks.length;
 
-  // 2. Subtabs de usuarios y grupos
+  const badgeServices = document.getElementById('badge-services');
+  if (badgeServices) {
+    const activeCount = AppState.services.filter(s => s.status === 'active').length;
+    badgeServices.innerText = `${activeCount}/${AppState.services.length}`;
+  }
+
   const subtabUsers = document.getElementById('subtab-users-label');
   if (subtabUsers) subtabUsers.innerText = `Usuarios del Sistema y Samba (${AppState.users.length})`;
 
   const subtabGroups = document.getElementById('subtab-groups-label');
   if (subtabGroups) subtabGroups.innerText = `Grupos de Seguridad grp_* (${AppState.groups.length})`;
 
-  // 3. Chips de filtro de recursos Samba
+  // Chips de filtro de recursos Samba
   const totalShares = AppState.shares.length;
   const visibleShares = AppState.shares.filter(s => s.vis === 'Visible').length;
   const hiddenShares = AppState.shares.filter(s => s.vis !== 'Visible' || s.name.endsWith('$')).length;
@@ -330,18 +487,15 @@ function toggleTheme() {
 
 function updateThemeIcon() {
   const iconSpan = document.getElementById('theme-toggle-icon');
-  const textSpan = document.getElementById('theme-toggle-text');
-  if (AppState.currentTheme === 'dark') {
-    if (iconSpan) iconSpan.innerHTML = '<use href="#icon-sun"></use>';
-    if (textSpan) textSpan.innerText = 'Modo Claro';
-  } else {
-    if (iconSpan) iconSpan.innerHTML = '<use href="#icon-moon"></use>';
-    if (textSpan) textSpan.innerText = 'Modo Oscuro';
+  if (iconSpan) {
+    iconSpan.innerHTML = AppState.currentTheme === 'dark' 
+      ? '<use href="#icon-sun"></use>' 
+      : '<use href="#icon-moon"></use>';
   }
 }
 
 // ==============================================================================
-// Navegación entre Pestañas / Vistas
+// Navegación entre las 13 Vistas
 // ==============================================================================
 function setupNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
@@ -388,22 +542,20 @@ function switchView(viewId) {
   document.querySelectorAll('.view-section').forEach(sec => {
     sec.classList.remove('active');
   });
+
   const targetView = document.getElementById(`view-${viewId}`);
   if (targetView) targetView.classList.add('active');
 
-  const breadcrumb = document.getElementById('current-view-title');
-  const viewNames = {
-    'dashboard': 'Dashboard General',
-    'shares': 'Recursos Compartidos (Samba)',
-    'users': 'Usuarios y Grupos de Red',
-    'backups': 'Central de Respaldos',
-    'diagnostics': 'Mantenimiento y Diagnóstico'
-  };
-  if (breadcrumb) breadcrumb.innerText = viewNames[viewId] || 'Inicio';
+  // Acciones al cambiar de vista
+  if (viewId === 'terminal') {
+    focusTerminalInput();
+  } else if (viewId === 'logs') {
+    renderLogsTable();
+  }
 }
 
 // ==============================================================================
-// Notificaciones Toast Flotantes
+// Notificaciones Toast Flotantes (PatternFly 4)
 // ==============================================================================
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
@@ -428,7 +580,7 @@ function showToast(message, type = 'info') {
 }
 
 // ==============================================================================
-// Pestaña 1: Dashboard y Feed de Actividad
+// 1. DASHBOARD: FEED DE ACTIVIDAD & MÉTRICAS
 // ==============================================================================
 function renderDashboardActivityFeed() {
   const container = document.getElementById('dashboard-activity-feed');
@@ -438,7 +590,7 @@ function renderDashboardActivityFeed() {
     const isLast = idx === AppState.activityFeed.length - 1;
     const borderStyle = isLast ? '' : 'border-bottom:1px solid var(--border-light); padding-bottom:8px;';
     return `
-      <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; ${borderStyle}">
+      <div style="display:flex; align-items:flex-start; gap:10px; font-size:12px; ${borderStyle}">
         <span class="badge ${item.badgeClass}" style="font-size:10px;">${item.badge}</span>
         <div>
           <div>${item.title}</div>
@@ -460,11 +612,603 @@ function refreshDashboardMetrics() {
     if (btn) btn.disabled = false;
     updateAllCounters();
     showToast('Métricas del sistema Debian 13 actualizadas en tiempo real', 'success');
-  }, 750);
+  }, 650);
 }
 
 // ==============================================================================
-// Pestaña 2: Recursos Compartidos (Samba Shares)
+// 2. REGISTROS (LOGS / JOURNALCTL)
+// ==============================================================================
+let currentLogsFilter = 'all';
+
+function renderLogsTable(filterText = '') {
+  const tbody = document.getElementById('logs-table-body');
+  if (!tbody) return;
+
+  const filtered = AppState.systemLogs.filter(l => {
+    if (currentLogsFilter === 'errors' && l.level !== 'ERR' && l.level !== 'WARN') return false;
+    if (currentLogsFilter === 'samba' && l.src !== 'smbd' && l.src !== 'wsdd2') return false;
+    if (currentLogsFilter === 'backup' && l.src !== 'backup') return false;
+    if (currentLogsFilter === 'kernel' && l.src !== 'kernel' && l.src !== 'cron') return false;
+
+    if (filterText) {
+      const q = filterText.toLowerCase();
+      return l.text.toLowerCase().includes(q) || l.src.toLowerCase().includes(q) || l.level.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-msg">No se encontraron registros que coincidan con el filtro actual.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(l => {
+    const badgeClass = l.level === 'OK' ? 'badge-ok' :
+                       l.level === 'WARN' ? 'badge-warn' :
+                       l.level === 'ERR' ? 'badge-err' : 'badge-blue';
+    return `
+      <tr>
+        <td style="font-family:var(--font-mono); color:var(--text-muted); font-size:11.5px;">${l.time}</td>
+        <td><span class="badge ${badgeClass}">${l.level}</span></td>
+        <td><code>${l.src}</code></td>
+        <td style="font-family:var(--font-mono); font-size:12px;">${l.text}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterLogs(filterType, btnElement) {
+  currentLogsFilter = filterType;
+  document.querySelectorAll('#logs-filter-chips .chip-btn').forEach(btn => btn.classList.remove('active'));
+  if (btnElement) btnElement.classList.add('active');
+  renderLogsTable(document.getElementById('logs-search-input')?.value || '');
+}
+
+function clearLogsFilter() {
+  currentLogsFilter = 'all';
+  const searchInput = document.getElementById('logs-search-input');
+  if (searchInput) searchInput.value = '';
+  document.querySelectorAll('#logs-filter-chips .chip-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-filter') === 'all');
+  });
+  renderLogsTable();
+  showToast('Filtro de registros restablecido', 'info');
+}
+
+function copySystemLogs() {
+  const text = AppState.systemLogs.map(l => `[${l.time}] [${l.src}] [${l.level}] ${l.text}`).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Bitácoras copiadas al portapapeles', 'success');
+    }).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('Bitácoras copiadas al portapapeles', 'success');
+  } catch (e) {
+    showToast('No se pudo copiar automáticamente', 'warning');
+  }
+  document.body.removeChild(ta);
+}
+
+// ==============================================================================
+// 3. ALMACENAMIENTO: BTRFS SCRUB & SSD TRIM
+// ==============================================================================
+function runBtrfsScrubSimulation() {
+  if (AppState.isScrubRunning) {
+    showToast('Una auditoría Btrfs Scrub ya se encuentra en ejecución', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('btn-run-scrub');
+  const bar = document.getElementById('scrub-progress-bar');
+  const statusTxt = document.getElementById('scrub-status-text');
+
+  if (!btn || !bar) return;
+
+  AppState.isScrubRunning = true;
+  btn.disabled = true;
+  statusTxt.innerText = 'Ejecutando btrfs scrub start -B /srv/nas...';
+  bar.style.width = '0%';
+
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += 25;
+    bar.style.width = `${progress}%`;
+    if (progress >= 100) {
+      clearInterval(interval);
+      AppState.isScrubRunning = false;
+      btn.disabled = false;
+      statusTxt.innerText = '✔ Scrub finalizado: 1,420,892 bloques verificados. 0 errores detectados (Bit Rot 0%).';
+      showToast('Auditoría Btrfs Scrub finalizada: Integridad 100% verificada', 'success');
+    }
+  }, 400);
+}
+
+function runFstrimSimulation() {
+  if (AppState.isTrimRunning) {
+    showToast('El descarte flash fstrim ya está en progreso', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('btn-run-trim');
+  if (!btn) return;
+
+  AppState.isTrimRunning = true;
+  btn.disabled = true;
+  showToast('Ejecutando fstrim -va en unidades SSD flash...', 'info');
+
+  setTimeout(() => {
+    AppState.isTrimRunning = false;
+    btn.disabled = false;
+    const txt = document.getElementById('trim-status-text');
+    if (txt) txt.innerText = '✔ Último descarte manual exitoso: 114.6 GiB recortados en /srv/nas';
+    showToast('fstrim completado: Sectores flash descartados correctamente', 'success');
+  }, 1000);
+}
+
+// ==============================================================================
+// 4. REDES: TEST DE CONECTIVIDAD EN TIEMPO REAL
+// ==============================================================================
+function runNetworkTest() {
+  const hostInput = document.getElementById('net-test-host');
+  const host = hostInput ? hostInput.value.trim() : '10.10.1.45';
+  const type = document.getElementById('net-test-type')?.value || '445';
+  const out = document.getElementById('net-test-result');
+
+  if (!host) {
+    showToast('Ingresa una dirección IP o nombre de host válido', 'danger');
+    return;
+  }
+
+  if (!out) return;
+  out.innerHTML = `<span style="color:var(--accent-primary);">Probando conectividad hacia ${host} vía puerto ${type}...</span>`;
+
+  setTimeout(() => {
+    let title = '';
+    let detail = '';
+
+    if (type === 'ICMP') {
+      title = '✔ Respuesta de Ping ICMP exitosa en 1.1 ms';
+      detail = '4 paquetes transmitidos, 4 paquetes recibidos, 0% packet loss. RTT avg = 1.1 ms.';
+    } else if (type === '445') {
+      title = '✔ Puerto 445/tcp (SMB/CIFS) abierto y escuchando';
+      detail = 'Handshake TCP establecido en 2.3 ms. Negociado dialecto SMB 3.1.1 con cifrado AES-128-GCM.';
+    } else if (type === '22') {
+      title = '✔ Puerto 22/tcp (SSH) abierto y escuchando';
+      detail = 'Banner SSH-2.0-OpenSSH_9.2p1 Debian 13 recibido. Negociación criptográfica correcta.';
+    } else if (type === '5357') {
+      title = '✔ Puerto 5357/tcp (WSD Discovery) activo';
+      detail = 'Servicio wsdd2 respondiendo sondas de descubrimiento para clientes Windows 10/11.';
+    }
+
+    out.innerHTML = `
+      <div style="color:var(--accent-success); font-weight:700;">${title}</div>
+      <div style="color:var(--text-secondary); margin-top:2px;">Destino: ${host} | Protocolo: ${type}</div>
+      <div style="color:var(--text-muted); font-size:11px;">${detail}</div>
+    `;
+    showToast(`Conectividad con ${host} (${type}) verificada`, 'success');
+  }, 650);
+}
+
+// ==============================================================================
+// 5. SERVICIOS SYSTEMD
+// ==============================================================================
+function renderServicesTable() {
+  const tbody = document.getElementById('services-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = AppState.services.map(s => {
+    const isActive = s.status === 'active';
+    const statusBadge = isActive
+      ? `<span class="badge badge-ok"><span class="status-dot status-ok"></span> ${s.status} (${s.sub})</span>`
+      : `<span class="badge badge-err"><span class="status-dot status-err"></span> ${s.status} (${s.sub})</span>`;
+
+    return `
+      <tr>
+        <td>
+          <strong>${s.name}</strong>
+        </td>
+        <td>${s.desc}</td>
+        <td>${statusBadge}</td>
+        <td><span class="badge badge-gray">${s.enabled}</span></td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-secondary btn-sm" onclick="restartService('${s.name}')" title="Reiniciar servicio">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Reiniciar
+            </button>
+            <button class="btn ${isActive ? 'btn-danger' : 'btn-primary'} btn-sm" onclick="toggleService('${s.name}')">
+              ${isActive ? 'Detener' : 'Iniciar'}
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function restartService(serviceName) {
+  showToast(`Reiniciando ${serviceName}...`, 'info');
+  setTimeout(() => {
+    showToast(`Servicio [${serviceName}] reiniciado con éxito`, 'success');
+    renderServicesTable();
+    updateAllCounters();
+  }, 600);
+}
+
+function toggleService(serviceName) {
+  const svc = AppState.services.find(s => s.name === serviceName);
+  if (!svc) return;
+
+  if (svc.status === 'active') {
+    svc.status = 'inactive';
+    svc.sub = 'dead';
+    showToast(`Servicio [${serviceName}] detenido`, 'warning');
+  } else {
+    svc.status = 'active';
+    svc.sub = 'running';
+    showToast(`Servicio [${serviceName}] iniciado`, 'success');
+  }
+  renderServicesTable();
+  updateAllCounters();
+}
+
+// ==============================================================================
+// 6. TERMINAL WEB INTERACTIVA
+// ==============================================================================
+function setupTerminal() {
+  const input = document.getElementById('terminal-cmd-input');
+  const output = document.getElementById('cockpit-terminal-output');
+
+  if (output && output.children.length === 0) {
+    appendTerminalOutput([
+      'Debian GNU/Linux 13 (trixie) [Linux 6.12.9-amd64 x86_64]',
+      'Consola de Administración Web Cockpit • SRV-NAS (10.10.1.2)',
+      'Organización: TEAM-JOFRATO • Rol: ARCHIVOS & BACKUP',
+      'Escribe "help" o "ayuda" para ver la lista de comandos disponibles.',
+      ''
+    ].join('\n'), 'term-info');
+  }
+
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const cmd = input.value.trim();
+        if (cmd) {
+          executeTerminalCommand(cmd);
+          AppState.terminal.history.push(cmd);
+          AppState.terminal.historyIdx = AppState.terminal.history.length;
+          input.value = '';
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (AppState.terminal.history.length > 0 && AppState.terminal.historyIdx > 0) {
+          AppState.terminal.historyIdx--;
+          input.value = AppState.terminal.history[AppState.terminal.historyIdx] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (AppState.terminal.historyIdx < AppState.terminal.history.length - 1) {
+          AppState.terminal.historyIdx++;
+          input.value = AppState.terminal.history[AppState.terminal.historyIdx] || '';
+        } else {
+          AppState.terminal.historyIdx = AppState.terminal.history.length;
+          input.value = '';
+        }
+      }
+    });
+  }
+}
+
+function focusTerminalInput() {
+  const input = document.getElementById('terminal-cmd-input');
+  if (input) input.focus();
+}
+
+function clearTerminalScreen() {
+  const output = document.getElementById('cockpit-terminal-output');
+  if (output) output.innerHTML = '';
+  focusTerminalInput();
+}
+
+function showTerminalHelp() {
+  executeTerminalCommand('help');
+}
+
+function appendTerminalOutput(text, className = '') {
+  const output = document.getElementById('cockpit-terminal-output');
+  if (!output) return;
+
+  const div = document.createElement('div');
+  div.className = `terminal-output-line ${className}`;
+  div.innerText = text;
+  output.appendChild(div);
+  output.scrollTop = output.scrollHeight;
+}
+
+function executeTerminalCommand(cmd) {
+  // Mostrar el prompt y comando
+  appendTerminalOutput(`root@SRV-NAS:~# ${cmd}`, 'terminal-cmd-entry');
+
+  const lower = cmd.toLowerCase().trim();
+
+  if (lower === 'clear' || lower === 'cls') {
+    clearTerminalScreen();
+    return;
+  }
+
+  if (lower === 'help' || lower === 'ayuda') {
+    appendTerminalOutput([
+      'Comandos del Sistema y Plataforma NAS Debian 13:',
+      '  nas --status          : Estado completo de servicios y almacenamiento',
+      '  df -h                 : Reporte de sistemas de archivos montados',
+      '  free -m               : Uso de memoria RAM y buffers VFS',
+      '  ip a                  : Configuración y direcciones IP de interfaces',
+      '  systemctl status smbd : Diagnóstico del demonio Samba',
+      '  btrfs scrub status    : Auditoría contra Bit Rot en /srv/nas',
+      '  testparm -s           : Verificación de sintaxis de smb.conf',
+      '  uptime                : Tiempo de actividad y promedio de carga',
+      '  uname -a              : Versión del kernel Linux',
+      '  clear                 : Limpiar pantalla de la consola'
+    ].join('\n'), 'term-info');
+    return;
+  }
+
+  if (lower.startsWith('nas --status') || lower === 'nas') {
+    appendTerminalOutput([
+      '======================================================================',
+      '   ESTADO DE LA PLATAFORMA NAS DEBIAN 13 (TEAM-JOFRATO)',
+      '======================================================================',
+      '  Host / NetBIOS     : SRV-NAS (IP: 10.10.1.2)',
+      '  Workgroup          : TEAM-JOFRATO',
+      '  Punto de Montaje   : /srv/nas (3.88 TB, Btrfs zstd:3, 1.4 TB ocupado)',
+      '  Servicio Samba     : ACTIVO (smbd: OK, nmbd: OK, wsdd2: OK)',
+      '  Conexiones Activas : 28 puestos concurrentes',
+      '  Tuning I/O         : vm.dirty_bytes=256MB • readahead=4096KB',
+      '  Central Respaldos  : 3 tareas activas • Deduplicación >85%',
+      '======================================================================'
+    ].join('\n'), 'term-ok');
+    return;
+  }
+
+  if (lower.startsWith('df')) {
+    appendTerminalOutput([
+      'Filesystem      Size  Used Avail Use% Mounted on',
+      'udev            7.8G     0  7.8G   0% /dev',
+      'tmpfs           1.6G  1.8M  1.6G   1% /run',
+      '/dev/sda1       118G   18G   94G  16% /',
+      'tmpfs           7.9G     0  7.9G   0% /dev/shm',
+      '/dev/sda2       3.9T  1.4T  2.5T  36% /srv/nas'
+    ].join('\n'), 'term-cmd');
+    return;
+  }
+
+  if (lower.startsWith('free')) {
+    appendTerminalOutput([
+      '               total        used        free      shared  buff/cache   available',
+      'Mem:           15890        3840        5850          12        6200       11680',
+      'Swap:           4096           0        4096'
+    ].join('\n'), 'term-cmd');
+    return;
+  }
+
+  if (lower.startsWith('ip a') || lower === 'ifconfig') {
+    appendTerminalOutput([
+      '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default',
+      '    inet 127.0.0.1/8 scope host lo',
+      '2: enp3s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000',
+      '    inet 10.10.1.2/24 brd 10.10.1.255 scope global enp3s0'
+    ].join('\n'), 'term-cmd');
+    return;
+  }
+
+  if (lower.includes('smbd') || lower.includes('systemctl')) {
+    appendTerminalOutput([
+      '● smbd.service - Samba SMB Daemon',
+      '     Loaded: loaded (/lib/systemd/system/smbd.service; enabled; vendor preset: enabled)',
+      '     Active: active (running) since Sun 2026-09-18 04:00:12 UTC; 14 days ago',
+      '   Main PID: 1420 (smbd)',
+      '      Tasks: 29 (limit: 18940)',
+      '     Memory: 114.2M',
+      '        CPU: 12min 4.218s',
+      '     CGroup: /system.slice/smbd.service'
+    ].join('\n'), 'term-ok');
+    return;
+  }
+
+  if (lower.includes('btrfs') || lower.includes('scrub')) {
+    appendTerminalOutput([
+      'Scrub status for UUID f8a211bc-9910-4c22-9214-38ad591c01b2',
+      '  scrub started at Thu Oct  1 02:00:00 2026 and finished after 00:18:42',
+      '  total to scrub: 1.42TiB',
+      '  rate: 1.30GiB/s',
+      '  verified: 1420892 blocks',
+      '  errors: 0 (csum: 0, read: 0, super: 0, uncorrectable: 0)'
+    ].join('\n'), 'term-ok');
+    return;
+  }
+
+  if (lower.startsWith('testparm')) {
+    appendTerminalOutput([
+      'Load smb config files from /etc/samba/smb.conf',
+      'Loaded services file OK.',
+      'Weak crypto is allowed',
+      'Server role: ROLE_STANDALONE',
+      'Press enter to see a dump of your service definitions'
+    ].join('\n'), 'term-ok');
+    return;
+  }
+
+  if (lower === 'uptime') {
+    appendTerminalOutput(' 11:24:18 up 14 days,  6:22,  1 user,  load average: 0.12, 0.08, 0.05', 'term-cmd');
+    return;
+  }
+
+  if (lower.startsWith('uname')) {
+    appendTerminalOutput('Linux SRV-NAS 6.12.9-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.9-1 x86_64 GNU/Linux', 'term-cmd');
+    return;
+  }
+
+  // Comando no reconocido
+  appendTerminalOutput(`bash: ${cmd}: orden no encontrada. Escribe "help" para ver los comandos soportados.`, 'term-err');
+}
+
+// ==============================================================================
+// 7. NAVEGADOR DE ARCHIVOS (/srv/nas)
+// ==============================================================================
+function renderFileBrowser() {
+  const breadcrumb = document.getElementById('file-breadcrumb-trail');
+  const tbody = document.getElementById('file-browser-table-body');
+  if (!tbody || !breadcrumb) return;
+
+  const currentPath = AppState.fileBrowser.currentPath;
+
+  // Migas de pan
+  const parts = currentPath.split('/').filter(Boolean);
+  let accumulated = '';
+  breadcrumb.innerHTML = parts.map((part, idx) => {
+    accumulated += `/${part}`;
+    const target = accumulated;
+    const isLast = idx === parts.length - 1;
+    return isLast
+      ? `<span style="font-weight:700; color:var(--text-main);">${part}</span>`
+      : `<span class="file-breadcrumb-segment" onclick="navigateToFileFolder('${target}')">${part}</span> <span>/</span>`;
+  }).join(' ');
+
+  // Lista de archivos
+  const items = AppState.fileBrowser.fileTree[currentPath] || [];
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">El directorio está vacío.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(item => {
+    const isDir = item.type === 'dir';
+    const iconName = isDir ? 'icon-folder' : 'icon-file';
+    const clickAttr = isDir ? `onclick="navigateToFileFolder('${currentPath}/${item.name}')"` : '';
+    const cursorStyle = isDir ? 'cursor:pointer; color:var(--accent-primary); font-weight:600;' : '';
+
+    return `
+      <tr>
+        <td>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg class="icon" style="${isDir ? 'color:var(--accent-primary);' : 'color:var(--text-muted);'}"><use href="#${iconName}"></use></svg>
+            <span ${clickAttr} style="${cursorStyle}">${item.name}</span>
+          </div>
+        </td>
+        <td>${item.size}</td>
+        <td><code>${item.owner}:${item.group}</code></td>
+        <td><span class="tag-pill">${item.perms} (${item.octal})</span></td>
+        <td><small style="color:var(--text-secondary);">${item.mtime}</small></td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-secondary btn-sm" onclick="inspectFilePerms('${item.name}', '${currentPath}/${item.name}', '${item.owner}', '${item.group}', '${item.perms}', '${item.octal}')" title="Ver ACLs y getfacl">
+              ACLs
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteFileItem('${item.name}')" title="Eliminar">
+              <svg class="icon"><use href="#icon-trash"></use></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function navigateToFileFolder(path) {
+  if (AppState.fileBrowser.fileTree[path]) {
+    AppState.fileBrowser.currentPath = path;
+    renderFileBrowser();
+  } else {
+    showToast(`El directorio ${path} está vacío o no contiene elementos.`, 'info');
+  }
+}
+
+function navigateUpFolder() {
+  const current = AppState.fileBrowser.currentPath;
+  if (current === '/srv/nas') {
+    showToast('Ya te encuentras en la raíz del almacenamiento (/srv/nas)', 'info');
+    return;
+  }
+  const parts = current.split('/').filter(Boolean);
+  parts.pop();
+  AppState.fileBrowser.currentPath = '/' + parts.join('/');
+  renderFileBrowser();
+}
+
+function inspectFilePerms(name, fullPath, owner, group, perms, octal) {
+  document.getElementById('perms-item-name').innerText = name;
+  document.getElementById('perms-item-path').value = fullPath;
+  document.getElementById('perms-item-owner').value = `${owner} (UID 1000)`;
+  document.getElementById('perms-item-group').value = `${group} (GID 2000)`;
+
+  const aclOutput = [
+    `# file: ${fullPath}`,
+    `# owner: ${owner}`,
+    `# group: ${group}`,
+    `# flags: -s-`,
+    `user::rwx`,
+    `group::rwx`,
+    `group:${group}:rwx`,
+    `mask::rwx`,
+    `other::---`,
+    `default:user::rwx`,
+    `default:group::rwx`,
+    `default:group:${group}:rwx`,
+    `default:mask::rwx`,
+    `default:other::---`
+  ].join('\n');
+
+  document.getElementById('perms-item-getfacl').innerText = aclOutput;
+  openModal('modal-file-perms');
+}
+
+function deleteFileItem(name) {
+  if (confirm(`¿Estás seguro de que deseas eliminar [${name}] de /srv/nas?`)) {
+    const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
+    if (list) {
+      AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath] = list.filter(i => i.name !== name);
+      renderFileBrowser();
+      showToast(`Elemento [${name}] eliminado de disco`, 'danger');
+    }
+  }
+}
+
+function simulateFileUpload() {
+  showToast('Cargando archivo simulado en /srv/nas...', 'info');
+  setTimeout(() => {
+    const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
+    if (list) {
+      list.push({
+        name: `documento_cargado_${Date.now().toString().slice(-4)}.pdf`,
+        type: 'file',
+        size: '1.4 MB',
+        owner: 'admin_nas',
+        group: 'grp_sistemas',
+        perms: '-rw-rw-r--',
+        octal: '0664',
+        mtime: 'Hace un momento'
+      });
+      renderFileBrowser();
+      showToast('Archivo subido correctamente con permisos POSIX heredados', 'success');
+    }
+  }, 700);
+}
+
+// ==============================================================================
+// 8. RECURSOS COMPARTIDOS (SAMBA SHARES)
 // ==============================================================================
 let currentShareFilter = 'all';
 
@@ -489,7 +1233,7 @@ function renderSharesTable(filterText = '') {
   });
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No se encontraron recursos que coincidan con la búsqueda.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-msg">No se encontraron recursos que coincidan con la búsqueda.</td></tr>`;
     return;
   }
 
@@ -516,14 +1260,14 @@ function renderSharesTable(filterText = '') {
         </td>
         <td>${badgeVis}</td>
         <td>
-          <div style="font-size:12.5px; font-weight:600;">${s.schemeName}</div>
+          <div style="font-size:12px; font-weight:600;">${s.schemeName}</div>
           <div style="font-size:11px; color:var(--text-secondary);">${s.comment}</div>
         </td>
         <td>
           ${groupsHtml}
           ${writeListHtml}
         </td>
-        <td><code style="color:var(--accent-cyan);">${s.path}</code></td>
+        <td><code style="color:var(--accent-cyan); font-size:11.5px;">${s.path}</code></td>
         <td>
           <label class="toggle-switch">
             <input type="checkbox" ${isChecked} onchange="toggleShareStatus('${s.id}')">
@@ -564,7 +1308,6 @@ function toggleShareStatus(shareId) {
 function deleteShare(shareId) {
   if (confirm(`¿Estás seguro de que deseas eliminar el recurso compartido [${shareId}]?`)) {
     AppState.shares = AppState.shares.filter(s => s.id !== shareId);
-    // Eliminar también referencia en grupos
     AppState.groups.forEach(g => {
       g.shares = g.shares.filter(s => s !== shareId);
     });
@@ -584,9 +1327,6 @@ function viewShareConfig(shareId) {
   openModal('modal-share-preview');
 }
 
-// ==============================================================================
-// Generador y Validaciones de smb.conf en Modal
-// ==============================================================================
 function updateNewSharePreview() {
   const nameInput = document.getElementById('new-share-name');
   if (!nameInput) return;
@@ -659,12 +1399,8 @@ function generateSmbConfSnippet(s) {
     `   guest ok = ${guestOkStr}`
   ];
 
-  if (validUsersStr) {
-    lines.push(`   valid users = ${validUsersStr}`);
-  }
-  if (writeListStr) {
-    lines.push(`   write list = ${writeListStr}`);
-  }
+  if (validUsersStr) lines.push(`   valid users = ${validUsersStr}`);
+  if (writeListStr) lines.push(`   write list = ${writeListStr}`);
 
   lines.push(
     `   create mask = ${maskStr}`,
@@ -679,15 +1415,11 @@ function generateSmbConfSnippet(s) {
   return lines.join('\n');
 }
 
-// ==============================================================================
-// Inyección Dinámica de Checkboxes de Grupos en Modales
-// ==============================================================================
 function renderGroupCheckboxes() {
-  // 1. Grupos en modal de nuevo recurso
   const shareGroupsList = document.getElementById('new-share-groups-list');
   if (shareGroupsList) {
     shareGroupsList.innerHTML = AppState.groups.map(g => `
-      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
         <input type="checkbox" class="new-share-grp-chk" value="${g.name}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
         ${g.name} ${g.name === 'grp_sistemas' ? '(Admin)' : ''}
       </label>
@@ -701,14 +1433,12 @@ function renderGroupCheckboxes() {
     });
   }
 
-  // 2. Select de write list en Scheme 2
   updateWriteListOptions();
 
-  // 3. Grupos en modal de nuevo usuario
   const userGroupsList = document.getElementById('new-user-groups-list');
   if (userGroupsList) {
     userGroupsList.innerHTML = AppState.groups.map(g => `
-      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
         <input type="checkbox" class="new-user-grp-chk" value="${g.name}" ${g.name === 'grp_empleados' ? 'checked' : ''}>
         ${g.name}
       </label>
@@ -731,7 +1461,187 @@ function updateWriteListOptions() {
 }
 
 // ==============================================================================
-// Pestaña 3: Usuarios y Grupos
+// 9. CENTRAL DE RESPALDOS MULTIPLATAFORMA
+// ==============================================================================
+function renderBackupTasksTable() {
+  const tbody = document.getElementById('backup-tasks-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = AppState.backupTasks.map(t => {
+    const isWindows = t.proto.includes('CIFS');
+    const badgeProto = isWindows
+      ? `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-server"></use></svg> CIFS / Windows</span>`
+      : `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-terminal"></use></svg> SSH / Linux</span>`;
+
+    return `
+      <tr>
+        <td>
+          <strong>${t.id}</strong>
+          <div style="font-size:11px; color:var(--text-muted);">${t.user}</div>
+        </td>
+        <td>${badgeProto}</td>
+        <td><code style="color:var(--accent-primary); font-size:11.5px;">${t.src}</code></td>
+        <td>
+          <code>${t.cron}</code>
+          <div style="font-size:11px; color:var(--text-secondary);">${t.cronDesc}</div>
+        </td>
+        <td>${t.retention} snaps</td>
+        <td><strong style="color:var(--accent-success);">${t.snapsCount}</strong> en disco</td>
+        <td>
+          <div>${t.lastRun}</div>
+          <span class="badge badge-ok" style="font-size:10px;">✔ ${t.lastStatus}</span>
+        </td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-primary btn-sm" onclick="runBackupTask('${t.id}')" title="Ejecutar Respaldo Inmediatamente">
+              <svg class="icon"><use href="#icon-play"></use></svg> Ejecutar
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="openSnapshotsModal('${t.id}')" title="Ver Snapshots Deduplicados">
+              <svg class="icon"><use href="#icon-clock"></use></svg> Historial
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBackupTask('${t.id}')" title="Eliminar Tarea">
+              <svg class="icon"><use href="#icon-trash"></use></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function deleteBackupTask(taskId) {
+  if (confirm(`¿Estás seguro de eliminar la tarea de respaldo ${taskId} y su cronograma asociado?`)) {
+    AppState.backupTasks = AppState.backupTasks.filter(t => t.id !== taskId);
+    delete AppState.snapshotsData[taskId];
+    showToast(`Tarea de backup [${taskId}] eliminada`, 'danger');
+    updateAllCounters();
+    renderBackupTasksTable();
+  }
+}
+
+function runBackupTask(taskId) {
+  const task = AppState.backupTasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  AppState.activeBackupTimers.forEach(id => clearTimeout(id));
+  AppState.activeBackupTimers = [];
+
+  const terminal = document.getElementById('backup-runner-terminal');
+  terminal.innerHTML = '';
+  document.getElementById('runner-task-title').innerText = `${taskId} (${task.proto})`;
+  openModal('modal-backup-runner');
+
+  const isWindows = task.proto.includes('CIFS');
+  const nowStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '').slice(0, 15);
+  const stagingDir = `/srv/nas/BACKUPS_HISTORICOS/${taskId}/.inprogress_${nowStr}`;
+
+  const lines = [
+    { t: 0,    level: 'term-info', text: `[1/8] Adquiriendo candado de exclusión mutua /var/lock/backup_${taskId}.lock... (flock OK)` },
+    { t: 400,  level: 'term-info', text: `[2/8] Evaluando capacidad en /srv/nas mediante df -Pk...` },
+    { t: 800,  level: 'term-ok',   text: `✔ Ocupación actual: 35%. 2.6 TB libres (>2 GB umbral crítico de aborto). Procediendo.` },
+    { t: 1400, level: 'term-info', text: `[3/8] Creando staging atómico temporal: ${stagingDir}` },
+    { t: 2000, level: 'term-info', text: isWindows
+        ? `[4/8] Conectando a origen Windows CIFS [${task.src}] con credenciales AD (0600 root:root)...`
+        : `[4/8] Negociando túnel SSH seguro con host Linux origen y StrictHostKeyChecking=accept-new...` },
+    { t: 2600, level: 'term-ok',   text: isWindows
+        ? `✔ Montaje temporal CIFS exitoso (ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30) en /mnt/backup_sources/${taskId}`
+        : `✔ Llave de host registrada en /root/.ssh/known_hosts_backup. Túnel SSH autenticado sin intermediarios.` },
+    { t: 3400, level: 'term-cmd',  text: isWindows
+        ? `[5/8] Ejecutando rsync -aAXH --numeric-ids --link-dest=../snapshot_reciente /mnt/backup_sources/${taskId}/ ${stagingDir}/`
+        : `[5/8] Ejecutando rsync -aAXH --numeric-ids -v -z --timeout=60 --link-dest=../snapshot_reciente ${task.src}/ ${stagingDir}/` },
+    { t: 4400, level: 'term-info', text: `     Analizando árbol de archivos... 41,890 archivos idénticos enlazados vía Hardlinks (0 bytes extra).` },
+    { t: 5200, level: 'term-info', text: `     Transfiriendo archivos modificados (45.2 MB) a tasa sostenida...` },
+    { t: 6000, level: 'term-ok',   text: `✔ Sincronización rsync completada. Código de retorno: 0 (Sin errores de I/O)` },
+    { t: 6600, level: 'term-info', text: `[6/8] Promoción atómica de copia íntegra: mv ${stagingDir} snapshot_${nowStr}` },
+    { t: 7200, level: 'term-info', text: `[7/8] Evaluando política de retención (${task.retention} snapshots máximos)... Total: ${task.snapsCount + 1}. Dentro de límite.` },
+    { t: 7800, level: 'term-info', text: isWindows
+        ? `[8/8] Desmontando recurso CIFS en /mnt/backup_sources/${taskId} y liberando descriptor flock...`
+        : `[8/8] Cerrando socket SSH y liberando descriptor de candado flock...` },
+    { t: 8400, level: 'term-ok',   text: `======================================================================` },
+    { t: 8500, level: 'term-ok',   text: `✔ SNAPSHOT COMPLETADO EXITOSAMENTE. AHORRO POR HARDLINKS: >90%` },
+    { t: 8600, level: 'term-ok',   text: `======================================================================` }
+  ];
+
+  lines.forEach(l => {
+    const timerId = setTimeout(() => {
+      const now = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'terminal-line';
+      div.innerHTML = `<span class="term-time">[${now}]</span> <span class="${l.level}">${l.text}</span>`;
+      terminal.appendChild(div);
+      terminal.scrollTop = terminal.scrollHeight;
+
+      if (l.t >= 8600) {
+        showToast(`Respaldo de [${taskId}] completado con éxito`, 'success');
+        task.lastRun = 'Hace unos instantes';
+        task.snapsCount += 1;
+
+        const todayDate = new Date();
+        const dateFormatted = `${todayDate.toISOString().slice(0, 10)} ${todayDate.toTimeString().slice(0, 8)}`;
+        if (!AppState.snapshotsData[taskId]) AppState.snapshotsData[taskId] = [];
+        AppState.snapshotsData[taskId].unshift({
+          name: `snapshot_${nowStr}`,
+          date: dateFormatted,
+          apparent: task.sizeLogical,
+          real: '124 MB',
+          dedup: '98.7%',
+          status: 'Atómico / Íntegro'
+        });
+
+        const logTime = todayDate.toTimeString().slice(0, 8);
+        AppState.systemLogs.unshift({
+          time: logTime,
+          level: 'OK',
+          src: 'backup',
+          text: `backup_runner: Tarea [${taskId}] snapshot snapshot_${nowStr} promovido atómicamente.`
+        });
+        AppState.activityFeed.unshift({
+          badge: 'Éxito',
+          badgeClass: 'badge-ok',
+          title: `Snapshot completado: ${taskId}`,
+          desc: `Promoción atómica • Snapshots en disco: ${task.snapsCount}`
+        });
+
+        renderBackupTasksTable();
+        renderLogsTable();
+        renderDashboardActivityFeed();
+      }
+    }, l.t);
+
+    AppState.activeBackupTimers.push(timerId);
+  });
+}
+
+function openSnapshotsModal(taskId) {
+  const snaps = AppState.snapshotsData[taskId] || [];
+  const tbody = document.getElementById('snapshots-table-body');
+  document.getElementById('modal-snapshots-task-name').innerText = taskId;
+
+  if (snaps.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">No hay snapshots históricos registrados todavía para esta tarea.</td></tr>`;
+  } else {
+    tbody.innerHTML = snaps.map(s => `
+      <tr>
+        <td>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-clock"></use></svg>
+            <strong>${s.name}</strong>
+          </div>
+        </td>
+        <td>${s.date}</td>
+        <td>${s.apparent}</td>
+        <td><strong style="color:var(--accent-success);">${s.real}</strong></td>
+        <td><span class="badge badge-ok">${s.dedup}</span></td>
+        <td><span class="badge badge-blue">${s.status}</span></td>
+      </tr>
+    `).join('');
+  }
+
+  openModal('modal-snapshots');
+}
+
+// ==============================================================================
+// 10. USUARIOS Y GRUPOS
 // ==============================================================================
 function renderUsersTable(filterText = '') {
   const tbody = document.getElementById('users-table-body');
@@ -755,8 +1665,8 @@ function renderUsersTable(filterText = '') {
     return `
       <tr>
         <td>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <div style="width:32px; height:32px; border-radius:50%; background:var(--accent-primary-light); color:var(--accent-primary); display:flex; align-items:center; justify-content:center; font-weight:700;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="width:28px; height:28px; border-radius:50%; background:var(--accent-primary-light); color:var(--accent-primary); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px;">
               ${u.uid.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -768,7 +1678,7 @@ function renderUsersTable(filterText = '') {
         <td>${u.fullName}</td>
         <td>${groupsHtml}</td>
         <td>${isSambaOk}</td>
-        <td><code style="font-size:11.5px; color:var(--text-secondary);">${u.shell}</code></td>
+        <td><code style="font-size:11px; color:var(--text-secondary);">${u.shell}</code></td>
         <td>
           <div class="table-actions">
             <button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal('${u.uid}')" title="Cambiar Contraseña">
@@ -802,7 +1712,6 @@ function deleteUser(uid) {
   }
   if (confirm(`¿Eliminar al usuario ${uid} del sistema Debian y de la base de datos Samba?`)) {
     AppState.users = AppState.users.filter(u => u.uid !== uid);
-    // Eliminarlo de los miembros de todos los grupos
     AppState.groups.forEach(g => {
       g.members = g.members.filter(m => m !== uid);
     });
@@ -819,12 +1728,12 @@ function renderGroupsTable() {
 
   tbody.innerHTML = AppState.groups.map(g => {
     const membersHtml = g.members.length 
-      ? g.members.map(m => `<span class="tag-pill" style="color:var(--text-main);">${m}</span>`).join(' ')
-      : '<span style="color:var(--text-muted); font-size:12px;">(Sin miembros)</span>';
+      ? g.members.map(m => `<span class="tag-pill">${m}</span>`).join(' ')
+      : '<span style="color:var(--text-muted); font-size:11.5px;">(Sin miembros)</span>';
 
     const sharesHtml = g.shares.length
-      ? g.shares.map(s => `<span class="badge badge-gray" style="font-size:10.5px;">${s}</span>`).join(' ')
-      : '<span style="color:var(--text-muted); font-size:12px;">(Ninguno)</span>';
+      ? g.shares.map(s => `<span class="badge badge-gray">${s}</span>`).join(' ')
+      : '<span style="color:var(--text-muted); font-size:11.5px;">(Ninguno)</span>';
 
     return `
       <tr>
@@ -891,11 +1800,9 @@ function deleteCurrentGroup() {
 
   if (confirm(`¿Estás seguro de eliminar el grupo de seguridad [${groupName}]?`)) {
     AppState.groups = AppState.groups.filter(g => g.name !== groupName);
-    // Retirar del perfil de cada usuario
     AppState.users.forEach(u => {
       u.groups = u.groups.filter(g => g !== groupName);
     });
-    // Retirar de shares
     AppState.shares.forEach(s => {
       s.groups = s.groups.filter(g => g !== groupName);
     });
@@ -931,333 +1838,75 @@ function generateSecurePassword() {
 }
 
 // ==============================================================================
-// Pestaña 4: Central de Respaldos Multiplataforma
+// 11. ACTUALIZACIÓN DE SOFTWARE
 // ==============================================================================
-function renderBackupTasksTable() {
-  const tbody = document.getElementById('backup-tasks-table-body');
+function renderUpdatesTable() {
+  const tbody = document.getElementById('updates-table-body');
   if (!tbody) return;
 
-  tbody.innerHTML = AppState.backupTasks.map(t => {
-    const isWindows = t.proto.includes('CIFS');
-    const badgeProto = isWindows
-      ? `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-server"></use></svg> CIFS / Windows</span>`
-      : `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-terminal"></use></svg> SSH / Linux</span>`;
-
-    return `
-      <tr>
-        <td>
-          <strong>${t.id}</strong>
-          <div style="font-size:11px; color:var(--text-muted);">${t.user}</div>
-        </td>
-        <td>${badgeProto}</td>
-        <td><code style="color:var(--accent-primary);">${t.src}</code></td>
-        <td>
-          <code>${t.cron}</code>
-          <div style="font-size:11px; color:var(--text-secondary);">${t.cronDesc}</div>
-        </td>
-        <td>${t.retention} snaps</td>
-        <td><strong style="color:var(--accent-success);">${t.snapsCount}</strong> en disco</td>
-        <td>
-          <div>${t.lastRun}</div>
-          <span class="badge badge-ok" style="font-size:10.5px;">✔ ${t.lastStatus}</span>
-        </td>
-        <td>
-          <div class="table-actions">
-            <button class="btn btn-primary btn-sm" onclick="runBackupTask('${t.id}')" title="Ejecutar Respaldo Inmediatamente">
-              <svg class="icon"><use href="#icon-play"></use></svg> Ejecutar
-            </button>
-            <button class="btn btn-secondary btn-sm" onclick="openSnapshotsModal('${t.id}')" title="Ver Snapshots Deduplicados">
-              <svg class="icon"><use href="#icon-clock"></use></svg> Historial
-            </button>
-            <button class="btn btn-danger btn-sm" onclick="deleteBackupTask('${t.id}')" title="Eliminar Tarea">
-              <svg class="icon"><use href="#icon-trash"></use></svg>
-            </button>
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join('');
+  tbody.innerHTML = AppState.updates.map(u => `
+    <tr>
+      <td><strong>${u.pkg}</strong></td>
+      <td><code>${u.installed}</code></td>
+      <td><code>${u.available}</code></td>
+      <td><span class="badge badge-gray">${u.source}</span></td>
+      <td><span class="badge badge-ok">${u.status}</span></td>
+    </tr>
+  `).join('');
 }
 
-function deleteBackupTask(taskId) {
-  if (confirm(`¿Estás seguro de eliminar la tarea de respaldo ${taskId} y su cronograma asociado?`)) {
-    AppState.backupTasks = AppState.backupTasks.filter(t => t.id !== taskId);
-    delete AppState.snapshotsData[taskId];
-    showToast(`Tarea de backup [${taskId}] eliminada`, 'danger');
-    updateAllCounters();
-    renderBackupTasksTable();
-  }
-}
-
-// Ejecución Simulada en Vivo de la Tarea de Respaldo (Multiplataforma)
-function runBackupTask(taskId) {
-  const task = AppState.backupTasks.find(t => t.id === taskId);
-  if (!task) return;
-
-  // Limpiar timers previos si se canceló o reabrió
-  AppState.activeBackupTimers.forEach(id => clearTimeout(id));
-  AppState.activeBackupTimers = [];
-
-  const terminal = document.getElementById('backup-runner-terminal');
-  terminal.innerHTML = '';
-  document.getElementById('runner-task-title').innerText = `${taskId} (${task.proto})`;
-  openModal('modal-backup-runner');
-
-  const isWindows = task.proto.includes('CIFS');
-  const nowStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '').slice(0, 15);
-  const stagingDir = `/srv/nas/BACKUPS_HISTORICOS/${taskId}/.inprogress_${nowStr}`;
-
-  // Líneas de ejecución técnica adaptadas según el rol y protocolo (CIFS Windows vs SSH Linux)
-  const lines = [
-    { t: 0,    level: 'term-info', text: `[1/8] Adquiriendo candado de exclusión mutua /var/lock/backup_${taskId}.lock... (flock OK)` },
-    { t: 500,  level: 'term-info', text: `[2/8] Evaluando capacidad en /srv/nas mediante df -Pk...` },
-    { t: 1000, level: 'term-ok',   text: `✔ Ocupación actual: 35%. 2.6 TB libres (>2 GB umbral crítico de aborto). Procediendo.` },
-    { t: 1600, level: 'term-info', text: `[3/8] Creando staging atómico temporal: ${stagingDir}` },
-    { t: 2400, level: 'term-info', text: isWindows
-        ? `[4/8] Conectando a origen Windows CIFS [${task.src}] con credenciales AD (0600 root:root)...`
-        : `[4/8] Negociando túnel SSH seguro con host Linux origen y StrictHostKeyChecking=accept-new...` },
-    { t: 3200, level: 'term-ok',   text: isWindows
-        ? `✔ Montaje temporal CIFS exitoso (ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30) en /mnt/backup_sources/${taskId}`
-        : `✔ Llave de host registrada en /root/.ssh/known_hosts_backup. Túnel SSH autenticado sin intermediarios.` },
-    { t: 4000, level: 'term-cmd',  text: isWindows
-        ? `[5/8] Ejecutando rsync -aAXH --numeric-ids --link-dest=../snapshot_reciente /mnt/backup_sources/${taskId}/ ${stagingDir}/`
-        : `[5/8] Ejecutando rsync -aAXH --numeric-ids -v -z --timeout=60 --link-dest=../snapshot_reciente ${task.src}/ ${stagingDir}/` },
-    { t: 5200, level: 'term-info', text: `     Analizando árbol de archivos... 41,890 archivos idénticos enlazados vía Hardlinks (0 bytes extra).` },
-    { t: 6200, level: 'term-info', text: `     Transfiriendo archivos modificados (45.2 MB) a tasa sostenida...` },
-    { t: 7200, level: 'term-ok',   text: `✔ Sincronización rsync completada. Código de retorno: 0 (Sin errores de I/O)` },
-    { t: 8000, level: 'term-info', text: `[6/8] Promoción atómica de copia íntegra: mv ${stagingDir} snapshot_${nowStr}` },
-    { t: 8600, level: 'term-info', text: `[7/8] Evaluando política de retención (${task.retention} snapshots máximos)... Total: ${task.snapsCount + 1}. Dentro de límite.` },
-    { t: 9200, level: 'term-info', text: isWindows
-        ? `[8/8] Desmontando recurso CIFS en /mnt/backup_sources/${taskId} y liberando descriptor flock...`
-        : `[8/8] Cerrando socket SSH y liberando descriptor de candado flock...` },
-    { t: 9800, level: 'term-ok',   text: `======================================================================` },
-    { t: 9900, level: 'term-ok',   text: `✔ SNAPSHOT COMPLETADO EXITOSAMENTE. AHORRO POR HARDLINKS: >90%` },
-    { t: 10000, level: 'term-ok',  text: `======================================================================` }
-  ];
-
-  lines.forEach(l => {
-    const timerId = setTimeout(() => {
-      const now = new Date().toLocaleTimeString();
-      const div = document.createElement('div');
-      div.className = 'terminal-line';
-      div.innerHTML = `<span class="term-time">[${now}]</span> <span class="${l.level}">${l.text}</span>`;
-      terminal.appendChild(div);
-      terminal.scrollTop = terminal.scrollHeight;
-
-      if (l.t >= 10000) {
-        showToast(`Respaldo de [${taskId}] completado con éxito`, 'success');
-        task.lastRun = 'Hace unos instantes';
-        task.snapsCount += 1;
-
-        // Registrar el nuevo snapshot en el historial dinámico
-        const todayDate = new Date();
-        const dateFormatted = `${todayDate.toISOString().slice(0, 10)} ${todayDate.toTimeString().slice(0, 8)}`;
-        if (!AppState.snapshotsData[taskId]) AppState.snapshotsData[taskId] = [];
-        AppState.snapshotsData[taskId].unshift({
-          name: `snapshot_${nowStr}`,
-          date: dateFormatted,
-          apparent: task.sizeLogical,
-          real: '124 MB',
-          dedup: '98.7%',
-          status: 'Atómico / Íntegro'
-        });
-
-        // Registrar evento en feed y logs
-        const logTime = todayDate.toTimeString().slice(0, 8);
-        AppState.systemLogs.unshift({
-          time: logTime,
-          level: 'OK',
-          src: 'backup',
-          text: `backup_runner: Tarea [${taskId}] snapshot snapshot_${nowStr} promovido atómicamente.`
-        });
-        AppState.activityFeed.unshift({
-          badge: 'Éxito',
-          badgeClass: 'badge-ok',
-          title: `Snapshot completado: ${taskId}`,
-          desc: `Promoción atómica • Snapshots en disco: ${task.snapsCount}`
-        });
-
-        renderBackupTasksTable();
-        renderSystemLogs();
-        renderDashboardActivityFeed();
-      }
-    }, l.t);
-
-    AppState.activeBackupTimers.push(timerId);
-  });
-}
-
-function openSnapshotsModal(taskId) {
-  const snaps = AppState.snapshotsData[taskId] || [];
-  const tbody = document.getElementById('snapshots-table-body');
-  document.getElementById('modal-snapshots-task-name').innerText = taskId;
-
-  if (snaps.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No hay snapshots históricos registrados todavía para esta tarea.</td></tr>`;
-  } else {
-    tbody.innerHTML = snaps.map(s => `
-      <tr>
-        <td>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-clock"></use></svg>
-            <strong>${s.name}</strong>
-          </div>
-        </td>
-        <td>${s.date}</td>
-        <td>${s.apparent}</td>
-        <td><strong style="color:var(--accent-success);">${s.real}</strong></td>
-        <td><span class="badge badge-ok">${s.dedup}</span></td>
-        <td><span class="badge badge-blue">${s.status}</span></td>
-      </tr>
-    `).join('');
-  }
-
-  openModal('modal-snapshots');
-}
-
-// ==============================================================================
-// Pestaña 5: Mantenimiento y Diagnóstico
-// ==============================================================================
-function runBtrfsScrubSimulation() {
-  if (AppState.isScrubRunning) {
-    showToast('Una auditoría BTRFS Scrub ya se encuentra en ejecución', 'warning');
-    return;
-  }
-
-  const btn = document.getElementById('btn-run-scrub');
-  const bar = document.getElementById('scrub-progress-bar');
-  const statusTxt = document.getElementById('scrub-status-text');
-
-  if (!btn || !bar) return;
-
-  AppState.isScrubRunning = true;
-  btn.disabled = true;
-  statusTxt.innerText = 'Ejecutando btrfs scrub start -B /srv/nas...';
-  bar.style.width = '0%';
-
-  let progress = 0;
-  const interval = setInterval(() => {
-    progress += 20;
-    bar.style.width = `${progress}%`;
-    if (progress >= 100) {
-      clearInterval(interval);
-      AppState.isScrubRunning = false;
-      btn.disabled = false;
-      statusTxt.innerText = '✔ Scrub finalizado: 1,420,892 bloques verificados. 0 errores detectados (Bit Rot 0%).';
-      showToast('Auditoría BTRFS Scrub finalizada sin inconsistencias', 'success');
-    }
-  }, 450);
-}
-
-function runFstrimSimulation() {
-  if (AppState.isTrimRunning) {
-    showToast('El descarte flash fstrim ya está en progreso', 'warning');
-    return;
-  }
-
-  const btn = document.getElementById('btn-run-trim');
-  if (!btn) return;
-
-  AppState.isTrimRunning = true;
-  btn.disabled = true;
-  showToast('Ejecutando fstrim -va en unidades SSD flash...', 'info');
-
+function checkForUpdates() {
+  showToast('Consultando repositorios de Debian 13 y GitHub...', 'info');
   setTimeout(() => {
-    AppState.isTrimRunning = false;
-    btn.disabled = false;
-    document.getElementById('trim-status-text').innerText = '✔ Último descarte manual exitoso: 114.6 GiB recortados en /srv/nas';
-    showToast('fstrim completado: Sectores flash descartados correctamente', 'success');
+    showToast('Todos los paquetes del sistema y la plataforma están en su última versión estable.', 'success');
+  }, 800);
+}
+
+function runSoftwareUpdate() {
+  showToast('Iniciando proceso seguro de actualización con rollback...', 'info');
+  setTimeout(() => {
+    showToast('Plataforma nas_debian verificada: Código 100% íntegro (v1.2.4-stable).', 'success');
   }, 1200);
 }
 
-function runLogrotateSimulation() {
-  showToast('Rotando logs del servidor con copytruncate y compresión gzip...', 'info');
+// ==============================================================================
+// 12. APLICACIONES Y MÓDULOS DEL SERVIDOR
+// ==============================================================================
+function renderApplicationsGrid() {
+  const grid = document.getElementById('apps-cards-grid');
+  if (!grid) return;
+
+  grid.innerHTML = AppState.applications.map(app => `
+    <div class="app-card">
+      <div class="app-card-top">
+        <div class="app-card-icon">
+          <svg class="icon icon-lg"><use href="#${app.icon}"></use></svg>
+        </div>
+        <div class="app-card-meta">
+          <h4>${app.name}</h4>
+          <span class="badge badge-ok" style="margin-bottom:4px;">${app.status}</span>
+          <p>${app.desc}</p>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:10px;">
+        <span style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted);">v${app.version}</span>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Módulo [${app.name}] en ejecución óptima', 'info')">
+          Detalles
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ==============================================================================
+// 13. UNIRSE A UN DOMINIO ACTIVE DIRECTORY
+// ==============================================================================
+function executeServerReboot() {
+  closeModal('modal-reboot-server');
+  showToast('Enviando señal SIGTERM y ejecutando sync en /srv/nas...', 'warning');
   setTimeout(() => {
-    showToast('Bitácoras rotadas exitosamente (/var/log/nas-backups.1.gz)', 'success');
-  }, 900);
-}
-
-function testConnectivitySimulation() {
-  const hostInput = document.getElementById('test-conn-host');
-  const host = hostInput ? hostInput.value.trim() : '10.10.1.2';
-  const type = document.getElementById('test-conn-type')?.value || '445';
-  const out = document.getElementById('test-conn-result');
-  const btn = document.getElementById('btn-test-conn');
-
-  if (!host) {
-    showToast('Ingresa una dirección IP o nombre de host válido para la prueba', 'danger');
-    return;
-  }
-
-  if (!out) return;
-  btn.disabled = true;
-  out.innerHTML = `<span style="color:var(--accent-primary);">Probando conectividad con ${host} vía ${type === 'ICMP' ? 'ICMP Ping' : `puerto ${type}`}...</span>`;
-
-  setTimeout(() => {
-    btn.disabled = false;
-    let detailText = '';
-    let protoTitle = '';
-
-    if (type === 'ICMP') {
-      protoTitle = '✔ Respuesta de Ping ICMP exitosa en 1.2 ms';
-      detailText = '4 paquetes transmitidos, 4 paquetes recibidos, 0% packet loss. RTT min/avg/max = 0.8/1.2/2.1 ms.';
-    } else if (type === '445') {
-      protoTitle = '✔ Puerto 445/tcp (SMB/CIFS) abierto y escuchando';
-      detailText = 'Handshake TCP establecido en 2.4 ms. Dialecto SMB 3.1.1 soportado con cifrado AES-128-GCM.';
-    } else if (type === '22') {
-      protoTitle = '✔ Puerto 22/tcp (SSH) abierto y escuchando';
-      detailText = 'Banner SSH-2.0-OpenSSH_9.2p1 Debian 13 recibido. Negociación criptográfica correcta.';
-    } else if (type === '5357') {
-      protoTitle = '✔ Puerto 5357/tcp (WSD Discovery) activo';
-      detailText = 'Servicio wsdd2 respondiendo sondas de descubrimiento para clientes Windows 10/11.';
-    }
-
-    out.innerHTML = `
-      <div style="color:var(--accent-success); font-weight:700;">${protoTitle}</div>
-      <div style="color:var(--text-secondary); margin-top:4px;">Destino: ${host} | Protocolo: ${type}</div>
-      <div style="color:var(--text-muted); font-size:11px;">${detailText}</div>
-    `;
-    showToast(`Conectividad con ${host} (${type}) verificada`, 'success');
-  }, 700);
-}
-
-function renderSystemLogs() {
-  const container = document.getElementById('system-logs-container');
-  if (!container) return;
-
-  container.innerHTML = AppState.systemLogs.map(l => {
-    const levelClass = l.level === 'OK' ? 'term-ok' : l.level === 'WARN' ? 'term-warn' : l.level === 'ERR' ? 'term-err' : 'term-info';
-    return `<div class="terminal-line"><span class="term-time">[${l.time}]</span> <span class="badge badge-gray" style="font-size:10px; margin-right:6px;">${l.src}</span> <span class="${levelClass}">[${l.level}]</span> ${l.text}</div>`;
-  }).join('');
-}
-
-function copySystemLogs() {
-  const text = AppState.systemLogs.map(l => `[${l.time}] [${l.src}] [${l.level}] ${l.text}`).join('\n');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => {
-      showToast('Bitácoras copiadas al portapapeles', 'success');
-    }).catch(() => {
-      fallbackCopy(text);
-    });
-  } else {
-    fallbackCopy(text);
-  }
-}
-
-function fallbackCopy(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    document.execCommand('copy');
-    showToast('Bitácoras copiadas al portapapeles', 'success');
-  } catch (e) {
-    showToast('No se pudo copiar automáticamente', 'warning');
-  }
-  document.body.removeChild(ta);
+    showToast('Reinicio del servidor programado correctamente.', 'danger');
+  }, 1000);
 }
 
 // ==============================================================================
@@ -1312,24 +1961,25 @@ function setupForms() {
   // Búsqueda en recursos compartidos
   const shareSearch = document.getElementById('shares-search-input');
   if (shareSearch) {
-    shareSearch.addEventListener('input', (e) => {
-      renderSharesTable(e.target.value);
-    });
+    shareSearch.addEventListener('input', (e) => renderSharesTable(e.target.value));
+  }
+
+  // Búsqueda en logs
+  const logsSearch = document.getElementById('logs-search-input');
+  if (logsSearch) {
+    logsSearch.addEventListener('input', (e) => renderLogsTable(e.target.value));
   }
 
   // Búsqueda en usuarios
   const userSearch = document.getElementById('users-search-input');
   if (userSearch) {
-    userSearch.addEventListener('input', (e) => {
-      renderUsersTable(e.target.value);
-    });
+    userSearch.addEventListener('input', (e) => renderUsersTable(e.target.value));
   }
 
   // Eventos de creación de recurso
   const nameInput = document.getElementById('new-share-name');
-  if (nameInput) {
-    nameInput.addEventListener('input', updateNewSharePreview);
-  }
+  if (nameInput) nameInput.addEventListener('input', updateNewSharePreview);
+
   const pathInput = document.getElementById('new-share-path');
   if (pathInput) {
     pathInput.addEventListener('input', () => {
@@ -1337,33 +1987,28 @@ function setupForms() {
       updateNewSharePreview();
     });
   }
+
   const commentInput = document.getElementById('new-share-comment');
-  if (commentInput) {
-    commentInput.addEventListener('input', updateNewSharePreview);
-  }
+  if (commentInput) commentInput.addEventListener('input', updateNewSharePreview);
+
   document.querySelectorAll('input[name="new-share-vis"]').forEach(r => {
     r.addEventListener('change', updateNewSharePreview);
   });
+
   document.querySelectorAll('input[name="new-share-scheme"]').forEach(r => {
     r.addEventListener('change', (e) => {
       document.querySelectorAll('.radio-tile').forEach(t => t.classList.remove('selected'));
       e.target.closest('.radio-tile').classList.add('selected');
       const scheme2Wrap = document.getElementById('new-share-scheme2-wrapper');
       const groupsWrap = document.getElementById('new-share-groups-container');
-      if (scheme2Wrap) {
-        scheme2Wrap.style.display = e.target.value === '2' ? 'block' : 'none';
-      }
-      if (groupsWrap) {
-        groupsWrap.style.display = e.target.value === '4' ? 'none' : 'block';
-      }
+      if (scheme2Wrap) scheme2Wrap.style.display = e.target.value === '2' ? 'block' : 'none';
+      if (groupsWrap) groupsWrap.style.display = e.target.value === '4' ? 'none' : 'block';
       updateNewSharePreview();
     });
   });
 
   const writelistSelect = document.getElementById('new-share-writelist-select');
-  if (writelistSelect) {
-    writelistSelect.addEventListener('change', updateNewSharePreview);
-  }
+  if (writelistSelect) writelistSelect.addEventListener('change', updateNewSharePreview);
 
   // Guardar Nuevo Recurso
   const formNewShare = document.getElementById('form-new-share');
@@ -1417,13 +2062,10 @@ function setupForms() {
 
       AppState.shares.push(newShare);
 
-      // Actualizar los shares asignados a cada grupo
       if (schemeVal !== '4') {
         selectedGroups.forEach(gName => {
           const grp = AppState.groups.find(g => g.name === gName);
-          if (grp && !grp.shares.includes(finalName)) {
-            grp.shares.push(finalName);
-          }
+          if (grp && !grp.shares.includes(finalName)) grp.shares.push(finalName);
         });
       }
 
@@ -1467,12 +2109,9 @@ function setupForms() {
         lastLogin: 'Nunca (Nuevo)'
       });
 
-      // Añadir al array de miembros de cada grupo
       assignedGroups.forEach(gName => {
         const grp = AppState.groups.find(g => g.name === gName);
-        if (grp && !grp.members.includes(uid)) {
-          grp.members.push(uid);
-        }
+        if (grp && !grp.members.includes(uid)) grp.members.push(uid);
       });
 
       showToast(`Usuario [${uid}] creado y sincronizado con Samba`, 'success');
@@ -1518,6 +2157,35 @@ function setupForms() {
     });
   }
 
+  // Guardar Nueva Carpeta en File Browser
+  const formNewFolder = document.getElementById('form-new-folder');
+  if (formNewFolder) {
+    formNewFolder.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const folderName = document.getElementById('new-folder-name').value.trim().replace(/\s+/g, '_');
+      if (!folderName) return;
+
+      const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
+      if (list) {
+        list.push({
+          name: folderName,
+          type: 'dir',
+          size: '4.0 KB',
+          owner: 'root',
+          group: 'grp_sistemas',
+          perms: 'drwxrwx---',
+          octal: '2770',
+          mtime: 'Hace un momento'
+        });
+        AppState.fileBrowser.fileTree[`${AppState.fileBrowser.currentPath}/${folderName}`] = [];
+        renderFileBrowser();
+        showToast(`Carpeta [${folderName}] creada con permisos 2770`, 'success');
+      }
+      closeModal('modal-new-folder');
+      formNewFolder.reset();
+    });
+  }
+
   // Guardar Miembros Editados en Grupo
   const formEditGroup = document.getElementById('form-edit-group');
   if (formEditGroup) {
@@ -1530,15 +2198,11 @@ function setupForms() {
       const checkedUids = Array.from(document.querySelectorAll('.edit-group-user-chk:checked')).map(c => c.value);
       grp.members = checkedUids;
 
-      // Sincronizar grupos en cada usuario
       AppState.users.forEach(u => {
         const shouldBeMember = checkedUids.includes(u.uid);
         const isMember = u.groups.includes(groupName);
-        if (shouldBeMember && !isMember) {
-          u.groups.push(groupName);
-        } else if (!shouldBeMember && isMember) {
-          u.groups = u.groups.filter(g => g !== groupName);
-        }
+        if (shouldBeMember && !isMember) u.groups.push(groupName);
+        else if (!shouldBeMember && isMember) u.groups = u.groups.filter(g => g !== groupName);
       });
 
       showToast(`Miembros de [${groupName}] actualizados`, 'success');
@@ -1619,6 +2283,46 @@ function setupForms() {
       updateAllCounters();
       renderBackupTasksTable();
       formNewBackup.reset();
+    });
+  }
+
+  // Formulario Unirse a Dominio Active Directory
+  const formDomain = document.getElementById('form-domain-join');
+  if (formDomain) {
+    formDomain.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const domainName = document.getElementById('ad-domain-name')?.value.trim();
+      const dcIp = document.getElementById('ad-dc-ip')?.value.trim();
+      const adminUser = document.getElementById('ad-admin-user')?.value.trim();
+      const btn = document.getElementById('btn-domain-join');
+
+      if (!domainName || !dcIp || !adminUser) {
+        showToast('Completa todos los parámetros del dominio', 'danger');
+        return;
+      }
+
+      if (btn) btn.disabled = true;
+      showToast(`Contactando Controlador de Dominio [${dcIp}] y negociando ticket Kerberos...`, 'info');
+
+      setTimeout(() => {
+        if (btn) btn.disabled = false;
+        AppState.domain.isJoined = true;
+        AppState.domain.realm = domainName;
+        AppState.domain.dc = dcIp;
+
+        const statusBox = document.getElementById('domain-current-status-box');
+        if (statusBox) {
+          statusBox.className = 'alert-box alert-box-success';
+          statusBox.innerHTML = `
+            <svg class="icon icon-lg"><use href="#icon-check-circle"></use></svg>
+            <div>
+              <strong>Servidor Integrado en Dominio:</strong> El host <code>SRV-NAS</code> se unió exitosamente al reino Active Directory <b>${domainName}</b>.
+              Samba Winbind y SSSD se encuentran sincronizando cuentas de usuario corporativas.
+            </div>
+          `;
+        }
+        showToast(`Servidor unido con éxito al dominio ${domainName}`, 'success');
+      }, 1400);
     });
   }
 }
