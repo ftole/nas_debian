@@ -1,0 +1,980 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Plantilla Maestra del Panel Web de Administración NAS & Central de Respaldos (Debian 13).
+ * 100% Offline • Cero dependencias externas • Estilo sobrio Cockpit / PatternFly 4.
+ *
+ * @var array $metrics Métricas del sistema (hostname, CPU, RAM, uptime, kernel).
+ * @var array $storage Resumen de almacenamiento (/srv/nas, fs, disco).
+ * @var array $services Estado de los demonios clave del NAS.
+ */
+
+$hostname = htmlspecialchars((string) ($metrics['hostname'] ?? 'SRV-NAS'), ENT_QUOTES, 'UTF-8');
+$uptime = htmlspecialchars((string) ($metrics['uptime'] ?? 'N/A'), ENT_QUOTES, 'UTF-8');
+$kernel = htmlspecialchars((string) ($metrics['kernel'] ?? php_uname('r')), ENT_QUOTES, 'UTF-8');
+$cpuModel = htmlspecialchars((string) ($metrics['cpu_model'] ?? 'x86_64'), ENT_QUOTES, 'UTF-8');
+$cpuPct = (float) ($metrics['cpu_usage_pct'] ?? 0);
+$ramTotal = (float) ($metrics['ram_total_gb'] ?? 0);
+$ramUsed = (float) ($metrics['ram_used_gb'] ?? 0);
+$ramPct = (float) ($metrics['ram_usage_pct'] ?? 0);
+
+$fsType = htmlspecialchars((string) ($storage['filesystem'] ?? 'ext4'), ENT_QUOTES, 'UTF-8');
+$diskTotal = (float) ($storage['total_gb'] ?? 0);
+$diskUsed = (float) ($storage['used_gb'] ?? 0);
+$diskPct = (float) ($storage['usage_percent'] ?? 0);
+$deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), ENT_QUOTES, 'UTF-8');
+?>
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>Panel Web • <?= $hostname ?> (Debian 13)</title>
+  <script>
+    (function() {
+      try {
+        var savedTheme = localStorage.getItem('nas_theme');
+        if (savedTheme) {
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/cockpit.css">
+</head>
+<body>
+
+  <!-- ==============================================================================
+       Definición de Iconos SVG Inline (100% Offline • Cero dependencias externas)
+       ============================================================================== -->
+  <svg style="display:none;">
+    <defs>
+      <symbol id="icon-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></symbol>
+      <symbol id="icon-hard-drive" viewBox="0 0 24 24"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></symbol>
+      <symbol id="icon-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></symbol>
+      <symbol id="icon-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></symbol>
+      <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="icon-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+      <symbol id="icon-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+      <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></symbol>
+      <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></symbol>
+      <symbol id="icon-check-circle" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></symbol>
+      <symbol id="icon-alert-triangle" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+      <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+      <symbol id="icon-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></symbol>
+      <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="icon-unlock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol>
+      <symbol id="icon-key" viewBox="0 0 24 24"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5-3 3L8 9l-3 3 1.5 1.5L2 18v4h4l4.5-4.5 1.5 1.5 3-3-1.5-1.5 3.5-3.5 1.5 1.5 2-2z"/></symbol>
+      <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+      <symbol id="icon-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+      <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="icon-eye-off" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
+      <symbol id="icon-file" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></symbol>
+      <symbol id="icon-network" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><path d="M6 10v4m12-4v4M12 10v12m-8 0h16"/></symbol>
+      <symbol id="icon-services" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+      <symbol id="icon-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></symbol>
+      <symbol id="icon-domain" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+      <symbol id="icon-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- ==============================================================================
+       BARRA SUPERIOR GLOBAL (MASTHEAD)
+       ============================================================================== -->
+  <header class="masthead">
+    <div class="masthead-main">
+      <button class="mobile-toggle" id="mobile-menu-btn" title="Alternar menú de navegación">
+        <svg class="icon"><use href="#icon-menu"></use></svg>
+      </button>
+      <div class="masthead-brand">
+        <svg class="icon"><use href="#icon-server"></use></svg>
+        <span class="brand-logo-text">
+          <span>NAS</span>
+          <span class="brand-divider">|</span>
+          <span class="brand-hostname" id="masthead-hostname"><?= $hostname ?></span>
+        </span>
+        <span class="brand-badge">Debian 13</span>
+        <span class="brand-ip"><?= htmlspecialchars($_SERVER['SERVER_ADDR'] ?? '10.10.1.2', ENT_QUOTES, 'UTF-8') ?></span>
+      </div>
+    </div>
+
+    <div class="masthead-tools">
+      <div class="header-meta-pill">
+        <span>Rol:</span> <strong>ARCHIVOS & BACKUP</strong>
+      </div>
+      <div class="header-meta-pill">
+        <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="switchView('terminal')" title="Abrir Consola Web Interactiva">
+        <svg class="icon"><use href="#icon-terminal"></use></svg>
+        <span class="btn-text-responsive">Terminal</span>
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="openModal('modal-reboot-server')" title="Reiniciar Servidor NAS">
+        <svg class="icon" style="color:var(--accent-danger);"><use href="#icon-power"></use></svg>
+        <span class="btn-text-responsive">Reiniciar</span>
+      </button>
+      <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" onclick="refreshDashboardMetrics()" title="Refrescar métricas del servidor">
+        <svg class="icon" id="icon-refresh-metrics"><use href="#icon-refresh"></use></svg>
+      </button>
+      <button class="btn btn-secondary btn-sm" id="btn-theme-toggle" onclick="toggleTheme()" title="Alternar tema Claro / Oscuro">
+        <svg class="icon icon-sm" id="theme-toggle-icon"><use href="#icon-sun"></use></svg>
+      </button>
+      <div class="user-pill" title="Sesión administrativa activa">
+        <span class="status-dot status-ok"></span>
+        <span class="user-name">administrador</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Contenedor Principal (Sidebar + Contenido) -->
+  <div class="app-layout">
+
+    <!-- ==============================================================================
+         BARRA LATERAL (SIDEBAR) JERÁRQUICA
+         ============================================================================== -->
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+
+        <div class="nav-section-title">SISTEMA</div>
+
+        <div class="nav-item active" data-view="dashboard">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-dashboard"></use></svg>
+            <span>Vista general</span>
+          </div>
+          <span class="nav-badge">OK</span>
+        </div>
+
+        <div class="nav-item" data-view="logs">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-file"></use></svg>
+            <span>Registros (Logs)</span>
+          </div>
+          <span class="nav-badge" id="badge-logs">Live</span>
+        </div>
+
+        <div class="nav-item" data-view="storage">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-hard-drive"></use></svg>
+            <span>Almacenamiento</span>
+          </div>
+          <span class="nav-badge" id="badge-storage"><?= round($diskTotal / 1024, 1) ?> TB</span>
+        </div>
+
+        <div class="nav-item" data-view="networking">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-network"></use></svg>
+            <span>Redes</span>
+          </div>
+          <span class="nav-badge">1 Gbps</span>
+        </div>
+
+        <div class="nav-item" data-view="services">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-services"></use></svg>
+            <span>Servicios</span>
+          </div>
+          <span class="nav-badge" id="badge-services">OK</span>
+        </div>
+
+        <div class="nav-item" data-view="terminal">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-terminal"></use></svg>
+            <span>Terminal</span>
+          </div>
+          <span class="nav-badge">CLI</span>
+        </div>
+
+        <div class="nav-section-title">DATOS Y COMPARTICIÓN</div>
+
+        <div class="nav-item" data-view="shares">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-folder"></use></svg>
+            <span>Redes compartidas</span>
+          </div>
+          <span class="nav-badge" id="badge-shares">...</span>
+        </div>
+
+        <div class="nav-item" data-view="backups">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-shield"></use></svg>
+            <span>Respaldos</span>
+          </div>
+          <span class="nav-badge" id="badge-backups">...</span>
+        </div>
+
+        <div class="nav-item" data-view="users">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-users"></use></svg>
+            <span>Usuarios y grupos</span>
+          </div>
+          <span class="nav-badge" id="badge-users">...</span>
+        </div>
+
+        <div class="nav-section-title">HERRAMIENTAS</div>
+
+        <div class="nav-item" data-view="updates">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-download"></use></svg>
+            <span>Actualizaciones</span>
+          </div>
+          <span class="nav-badge badge-ok">Al día</span>
+        </div>
+
+        <div class="nav-item" data-view="applications">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-apps"></use></svg>
+            <span>Componentes</span>
+          </div>
+          <span class="nav-badge">Nativo</span>
+        </div>
+
+        <div class="nav-item" data-view="domain">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-domain"></use></svg>
+            <span>Dominio AD</span>
+          </div>
+          <span class="nav-badge" id="badge-domain">AD</span>
+        </div>
+
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="server-quick-pill">
+          <span><span class="status-dot status-ok"></span> Debian 13 (Trixie)</span>
+          <span class="badge badge-gray" style="font-size:10px;"><?= $hostname ?></span>
+        </div>
+        <div class="sidebar-footer-sub">
+          <span>Kernel <?= $kernel ?></span>
+          <span>Uptime: <?= $uptime ?></span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- ==============================================================================
+         ÁREA DE CONTENIDO PRINCIPAL
+         ============================================================================== -->
+    <main class="main-content">
+
+      <!-- 1. VISTA GENERAL (DASHBOARD) -->
+      <section id="view-dashboard" class="view-section active">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-dashboard"></use></svg> Vista general del servidor</h2>
+            <p>Servidor NAS departamental & Central de copias de seguridad de alta resiliencia</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="switchView('shares'); openModal('modal-new-share');">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Nueva red compartida
+            </button>
+            <button class="btn btn-secondary" onclick="switchView('backups'); openModal('modal-new-backup');">
+              <svg class="icon"><use href="#icon-shield"></use></svg> Nuevo respaldo
+            </button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <!-- Tarjeta 1: Almacenamiento -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Almacenamiento (/srv/nas)</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-hard-drive"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="kpi-storage-val"><?= $diskUsed ?> GB <small style="font-size:12px; color:var(--text-secondary);">/ <?= $diskTotal ?> GB</small></div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" id="kpi-storage-bar" style="width: <?= $diskPct ?>%; background: var(--accent-primary);"></div>
+            </div>
+            <div class="kpi-sub">
+              <span>Sistema: <strong><?= strtoupper($fsType) ?></strong> • <?= $deviceType ?></span>
+            </div>
+          </div>
+
+          <!-- Tarjeta 2: RAM -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Memoria RAM</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-cpu"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="kpi-ram-val"><?= $ramUsed ?> GB <small style="font-size:12px; color:var(--text-secondary);">/ <?= $ramTotal ?> GB</small></div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" id="kpi-ram-bar" style="width: <?= $ramPct ?>%; background: var(--accent-primary);"></div>
+            </div>
+            <div class="kpi-sub">
+              <span>CPU: <?= $cpuPct ?>% • <?= $cpuModel ?></span>
+            </div>
+          </div>
+
+          <!-- Tarjeta 3: Red y Samba -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Servicios de Red</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-server"></use></svg></div>
+            </div>
+            <div class="kpi-val" style="color:var(--accent-success-text);">Samba 4 & Nginx</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              <span class="badge badge-ok">smbd OK</span>
+              <span class="badge badge-ok">wsdd2 OK</span>
+              <span class="badge badge-ok">nginx OK</span>
+              <span class="badge badge-ok">php-fpm ondemand</span>
+            </div>
+            <div class="kpi-sub">
+              <span>Optimización Office VFS activa</span>
+            </div>
+          </div>
+
+          <!-- Tarjeta 4: Resiliencia -->
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Resiliencia & Protección</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-wrench"></use></svg></div>
+            </div>
+            <div class="kpi-val"><?= $deviceType ?></div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              <span class="tag-pill">Staging atómico</span>
+              <span class="tag-pill">Hardlinks &gt;85%</span>
+            </div>
+            <div class="kpi-sub">
+              <span style="color:var(--accent-success-text);">✔ Resiliencia contra apagones</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Banner Informativo -->
+        <div class="alert-box alert-box-success" style="margin-top:20px;">
+          <svg class="icon icon-lg"><use href="#icon-check-circle"></use></svg>
+          <div>
+            <strong>Entorno Web Nativo Activo:</strong> Nginx-light con PHP-FPM bajo demanda (<code>pm = ondemand</code>).
+            Consumo en reposo ~0 MB de memoria RAM. Arquitectura MVC desacoplada, tipado estricto y ejecución segura con <code>proc_open</code>.
+          </div>
+        </div>
+
+        <!-- Grilla de Operaciones Frecuentes y Feed -->
+        <div class="card-grid-2" style="margin-top:20px;">
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3><svg class="icon"><use href="#icon-wrench"></use></svg> Operaciones frecuentes</h3>
+            </div>
+            <div class="panel-card-body" style="display:flex; flex-direction:column; gap:10px;">
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('shares'); openModal('modal-new-share');">
+                <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg>
+                <span>Crear nueva carpeta compartida en Samba con ACLs granulares</span>
+              </button>
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('users'); openModal('modal-new-user');">
+                <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg>
+                <span>Dar de alta un usuario y sincronizar credenciales smbpasswd</span>
+              </button>
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('backups'); openModal('modal-new-backup');">
+                <svg class="icon" style="color:var(--accent-success);"><use href="#icon-shield"></use></svg>
+                <span>Programar tarea de réplica remota (CIFS 3.1.1 o SSH Linux)</span>
+              </button>
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('storage'); runStorageScrub();">
+                <svg class="icon" style="color:var(--accent-warning);"><use href="#icon-refresh"></use></svg>
+                <span>Iniciar auditoría criptográfica BTRFS scrub contra Bit Rot</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3><svg class="icon"><use href="#icon-clock"></use></svg> Registro de eventos en vivo</h3>
+              <span class="badge badge-ok">journalctl</span>
+            </div>
+            <div class="panel-card-body" id="dashboard-activity-feed" style="display:flex; flex-direction:column; gap:8px;">
+              <p style="color:var(--text-secondary);">Cargando bitácoras recientes...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. REGISTROS (LOGS) -->
+      <section id="view-logs" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-file"></use></svg> Registros del sistema (journalctl)</h2>
+            <p>Bitácoras consolidadas de demonios de red, rsync y seguridad Debian 13</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadLogs()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th style="width:180px;">Timestamp</th>
+                  <th style="width:130px;">Servicio</th>
+                  <th>Mensaje del registro</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table-body">
+                <tr><td colspan="3" style="text-align:center;">Cargando registros...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. ALMACENAMIENTO (STORAGE) -->
+      <section id="view-storage" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Almacenamiento y discos físicos</h2>
+            <p>Monitoreo de particiones, integridad de datos y mantenimiento BTRFS / TRIM</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="runStorageScrub()">
+              <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
+            </button>
+            <button class="btn btn-secondary" onclick="runStorageTrim()">
+              <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar TRIM SSD
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-head">
+            <h3>Dispositivos de bloque reconocidos (lsblk)</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Dispositivo</th>
+                  <th>Modelo</th>
+                  <th>Tamaño</th>
+                  <th>Tipo</th>
+                  <th>Punto de montaje</th>
+                  <th>Filesystem</th>
+                </tr>
+              </thead>
+              <tbody id="storage-disks-body">
+                <tr><td colspan="6" style="text-align:center;">Cargando inventario de discos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. REDES (NETWORKING) -->
+      <section id="view-networking" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-network"></use></svg> Configuración y visibilidad de red</h2>
+            <p>Protocolos de descubrimiento SMB 3.1.1, WSDD2 / LLMNR para clientes Windows 10/11</p>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card-body" style="display:flex; flex-direction:column; gap:16px;">
+            <div class="info-row">
+              <span class="info-label">NetBIOS Name:</span>
+              <strong class="info-val"><?= $hostname ?></strong>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Workgroup:</span>
+              <strong class="info-val">TEAM-JOFRATO</strong>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Protocolo SMB:</span>
+              <strong class="info-val">SMB 3.1.1 (Min: SMB 2.02)</strong>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Descubrimiento WSD:</span>
+              <strong class="info-val" style="color:var(--accent-success-text);">WSDD2 Activo (Puertos 3702, 5355, 5357)</strong>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Ruta de Red Windows:</span>
+              <strong class="info-val"><code>\\<?= $hostname ?></code> o <code>\\<?= htmlspecialchars($_SERVER['SERVER_ADDR'] ?? '10.10.1.2', ENT_QUOTES, 'UTF-8') ?></code></strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. SERVICIOS (SERVICES) -->
+      <section id="view-services" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Demonios y servicios del sistema</h2>
+            <p>Control de ejecución de Samba, WSDD2, Nginx, PHP-FPM y Cron</p>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Servicio</th>
+                  <th>Descripción</th>
+                  <th>Estado</th>
+                  <th style="width:140px; text-align:right;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="services-table-body">
+                <tr><td colspan="4" style="text-align:center;">Cargando servicios...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. TERMINAL -->
+      <section id="view-terminal" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Consola de terminal web</h2>
+            <p>Diagnóstico rápido de estado mediante comandos permitidos</p>
+          </div>
+        </div>
+
+        <div class="cockpit-terminal">
+          <div class="cockpit-terminal-bar">
+            <span>Terminal NAS • Debian 13</span>
+          </div>
+          <div class="cockpit-terminal-body" id="terminal-output">
+            <p>Consola de comandos NAS Debian 13 lista.</p>
+            <p>Escribe <code>help</code> para consultar comandos disponibles (status, shares, backups, disks, clear).</p>
+          </div>
+          <div style="display:flex; background:var(--bg-card); padding:8px; border-top:1px solid var(--border-color);">
+            <span style="padding:6px 10px; color:var(--accent-primary); font-family:monospace; font-weight:bold;">nas&gt;</span>
+            <input type="text" id="terminal-input" style="flex:1; background:transparent; border:none; color:var(--text-primary); font-family:monospace; outline:none;" placeholder="Escribe un comando...">
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. REDES COMPARTIDAS (SHARES) -->
+      <section id="view-shares" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Carpetas y recursos compartidos (Samba)</h2>
+            <p>Recursos visibles y ocultos ($) con 4 esquemas de permisos y aceleración Office</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="openModal('modal-new-share')">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Crear recurso compartido
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Recurso</th>
+                  <th>Ruta en disco</th>
+                  <th>Esquema de permisos</th>
+                  <th>Visibilidad</th>
+                  <th>Usuarios / Grupos</th>
+                  <th style="width:100px; text-align:right;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="shares-table-body">
+                <tr><td colspan="6" style="text-align:center;">Cargando recursos compartidos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8. CENTRAL DE RESPALDOS (BACKUPS) -->
+      <section id="view-backups" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Central de copias de seguridad</h2>
+            <p>Réplicas remotas CIFS 3.1.1 y SSH Linux con deduplicación por Hardlinks (&gt;85% ahorro)</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="openModal('modal-new-backup')">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Nueva tarea de backup
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Identificador</th>
+                  <th>Protocolo</th>
+                  <th>Origen remoto</th>
+                  <th>Horario Cron</th>
+                  <th>Retención</th>
+                  <th>Último estado</th>
+                  <th style="width:160px; text-align:right;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="backups-table-body">
+                <tr><td colspan="7" style="text-align:center;">Cargando tareas de backup...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. USUARIOS Y GRUPOS (USERS) -->
+      <section id="view-users" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Usuarios y grupos departamentales</h2>
+            <p>Sincronización estricta con smbpasswd y prefijo corporativo mandatorio 'grp_*'</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="openModal('modal-new-user')">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Crear usuario
+            </button>
+            <button class="btn btn-secondary" onclick="openModal('modal-new-group')">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Crear grupo
+            </button>
+          </div>
+        </div>
+
+        <div class="card-grid-2">
+          <!-- Tabla de Usuarios -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3>Usuarios registrados</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>UID</th>
+                    <th>Rol</th>
+                    <th>Samba</th>
+                    <th style="width:80px; text-align:right;">Acción</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body">
+                  <tr><td colspan="5" style="text-align:center;">Cargando usuarios...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tabla de Grupos -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3>Grupos corporativos (grp_*)</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>GID</th>
+                    <th>Miembros</th>
+                    <th style="width:80px; text-align:right;">Acción</th>
+                  </tr>
+                </thead>
+                <tbody id="groups-table-body">
+                  <tr><td colspan="4" style="text-align:center;">Cargando grupos...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. ACTUALIZACIONES (UPDATES) -->
+      <section id="view-updates" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-download"></use></svg> Actualizaciones de software</h2>
+            <p>Control de versiones del servidor NAS y parches del sistema Debian 13</p>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card-body" id="updates-container">
+            <p>Cargando información de versiones...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 11. COMPONENTES (APPLICATIONS) -->
+      <section id="view-applications" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Módulos y componentes del servidor</h2>
+            <p>Tecnologías integradas para alto rendimiento, concurrencia y resiliencia</p>
+          </div>
+        </div>
+
+        <div class="card-grid-2">
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>Samba 4 & VFS</h3></div>
+            <div class="panel-card-body">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>Nginx-light & PHP-FPM</h3></div>
+            <div class="panel-card-body">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>BTRFS con Zstandard</h3></div>
+            <div class="panel-card-body">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>Rsync Multiplataforma</h3></div>
+            <div class="panel-card-body">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 12. DOMINIO AD (DOMAIN) -->
+      <section id="view-domain" class="view-section">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-domain"></use></svg> Integración con Active Directory</h2>
+            <p>Autenticación corporativa mediante dominios Windows y cuentas de red</p>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card-body">
+            <p>El servidor opera actualmente en modo <strong>Servidor Autónomo (Standalone)</strong> en el grupo de trabajo <strong>TEAM-JOFRATO</strong>.</p>
+            <p>Para unir este servidor a un controlador de dominio Active Directory, puedes utilizar la herramienta interactiva por consola: <code>sudo nas</code>.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ==============================================================================
+       MODALES DE OPERACIÓN
+       ============================================================================== -->
+
+  <!-- Modal: Nuevo Recurso Compartido -->
+  <div class="modal-backdrop" id="modal-new-share">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Crear nueva carpeta compartida</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-share')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-share" onsubmit="submitNewShare(event)">
+          <div class="form-group">
+            <label for="share-name">Nombre del recurso compartido:</label>
+            <input type="text" id="share-name" required placeholder="ej. CONTABILIDAD" pattern="[A-Za-z0-9_-]+">
+            <small>Usa mayúsculas recomendadas sin espacios.</small>
+          </div>
+          <div class="form-group">
+            <label for="share-comment">Descripción / Comentario:</label>
+            <input type="text" id="share-comment" placeholder="ej. Documentos contables y fiscales">
+          </div>
+          <div class="form-group">
+            <label for="share-scheme">Esquema de permisos granular:</label>
+            <select id="share-scheme" onchange="toggleSchemeFields()">
+              <option value="1">1. Lectura y Escritura por Grupo</option>
+              <option value="2">2. Solo Lectura General + Escritura Exclusiva</option>
+              <option value="3">3. Solo Lectura Estricta (Histórico)</option>
+              <option value="4">4. Acceso Público / Invitados (guest ok)</option>
+            </select>
+          </div>
+          <div class="form-group" id="group-share-groups">
+            <label>Grupos autorizados:</label>
+            <div id="share-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
+              <!-- Llenado dinámicamente -->
+            </div>
+          </div>
+          <div class="form-group" id="group-share-write-group" style="display:none;">
+            <label for="share-write-group">Grupo con permiso exclusivo de escritura:</label>
+            <select id="share-write-group"></select>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="share-hidden">
+              <span>Recurso oculto (agrega sufijo <code>$</code> al nombre para no difundir en red)</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-share')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Crear recurso</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nueva Tarea de Backup -->
+  <div class="modal-backdrop" id="modal-new-backup">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Programar nueva tarea de respaldo</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-backup')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-backup" onsubmit="submitNewBackup(event)">
+          <div class="form-group">
+            <label for="bkp-id">Identificador único de la tarea:</label>
+            <input type="text" id="bkp-id" required placeholder="ej. srv_win_ventas" pattern="[a-z0-9_-]+">
+          </div>
+          <div class="form-group">
+            <label for="bkp-proto">Protocolo de replicación:</label>
+            <select id="bkp-proto" onchange="toggleBackupFields()">
+              <option value="cifs">CIFS / SMB 3.1.1 (Servidor Windows)</option>
+              <option value="ssh">SSH + Rsync (Servidor Linux Remoto)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="bkp-ip">Dirección IP o Nombre del Host Remoto:</label>
+            <input type="text" id="bkp-ip" required placeholder="ej. 10.10.1.50">
+          </div>
+          <div class="form-group" id="field-bkp-share">
+            <label for="bkp-share">Recurso compartido remoto:</label>
+            <input type="text" id="bkp-share" placeholder="ej. Facturacion o C$">
+          </div>
+          <div class="form-group" id="field-bkp-path" style="display:none;">
+            <label for="bkp-path">Ruta absoluta remota en Linux:</label>
+            <input type="text" id="bkp-path" placeholder="ej. /var/www">
+          </div>
+          <div class="form-group">
+            <label for="bkp-user">Usuario remoto (ej. Administrador o DOMINIO\usuario):</label>
+            <input type="text" id="bkp-user" required placeholder="ej. Administrador">
+          </div>
+          <div class="form-group">
+            <label for="bkp-pass">Contraseña:</label>
+            <input type="password" id="bkp-pass" required>
+          </div>
+          <div class="form-group">
+            <label for="bkp-cron">Frecuencia programada (Cron):</label>
+            <select id="bkp-cron">
+              <option value="0 23 * * *">Diario a las 23:00 hrs (Recomendado)</option>
+              <option value="0 */6 * * *">Cada 6 horas</option>
+              <option value="0 * * * *">Cada hora en punto</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="bkp-retention">Snapshots a conservar antes de rotar:</label>
+            <input type="number" id="bkp-retention" value="30" min="1" max="365">
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-backup')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Programar respaldo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nuevo Usuario -->
+  <div class="modal-backdrop" id="modal-new-user">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Dar de alta usuario</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-user')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-user" onsubmit="submitNewUser(event)">
+          <div class="form-group">
+            <label for="user-uname">Nombre de usuario:</label>
+            <input type="text" id="user-uname" required placeholder="ej. operador1" pattern="[a-z0-9_-]+">
+          </div>
+          <div class="form-group">
+            <label for="user-pass">Contraseña:</label>
+            <input type="password" id="user-pass" required minlength="6">
+          </div>
+          <div class="form-group">
+            <label>Grupos a asignar:</label>
+            <div id="user-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
+              <!-- Llenado dinámicamente -->
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="user-is-admin">
+              <span>Privilegios administrativos (acceso sudo y grp_sistemas)</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-user')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Crear usuario</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nuevo Grupo -->
+  <div class="modal-backdrop" id="modal-new-group">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Crear grupo departamental</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-group')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-group" onsubmit="submitNewGroup(event)">
+          <div class="form-group">
+            <label for="group-name">Nombre del grupo (prefijo <code>grp_</code> mandatorio):</label>
+            <input type="text" id="group-name" required placeholder="ej. contabilidad">
+            <small>Se guardará como <code>grp_contabilidad</code>.</small>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Crear grupo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Registro de Tarea de Backup -->
+  <div class="modal-backdrop" id="modal-backup-logs">
+    <div class="modal-dialog" style="max-width:700px;">
+      <div class="modal-header">
+        <h3 id="modal-backup-logs-title">Bitácora de respaldo</h3>
+        <button class="modal-close" onclick="closeModal('modal-backup-logs')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre id="modal-backup-logs-content" style="background:var(--bg-terminal); color:var(--text-terminal); padding:12px; border-radius:4px; max-height:400px; overflow-y:auto; font-family:monospace; font-size:12px; white-space:pre-wrap;"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-backup-logs')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmar Reinicio -->
+  <div class="modal-backdrop" id="modal-reboot-server">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Reiniciar Servidor NAS</h3>
+        <button class="modal-close" onclick="closeModal('modal-reboot-server')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>¿Estás seguro de que deseas reiniciar el servidor? Todas las sesiones de red y transferencias activas se interrumpirán momentáneamente.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-reboot-server')">Cancelar</button>
+        <button type="button" class="btn btn-danger" onclick="confirmRebootServer()">Reiniciar ahora</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor de Alertas Toast -->
+  <div id="toast-container" style="position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
