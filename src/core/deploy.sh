@@ -427,7 +427,8 @@ fi
 # 1. Configurar Pool de PHP-FPM bajo demanda (pm = ondemand, ~0 MB RAM en reposo)
 PHP_POOL_DIR=$(find /etc/php -maxdepth 3 -type d -name "pool.d" 2>/dev/null | tail -1)
 if [ -z "$PHP_POOL_DIR" ]; then
-    PHP_POOL_DIR="/etc/php/8.2/fpm/pool.d"
+    PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+    PHP_POOL_DIR="/etc/php/$PHP_VER/fpm/pool.d"
 fi
 mkdir -p "$PHP_POOL_DIR" /run/php
 
@@ -486,12 +487,54 @@ ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 
 # 4. Configurar sudoers para www-data con permisos acotados y seguros
 cat << 'SUDOERS_EOF' > /etc/sudoers.d/nas-web
-Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /bin/systemctl restart smbd, /bin/systemctl restart nmbd, /bin/systemctl restart wsdd2, /bin/systemctl restart nginx, /bin/systemctl status smbd, /bin/systemctl status nmbd, /bin/systemctl status wsdd2, /bin/systemctl status nginx, /bin/systemctl status cron, /sbin/reboot, /bin/systemctl reboot
+Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \
+    /bin/systemctl restart smbd, /usr/bin/systemctl restart smbd, \
+    /bin/systemctl restart nmbd, /usr/bin/systemctl restart nmbd, \
+    /bin/systemctl restart wsdd2, /usr/bin/systemctl restart wsdd2, \
+    /bin/systemctl restart nginx, /usr/bin/systemctl restart nginx, \
+    /bin/systemctl start smbd, /usr/bin/systemctl start smbd, \
+    /bin/systemctl start nmbd, /usr/bin/systemctl start nmbd, \
+    /bin/systemctl start wsdd2, /usr/bin/systemctl start wsdd2, \
+    /bin/systemctl start nginx, /usr/bin/systemctl start nginx, \
+    /bin/systemctl stop smbd, /usr/bin/systemctl stop smbd, \
+    /bin/systemctl stop nmbd, /usr/bin/systemctl stop nmbd, \
+    /bin/systemctl stop wsdd2, /usr/bin/systemctl stop wsdd2, \
+    /bin/systemctl stop nginx, /usr/bin/systemctl stop nginx, \
+    /bin/systemctl restart php*-fpm*, /usr/bin/systemctl restart php*-fpm*, \
+    /bin/systemctl reload php*-fpm*, /usr/bin/systemctl reload php*-fpm*, \
+    /bin/systemctl start php*-fpm*, /usr/bin/systemctl start php*-fpm*, \
+    /bin/systemctl stop php*-fpm*, /usr/bin/systemctl stop php*-fpm*, \
+    /bin/systemctl restart cron, /usr/bin/systemctl restart cron, \
+    /bin/systemctl start cron, /usr/bin/systemctl start cron, \
+    /bin/systemctl stop cron, /usr/bin/systemctl stop cron, \
+    /bin/systemctl status smbd, /usr/bin/systemctl status smbd, \
+    /bin/systemctl status nmbd, /usr/bin/systemctl status nmbd, \
+    /bin/systemctl status wsdd2, /usr/bin/systemctl status wsdd2, \
+    /bin/systemctl status nginx, /usr/bin/systemctl status nginx, \
+    /bin/systemctl status cron, /usr/bin/systemctl status cron, \
+    /bin/systemctl status php*-fpm*, /usr/bin/systemctl status php*-fpm*, \
+    /sbin/reboot, /usr/sbin/reboot, /bin/systemctl reboot, /usr/bin/systemctl reboot
 Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/usermod *, /usr/sbin/groupadd *, /usr/sbin/groupdel *, /usr/bin/gpasswd *, /usr/bin/passwd *, /usr/sbin/chpasswd
-Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
-Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, /bin/cp /tmp/nas_backup_* /etc/cron.d/*, /bin/rm -f /etc/cron.d/backup_*, /bin/rm -f /usr/local/bin/backup_*.sh, /bin/rm -f /etc/backup-credentials/*, /bin/cp /tmp/cred_* /etc/backup-credentials/*, /bin/cp /tmp/runner_* /usr/local/bin/backup_*.sh, /bin/cp /tmp/cron_* /etc/cron.d/backup_*, /bin/chmod * /etc/backup-credentials/*, /bin/chmod * /usr/local/bin/backup_*.sh, /bin/chmod * /etc/cron.d/backup_*, /bin/sh -c /usr/local/bin/backup_*.sh *
-Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /bin/mkdir -p /srv/nas/*, /bin/chmod * /srv/nas/*, /bin/chown * /srv/nas/*, /usr/bin/setfacl * /srv/nas/*
+Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /bin/btrfs scrub *, /sbin/fstrim *, /usr/sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
+Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, \
+    /bin/cp /tmp/nas_* /etc/cron.d/backup_*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_*, \
+    /bin/cp /tmp/nas_* /usr/local/bin/backup_*.sh, /usr/bin/cp /tmp/nas_* /usr/local/bin/backup_*.sh, \
+    /bin/cp /tmp/nas_* /etc/backup-credentials/*, /usr/bin/cp /tmp/nas_* /etc/backup-credentials/*, \
+    /bin/chmod * /etc/backup-credentials/*, /usr/bin/chmod * /etc/backup-credentials/*, \
+    /bin/chmod * /usr/local/bin/backup_*.sh, /usr/bin/chmod * /usr/local/bin/backup_*.sh, \
+    /bin/chmod * /etc/cron.d/backup_*, /usr/bin/chmod * /etc/cron.d/backup_*, \
+    /bin/rm -f /etc/cron.d/backup_*, /usr/bin/rm -f /etc/cron.d/backup_*, \
+    /bin/rm -f /usr/local/bin/backup_*.sh, /usr/bin/rm -f /usr/local/bin/backup_*.sh, \
+    /bin/rm -f /etc/backup-credentials/*, /usr/bin/rm -f /etc/backup-credentials/*, \
+    /bin/rm -f /var/lock/backup_*.lock, /usr/bin/rm -f /var/lock/backup_*.lock, \
+    /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
+Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \
+    /bin/mkdir -p /srv/nas/*, /usr/bin/mkdir -p /srv/nas/*, \
+    /bin/chmod * /srv/nas/*, /usr/bin/chmod * /srv/nas/*, \
+    /bin/chown * /srv/nas/*, /usr/bin/chown * /srv/nas/*, \
+    /usr/bin/setfacl * /srv/nas/*, /bin/setfacl * /srv/nas/*, \
+    /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
 
 www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF
 SUDOERS_EOF
@@ -648,7 +691,8 @@ fi
 
 PHP_FPM_SVC=$(systemctl list-unit-files --type=service 'php*-fpm.service' 2>/dev/null | awk '/php.*-fpm/ {print $1; exit}')
 if [ -z "$PHP_FPM_SVC" ]; then
-    PHP_FPM_SVC="php8.2-fpm"
+    PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+    PHP_FPM_SVC="php${PHP_VER}-fpm"
 fi
 
 systemctl daemon-reload
