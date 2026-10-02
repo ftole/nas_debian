@@ -64,7 +64,7 @@ fi
 desinstalar_guiado() {
     if (whiptail --title "ALERTA DE DESINSTALACIÓN CRÍTICA" \
         --yes-button "< Sí, Desinstalar Todo >" --no-button "< Cancelar >" \
-        --yesno "¡CUIDADO! Esta acción desinstalará todos los paquetes de Samba, Cockpit, desmontará el disco y limpiará las configuraciones.\n\n¿Confirmas que deseas restablecer el servidor a su estado base limpio?" 12 72); then
+        --yesno "¡CUIDADO! Esta acción desinstalará todos los paquetes de Samba, el Panel Web (Nginx/PHP), desmontará el disco y limpiará las configuraciones.\n\n¿Confirmas que deseas restablecer el servidor a su estado base limpio?" 12 72); then
         clear 2>/dev/null || true
         bash "$SRC_DIR/core/uninstall.sh" --yes
         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
@@ -105,7 +105,7 @@ while true; do
         "4" "[4]  Gestión de Tareas de Backup (Windows / Linux / Local)" \
         "5" "[5]  Gestión de Usuarios y Empleados (Crear, Grupos y Claves)" \
         "6" "[6]  Ver Diagnóstico, Discos y Recursos Compartidos" \
-        "7" "[7]  Reiniciar Servicios de Red (Samba / Cockpit)" \
+        "7" "[7]  Reiniciar Servicios de Red (Samba / Web)" \
         "8" "[8]  Buscar Actualizaciones desde GitHub (Auto-Update)" \
         "9" "[9]  Desinstalar y Limpiar Servidor" 3>&1 1>&2 2>&3)
 
@@ -132,10 +132,11 @@ while true; do
         7) 
             if (whiptail --title "Confirmar Reinicio" \
                 --yes-button "< Sí, Reiniciar >" --no-button "< Cancelar >" \
-                --yesno "¿Deseas reiniciar los servicios de red de Samba, WSDD2 y Cockpit ahora?" 9 65); then
-                systemctl restart smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null || true
+                --yesno "¿Deseas reiniciar los servicios de red de Samba, WSDD2, Nginx y PHP-FPM ahora?" 9 65); then
+                systemctl restart smbd nmbd wsdd2 nginx 2>/dev/null || true
+                systemctl restart php*-fpm 2>/dev/null || true
                 whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
-                    --msgbox "✔ Servicios de Samba, WSDD2 y Cockpit reiniciados correctamente." 8 60
+                    --msgbox "✔ Servicios de Samba, WSDD2, Nginx y PHP-FPM reiniciados correctamente." 8 60
             fi
             ;;
         8) actualizar_desde_git ;;
