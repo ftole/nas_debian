@@ -13,7 +13,10 @@ diagnostico_nas() {
     echo -e "  ╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 
     echo -e "  ${C_BOLD}${C_WHITE}1. ESTADO DE SERVICIOS EN TIEMPO REAL:${C_RESET}"
-    for s in smbd nmbd wsdd2 nginx cron; do
+    local php_svc
+    php_svc=$(systemctl list-unit-files --type=service 'php*-fpm.service' 2>/dev/null | awk '/php.*-fpm/ {print $1; exit}')
+    [ -z "$php_svc" ] && php_svc="php-fpm"
+    for s in smbd nmbd wsdd2 nginx "$php_svc" cron; do
         if systemctl is-active "$s" &>/dev/null; then
             echo -e "     [${C_GREEN}● ACTIVO${C_RESET}] $s"
         else
