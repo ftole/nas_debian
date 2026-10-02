@@ -18,9 +18,49 @@
   --pf-info: #0066cc;
   --pf-purple: #6753ac;
 
-  /* Modo Oscuro (Predeterminado Cockpit) */
+  /* ============================================================================
+   * Modo Oscuro (Predeterminado Cockpit)
+   * ============================================================================ */
+  /* Masthead Superior en Modo Oscuro */
   --bg-masthead: #151515;
+  --border-masthead: #292e34;
+  --text-masthead: #ffffff;
+  --text-masthead-hostname: #73bcf7;
+  --text-masthead-divider: #4f5255;
+  --text-masthead-ip: #8a8d90;
+  --masthead-logo-color: var(--accent-primary);
+  --bg-masthead-badge: #26292d;
+  --border-masthead-badge: #3c3f42;
+  --text-masthead-badge: #d2d2d2;
+  --bg-masthead-pill: #212427;
+  --border-masthead-pill: #3c3f42;
+  --text-masthead-pill: #d2d2d2;
+  --text-masthead-pill-strong: #ffffff;
+  --bg-masthead-btn: transparent;
+  --border-masthead-btn: #3c3f42;
+  --text-masthead-btn: #f0f0f0;
+  --bg-masthead-btn-hover: #26292d;
+  --border-masthead-btn-hover: #4f5255;
+  --text-masthead-btn-hover: #ffffff;
+
+  /* Sidebar Lateral en Modo Oscuro */
   --bg-sidebar: #212427;
+  --border-sidebar: #292e34;
+  --text-sidebar-title: #8a8d90;
+  --text-sidebar-nav: #d2d2d2;
+  --bg-sidebar-nav-hover: #292e34;
+  --text-sidebar-nav-hover: #ffffff;
+  --bg-sidebar-nav-active: #151515;
+  --text-sidebar-nav-active: #ffffff;
+  --border-sidebar-nav-active: var(--pf-primary);
+  --bg-sidebar-badge: #26292d;
+  --border-sidebar-badge: #3c3f42;
+  --text-sidebar-badge: #d2d2d2;
+  --border-sidebar-footer: #26292d;
+  --text-sidebar-footer: #d2d2d2;
+  --text-sidebar-footer-sub: #8a8d90;
+
+  /* Estructura Base, Tarjetas y Superficies en Modo Oscuro */
   --bg-body: #0f1214;
   --bg-card: #1b1d21;
   --bg-card-header: #212427;
@@ -28,18 +68,39 @@
   --bg-hover: #26292d;
   --bg-selected: rgba(0, 102, 204, 0.18);
   --bg-input: #151515;
-  --bg-terminal: #000000;
 
+  /* Terminal Web en Modo Oscuro (Consola Negra #0b0d0e) */
+  --bg-terminal: #0b0d0e;
+  --bg-terminal-bar: #16191c;
+  --border-terminal: #292e34;
+  --text-terminal: #dcdcdc;
+  --text-terminal-cmd: #ffffff;
+  --text-terminal-bar: #aaaaaa;
+  --text-terminal-badge: #5ba353;
+  --text-terminal-prompt: #5ba353;
+  --text-terminal-input: #ffffff;
+  --caret-terminal: #5ba353;
+  --shadow-terminal: inset 0 0 10px rgba(0, 0, 0, 0.8);
+  --term-time: #8a8d90;
+  --term-ok: #5ba353;
+  --term-warn: #f0ab00;
+  --term-err: #f05e54;
+  --term-info: #73bcf7;
+  --term-cmd: #ffffff;
+
+  /* Bordes */
   --border-color: #3c3f42;
   --border-subtle: #292e34;
   --border-dark: #151515;
   --border-light: #292e34;
 
+  /* Textos Globales */
   --text-main: #f0f0f0;
   --text-secondary: #d2d2d2;
   --text-muted: #8a8d90;
   --text-inverse: #151515;
 
+  /* Acentos y Notificaciones */
   --accent-primary: #0066cc;
   --accent-primary-hover: #004080;
   --accent-primary-light: rgba(0, 102, 204, 0.2);
@@ -80,6 +141,8 @@
   --badge-warn-text: #f3c24b;
   --badge-warn-border: rgba(240, 171, 0, 0.45);
 
+  --modal-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
   --radius-sm: 2px;
   --radius-md: 3px;
   --radius-pill: 12px;
@@ -89,28 +152,89 @@
 }
 
 [data-theme="light"] {
-  /* Modo Claro - Red Hat Cockpit Puro */
-  --bg-masthead: #151515;       /* Barra superior Cockpit oscura */
-  --bg-sidebar: #151515;        /* Barra lateral Cockpit oscura */
-  --bg-body: #f0f0f0;           /* Fondo gris neutro PatternFly */
+  /* ============================================================================
+   * Modo Claro (100% Claro • Sin partes oscuras en toda la pantalla)
+   * ============================================================================ */
+  /* Masthead Superior en Modo Claro */
+  --bg-masthead: #ffffff;
+  --border-masthead: #d2d2d2;
+  --text-masthead: #151515;
+  --text-masthead-hostname: #151515;
+  --text-masthead-divider: #d2d2d2;
+  --text-masthead-ip: #6a6e73;
+  --masthead-logo-color: #151515;
+  --bg-masthead-badge: #f0f0f0;
+  --border-masthead-badge: #d2d2d2;
+  --text-masthead-badge: #4f5255;
+  --bg-masthead-pill: #f5f5f5;
+  --border-masthead-pill: #d2d2d2;
+  --text-masthead-pill: #4f5255;
+  --text-masthead-pill-strong: #151515;
+  --bg-masthead-btn: #ffffff;
+  --border-masthead-btn: #d2d2d2;
+  --text-masthead-btn: #151515;
+  --bg-masthead-btn-hover: #eeeeee;
+  --border-masthead-btn-hover: #b8bbbe;
+  --text-masthead-btn-hover: #151515;
+
+  /* Sidebar Lateral en Modo Claro */
+  --bg-sidebar: #fafafa;
+  --border-sidebar: #d2d2d2;
+  --text-sidebar-title: #6a6e73;
+  --text-sidebar-nav: #151515;
+  --bg-sidebar-nav-hover: #eeeeee;
+  --text-sidebar-nav-hover: #151515;
+  --bg-sidebar-nav-active: #e7f1fa;
+  --text-sidebar-nav-active: #0066cc;
+  --border-sidebar-nav-active: #0066cc;
+  --bg-sidebar-badge: #e0e0e0;
+  --border-sidebar-badge: #d2d2d2;
+  --text-sidebar-badge: #4f5255;
+  --border-sidebar-footer: #d2d2d2;
+  --text-sidebar-footer: #151515;
+  --text-sidebar-footer-sub: #6a6e73;
+
+  /* Estructura Base, Tarjetas y Superficies en Modo Claro */
+  --bg-body: #f0f0f0;
   --bg-card: #ffffff;
   --bg-card-header: #fafafa;
   --bg-surface: #f5f5f5;
-  --bg-hover: #f5f5f5;
+  --bg-hover: #eeeeee;
   --bg-selected: #e7f1fa;
   --bg-input: #ffffff;
-  --bg-terminal: #000000;
 
+  /* Terminal Web en Modo Claro (Legibilidad Total) */
+  --bg-terminal: #ffffff;
+  --bg-terminal-bar: #f0f0f0;
+  --border-terminal: #d2d2d2;
+  --text-terminal: #151515;
+  --text-terminal-cmd: #0066cc;
+  --text-terminal-bar: #4f5255;
+  --text-terminal-badge: #1e4f18;
+  --text-terminal-prompt: #004080;
+  --text-terminal-input: #151515;
+  --caret-terminal: #0066cc;
+  --shadow-terminal: none;
+  --term-time: #6a6e73;
+  --term-ok: #1e4f18;
+  --term-warn: #795600;
+  --term-err: #c9190b;
+  --term-info: #004080;
+  --term-cmd: #0066cc;
+
+  /* Bordes */
   --border-color: #d2d2d2;
   --border-subtle: #e0e0e0;
-  --border-dark: #292e34;
+  --border-dark: #d2d2d2;
   --border-light: #e0e0e0;
 
+  /* Textos Globales */
   --text-main: #151515;
   --text-secondary: #4f5255;
   --text-muted: #6a6e73;
   --text-inverse: #ffffff;
 
+  /* Acentos */
   --accent-primary: #0066cc;
   --accent-primary-hover: #004080;
   --accent-primary-light: #edf5fc;
@@ -122,11 +246,13 @@
   --accent-cyan: #0066cc;
   --accent-info: #0066cc;
 
+  /* Alertas */
   --alert-success-bg: #eef7ed;
   --alert-info-bg: #edf5fc;
   --alert-warning-bg: #fdf7e7;
   --alert-danger-bg: #faeae8;
 
+  /* Badges */
   --badge-ok-bg: #eef7ed;
   --badge-ok-text: #1e4f18;
   --badge-ok-border: #92d400;
@@ -150,6 +276,8 @@
   --badge-warn-bg: #fdf7e7;
   --badge-warn-text: #795600;
   --badge-warn-border: #f3c24b;
+
+  --modal-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
 /* ==============================================================================
@@ -241,12 +369,12 @@ code, kbd, pre, samp {
   height: 48px;
   flex-shrink: 0;
   background-color: var(--bg-masthead);
-  border-bottom: 1px solid var(--border-dark);
+  border-bottom: 1px solid var(--border-masthead);
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 0 16px;
-  color: #ffffff;
+  color: var(--text-masthead);
   z-index: 100;
 }
 
@@ -257,17 +385,18 @@ code, kbd, pre, samp {
 }
 
 .masthead .mobile-toggle {
-  background: transparent;
-  border: 1px solid #3c3f42;
-  color: #d2d2d2;
+  background: var(--bg-masthead-btn);
+  border: 1px solid var(--border-masthead-btn);
+  color: var(--text-masthead-btn);
   border-radius: var(--radius-md);
   padding: 4px 8px;
   cursor: pointer;
   display: none;
 }
 .masthead .mobile-toggle:hover {
-  background-color: #26292d;
-  color: #ffffff;
+  background-color: var(--bg-masthead-btn-hover);
+  border-color: var(--border-masthead-btn-hover);
+  color: var(--text-masthead-btn-hover);
 }
 
 .masthead-brand {
@@ -276,10 +405,14 @@ code, kbd, pre, samp {
   gap: 8px;
 }
 
+.masthead-brand .icon {
+  color: var(--masthead-logo-color);
+}
+
 .masthead-brand .brand-logo-text {
   font-size: 15px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-masthead);
   letter-spacing: 0.3px;
   display: flex;
   align-items: center;
@@ -287,12 +420,12 @@ code, kbd, pre, samp {
 }
 
 .masthead-brand .brand-divider {
-  color: #4f5255;
+  color: var(--text-masthead-divider);
   font-weight: 300;
 }
 
 .masthead-brand .brand-hostname {
-  color: #73bcf7;
+  color: var(--text-masthead-hostname);
   font-weight: 600;
 }
 
@@ -301,15 +434,15 @@ code, kbd, pre, samp {
   font-weight: 600;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  background-color: #26292d;
-  border: 1px solid #3c3f42;
-  color: #d2d2d2;
+  background-color: var(--bg-masthead-badge);
+  border: 1px solid var(--border-masthead-badge);
+  color: var(--text-masthead-badge);
 }
 
 .brand-ip {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: #8a8d90;
+  color: var(--text-masthead-ip);
   margin-left: 2px;
 }
 
@@ -324,25 +457,25 @@ code, kbd, pre, samp {
   align-items: center;
   gap: 5px;
   font-size: 11.5px;
-  color: #d2d2d2;
-  background-color: #212427;
-  border: 1px solid #3c3f42;
+  color: var(--text-masthead-pill);
+  background-color: var(--bg-masthead-pill);
+  border: 1px solid var(--border-masthead-pill);
   padding: 3px 9px;
   border-radius: var(--radius-md);
 }
 .header-meta-pill strong {
-  color: #ffffff;
+  color: var(--text-masthead-pill-strong);
 }
 
 .masthead .btn-secondary {
-  color: #f0f0f0;
-  border-color: #3c3f42;
-  background-color: transparent;
+  color: var(--text-masthead-btn);
+  border-color: var(--border-masthead-btn);
+  background-color: var(--bg-masthead-btn);
 }
 .masthead .btn-secondary:hover:not(:disabled) {
-  background-color: #26292d;
-  border-color: #4f5255;
-  color: #ffffff;
+  background-color: var(--bg-masthead-btn-hover);
+  border-color: var(--border-masthead-btn-hover);
+  color: var(--text-masthead-btn-hover);
 }
 
 .user-pill {
@@ -350,15 +483,15 @@ code, kbd, pre, samp {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #d2d2d2;
+  color: var(--text-masthead-pill);
   padding: 3px 9px;
-  background-color: #212427;
-  border: 1px solid #3c3f42;
+  background-color: var(--bg-masthead-pill);
+  border: 1px solid var(--border-masthead-pill);
   border-radius: var(--radius-md);
 }
 .user-name {
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-masthead-pill-strong);
 }
 
 /* ==============================================================================
@@ -377,7 +510,7 @@ code, kbd, pre, samp {
 .sidebar {
   width: 250px;
   background-color: var(--bg-sidebar);
-  border-right: 1px solid #292e34;
+  border-right: 1px solid var(--border-sidebar);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -411,7 +544,7 @@ code, kbd, pre, samp {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: #8a8d90;
+  color: var(--text-sidebar-title);
 }
 
 .nav-item {
@@ -420,7 +553,7 @@ code, kbd, pre, samp {
   align-items: center;
   padding: 8px 16px;
   cursor: pointer;
-  color: #d2d2d2;
+  color: var(--text-sidebar-nav);
   font-size: 13px;
   font-weight: 500;
   border-left: 3px solid transparent;
@@ -428,14 +561,14 @@ code, kbd, pre, samp {
 }
 
 .nav-item:hover {
-  background-color: #292e34;
-  color: #ffffff;
+  background-color: var(--bg-sidebar-nav-hover);
+  color: var(--text-sidebar-nav-hover);
 }
 
 .nav-item.active {
-  background-color: #151515;
-  color: #ffffff;
-  border-left-color: var(--pf-primary);
+  background-color: var(--bg-sidebar-nav-active);
+  color: var(--text-sidebar-nav-active);
+  border-left-color: var(--border-sidebar-nav-active);
   font-weight: 600;
 }
 
@@ -455,9 +588,9 @@ code, kbd, pre, samp {
   font-weight: 600;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
-  background-color: #26292d;
-  color: #d2d2d2;
-  border: 1px solid #3c3f42;
+  background-color: var(--bg-sidebar-badge);
+  color: var(--text-sidebar-badge);
+  border: 1px solid var(--border-sidebar-badge);
 }
 .nav-item.active .nav-badge {
   background-color: var(--pf-primary);
@@ -468,7 +601,7 @@ code, kbd, pre, samp {
 .sidebar-footer {
   margin-top: auto;
   padding: 12px 16px;
-  border-top: 1px solid #26292d;
+  border-top: 1px solid var(--border-sidebar-footer);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -479,7 +612,7 @@ code, kbd, pre, samp {
   justify-content: space-between;
   align-items: center;
   font-size: 11.5px;
-  color: #d2d2d2;
+  color: var(--text-sidebar-footer);
 }
 
 .sidebar-footer-sub {
@@ -487,7 +620,7 @@ code, kbd, pre, samp {
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: #8a8d90;
+  color: var(--text-sidebar-footer-sub);
 }
 
 /* ==============================================================================
@@ -1140,7 +1273,7 @@ code, kbd, pre, samp {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--modal-shadow);
 }
 
 .modal-box-lg {
@@ -1199,25 +1332,25 @@ code, kbd, pre, samp {
  * Terminal Cockpit Web Interactiva Auténtica
  * ============================================================================== */
 .cockpit-terminal {
-  background-color: #000000;
-  border: 1px solid var(--border-color);
+  background-color: var(--bg-terminal);
+  border: 1px solid var(--border-terminal);
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   height: 520px;
   overflow: hidden;
   font-family: var(--font-mono);
-  box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+  box-shadow: var(--shadow-terminal);
 }
 
 .cockpit-terminal-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #1a1a1a;
+  background-color: var(--bg-terminal-bar);
   padding: 6px 12px;
-  border-bottom: 1px solid #333333;
-  color: #aaaaaa;
+  border-bottom: 1px solid var(--border-terminal);
+  color: var(--text-terminal-bar);
   font-size: 11.5px;
 }
 
@@ -1225,7 +1358,7 @@ code, kbd, pre, samp {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #5ba353;
+  color: var(--text-terminal-badge);
   font-weight: 600;
 }
 
@@ -1233,7 +1366,7 @@ code, kbd, pre, samp {
   flex: 1;
   padding: 12px;
   overflow-y: auto;
-  color: #dcdcdc;
+  color: var(--text-terminal);
   font-size: 12.5px;
   line-height: 1.5;
 }
@@ -1245,7 +1378,7 @@ code, kbd, pre, samp {
 }
 
 .terminal-cmd-entry {
-  color: #ffffff;
+  color: var(--text-terminal-cmd);
   font-weight: 600;
 }
 
@@ -1253,13 +1386,13 @@ code, kbd, pre, samp {
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background-color: #000000;
-  border-top: 1px solid #222222;
+  background-color: var(--bg-terminal);
+  border-top: 1px solid var(--border-terminal);
   gap: 8px;
 }
 
 .terminal-prompt {
-  color: #5ba353;
+  color: var(--text-terminal-prompt);
   font-weight: 700;
   font-size: 12.5px;
   white-space: nowrap;
@@ -1270,24 +1403,24 @@ code, kbd, pre, samp {
   background: transparent;
   border: none;
   outline: none;
-  color: #ffffff;
+  color: var(--text-terminal-input);
   font-family: var(--font-mono);
   font-size: 12.5px;
-  caret-color: #5ba353;
+  caret-color: var(--caret-terminal);
 }
 
 /* Visores de Configuración y Logs Simples */
 .live-terminal,
 .config-preview-box {
   background-color: var(--bg-terminal);
-  color: #d2d2d2;
+  color: var(--text-terminal);
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 12px;
   border-radius: var(--radius-md);
   overflow-y: auto;
   line-height: 1.5;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-terminal);
 }
 
 .terminal-line {
@@ -1296,32 +1429,32 @@ code, kbd, pre, samp {
 }
 
 .term-time {
-  color: #8a8d90;
+  color: var(--term-time);
   margin-right: 6px;
 }
 
 .term-ok {
-  color: #5ba353;
+  color: var(--term-ok);
   font-weight: 600;
 }
 
 .term-warn {
-  color: #f0ab00;
+  color: var(--term-warn);
   font-weight: 600;
 }
 
 .term-err {
-  color: #f05e54;
+  color: var(--term-err);
   font-weight: 600;
 }
 
 .term-info {
-  color: #73bcf7;
+  color: var(--term-info);
   font-weight: 600;
 }
 
 .term-cmd {
-  color: #f0f0f0;
+  color: var(--term-cmd);
   font-weight: 600;
 }
 
@@ -1340,7 +1473,7 @@ code, kbd, pre, samp {
   display: flex;
   height: 24px;
   width: 100%;
-  background-color: #292e34;
+  background-color: var(--bg-surface);
   border-radius: var(--radius-sm);
   overflow: hidden;
   margin: 10px 0;
@@ -1360,6 +1493,18 @@ code, kbd, pre, samp {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.disk-partition-seg.seg-os {
+  background-color: var(--border-color);
+  color: var(--text-main);
+  text-shadow: none;
+}
+
+.disk-partition-seg.seg-free {
+  background-color: var(--bg-surface);
+  color: var(--text-secondary);
+  text-shadow: none;
 }
 
 /* ==============================================================================
