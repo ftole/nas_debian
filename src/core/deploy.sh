@@ -34,20 +34,18 @@ trap 'log "[ERROR] Fallo en la línea $LINENO"' ERR
 
 # Restaura los parches de Cockpit desde la copia de seguridad más reciente.
 restaurar_parches_cockpit() {
-    local orig ultimo
-    for orig in /usr/share/cockpit/storaged/storaged.js.gz; do
-        [ -f "$orig" ] || continue
-        case "$orig" in
-            *.bak-*) continue ;;
-        esac
-        ultimo=$(find "$(dirname "$orig")" -maxdepth 1 -type f -name "$(basename "$orig").bak-*" 2>/dev/null | sort | tail -n 1)
-        if [ -n "$ultimo" ] && [ -f "$ultimo" ]; then
-            cp -p "$ultimo" "$orig"
-            echo "  [•] Parche restaurado en $orig desde $ultimo"
-        else
-            echo "  [!] Sin respaldo disponible para $orig"
-        fi
-    done
+    local orig="/usr/share/cockpit/storaged/storaged.js.gz"
+    local ultimo
+    if [ ! -f "$orig" ]; then
+        return 0
+    fi
+    ultimo=$(find "$(dirname "$orig")" -maxdepth 1 -type f -name "$(basename "$orig").bak-*" 2>/dev/null | sort | tail -n 1)
+    if [ -n "$ultimo" ] && [ -f "$ultimo" ]; then
+        cp -p "$ultimo" "$orig"
+        echo "  [•] Parche restaurado en $orig desde $ultimo"
+    else
+        echo "  [!] Sin respaldo disponible para $orig"
+    fi
 }
 
 
