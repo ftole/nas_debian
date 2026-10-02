@@ -37,21 +37,21 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | :--- | :--- | :--- |
 | `install.sh` | Script Bash CLI | **Instalador Remoto Oficial y Gestor CLI** para desplegar el comando `nas`, con auto-actualización (`update`) y desinstalación limpia. |
 | `src/asistente.sh` | Script Bash (TUI `whiptail`) | **Asistente Visual Interactivo** con colores nativos, detección dinámica de discos/IP/usuario, validación en vivo, ciclo de edición y 9 módulos de gestión. |
-| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS` o `BACKUP`), formateo, Samba, Cockpit y parches. |
+| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS` o `BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
 | `src/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente: `deploy_wizard`, `groups`, `shares`, `backups`, `users`, `diagnostics`. |
-| `src/web/backups/` | Web (Cockpit) | Plugin de respaldos: `index.html`, `main.js`, `style.css`, `backup_api.py` y FontAwesome. |
+| `web/` | Web (Nginx + PHP-FPM) | Entorno Web nativo MVC PHP 8: Dashboard, Samba, Backups, Almacenamiento, Usuarios y Sistema con estética Cockpit/PatternFly 4 100% offline. |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `tests/test_api.py` | pytest | Pruebas de validación y fallos del backend web. |
+| `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8. |
 | `FAILURE_MODES.md` | Markdown | Modos de fallo y su verificación (FMEA). |
-| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS y Flake8. |
+| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP. |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
 | `SMB_DEBIAN.md` | Markdown | **Manual Técnico y Guía de Replicación** para usuarios y administradores. |
-| `SECURITY.md` | Markdown | **Modelo de seguridad**, rollback de actualizaciones, identidades SSH, credenciales y parches de Cockpit. |
+| `SECURITY.md` | Markdown | **Modelo de seguridad**, rollback de actualizaciones, identidades SSH, credenciales y privilegios web. |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
 
 ### 2.1 Cuadro Maestro de Tecnologías, Subsistemas y Librerías
@@ -72,17 +72,16 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector Linux | Replicación remota cifrada por SSH con almacenamiento de firmas en `/root/.ssh/known_hosts_backup`. | Previene ataques de intermediario (*Man-in-the-Middle*) al registrar hosts nuevos automáticamente sin intervención manual y sin deshabilitar la comprobación de claves. |
 | **Tuning de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel | Configuración de límites del VFS, monitoreo inotify y reciclaje de memoria sucia. | `fs.inotify` masivo (524,288 watches); `tcp_keepalive` (120s/15s/4) limpia sesiones SMB inactivas en 3 minutos en lugar de 2 horas; `vm.dirty_bytes=256MB` fuerza ráfagas breves de escritura a disco, previniendo congelamientos de I/O por saturación de RAM. |
 | **Readahead Tuning udev (`60-nas-readahead.rules`)** | Subsistema de Bloques | Reglas udev persistentes para precarga de disco (`1024 KB` en SSD / `4096 KB` en HDD). | Aumenta el rendimiento sostenido en lecturas secuenciales pesadas a través de la red y agiliza las comparaciones diferenciales de `rsync`. |
-| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Oculta el disco del sistema en la interfaz de Cockpit Storage y UDisks2, impidiendo su borrado o modificación inadvertida. |
+| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
-| **Cockpit + PatternFly 4 + 45Drives Plugins** | Interfaz Web | Panel administrativo modular sin servicios residentes pesados (activación por socket `systemd`). | Consumo despreciable de memoria en reposo, diseño responsivo estandarizado y gestión gráfica intuitiva. |
-| **Python 3 (`backup_api.py`)** | Backend API para Cockpit | Puente de comandos estructurado en JSON con saneamiento de parámetros. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
+| **Nginx-light + PHP-FPM ondemand + MVC PHP 8** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño responsivo estandarizado tipo Cockpit/PatternFly 4 100% offline. |
+| **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Servicios y controladores con ejecución estricta proc_open con array de argumentos. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
 | **whiptail + Bash 5** | Interfaz Visual TUI | Asistente de terminal interactivo con detección automática de recursos y validaciones en vivo. | Gestión integral del servidor desde la consola local o sesiones SSH sin necesidad de interfaz gráfica X11. |
 | **Control de Concurrencia con `flock`** | Programación de Tareas | Bloqueo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza la exclusión mutua de procesos impidiendo sobrecargas o escrituras simultáneas sobre una misma tarea. |
 | **Monitoreo de Umbrales de Espacio (`df -Pk`)** | Seguridad Operativa | Comprobación de capacidad previa al inicio de cada respaldo. | Emite alertas tempranas al superar el 85% de uso y cancela la copia si restan menos de 2 GB o se supera el 95%, evitando la corrupción por desbordamiento del filesystem. |
 | **`fstrim.timer`** | Mantenimiento para SSD | Tarea periódica de descarte de bloques no referenciados en almacenamiento flash. | Mantiene velocidades de escritura constantes y optimiza la vida útil de los dispositivos de estado sólido. |
 | **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Bitácoras | Rotación semanal/mensual con directiva `copytruncate` y compresión `gzip`. | Mantiene controlados los registros de actividad evitando que saturen el espacio de almacenamiento. |
 | **WSDD2 con Override Systemd** | Descubrimiento de Red | Implementación ligera del protocolo Web Services Discovery y LLMNR. | Visibilidad instantánea en el explorador de red de Windows 10/11 sin activar protocolos obsoletos ni inseguros como NetBIOS broadcast o SMBv1. |
-| **Aislamiento de Idioma (`LC_ALL=C LANG=C`)** | Compatibilidad de Sistema | Envoltorios de ejecución en `/usr/local/sbin/chage`, `passwd` y `lastb`. | Normaliza las salidas de utilidades administrativas al estándar en inglés, evitando fallos de parseo en Cockpit en servidores instalados en español. |
 | **ACLs POSIX (`setfacl`) con Herencia por Defecto** | Control de Acceso Granular | Configuración de permisos multi-grupo y reglas por defecto (`default ACL`) en carpetas compartidas. | Permite esquemas mixtos donde coexisten grupos con solo lectura y grupos con permisos de escritura exclusiva, garantizando que todo nuevo archivo herede los permisos correctos. |
 
 ---
@@ -178,22 +177,19 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
 1. **Visibilidad en Red Windows (WSDD2):**
    * *Problema:* `wsdd2` en Debian 13 usa `DynamicUser=true` y falla al ejecutar `testparm` para leer `smb.conf`.
    * *Solución:* Override en `/etc/default/wsdd2` y `/etc/systemd/system/wsdd2.service.d/override.conf` con `WSDD2_OPTS="-N <NETBIOS> -G <WORKGROUP> -H <NETBIOS>"`.
-2. **Compatibilidad de Cockpit en Servidores en Español:**
-   * *Problema:* Cockpit espera salida en inglés de herramientas del sistema (`chage`, `passwd -S`, `lastb`).
-   * *Solución:* Wrappers en `/usr/local/sbin/chage`, `/usr/local/sbin/passwd` y `/usr/local/bin/lastb` que fuerzan `LC_ALL=C LANG=C`.
-3. **Interfaz Web (Cockpit Backups):**
-   * *Arquitectura:* Aplicación web ES5 nativa sin frameworks pesados, inyectada en `/usr/share/cockpit/backups`.
-   * *Estilos:* Utiliza PatternFly 4 (`cockpit.css.gz`) importado desde Navigator para mantener coherencia de diseño oscuro/claro nativo de 45Drives.
-   * *Backend:* `backup_api.py` actúa como puente JSON. `cockpit.spawn` invoca la API localmente usando escalada de privilegios segura.
-4. **Optimización del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
+2. **Entorno Web Nativo Ultraligero (Nginx-light + PHP-FPM ondemand):**
+   * *Arquitectura:* Aplicación MVC en PHP 8 (`/var/www/nas-web`) servida por Nginx-light y pool PHP-FPM en modo `pm = ondemand`.
+   * *Estilos:* 100% Offline con diseño responsivo PatternFly 4 / Cockpit CSS y 36 iconos SVG incrustados; cero llamadas a CDNs.
+   * *Seguridad:* Invocación estricta de utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`) mediante `proc_open` con listas de argumentos y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
+3. **Optimización del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
    * Ampliación de descriptores inotify (`max_user_watches = 524288`), keepalive TCP SMB (`tcp_keepalive_time = 120`), retención de caché VFS (`vfs_cache_pressure = 30`) y control estricto de memoria sucia (`vm.dirty_bytes = 268435456`, `dirty_background_bytes = 67108864`).
-5. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
+4. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
    * Reglas udev persistentes que asignan `1024 KB` en unidades SSD y `4096 KB` en discos mecánicos HDD.
-6. **Protección udev del Disco del SO (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):**
-   * Inyección de `UDISKS_IGNORE="1"` para ocultar la unidad del sistema operativo en Cockpit Storage y UDisks2.
-7. **Prevención de Corrupción Silenciosa (*Bit Rot*):**
+5. **Protección udev del Disco del SO (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):**
+   * Inyección de `UDISKS_IGNORE="1"` para proteger la unidad del sistema operativo y aislarla de formateos involuntarios en UDisks2.
+6. **Prevención de Corrupción Silenciosa (*Bit Rot*):**
    * Tarea cron mensual en `/etc/cron.d/nas-btrfs-scrub` (`0 2 1 * *`) para auditar la integridad criptográfica de los datos en Btrfs.
-8. **Mantenimiento SSD y Rotación de Logs:**
+7. **Mantenimiento SSD y Rotación de Logs:**
    * Habilitación de `fstrim.timer` para optimización de bloques flash y rotación programada con compresión mediante `logrotate` en `/etc/logrotate.d/nas-backups` y `nas-deploy`.
 
 > [!NOTE]
