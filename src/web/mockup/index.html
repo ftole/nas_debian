@@ -219,7 +219,7 @@
             <svg class="icon"><use href="#icon-domain"></use></svg>
             <span>Unirse a un dominio</span>
           </div>
-          <span class="nav-badge">AD</span>
+          <span class="nav-badge" id="badge-domain">AD</span>
         </div>
 
       </nav>
@@ -598,8 +598,8 @@
               <p>Interfaces físicas, puertos de escucha Samba/WSDD2/SSH y diagnóstico de latencia</p>
             </div>
             <div class="page-head-actions">
-              <button class="btn btn-secondary" onclick="switchView('diagnostics')">
-                <svg class="icon"><use href="#icon-wrench"></use></svg> Test avanzado
+              <button class="btn btn-secondary" onclick="runNetworkDiagnosticsInTerminal()">
+                <svg class="icon"><use href="#icon-terminal"></use></svg> Diagnóstico en Terminal
               </button>
             </div>
           </div>
