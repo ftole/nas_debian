@@ -1,0 +1,14 @@
+{
+    "name": "ead-col/nas-web",
+    "description": "Panel Web de Administración NAS & Central de Respaldos (Debian 13)",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}
