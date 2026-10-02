@@ -101,10 +101,8 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Configurar PHP 8.2
-        uses: shivammathur/setup-php@c54fccf54d2b40b8c9733483034a0428581ad839 # v2
-        with:
-          php-version: "8.2"
+      - name: Instalar PHP CLI
+        run: sudo apt-get update && sudo apt-get install -y php-cli
 
       - name: Validar sintaxis PHP (php -l)
         run: |
