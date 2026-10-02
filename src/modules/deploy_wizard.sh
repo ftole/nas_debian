@@ -138,12 +138,12 @@ instalar_nas() {
     SMB_WORKGROUP=$(echo "$SMB_WORKGROUP" | tr '[:lower:]' '[:upper:]' | tr -cd '[:upper:]0-9_-')
 
     # --------------------------------------------------------------------------
-    # PASO 4: ADMINISTRADOR DE COCKPIT Y SAMBA
+    # PASO 4: ADMINISTRADOR DEL PANEL WEB Y SAMBA
     # --------------------------------------------------------------------------
     USUARIO_ACTUAL="$DEFAULT_USER"
-    OPCION_USER=$(whiptail --title "Paso 4 de 5: Administrador de Cockpit" \
+    OPCION_USER=$(whiptail --title "Paso 4 de 5: Administrador del Panel Web" \
         --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-        --menu "Selecciona la cuenta que administrará el panel web Cockpit y el servidor:" 14 70 2 \
+        --menu "Selecciona la cuenta que administrará el panel web y el servidor:" 14 70 2 \
         "1" "Usar usuario detectado: [$USUARIO_ACTUAL] (Recomendado)" \
         "2" "Crear o especificar otro usuario administrador" 3>&1 1>&2 2>&3)
     RET=$?
@@ -196,8 +196,8 @@ instalar_nas() {
 * Administrador Web    : $ADMIN_USER (Permisos sudo y Samba)
 
 INCLUYE PARCHES AUTOMATICOS:
-- Integracion Cockpit File Sharing y difusion WSDD2 / LLMNR
-- Wrappers de compatibilidad en espanol (chage / passwd / lastb)
+- Servidor Web Nginx, PHP-FPM ondemand y difusion WSDD2 / LLMNR
+- Arquitectura MVC limpia y ejecucion segura con proc_open
 - Herramientas multiplataforma de Backup (CIFS, Rsync, SSHPass, Cron)
 
 ¿Confirmas la configuracion y el despliegue completo?"
@@ -234,7 +234,7 @@ ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus 
         
         if [ $ret_exec -eq 0 ]; then
             whiptail --title "$APP_TITLE" --ok-button "< Finalizar >" \
-                --msgbox "✔ ¡Despliegue del Servidor ($ROL_SERVER) Completado con Éxito!\n\n• Panel Web Cockpit: https://${SERVER_IP}:9090\n• Administrador:     $ADMIN_USER (con permisos sudo y Samba)\n• Grupo Maestro:     grp_sistemas (Permisos totales sobre /srv/nas)\n• Redes Compartidas: 0 (Servidor base 100% limpio)\n\n💡 SIGUIENTE PASO:\nUtiliza las opciones [2] y [3] del menú para crear tus grupos y definir tus carpetas compartidas (visibles u ocultas $) a medida." 17 74
+                --msgbox "✔ ¡Despliegue del Servidor ($ROL_SERVER) Completado con Éxito!\n\n• Panel Web:         http://${SERVER_IP}\n• Administrador:     $ADMIN_USER (con permisos sudo y Samba)\n• Grupo Maestro:     grp_sistemas (Permisos totales sobre /srv/nas)\n• Redes Compartidas: 0 (Servidor base 100% limpio)\n\n💡 SIGUIENTE PASO:\nUtiliza las opciones [2] y [3] del menú para crear tus grupos y definir tus carpetas compartidas (visibles u ocultas $) a medida." 17 74
         else
             whiptail --title "Error en el Despliegue" --ok-button "< Aceptar >" \
                 --msgbox "✖ Ocurrió un error durante la ejecución del script de despliegue (Código de salida: $ret_exec).\n\nRevisa los mensajes anteriores en la consola." 12 70
