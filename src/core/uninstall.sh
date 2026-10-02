@@ -58,18 +58,19 @@ fi
 
 echo "[1/7] Deteniendo y deshabilitando servicios..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] detener y deshabilitar smbd, nmbd, wsdd2 y cockpit"
+    echo "  [dry-run] detener y deshabilitar smbd, nmbd, wsdd2, nginx y php-fpm"
 else
-    systemctl stop smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null || true
-    systemctl disable smbd nmbd wsdd2 cockpit.socket 2>/dev/null || true
+    systemctl stop smbd nmbd wsdd2 nginx php*-fpm cockpit.socket cockpit.service 2>/dev/null || true
+    systemctl disable smbd nmbd wsdd2 nginx php*-fpm cockpit.socket 2>/dev/null || true
 fi
 
-echo "[2/7] Desinstalando paquetes de Samba, Cockpit y extensiones..."
+echo "[2/7] Desinstalando paquetes de Samba, Servidor Web y extensiones..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] apt-get purge de Samba, Cockpit y extensiones"
+    echo "  [dry-run] apt-get purge de Samba, Nginx, PHP y extensiones"
 else
     DEBIAN_FRONTEND=noninteractive apt-get purge -y \
         samba samba-common samba-common-bin wsdd2 smbclient \
+        nginx-light php-fpm php-cli \
         cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
         cockpit-file-sharing cockpit-identities cockpit-navigator 2>/dev/null || true
 fi
@@ -112,9 +113,13 @@ fi
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, wrappers, parches, overrides, logrotate y udev"
+    echo "  [dry-run] eliminar /etc/samba, servidor web, wrappers, parches, overrides, logrotate y udev"
 else
     rm -rf /etc/samba
+    rm -rf /var/www/nas-web
+    rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
+    rm -f /etc/php/*/fpm/pool.d/nas-web.conf
+    rm -f /etc/sudoers.d/nas-web
     rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
     rm -f /usr/bin/lastb
     if command -v dpkg-divert &>/dev/null; then
