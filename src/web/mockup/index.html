@@ -69,11 +69,11 @@
       </div>
       <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" onclick="refreshDashboardMetrics()" title="Refrescar métricas del servidor">
         <svg class="icon" id="icon-refresh-metrics"><use href="#icon-refresh"></use></svg>
-        <span>Actualizar</span>
+        <span class="btn-text-responsive">Actualizar</span>
       </button>
       <button class="btn btn-secondary btn-sm" id="btn-theme-toggle" onclick="toggleTheme()" title="Alternar tema Claro / Oscuro">
         <svg class="icon icon-sm" id="theme-toggle-icon"><use href="#icon-sun"></use></svg>
-        <span id="theme-toggle-text">Modo Claro</span>
+        <span id="theme-toggle-text" class="btn-text-responsive">Modo Claro</span>
       </button>
       <div class="user-pill" title="Sesión administrativa activa">
         <span class="status-dot status-ok"></span>
@@ -145,22 +145,17 @@
       </div>
     </aside>
 
+    <!-- Telón de fondo para navegación móvil -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
     <!-- ==============================================================================
          ÁREA DE CONTENIDO PRINCIPAL
          ============================================================================== -->
     <div class="main-wrapper">
 
-      <!-- Barra Superior de Navegación / Breadcrumbs -->
-      <div class="page-top-bar">
-        <div class="breadcrumbs">
-          <span>SRV-NAS</span>
-          <span class="breadcrumb-separator">/</span>
-          <span class="crumb-current" id="current-view-title">Dashboard General</span>
-        </div>
-      </div>
-
-      <!-- Contenedor Dinámico de Vistas -->
+      <!-- Contenedor Dinámico de Vistas (Estilo Cockpit) -->
       <main class="page-container">
+        <span id="current-view-title" style="display:none;">Dashboard General</span>
 
         <!-- ==============================================================================
              VISTA 1: DASHBOARD GENERAL
@@ -194,7 +189,7 @@
               <div class="progress-bar-wrap">
                 <div class="progress-bar-segmented">
                   <div class="progress-seg" style="width: 22%; background: var(--accent-primary);" title="Archivos Compartidos (850 GB)"></div>
-                  <div class="progress-seg" style="width: 13%; background: var(--accent-purple);" title="Snapshots Respaldos (550 GB)"></div>
+                  <div class="progress-seg" style="width: 13%; background: #009596;" title="Snapshots Respaldos (550 GB)"></div>
                 </div>
               </div>
               <div class="kpi-sub">
@@ -211,7 +206,7 @@
               </div>
               <div class="kpi-val">3.8 GB <small style="font-size:13px; font-weight:normal; color:var(--text-secondary);">/ 16.0 GB</small></div>
               <div class="progress-bar-wrap">
-                <div class="progress-bar-fill" style="width: 24%; background: var(--accent-purple);"></div>
+                <div class="progress-bar-fill" style="width: 24%; background: var(--accent-primary);"></div>
               </div>
               <div class="kpi-sub">
                 <span>Caché VFS: 6.2 GB • <code>dirty_bytes=256MB</code></span>
@@ -277,7 +272,7 @@
                   <span>Crear nueva carpeta compartida en Samba con ACLs granulares</span>
                 </button>
                 <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('users'); openModal('modal-new-user');">
-                  <svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg>
+                  <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg>
                   <span>Dar de alta un usuario y sincronizar credenciales smbpasswd</span>
                 </button>
                 <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('backups'); runBackupTask('bkp_win_facturacion');">
@@ -377,7 +372,7 @@
         <section id="view-users" class="view-section">
           <div class="page-head">
             <div>
-              <h2><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Gestión de Usuarios y Grupos</h2>
+              <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Gestión de Usuarios y Grupos</h2>
               <p>Control de cuentas locales Debian 13 sincronizadas con la base de credenciales Samba (<code>smbpasswd</code>)</p>
             </div>
             <div class="page-head-actions">
@@ -587,7 +582,7 @@
             <!-- Tarjeta 3: Test de Conectividad en Vivo -->
             <div class="panel-card">
               <div class="panel-card-head">
-                <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-terminal"></use></svg> Test de Red en Tiempo Real</h3>
+                <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Test de Red en Tiempo Real</h3>
               </div>
               <div class="panel-card-body">
                 <div class="form-group" style="margin-bottom:8px;">
@@ -818,7 +813,7 @@
   <div class="modal-overlay" id="modal-new-user">
     <div class="modal-box">
       <div class="modal-head">
-        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Crear Nuevo Usuario de Red</h3>
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Crear Nuevo Usuario de Red</h3>
         <button class="modal-close">&times;</button>
       </div>
       <form id="form-new-user">
@@ -869,7 +864,7 @@
   <div class="modal-overlay" id="modal-new-group">
     <div class="modal-box" style="width:480px;">
       <div class="modal-head">
-        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Crear Grupo de Seguridad</h3>
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Crear Grupo de Seguridad</h3>
         <button class="modal-close">&times;</button>
       </div>
       <form id="form-new-group">
@@ -1033,7 +1028,7 @@
   <div class="modal-overlay" id="modal-edit-group">
     <div class="modal-box" style="width:520px;">
       <div class="modal-head">
-        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Miembros del Grupo: <span id="edit-group-name-display"></span></h3>
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Miembros del Grupo: <span id="edit-group-name-display"></span></h3>
         <button class="modal-close">&times;</button>
       </div>
       <form id="form-edit-group">
