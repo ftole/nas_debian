@@ -110,6 +110,7 @@
   --accent-danger: #c9190b;
   --accent-purple: #6753ac;
   --accent-cyan: #73bcf7;
+  --accent-teal: #009596;
   --accent-info: #0066cc;
 
   --alert-success-bg: rgba(62, 134, 53, 0.12);
@@ -244,6 +245,7 @@
   --accent-danger: #c9190b;
   --accent-purple: #6753ac;
   --accent-cyan: #0066cc;
+  --accent-teal: #008284;
   --accent-info: #0066cc;
 
   /* Alertas */
