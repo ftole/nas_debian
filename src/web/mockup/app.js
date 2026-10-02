@@ -2,7 +2,7 @@
  * ==============================================================================
  * NAS DEBIAN • LÓGICA DE INTERACTIVIDAD (VANILLA JAVASCRIPT)
  * Prototipo Web a la Medida para TEAM-JOFRATO (Debian 13)
- * 100% Offline • Sin librerías externas • Rendimiento Instantáneo
+ * 100% Offline • Cero dependencias externas • Rendimiento Instantáneo
  * ==============================================================================
  */
 
@@ -10,6 +10,9 @@
 const AppState = {
   currentView: 'dashboard',
   currentTheme: localStorage.getItem('nas_theme') || 'dark',
+  isScrubRunning: false,
+  isTrimRunning: false,
+  activeBackupTimers: [],
 
   // 1. Datos de Recursos Compartidos (Samba Shares)
   shares: [
@@ -70,6 +73,20 @@ const AppState = {
       comment: 'Repositorio de snapshots CIFS / Active Directory'
     },
     {
+      id: 'BACKUPS_LINUX$',
+      name: 'BACKUPS_LINUX$',
+      vis: 'Oculto ($)',
+      browseable: 'no',
+      scheme: '3',
+      schemeName: 'Solo Lectura Estricta',
+      groups: ['grp_sistemas'],
+      writeList: '',
+      readOnly: 'yes',
+      path: '/srv/nas/BACKUPS_HISTORICOS/linux',
+      status: 'Activo',
+      comment: 'Repositorio de snapshots SSH / Linux de servidores de producción'
+    },
+    {
       id: 'PUBLICO_DOCUMENTOS',
       name: 'PUBLICO_DOCUMENTOS',
       vis: 'Visible',
@@ -98,7 +115,7 @@ const AppState = {
     {
       uid: 'carlos_m',
       fullName: 'Carlos Morales - Cobranzas C1',
-      groups: ['grp_c1_cobranzas'],
+      groups: ['grp_c1_cobranzas', 'grp_empleados'],
       sambaActive: true,
       shell: '/usr/sbin/nologin',
       lastLogin: 'Hoy 09:30 (SMB Windows)'
@@ -139,7 +156,7 @@ const AppState = {
 
   // 3. Grupos de Seguridad (grp_*)
   groups: [
-    { name: 'grp_sistemas', level: 'Maestro (2770)', members: ['admin_nas', 'backup_svc'], shares: ['SISTEMAS', 'BACKUPS_WINDOWS$', 'CAMPANA_DOS_FINANZAS'] },
+    { name: 'grp_sistemas', level: 'Maestro (2770)', members: ['admin_nas', 'backup_svc'], shares: ['SISTEMAS', 'BACKUPS_WINDOWS$', 'BACKUPS_LINUX$', 'CAMPANA_DOS_FINANZAS'] },
     { name: 'grp_empleados', level: 'General Empleados', members: ['carlos_m', 'laura_s', 'patricia_r'], shares: ['CAMPANA_UNO_OPERACIONES'] },
     { name: 'grp_c1_cobranzas', level: 'Departamental C1', members: ['carlos_m'], shares: ['CAMPANA_UNO_OPERACIONES'] },
     { name: 'grp_c2_ventas', level: 'Departamental C2', members: ['laura_s'], shares: ['CAMPANA_DOS_FINANZAS'] },
@@ -227,6 +244,14 @@ const AppState = {
     { time: '03:30:18', level: 'OK',   src: 'backup', text: 'backup_runner: Tarea [bkp_lin_servidor_web] rsync con StrictHostKeyChecking=accept-new exitoso' },
     { time: '02:00:25', level: 'OK',   src: 'backup', text: 'backup_runner: Tarea [bkp_win_facturacion] deduplicación 88.6% (0 bytes adicionales en inodos compartidos)' },
     { time: '01:00:00', level: 'INFO', src: 'cron',   text: 'cron[620]: Verificación preventiva de espacio en disco en /srv/nas: 35% de ocupación (umbral seguro <85%)' }
+  ],
+
+  // 7. Feed de eventos recientes para el dashboard
+  activityFeed: [
+    { badge: 'Éxito', badgeClass: 'badge-ok', title: 'Snapshot completado: bkp_win_facturacion', desc: 'Deduplicación 88.6% • 0 bytes adicionales en inodos compartidos' },
+    { badge: 'Samba', badgeClass: 'badge-blue', title: 'Sesión SMB iniciada por carlos_m desde 10.10.1.34', desc: 'Acceso concedido a recurso [CAMPANA_UNO_OPERACIONES]' },
+    { badge: 'WSDD2', badgeClass: 'badge-purple', title: 'Descubrimiento de red WSD respondido para host SRV-NAS', desc: 'Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto' },
+    { badge: 'Scrub', badgeClass: 'badge-ok', title: 'Auditoría mensual BTRFS: 1,420,892 bloques validados', desc: '0 errores de corrupción silenciosa detectados en /srv/nas' }
   ]
 };
 
@@ -239,11 +264,53 @@ document.addEventListener('DOMContentLoaded', () => {
   renderSharesTable();
   renderUsersTable();
   renderGroupsTable();
+  renderGroupCheckboxes();
   renderBackupTasksTable();
   renderSystemLogs();
+  renderDashboardActivityFeed();
+  updateAllCounters();
   setupModals();
   setupForms();
+  updateNewSharePreview();
 });
+
+// ==============================================================================
+// Actualización Dinámica de Contadores y Badges
+// ==============================================================================
+function updateAllCounters() {
+  // 1. Badges del menú lateral (Sidebar)
+  const badgeShares = document.getElementById('badge-shares');
+  if (badgeShares) badgeShares.innerText = AppState.shares.length;
+
+  const badgeUsers = document.getElementById('badge-users');
+  if (badgeUsers) badgeUsers.innerText = AppState.users.length;
+
+  const badgeBackups = document.getElementById('badge-backups');
+  if (badgeBackups) badgeBackups.innerText = AppState.backupTasks.length;
+
+  // 2. Subtabs de usuarios y grupos
+  const subtabUsers = document.getElementById('subtab-users-label');
+  if (subtabUsers) subtabUsers.innerText = `Usuarios del Sistema y Samba (${AppState.users.length})`;
+
+  const subtabGroups = document.getElementById('subtab-groups-label');
+  if (subtabGroups) subtabGroups.innerText = `Grupos de Seguridad grp_* (${AppState.groups.length})`;
+
+  // 3. Chips de filtro de recursos Samba
+  const totalShares = AppState.shares.length;
+  const visibleShares = AppState.shares.filter(s => s.vis === 'Visible').length;
+  const hiddenShares = AppState.shares.filter(s => s.vis !== 'Visible' || s.name.endsWith('$')).length;
+  const activeShares = AppState.shares.filter(s => s.status === 'Activo').length;
+  const disabledShares = totalShares - activeShares;
+
+  document.querySelectorAll('#shares-chips .chip-btn').forEach(btn => {
+    const filter = btn.getAttribute('data-filter');
+    if (filter === 'all') btn.innerText = `Todos (${totalShares})`;
+    else if (filter === 'visible') btn.innerText = `Visibles (${visibleShares})`;
+    else if (filter === 'hidden') btn.innerText = `Ocultos $ (${hiddenShares})`;
+    else if (filter === 'active') btn.innerText = `Activos (${activeShares})`;
+    else if (filter === 'disabled') btn.innerText = `Deshabilitados (${disabledShares})`;
+  });
+}
 
 // ==============================================================================
 // Tema Oscuro / Claro
@@ -282,7 +349,6 @@ function setupNavigation() {
     item.addEventListener('click', () => {
       const viewId = item.getAttribute('data-view');
       switchView(viewId);
-      // En móviles cerrar el menú drawer
       document.querySelector('.sidebar').classList.remove('open');
     });
   });
@@ -298,7 +364,6 @@ function setupNavigation() {
 function switchView(viewId) {
   AppState.currentView = viewId;
 
-  // Actualizar sidebar activo
   document.querySelectorAll('.nav-item').forEach(item => {
     if (item.getAttribute('data-view') === viewId) {
       item.classList.add('active');
@@ -307,14 +372,12 @@ function switchView(viewId) {
     }
   });
 
-  // Actualizar vistas visibles
   document.querySelectorAll('.view-section').forEach(sec => {
     sec.classList.remove('active');
   });
   const targetView = document.getElementById(`view-${viewId}`);
   if (targetView) targetView.classList.add('active');
 
-  // Actualizar migas de pan
   const breadcrumb = document.getElementById('current-view-title');
   const viewNames = {
     'dashboard': 'Dashboard General',
@@ -327,7 +390,7 @@ function switchView(viewId) {
 }
 
 // ==============================================================================
-// Toast Notifications
+// Notificaciones Toast Flotantes
 // ==============================================================================
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
@@ -352,6 +415,42 @@ function showToast(message, type = 'info') {
 }
 
 // ==============================================================================
+// Pestaña 1: Dashboard y Feed de Actividad
+// ==============================================================================
+function renderDashboardActivityFeed() {
+  const container = document.getElementById('dashboard-activity-feed');
+  if (!container) return;
+
+  container.innerHTML = AppState.activityFeed.slice(0, 5).map((item, idx) => {
+    const isLast = idx === AppState.activityFeed.length - 1;
+    const borderStyle = isLast ? '' : 'border-bottom:1px solid var(--border-light); padding-bottom:8px;';
+    return `
+      <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; ${borderStyle}">
+        <span class="badge ${item.badgeClass}" style="font-size:10px;">${item.badge}</span>
+        <div>
+          <div>${item.title}</div>
+          <div style="color:var(--text-muted); font-size:11px;">${item.desc}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function refreshDashboardMetrics() {
+  const btn = document.getElementById('btn-refresh-metrics');
+  const icon = document.getElementById('icon-refresh-metrics');
+  if (icon) icon.classList.add('spin');
+  if (btn) btn.disabled = true;
+
+  setTimeout(() => {
+    if (icon) icon.classList.remove('spin');
+    if (btn) btn.disabled = false;
+    updateAllCounters();
+    showToast('Métricas del sistema Debian 13 actualizadas en tiempo real', 'success');
+  }, 750);
+}
+
+// ==============================================================================
 // Pestaña 2: Recursos Compartidos (Samba Shares)
 // ==============================================================================
 let currentShareFilter = 'all';
@@ -361,13 +460,11 @@ function renderSharesTable(filterText = '') {
   if (!tbody) return;
 
   const filtered = AppState.shares.filter(s => {
-    // Filtro por chips
     if (currentShareFilter === 'visible' && s.vis !== 'Visible') return false;
-    if (currentShareFilter === 'hidden' && s.vis !== 'Oculto ($)') return false;
+    if (currentShareFilter === 'hidden' && s.vis !== 'Oculto ($)' && !s.name.endsWith('$')) return false;
     if (currentShareFilter === 'active' && s.status !== 'Activo') return false;
     if (currentShareFilter === 'disabled' && s.status === 'Activo') return false;
 
-    // Filtro de texto
     if (filterText) {
       const q = filterText.toLowerCase();
       return s.name.toLowerCase().includes(q) ||
@@ -447,14 +544,21 @@ function toggleShareStatus(shareId) {
   if (!share) return;
   share.status = share.status === 'Activo' ? 'Deshabilitado' : 'Activo';
   showToast(`Recurso [${share.name}] ${share.status.toLowerCase()} en Samba`, share.status === 'Activo' ? 'success' : 'warning');
+  updateAllCounters();
   renderSharesTable(document.getElementById('shares-search-input')?.value || '');
 }
 
 function deleteShare(shareId) {
   if (confirm(`¿Estás seguro de que deseas eliminar el recurso compartido [${shareId}]?`)) {
     AppState.shares = AppState.shares.filter(s => s.id !== shareId);
+    // Eliminar también referencia en grupos
+    AppState.groups.forEach(g => {
+      g.shares = g.shares.filter(s => s !== shareId);
+    });
     showToast(`Recurso [${shareId}] eliminado de smb.conf`, 'danger');
-    renderSharesTable();
+    updateAllCounters();
+    renderSharesTable(document.getElementById('shares-search-input')?.value || '');
+    renderGroupsTable();
   }
 }
 
@@ -472,7 +576,10 @@ function viewShareConfig(shareId) {
 // ==============================================================================
 function updateNewSharePreview() {
   const nameInput = document.getElementById('new-share-name');
-  const isHidden = document.getElementById('new-share-vis-hidden').checked;
+  if (!nameInput) return;
+
+  const isHiddenRadio = document.getElementById('new-share-vis-hidden');
+  const isHidden = isHiddenRadio ? isHiddenRadio.checked : false;
   const pathInput = document.getElementById('new-share-path');
   const commentInput = document.getElementById('new-share-comment');
   const schemeVal = document.querySelector('input[name="new-share-scheme"]:checked')?.value || '1';
@@ -485,17 +592,16 @@ function updateNewSharePreview() {
   }
 
   const cleanDir = rawName.replace(/\$$/, '');
-  if (!pathInput.dataset.userEdited && cleanDir) {
+  if (pathInput && !pathInput.dataset.userEdited && cleanDir) {
     pathInput.value = `/srv/nas/${cleanDir}`;
   }
 
-  // Grupos seleccionados
   const selectedGroups = Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value);
 
   const previewObj = {
-    name: rawName || 'RECURSO_EJEMPLO',
-    path: pathInput.value || '/srv/nas/RECURSO',
-    comment: commentInput.value || 'Carpeta compartida',
+    name: rawName || 'RECURSO_NUEVO',
+    path: (pathInput && pathInput.value) || '/srv/nas/RECURSO',
+    comment: (commentInput && commentInput.value) || 'Carpeta compartida',
     browseable: isHidden ? 'no' : 'yes',
     scheme: schemeVal,
     groups: selectedGroups.length ? selectedGroups : ['grp_sistemas'],
@@ -508,38 +614,107 @@ function updateNewSharePreview() {
 }
 
 function generateSmbConfSnippet(s) {
-  let validUsersStr = s.groups ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
+  let validUsersStr = '';
   let writeListStr = '';
   let readOnlyStr = 'no';
   let guestOkStr = 'no';
+  let maskStr = '0770';
 
   if (s.scheme === '1') {
     readOnlyStr = 'no';
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
   } else if (s.scheme === '2') {
     readOnlyStr = 'no';
-    writeListStr = `   write list = @${s.writeList || 'grp_sistemas'}\n`;
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
+    writeListStr = `@${s.writeList || 'grp_sistemas'}`;
   } else if (s.scheme === '3') {
     readOnlyStr = 'yes';
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
   } else if (s.scheme === '4') {
-    validUsersStr = '';
     readOnlyStr = 'no';
     guestOkStr = 'yes';
+    maskStr = '0777';
   }
 
-  return `[${s.name}]
-   comment = ${s.comment || 'Carpeta de Red'}
-   path = ${s.path}
-   browseable = ${s.browseable}
-   available = yes
-   read only = ${readOnlyStr}
-   guest ok = ${guestOkStr}
-   ${validUsersStr ? `valid users = ${validUsersStr}\n` : ''}${writeListStr}   create mask = 0770
-   directory mask = 0770
-   force create mode = 0770
-   force directory mode = 0770
-   vfs objects = acl_xattr streams_xattr
-   store dos attributes = yes
-   inherit permissions = yes`;
+  const lines = [
+    `[${s.name}]`,
+    `   comment = ${s.comment || 'Carpeta de Red'}`,
+    `   path = ${s.path}`,
+    `   browseable = ${s.browseable}`,
+    `   available = yes`,
+    `   read only = ${readOnlyStr}`,
+    `   guest ok = ${guestOkStr}`
+  ];
+
+  if (validUsersStr) {
+    lines.push(`   valid users = ${validUsersStr}`);
+  }
+  if (writeListStr) {
+    lines.push(`   write list = ${writeListStr}`);
+  }
+
+  lines.push(
+    `   create mask = ${maskStr}`,
+    `   directory mask = ${maskStr}`,
+    `   force create mode = ${maskStr}`,
+    `   force directory mode = ${maskStr}`,
+    `   vfs objects = acl_xattr streams_xattr`,
+    `   store dos attributes = yes`,
+    `   inherit permissions = yes`
+  );
+
+  return lines.join('\n');
+}
+
+// ==============================================================================
+// Inyección Dinámica de Checkboxes de Grupos en Modales
+// ==============================================================================
+function renderGroupCheckboxes() {
+  // 1. Grupos en modal de nuevo recurso
+  const shareGroupsList = document.getElementById('new-share-groups-list');
+  if (shareGroupsList) {
+    shareGroupsList.innerHTML = AppState.groups.map(g => `
+      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+        <input type="checkbox" class="new-share-grp-chk" value="${g.name}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
+        ${g.name} ${g.name === 'grp_sistemas' ? '(Admin)' : ''}
+      </label>
+    `).join('');
+
+    shareGroupsList.querySelectorAll('.new-share-grp-chk').forEach(c => {
+      c.addEventListener('change', () => {
+        updateWriteListOptions();
+        updateNewSharePreview();
+      });
+    });
+  }
+
+  // 2. Select de write list en Scheme 2
+  updateWriteListOptions();
+
+  // 3. Grupos en modal de nuevo usuario
+  const userGroupsList = document.getElementById('new-user-groups-list');
+  if (userGroupsList) {
+    userGroupsList.innerHTML = AppState.groups.map(g => `
+      <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+        <input type="checkbox" class="new-user-grp-chk" value="${g.name}" ${g.name === 'grp_empleados' ? 'checked' : ''}>
+        ${g.name}
+      </label>
+    `).join('');
+  }
+}
+
+function updateWriteListOptions() {
+  const writeSelect = document.getElementById('new-share-writelist-select');
+  if (!writeSelect) return;
+
+  const checkedGroups = Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value);
+  const groupsToUse = checkedGroups.length ? checkedGroups : AppState.groups.map(g => g.name);
+
+  const prevVal = writeSelect.value;
+  writeSelect.innerHTML = groupsToUse.map(g => `<option value="${g}">${g}</option>`).join('');
+  if (groupsToUse.includes(prevVal)) {
+    writeSelect.value = prevVal;
+  }
 }
 
 // ==============================================================================
@@ -614,8 +789,14 @@ function deleteUser(uid) {
   }
   if (confirm(`¿Eliminar al usuario ${uid} del sistema Debian y de la base de datos Samba?`)) {
     AppState.users = AppState.users.filter(u => u.uid !== uid);
+    // Eliminarlo de los miembros de todos los grupos
+    AppState.groups.forEach(g => {
+      g.members = g.members.filter(m => m !== uid);
+    });
     showToast(`Usuario [${uid}] eliminado satisfactoriamente`, 'danger');
+    updateAllCounters();
     renderUsersTable();
+    renderGroupsTable();
   }
 }
 
@@ -628,7 +809,9 @@ function renderGroupsTable() {
       ? g.members.map(m => `<span class="tag-pill" style="color:var(--text-main);">${m}</span>`).join(' ')
       : '<span style="color:var(--text-muted); font-size:12px;">(Sin miembros)</span>';
 
-    const sharesHtml = g.shares.map(s => `<span class="badge badge-gray" style="font-size:10.5px;">${s}</span>`).join(' ');
+    const sharesHtml = g.shares.length
+      ? g.shares.map(s => `<span class="badge badge-gray" style="font-size:10.5px;">${s}</span>`).join(' ')
+      : '<span style="color:var(--text-muted); font-size:12px;">(Ninguno)</span>';
 
     return `
       <tr>
@@ -643,14 +826,74 @@ function renderGroupsTable() {
         <td>${sharesHtml}</td>
         <td>
           <div class="table-actions">
-            <button class="btn btn-secondary btn-sm" onclick="showToast('Gestionar miembros en ${g.name}', 'info')">
-              Editar
+            <button class="btn btn-secondary btn-sm" onclick="openEditGroupModal('${g.name}')">
+              Gestionar
             </button>
           </div>
         </td>
       </tr>
     `;
   }).join('');
+}
+
+function openEditGroupModal(groupName) {
+  const group = AppState.groups.find(g => g.name === groupName);
+  if (!group) return;
+
+  const nameInput = document.getElementById('edit-group-name');
+  const nameDisplay = document.getElementById('edit-group-name-display');
+  const membersList = document.getElementById('edit-group-members-list');
+  const btnDelete = document.getElementById('btn-delete-group');
+
+  if (nameInput) nameInput.value = groupName;
+  if (nameDisplay) nameDisplay.innerText = groupName;
+
+  if (btnDelete) {
+    btnDelete.style.display = groupName === 'grp_sistemas' ? 'none' : 'inline-flex';
+  }
+
+  if (membersList) {
+    membersList.innerHTML = AppState.users.map(u => {
+      const isMember = group.members.includes(u.uid);
+      return `
+        <div class="member-check-item">
+          <label class="member-check-label">
+            <input type="checkbox" class="edit-group-user-chk" value="${u.uid}" ${isMember ? 'checked' : ''}>
+            <span><strong>${u.uid}</strong> <small style="color:var(--text-muted); font-weight:normal;">(${u.fullName})</small></span>
+          </label>
+        </div>
+      `;
+    }).join('');
+  }
+
+  openModal('modal-edit-group');
+}
+
+function deleteCurrentGroup() {
+  const groupName = document.getElementById('edit-group-name')?.value;
+  if (!groupName || groupName === 'grp_sistemas') {
+    showToast('No se puede eliminar el grupo maestro grp_sistemas', 'danger');
+    return;
+  }
+
+  if (confirm(`¿Estás seguro de eliminar el grupo de seguridad [${groupName}]?`)) {
+    AppState.groups = AppState.groups.filter(g => g.name !== groupName);
+    // Retirar del perfil de cada usuario
+    AppState.users.forEach(u => {
+      u.groups = u.groups.filter(g => g !== groupName);
+    });
+    // Retirar de shares
+    AppState.shares.forEach(s => {
+      s.groups = s.groups.filter(g => g !== groupName);
+    });
+
+    closeModal('modal-edit-group');
+    showToast(`Grupo [${groupName}] eliminado`, 'danger');
+    updateAllCounters();
+    renderGroupsTable();
+    renderUsersTable();
+    renderGroupCheckboxes();
+  }
 }
 
 function switchUserTab(tabName) {
@@ -726,42 +969,61 @@ function renderBackupTasksTable() {
 function deleteBackupTask(taskId) {
   if (confirm(`¿Estás seguro de eliminar la tarea de respaldo ${taskId} y su cronograma asociado?`)) {
     AppState.backupTasks = AppState.backupTasks.filter(t => t.id !== taskId);
+    delete AppState.snapshotsData[taskId];
     showToast(`Tarea de backup [${taskId}] eliminada`, 'danger');
+    updateAllCounters();
     renderBackupTasksTable();
   }
 }
 
-// Ejecución Simulada en Vivo de la Tarea de Respaldo
+// Ejecución Simulada en Vivo de la Tarea de Respaldo (Multiplataforma)
 function runBackupTask(taskId) {
   const task = AppState.backupTasks.find(t => t.id === taskId);
   if (!task) return;
 
+  // Limpiar timers previos si se canceló o reabrió
+  AppState.activeBackupTimers.forEach(id => clearTimeout(id));
+  AppState.activeBackupTimers = [];
+
   const terminal = document.getElementById('backup-runner-terminal');
   terminal.innerHTML = '';
-  document.getElementById('runner-task-title').innerText = taskId;
+  document.getElementById('runner-task-title').innerText = `${taskId} (${task.proto})`;
   openModal('modal-backup-runner');
 
+  const isWindows = task.proto.includes('CIFS');
+  const nowStr = new Date().toISOString().replace(/T/, '_').replace(/:/g, '').slice(0, 15);
+  const stagingDir = `/srv/nas/BACKUPS_HISTORICOS/${taskId}/.inprogress_${nowStr}`;
+
+  // Líneas de ejecución técnica adaptadas según el rol y protocolo (CIFS Windows vs SSH Linux)
   const lines = [
     { t: 0,    level: 'term-info', text: `[1/8] Adquiriendo candado de exclusión mutua /var/lock/backup_${taskId}.lock... (flock OK)` },
-    { t: 600,  level: 'term-info', text: `[2/8] Evaluando umbrales de espacio de almacenamiento en /srv/nas...` },
-    { t: 1100, level: 'term-ok',   text: `✔ Espacio en disco: 35% ocupado. 2.6 TB libres (>2 GB umbral crítico). Procediendo.` },
-    { t: 1800, level: 'term-info', text: `[3/8] Creando directorio temporal de staging atómico: /srv/nas/BACKUPS_HISTORICOS/${taskId}/.inprogress_2026-10-02_114512` },
-    { t: 2600, level: 'term-info', text: `[4/8] Conectando a origen [${task.src}] con credenciales seguras (0600 root:root)...` },
-    { t: 3400, level: 'term-ok',   text: `✔ Montaje temporal CIFS exitoso con flags (ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30)` },
-    { t: 4200, level: 'term-cmd',  text: `[5/8] Ejecutando rsync -aAXH --numeric-ids --link-dest=../snapshot_2026-10-01_020000 /mnt/backup_sources/${taskId}/ .inprogress_2026-10-02_114512/` },
-    { t: 5200, level: 'term-info', text: `     Analizando árbol de 42,180 archivos... 41,890 archivos idénticos enlazados vía Hardlinks (0 bytes extra).` },
-    { t: 6200, level: 'term-info', text: `     Transfiriendo 290 archivos modificados (45.2 MB) a 62.4 MB/s...` },
-    { t: 7200, level: 'term-ok',   text: `✔ Sincronización rsync completada. Retorno de comando: 0 (Sin errores de I/O)` },
-    { t: 8000, level: 'term-info', text: `[6/8] Promoción atómica: mv .inprogress_2026-10-02_114512 snapshot_2026-10-02_114512` },
-    { t: 8600, level: 'term-info', text: `[7/8] Evaluando política de retención (${task.retention} snapshots máximos)... Total en disco: 15. Dentro del límite.` },
-    { t: 9200, level: 'term-info', text: `[8/8] Desmontando recurso de origen y liberando descriptor de candado flock...` },
+    { t: 500,  level: 'term-info', text: `[2/8] Evaluando capacidad en /srv/nas mediante df -Pk...` },
+    { t: 1000, level: 'term-ok',   text: `✔ Ocupación actual: 35%. 2.6 TB libres (>2 GB umbral crítico de aborto). Procediendo.` },
+    { t: 1600, level: 'term-info', text: `[3/8] Creando staging atómico temporal: ${stagingDir}` },
+    { t: 2400, level: 'term-info', text: isWindows
+        ? `[4/8] Conectando a origen Windows CIFS [${task.src}] con credenciales AD (0600 root:root)...`
+        : `[4/8] Negociando túnel SSH seguro con host Linux origen y StrictHostKeyChecking=accept-new...` },
+    { t: 3200, level: 'term-ok',   text: isWindows
+        ? `✔ Montaje temporal CIFS exitoso (ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30) en /mnt/backup_sources/${taskId}`
+        : `✔ Llave de host registrada en /root/.ssh/known_hosts_backup. Túnel SSH autenticado sin intermediarios.` },
+    { t: 4000, level: 'term-cmd',  text: isWindows
+        ? `[5/8] Ejecutando rsync -aAXH --numeric-ids --link-dest=../snapshot_reciente /mnt/backup_sources/${taskId}/ ${stagingDir}/`
+        : `[5/8] Ejecutando rsync -aAXH --numeric-ids -v -z --timeout=60 --link-dest=../snapshot_reciente ${task.src}/ ${stagingDir}/` },
+    { t: 5200, level: 'term-info', text: `     Analizando árbol de archivos... 41,890 archivos idénticos enlazados vía Hardlinks (0 bytes extra).` },
+    { t: 6200, level: 'term-info', text: `     Transfiriendo archivos modificados (45.2 MB) a tasa sostenida...` },
+    { t: 7200, level: 'term-ok',   text: `✔ Sincronización rsync completada. Código de retorno: 0 (Sin errores de I/O)` },
+    { t: 8000, level: 'term-info', text: `[6/8] Promoción atómica de copia íntegra: mv ${stagingDir} snapshot_${nowStr}` },
+    { t: 8600, level: 'term-info', text: `[7/8] Evaluando política de retención (${task.retention} snapshots máximos)... Total: ${task.snapsCount + 1}. Dentro de límite.` },
+    { t: 9200, level: 'term-info', text: isWindows
+        ? `[8/8] Desmontando recurso CIFS en /mnt/backup_sources/${taskId} y liberando descriptor flock...`
+        : `[8/8] Cerrando socket SSH y liberando descriptor de candado flock...` },
     { t: 9800, level: 'term-ok',   text: `======================================================================` },
-    { t: 9900, level: 'term-ok',   text: `✔ SNAPSHOT COMPLETADO EXITOSAMENTE EN 9.8 SEGUNDOS. AHORRO POR HARDLINKS: 98.4%` },
+    { t: 9900, level: 'term-ok',   text: `✔ SNAPSHOT COMPLETADO EXITOSAMENTE. AHORRO POR HARDLINKS: >90%` },
     { t: 10000, level: 'term-ok',  text: `======================================================================` }
   ];
 
   lines.forEach(l => {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
       const now = new Date().toLocaleTimeString();
       const div = document.createElement('div');
       div.className = 'terminal-line';
@@ -769,12 +1031,46 @@ function runBackupTask(taskId) {
       terminal.appendChild(div);
       terminal.scrollTop = terminal.scrollHeight;
 
-      if (l.t >= 9900) {
+      if (l.t >= 10000) {
         showToast(`Respaldo de [${taskId}] completado con éxito`, 'success');
-        task.lastRun = 'Hace unos segundos';
+        task.lastRun = 'Hace unos instantes';
+        task.snapsCount += 1;
+
+        // Registrar el nuevo snapshot en el historial dinámico
+        const todayDate = new Date();
+        const dateFormatted = `${todayDate.toISOString().slice(0, 10)} ${todayDate.toTimeString().slice(0, 8)}`;
+        if (!AppState.snapshotsData[taskId]) AppState.snapshotsData[taskId] = [];
+        AppState.snapshotsData[taskId].unshift({
+          name: `snapshot_${nowStr}`,
+          date: dateFormatted,
+          apparent: task.sizeLogical,
+          real: '124 MB',
+          dedup: '98.7%',
+          status: 'Atómico / Íntegro'
+        });
+
+        // Registrar evento en feed y logs
+        const logTime = todayDate.toTimeString().slice(0, 8);
+        AppState.systemLogs.unshift({
+          time: logTime,
+          level: 'OK',
+          src: 'backup',
+          text: `backup_runner: Tarea [${taskId}] snapshot snapshot_${nowStr} promovido atómicamente.`
+        });
+        AppState.activityFeed.unshift({
+          badge: 'Éxito',
+          badgeClass: 'badge-ok',
+          title: `Snapshot completado: ${taskId}`,
+          desc: `Promoción atómica • Snapshots en disco: ${task.snapsCount}`
+        });
+
         renderBackupTasksTable();
+        renderSystemLogs();
+        renderDashboardActivityFeed();
       }
     }, l.t);
+
+    AppState.activeBackupTimers.push(timerId);
   });
 }
 
@@ -784,7 +1080,7 @@ function openSnapshotsModal(taskId) {
   document.getElementById('modal-snapshots-task-name').innerText = taskId;
 
   if (snaps.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No hay snapshots históricos registrados todavía.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">No hay snapshots históricos registrados todavía para esta tarea.</td></tr>`;
   } else {
     tbody.innerHTML = snaps.map(s => `
       <tr>
@@ -810,12 +1106,18 @@ function openSnapshotsModal(taskId) {
 // Pestaña 5: Mantenimiento y Diagnóstico
 // ==============================================================================
 function runBtrfsScrubSimulation() {
+  if (AppState.isScrubRunning) {
+    showToast('Una auditoría BTRFS Scrub ya se encuentra en ejecución', 'warning');
+    return;
+  }
+
   const btn = document.getElementById('btn-run-scrub');
   const bar = document.getElementById('scrub-progress-bar');
   const statusTxt = document.getElementById('scrub-status-text');
 
   if (!btn || !bar) return;
 
+  AppState.isScrubRunning = true;
   btn.disabled = true;
   statusTxt.innerText = 'Ejecutando btrfs scrub start -B /srv/nas...';
   bar.style.width = '0%';
@@ -826,20 +1128,29 @@ function runBtrfsScrubSimulation() {
     bar.style.width = `${progress}%`;
     if (progress >= 100) {
       clearInterval(interval);
+      AppState.isScrubRunning = false;
       btn.disabled = false;
       statusTxt.innerText = '✔ Scrub finalizado: 1,420,892 bloques verificados. 0 errores detectados (Bit Rot 0%).';
       showToast('Auditoría BTRFS Scrub finalizada sin inconsistencias', 'success');
     }
-  }, 500);
+  }, 450);
 }
 
 function runFstrimSimulation() {
+  if (AppState.isTrimRunning) {
+    showToast('El descarte flash fstrim ya está en progreso', 'warning');
+    return;
+  }
+
   const btn = document.getElementById('btn-run-trim');
   if (!btn) return;
+
+  AppState.isTrimRunning = true;
   btn.disabled = true;
-  showToast('Ejecutando fstrim -va en unidades flash...', 'info');
+  showToast('Ejecutando fstrim -va en unidades SSD flash...', 'info');
 
   setTimeout(() => {
+    AppState.isTrimRunning = false;
     btn.disabled = false;
     document.getElementById('trim-status-text').innerText = '✔ Último descarte manual exitoso: 114.6 GiB recortados en /srv/nas';
     showToast('fstrim completado: Sectores flash descartados correctamente', 'success');
@@ -850,28 +1161,51 @@ function runLogrotateSimulation() {
   showToast('Rotando logs del servidor con copytruncate y compresión gzip...', 'info');
   setTimeout(() => {
     showToast('Bitácoras rotadas exitosamente (/var/log/nas-backups.1.gz)', 'success');
-  }, 1000);
+  }, 900);
 }
 
 function testConnectivitySimulation() {
-  const host = document.getElementById('test-conn-host')?.value || '192.168.1.10';
+  const hostInput = document.getElementById('test-conn-host');
+  const host = hostInput ? hostInput.value.trim() : '10.10.1.2';
   const type = document.getElementById('test-conn-type')?.value || '445';
   const out = document.getElementById('test-conn-result');
   const btn = document.getElementById('btn-test-conn');
 
+  if (!host) {
+    showToast('Ingresa una dirección IP o nombre de host válido para la prueba', 'danger');
+    return;
+  }
+
   if (!out) return;
   btn.disabled = true;
-  out.innerHTML = `<span style="color:var(--accent-primary);">Probando conexión hacia ${host}:${type}...</span>`;
+  out.innerHTML = `<span style="color:var(--accent-primary);">Probando conectividad con ${host} vía ${type === 'ICMP' ? 'ICMP Ping' : `puerto ${type}`}...</span>`;
 
   setTimeout(() => {
     btn.disabled = false;
+    let detailText = '';
+    let protoTitle = '';
+
+    if (type === 'ICMP') {
+      protoTitle = '✔ Respuesta de Ping ICMP exitosa en 1.2 ms';
+      detailText = '4 paquetes transmitidos, 4 paquetes recibidos, 0% packet loss. RTT min/avg/max = 0.8/1.2/2.1 ms.';
+    } else if (type === '445') {
+      protoTitle = '✔ Puerto 445/tcp (SMB/CIFS) abierto y escuchando';
+      detailText = 'Handshake TCP establecido en 2.4 ms. Dialecto SMB 3.1.1 soportado con cifrado AES-128-GCM.';
+    } else if (type === '22') {
+      protoTitle = '✔ Puerto 22/tcp (SSH) abierto y escuchando';
+      detailText = 'Banner SSH-2.0-OpenSSH_9.2p1 Debian 13 recibido. Negociación criptográfica correcta.';
+    } else if (type === '5357') {
+      protoTitle = '✔ Puerto 5357/tcp (WSD Discovery) activo';
+      detailText = 'Servicio wsdd2 respondiendo sondas de descubrimiento para clientes Windows 10/11.';
+    }
+
     out.innerHTML = `
-      <div style="color:var(--accent-success); font-weight:700;">✔ Conexión establecida con éxito en 4.2 ms</div>
-      <div style="color:var(--text-secondary); margin-top:4px;">Host: ${host} | Puerto: ${type} (Abierto y escuchando)</div>
-      <div style="color:var(--text-muted); font-size:11px;">Handshake TCP completado sin pérdidas de paquetes. Protocolo compatible.</div>
+      <div style="color:var(--accent-success); font-weight:700;">${protoTitle}</div>
+      <div style="color:var(--text-secondary); margin-top:4px;">Destino: ${host} | Protocolo: ${type}</div>
+      <div style="color:var(--text-muted); font-size:11px;">${detailText}</div>
     `;
-    showToast(`Conectividad con ${host}:${type} verificada`, 'success');
-  }, 800);
+    showToast(`Conectividad con ${host} (${type}) verificada`, 'success');
+  }, 700);
 }
 
 function renderSystemLogs() {
@@ -882,6 +1216,35 @@ function renderSystemLogs() {
     const levelClass = l.level === 'OK' ? 'term-ok' : l.level === 'WARN' ? 'term-warn' : l.level === 'ERR' ? 'term-err' : 'term-info';
     return `<div class="terminal-line"><span class="term-time">[${l.time}]</span> <span class="badge badge-gray" style="font-size:10px; margin-right:6px;">${l.src}</span> <span class="${levelClass}">[${l.level}]</span> ${l.text}</div>`;
   }).join('');
+}
+
+function copySystemLogs() {
+  const text = AppState.systemLogs.map(l => `[${l.time}] [${l.src}] [${l.level}] ${l.text}`).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Bitácoras copiadas al portapapeles', 'success');
+    }).catch(() => {
+      fallbackCopy(text);
+    });
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('Bitácoras copiadas al portapapeles', 'success');
+  } catch (e) {
+    showToast('No se pudo copiar automáticamente', 'warning');
+  }
+  document.body.removeChild(ta);
 }
 
 // ==============================================================================
@@ -907,6 +1270,9 @@ function setupModals() {
 function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) modal.classList.add('open');
+  if (modalId === 'modal-new-share') {
+    updateNewSharePreview();
+  }
 }
 
 function closeModal(modalId) {
@@ -917,7 +1283,12 @@ function closeModal(modalId) {
 function openChangePasswordModal(uid) {
   const inputUid = document.getElementById('change-pass-uid');
   if (inputUid) inputUid.value = uid;
-  document.getElementById('change-pass-user-display').innerText = uid;
+  const display = document.getElementById('change-pass-user-display');
+  if (display) display.innerText = uid;
+  const pass1 = document.getElementById('change-pass-new');
+  const pass2 = document.getElementById('change-pass-confirm');
+  if (pass1) pass1.value = '';
+  if (pass2) pass2.value = '';
   openModal('modal-change-password');
 }
 
@@ -965,15 +1336,21 @@ function setupForms() {
       document.querySelectorAll('.radio-tile').forEach(t => t.classList.remove('selected'));
       e.target.closest('.radio-tile').classList.add('selected');
       const scheme2Wrap = document.getElementById('new-share-scheme2-wrapper');
+      const groupsWrap = document.getElementById('new-share-groups-container');
       if (scheme2Wrap) {
         scheme2Wrap.style.display = e.target.value === '2' ? 'block' : 'none';
+      }
+      if (groupsWrap) {
+        groupsWrap.style.display = e.target.value === '4' ? 'none' : 'block';
       }
       updateNewSharePreview();
     });
   });
-  document.querySelectorAll('.new-share-grp-chk').forEach(c => {
-    c.addEventListener('change', updateNewSharePreview);
-  });
+
+  const writelistSelect = document.getElementById('new-share-writelist-select');
+  if (writelistSelect) {
+    writelistSelect.addEventListener('change', updateNewSharePreview);
+  }
 
   // Guardar Nuevo Recurso
   const formNewShare = document.getElementById('form-new-share');
@@ -991,6 +1368,11 @@ function setupForms() {
         return;
       }
 
+      if (AppState.shares.some(s => s.id === finalName)) {
+        showToast(`Ya existe un recurso con el nombre [${finalName}]`, 'danger');
+        return;
+      }
+
       const schemeVal = document.querySelector('input[name="new-share-scheme"]:checked')?.value || '1';
       const schemeNames = {
         '1': 'Lectura y Escritura por Grupo',
@@ -999,7 +1381,11 @@ function setupForms() {
         '4': 'Acceso Público / Invitados (Sin Contraseña)'
       };
 
-      const selectedGroups = Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value);
+      const selectedGroups = schemeVal === '4'
+        ? ['Todos (Invitados)']
+        : (Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value).length
+            ? Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value)
+            : ['grp_sistemas']);
 
       const newShare = {
         id: finalName,
@@ -1008,7 +1394,7 @@ function setupForms() {
         browseable: isHidden ? 'no' : 'yes',
         scheme: schemeVal,
         schemeName: schemeNames[schemeVal],
-        groups: selectedGroups.length ? selectedGroups : ['grp_sistemas'],
+        groups: selectedGroups,
         writeList: schemeVal === '2' ? (document.getElementById('new-share-writelist-select')?.value || 'grp_sistemas') : '',
         readOnly: schemeVal === '3' ? 'yes' : 'no',
         path: document.getElementById('new-share-path').value || `/srv/nas/${finalName.replace(/\$$/, '')}`,
@@ -1017,10 +1403,24 @@ function setupForms() {
       };
 
       AppState.shares.push(newShare);
+
+      // Actualizar los shares asignados a cada grupo
+      if (schemeVal !== '4') {
+        selectedGroups.forEach(gName => {
+          const grp = AppState.groups.find(g => g.name === gName);
+          if (grp && !grp.shares.includes(finalName)) {
+            grp.shares.push(finalName);
+          }
+        });
+      }
+
       showToast(`Recurso [${finalName}] creado con éxito en smb.conf`, 'success');
       closeModal('modal-new-share');
+      updateAllCounters();
       renderSharesTable();
+      renderGroupsTable();
       formNewShare.reset();
+      if (pathInput) pathInput.dataset.userEdited = '';
     });
   }
 
@@ -1043,18 +1443,30 @@ function setupForms() {
         return;
       }
 
+      const assignedGroups = selectedGroups.length ? selectedGroups : ['grp_empleados'];
+
       AppState.users.push({
         uid: uid,
         fullName: fullName || 'Empleado EAD',
-        groups: selectedGroups.length ? selectedGroups : ['grp_empleados'],
+        groups: assignedGroups,
         sambaActive: true,
         shell: '/usr/sbin/nologin',
         lastLogin: 'Nunca (Nuevo)'
       });
 
+      // Añadir al array de miembros de cada grupo
+      assignedGroups.forEach(gName => {
+        const grp = AppState.groups.find(g => g.name === gName);
+        if (grp && !grp.members.includes(uid)) {
+          grp.members.push(uid);
+        }
+      });
+
       showToast(`Usuario [${uid}] creado y sincronizado con Samba`, 'success');
       closeModal('modal-new-user');
+      updateAllCounters();
       renderUsersTable();
+      renderGroupsTable();
       formNewUser.reset();
     });
   }
@@ -1086,8 +1498,65 @@ function setupForms() {
 
       showToast(`Grupo de seguridad [${groupFullName}] creado`, 'success');
       closeModal('modal-new-group');
+      updateAllCounters();
       renderGroupsTable();
+      renderGroupCheckboxes();
       formNewGroup.reset();
+    });
+  }
+
+  // Guardar Miembros Editados en Grupo
+  const formEditGroup = document.getElementById('form-edit-group');
+  if (formEditGroup) {
+    formEditGroup.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const groupName = document.getElementById('edit-group-name').value;
+      const grp = AppState.groups.find(g => g.name === groupName);
+      if (!grp) return;
+
+      const checkedUids = Array.from(document.querySelectorAll('.edit-group-user-chk:checked')).map(c => c.value);
+      grp.members = checkedUids;
+
+      // Sincronizar grupos en cada usuario
+      AppState.users.forEach(u => {
+        const shouldBeMember = checkedUids.includes(u.uid);
+        const isMember = u.groups.includes(groupName);
+        if (shouldBeMember && !isMember) {
+          u.groups.push(groupName);
+        } else if (!shouldBeMember && isMember) {
+          u.groups = u.groups.filter(g => g !== groupName);
+        }
+      });
+
+      showToast(`Miembros de [${groupName}] actualizados`, 'success');
+      closeModal('modal-edit-group');
+      renderGroupsTable();
+      renderUsersTable();
+    });
+  }
+
+  // Guardar Cambio de Clave
+  const formChangePassword = document.getElementById('form-change-password');
+  if (formChangePassword) {
+    formChangePassword.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const uid = document.getElementById('change-pass-uid')?.value;
+      const pass1 = document.getElementById('change-pass-new')?.value;
+      const pass2 = document.getElementById('change-pass-confirm')?.value;
+
+      if (!pass1 || pass1.length < 6) {
+        showToast('La contraseña debe tener al menos 6 caracteres', 'danger');
+        return;
+      }
+
+      if (pass1 !== pass2) {
+        showToast('Las contraseñas no coinciden. Intenta de nuevo.', 'danger');
+        return;
+      }
+
+      showToast(`Contraseña de [${uid}] actualizada en Debian y Samba`, 'success');
+      closeModal('modal-change-password');
+      formChangePassword.reset();
     });
   }
 
@@ -1105,6 +1574,11 @@ function setupForms() {
 
       if (!id || !src) {
         showToast('Completa todos los campos obligatorios', 'danger');
+        return;
+      }
+
+      if (AppState.backupTasks.some(t => t.id === id)) {
+        showToast(`Ya existe una tarea con el identificador [${id}]`, 'danger');
         return;
       }
 
@@ -1129,6 +1603,7 @@ function setupForms() {
 
       showToast(`Tarea de respaldo [${id}] configurada en /etc/cron.d/backup_${id}`, 'success');
       closeModal('modal-new-backup');
+      updateAllCounters();
       renderBackupTasksTable();
       formNewBackup.reset();
     });
