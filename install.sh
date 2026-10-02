@@ -214,7 +214,7 @@ case "$1" in
             export TERM="${TERM:-xterm-256color}"
             bash "$INSTALL_DIR/src/asistente.sh" --status 2>/dev/null || bash -c "
                 echo '=== ESTADO DEL SERVIDOR ==='
-                systemctl status smbd wsdd2 cockpit --no-pager
+                systemctl status smbd wsdd2 nginx --no-pager
                 df -h /srv/nas 2>/dev/null || true
             "
         fi
