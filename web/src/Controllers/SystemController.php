@@ -71,4 +71,47 @@ class SystemController
         $info = $this->system->checkUpdates();
         Response::success($info);
     }
+
+    public function diagnostics(Request $request): void
+    {
+        $services = $this->system->getServicesStatus();
+        $metrics = $this->system->getSystemMetrics();
+        $storage = (new \App\Services\StorageService())->getStorageOverview();
+        $shares = (new \App\Services\SambaService())->listShares();
+        $backups = (new \App\Services\BackupService())->listTasks();
+
+        $activeServices = 0;
+        $totalServices = count($services);
+        foreach ($services as $s) {
+            if (!empty($s['active'])) {
+                $activeServices++;
+            }
+        }
+
+        // Validación testparm de Samba
+        $testparmOk = true;
+        if (DIRECTORY_SEPARATOR !== '\\' && getenv('APP_ENV') !== 'testing') {
+            $tpRes = SystemService::sudo(['testparm', '-s']);
+            if ($tpRes['code'] !== 0) {
+                $testparmOk = false;
+            }
+        }
+
+        $usagePct = (float) ($storage['usage_percent'] ?? 0);
+        $overall = ($activeServices === $totalServices && $testparmOk && $usagePct < 90) ? 'OK' : 'Warning';
+
+        Response::success([
+            'overall_status' => $overall,
+            'services_active' => $activeServices,
+            'services_total' => $totalServices,
+            'services' => $services,
+            'storage' => $storage,
+            'shares_count' => count($shares),
+            'backups_count' => count($backups),
+            'testparm_ok' => $testparmOk,
+            'hostname' => $metrics['hostname'] ?? 'SRV-NAS',
+            'uptime' => $metrics['uptime'] ?? 'N/A',
+            'kernel' => $metrics['kernel'] ?? php_uname('r'),
+        ]);
+    }
 }
