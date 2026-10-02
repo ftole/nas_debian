@@ -250,7 +250,7 @@ const AppState = {
   activityFeed: [
     { badge: 'Éxito', badgeClass: 'badge-ok', title: 'Snapshot completado: bkp_win_facturacion', desc: 'Deduplicación 88.6% • 0 bytes adicionales en inodos compartidos' },
     { badge: 'Samba', badgeClass: 'badge-blue', title: 'Sesión SMB iniciada por carlos_m desde 10.10.1.34', desc: 'Acceso concedido a recurso [CAMPANA_UNO_OPERACIONES]' },
-    { badge: 'WSDD2', badgeClass: 'badge-purple', title: 'Descubrimiento de red WSD respondido para host SRV-NAS', desc: 'Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto' },
+    { badge: 'WSDD2', badgeClass: 'badge-blue', title: 'Descubrimiento de red WSD respondido para host SRV-NAS', desc: 'Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto' },
     { badge: 'Scrub', badgeClass: 'badge-ok', title: 'Auditoría mensual BTRFS: 1,420,892 bloques validados', desc: '0 errores de corrupción silenciosa detectados en /srv/nas' }
   ]
 };
@@ -345,19 +345,32 @@ function updateThemeIcon() {
 // ==============================================================================
 function setupNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+
+  function closeSidebar() {
+    if (sidebar) sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('active');
+  }
+
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const viewId = item.getAttribute('data-view');
       switchView(viewId);
-      document.querySelector('.sidebar').classList.remove('open');
+      closeSidebar();
     });
   });
 
   const mobileToggle = document.getElementById('mobile-menu-btn');
   if (mobileToggle) {
     mobileToggle.addEventListener('click', () => {
-      document.querySelector('.sidebar').classList.toggle('open');
+      if (sidebar) sidebar.classList.toggle('open');
+      if (backdrop) backdrop.classList.toggle('active');
     });
+  }
+
+  if (backdrop) {
+    backdrop.addEventListener('click', closeSidebar);
   }
 }
 
@@ -484,7 +497,7 @@ function renderSharesTable(filterText = '') {
     const isHidden = s.name.endsWith('$') || s.vis === 'Oculto ($)';
     const isChecked = s.status === 'Activo' ? 'checked' : '';
     const badgeVis = isHidden 
-      ? `<span class="badge badge-purple"><svg class="icon icon-sm"><use href="#icon-eye-off"></use></svg> Oculto ($)</span>`
+      ? `<span class="badge badge-gray"><svg class="icon icon-sm"><use href="#icon-eye-off"></use></svg> Oculto ($)</span>`
       : `<span class="badge badge-ok"><svg class="icon icon-sm"><use href="#icon-eye"></use></svg> Visible</span>`;
 
     const groupsHtml = s.groups.map(g => `<span class="tag-pill">${g}</span>`).join(' ');
@@ -817,11 +830,11 @@ function renderGroupsTable() {
       <tr>
         <td>
           <div style="display:flex; align-items:center; gap:8px;">
-            <svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg>
-            <strong style="color:var(--accent-purple);">${g.name}</strong>
+            <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg>
+            <strong>${g.name}</strong>
           </div>
         </td>
-        <td><span class="badge badge-purple">${g.level}</span></td>
+        <td><span class="badge badge-blue">${g.level}</span></td>
         <td>${membersHtml}</td>
         <td>${sharesHtml}</td>
         <td>
@@ -928,7 +941,7 @@ function renderBackupTasksTable() {
     const isWindows = t.proto.includes('CIFS');
     const badgeProto = isWindows
       ? `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-server"></use></svg> CIFS / Windows</span>`
-      : `<span class="badge badge-purple"><svg class="icon icon-sm"><use href="#icon-terminal"></use></svg> SSH / Linux</span>`;
+      : `<span class="badge badge-blue"><svg class="icon icon-sm"><use href="#icon-terminal"></use></svg> SSH / Linux</span>`;
 
     return `
       <tr>
