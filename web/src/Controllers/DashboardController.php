@@ -35,7 +35,7 @@ class DashboardController
     /**
      * Renderiza la plantilla principal de la aplicación con la vista inicial.
      */
-    public function index(Request $request): void
+    public function index(Request $request, array $params = []): void
     {
         $templatePath = dirname(__DIR__, 2) . '/templates/layout.php';
         $metrics = $this->system->getSystemMetrics();
@@ -46,6 +46,7 @@ class DashboardController
             'metrics' => $metrics,
             'storage' => $storage,
             'services' => $services,
+            'activeView' => $params['view'] ?? 'dashboard',
         ]);
     }
 
