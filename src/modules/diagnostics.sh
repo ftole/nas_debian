@@ -13,7 +13,7 @@ diagnostico_nas() {
     echo -e "  ╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 
     echo -e "  ${C_BOLD}${C_WHITE}1. ESTADO DE SERVICIOS EN TIEMPO REAL:${C_RESET}"
-    for s in smbd nmbd wsdd2 cockpit.socket cron; do
+    for s in smbd nmbd wsdd2 nginx cron; do
         if systemctl is-active "$s" &>/dev/null; then
             echo -e "     [${C_GREEN}● ACTIVO${C_RESET}] $s"
         else
