@@ -71,7 +71,7 @@ jobs:
       - name: Analizar codigo Python
         run: |
           # Analisis amplio con la configuracion del proyecto (.flake8)
-          flake8 src/web/backups/backup_api.py tests/
+          flake8 tests/
 
   test-python:
     name: Pruebas Unitarias Python (pytest)
@@ -91,5 +91,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Ejecutar pruebas del backend web
+      - name: Ejecutar pruebas del frontend/mockup
         run: pytest tests/ -q
+
+  test-php:
+    name: Validar Entorno Web PHP 8 (Sintaxis y Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configurar PHP 8.2
+        uses: shivammathur/setup-php@c54fccf54d2b40b8c9733483034a0428581ad839 # v2
+        with:
+          php-version: "8.2"
+
+      - name: Validar sintaxis PHP (php -l)
+        run: |
+          find web/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l
+          find tests/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Ejecutar Suite de Pruebas PHP
+        run: php tests/test_web.php
