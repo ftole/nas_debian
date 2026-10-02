@@ -514,7 +514,7 @@ Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload 
     /bin/systemctl status cron, /usr/bin/systemctl status cron, \
     /bin/systemctl status php*-fpm*, /usr/bin/systemctl status php*-fpm*, \
     /sbin/reboot, /usr/sbin/reboot, /bin/systemctl reboot, /usr/bin/systemctl reboot
-Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *
+Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *, /usr/bin/smbclient *
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/usermod *, /usr/sbin/groupadd *, /usr/sbin/groupdel *, /usr/bin/gpasswd *, /usr/bin/passwd *, /usr/sbin/chpasswd
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /bin/btrfs scrub *, /sbin/fstrim *, /usr/sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
 Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, \
