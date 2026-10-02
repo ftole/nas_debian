@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 # Pruebas de inyeccion de fallos sobre los runners de backup generados.
-# Genera los runners reales con backup_api.py en directorios temporales y los
+# Genera los runners reales con BackupService.php en directorios temporales y los
 # ejecuta con binarios simulados. No toca discos, red ni servicios reales.
 
 setup() {
@@ -23,22 +23,20 @@ teardown() {
 }
 
 generate_runners() {
-    python3 - "$SANDBOX" <<'PY'
-import sys, importlib.util as u
-root = sys.argv[1]
-spec = u.spec_from_file_location('b', 'src/web/backups/backup_api.py')
-m = u.module_from_spec(spec)
-spec.loader.exec_module(m)
-m.BIN_DIR = root + '/runners'
-m.CRON_DIR = root + '/cron'
-m.CRED_DIR = root + '/cred'
-m.BKP_ROOT = root + '/bkp'
-m.LOG_ROOT = root + '/log'
-m.KNOWN_HOSTS = root + '/known_hosts'
-m.create_task({"id": "t_local", "proto": "local", "cron": "0 23 * * *", "retention": 30, "path": root + "/src"})
-m.create_task({"id": "t_cifs", "proto": "cifs", "cron": "0 23 * * *", "retention": 30, "ip": "10.0.0.1", "share": "docs", "user": "Administrador", "password": "x"})
-m.create_task({"id": "t_ssh", "proto": "ssh", "cron": "0 2 * * *", "retention": 15, "ip": "10.0.0.2", "port": "22", "path": "/var/www", "user": "root", "password": "x"})
-PY
+    php -- "$SANDBOX" <<'PHP_SCRIPT'
+<?php
+$root = $argv[1];
+require_once 'web/src/Services/BackupService.php';
+$svc = new \App\Services\BackupService();
+$svc->binDir = $root . '/runners';
+$svc->cronDir = $root . '/cron';
+$svc->credDir = $root . '/cred';
+$svc->bkpRoot = $root . '/bkp';
+$svc->logRoot = $root . '/log';
+$svc->createTask(['id' => 't_local', 'proto' => 'local', 'cron' => '0 23 * * *', 'retention' => 30, 'path' => $root . '/src']);
+$svc->createTask(['id' => 't_cifs', 'proto' => 'cifs', 'cron' => '0 23 * * *', 'retention' => 30, 'ip' => '10.0.0.1', 'share' => 'docs', 'user' => 'Administrador', 'password' => 'x']);
+$svc->createTask(['id' => 't_ssh', 'proto' => 'ssh', 'cron' => '0 2 * * *', 'retention' => 15, 'ip' => '10.0.0.2', 'port' => 22, 'path' => '/var/www', 'user' => 'root', 'password' => 'x']);
+PHP_SCRIPT
 }
 
 mock_df_ok() {
