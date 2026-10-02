@@ -20,7 +20,7 @@
 
   /* Modo Oscuro (Predeterminado Cockpit) */
   --bg-masthead: #151515;
-  --bg-sidebar: #151515;
+  --bg-sidebar: #212427;
   --bg-body: #0f1214;
   --bg-card: #1b1d21;
   --bg-card-header: #212427;
@@ -428,12 +428,12 @@ code, kbd, pre, samp {
 }
 
 .nav-item:hover {
-  background-color: #212427;
+  background-color: #292e34;
   color: #ffffff;
 }
 
 .nav-item.active {
-  background-color: #212427;
+  background-color: #151515;
   color: #ffffff;
   border-left-color: var(--pf-primary);
   font-weight: 600;
@@ -445,8 +445,8 @@ code, kbd, pre, samp {
   gap: 10px;
 }
 .nav-item-left .icon {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   opacity: 0.85;
 }
 
@@ -552,15 +552,18 @@ code, kbd, pre, samp {
 /* ==============================================================================
  * Tarjetas y Paneles (PatternFly 4 Flat Clean Cards)
  * ============================================================================== */
-.panel-card {
+.panel-card,
+.pf-c-card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   margin-bottom: 20px;
   overflow: hidden;
+  box-shadow: none;
 }
 
-.panel-card-head {
+.panel-card-head,
+.pf-c-card__header {
   padding: 10px 16px;
   background-color: var(--bg-card-header);
   border-bottom: 1px solid var(--border-color);
@@ -569,7 +572,8 @@ code, kbd, pre, samp {
   align-items: center;
 }
 
-.panel-card-head h3 {
+.panel-card-head h3,
+.pf-c-card__header h3 {
   margin: 0;
   font-size: 13px;
   font-weight: 700;
@@ -579,7 +583,8 @@ code, kbd, pre, samp {
   gap: 8px;
 }
 
-.panel-card-body {
+.panel-card-body,
+.pf-c-card__body {
   padding: 16px;
 }
 
