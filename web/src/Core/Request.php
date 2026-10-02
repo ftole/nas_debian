@@ -16,7 +16,8 @@ class Request
 
     public function __construct()
     {
-        $this->method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $rawMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $this->method = ($rawMethod === 'HEAD') ? 'GET' : $rawMethod;
         
         // Soporte para URL rewriting o parámetro de fallback ?route=...
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
