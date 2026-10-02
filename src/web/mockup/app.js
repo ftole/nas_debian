@@ -514,6 +514,10 @@ function updateThemeIcon() {
       ? '<use href="#icon-sun"></use>' 
       : '<use href="#icon-moon"></use>';
   }
+  const btn = document.getElementById('btn-theme-toggle');
+  if (btn) {
+    btn.setAttribute('title', AppState.currentTheme === 'dark' ? 'Cambiar a modo Claro' : 'Cambiar a modo Oscuro');
+  }
 }
 
 // ==============================================================================
@@ -1137,8 +1141,8 @@ function executeTerminalCommand(cmd) {
       'VERSION="13 (trixie)"',
       'VERSION_CODENAME=trixie',
       'ID=debian',
-      'HOME_URL="https://www.debian.org/"',
-      'SUPPORT_URL="https://www.debian.org/support"'
+      'HOME_URL="debian.org"',
+      'SUPPORT_URL="debian.org/support"'
     ].join('\n'), 'term-ok');
     return;
   }
