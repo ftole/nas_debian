@@ -10,7 +10,13 @@
 // Estado Global de la Aplicación
 const AppState = {
   currentView: 'dashboard',
-  currentTheme: localStorage.getItem('nas_theme') || 'dark',
+  currentTheme: (() => {
+    try {
+      return localStorage.getItem('nas_theme') || 'dark';
+    } catch (e) {
+      return 'dark';
+    }
+  })(),
   isScrubRunning: false,
   isTrimRunning: false,
   activeBackupTimers: [],
@@ -502,21 +508,26 @@ function initTheme() {
 function toggleTheme() {
   AppState.currentTheme = AppState.currentTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', AppState.currentTheme);
-  localStorage.setItem('nas_theme', AppState.currentTheme);
+  try {
+    localStorage.setItem('nas_theme', AppState.currentTheme);
+  } catch (e) {}
   updateThemeIcon();
   showToast(`Modo ${AppState.currentTheme === 'dark' ? 'Oscuro' : 'Claro'} activado`, 'info');
 }
 
 function updateThemeIcon() {
-  const iconSpan = document.getElementById('theme-toggle-icon');
-  if (iconSpan) {
-    iconSpan.innerHTML = AppState.currentTheme === 'dark' 
-      ? '<use href="#icon-sun"></use>' 
-      : '<use href="#icon-moon"></use>';
+  const iconSvg = document.getElementById('theme-toggle-icon');
+  const isDark = AppState.currentTheme === 'dark';
+  if (iconSvg) {
+    const iconId = isDark ? '#icon-sun' : '#icon-moon';
+    const use = iconSvg.querySelector('use');
+    if (use) {
+      use.setAttribute('href', iconId);
+    }
   }
   const btn = document.getElementById('btn-theme-toggle');
   if (btn) {
-    btn.setAttribute('title', AppState.currentTheme === 'dark' ? 'Cambiar a modo Claro' : 'Cambiar a modo Oscuro');
+    btn.setAttribute('title', isDark ? 'Cambiar a modo Claro' : 'Cambiar a modo Oscuro');
   }
 }
 
