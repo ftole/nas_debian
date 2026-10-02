@@ -1,0 +1,74 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Core\Request;
+use App\Core\Response;
+use App\Services\SystemService;
+
+/**
+ * Controlador API para operaciones del sistema, control de demonios, logs y reinicio.
+ */
+class SystemController
+{
+    private SystemService $system;
+
+    public function __construct()
+    {
+        $this->system = new SystemService();
+    }
+
+    public function services(Request $request): void
+    {
+        $services = $this->system->getServicesStatus();
+        Response::success($services);
+    }
+
+    public function manageService(Request $request): void
+    {
+        $data = $request->getBody();
+        $service = trim($data['service'] ?? '');
+        $action = trim($data['action'] ?? 'restart');
+
+        if (empty($service)) {
+            Response::error('El nombre del servicio es obligatorio.');
+            return;
+        }
+
+        $res = $this->system->manageService($service, $action);
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'Error al gestionar servicio.');
+            return;
+        }
+
+        Response::success(null, $res['message'] ?? 'Servicio actualizado.');
+    }
+
+    public function logs(Request $request): void
+    {
+        $limit = max(10, min(500, (int) $request->getQuery('limit', 80)));
+        $unit = $request->getQuery('unit');
+
+        $logs = $this->system->getJournalLogs($limit, is_string($unit) ? $unit : null);
+        Response::success($logs);
+    }
+
+    public function reboot(Request $request): void
+    {
+        $res = $this->system->rebootServer();
+        if ($res['code'] !== 0) {
+            Response::error('Error al solicitar reinicio: ' . ($res['stderr'] ?: $res['stdout']));
+            return;
+        }
+
+        Response::success(null, 'Reinicio del servidor programado.');
+    }
+
+    public function updates(Request $request): void
+    {
+        $info = $this->system->checkUpdates();
+        Response::success($info);
+    }
+}
