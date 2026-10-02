@@ -118,7 +118,7 @@ else
     rm -rf /etc/samba
     rm -rf /var/www/nas-web
     rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
-    rm -f /etc/php/*/fpm/pool.d/nas-web.conf
+    rm -f /etc/php/*/fpm/pool.d/nas-web.conf /run/php/php-fpm-nas.sock
     rm -f /etc/sudoers.d/nas-web
     rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
     rm -f /usr/bin/lastb
