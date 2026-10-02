@@ -11,18 +11,24 @@ putenv('APP_ENV=testing');
 require_once __DIR__ . '/../web/src/Core/Request.php';
 require_once __DIR__ . '/../web/src/Core/Response.php';
 require_once __DIR__ . '/../web/src/Core/Router.php';
+require_once __DIR__ . '/../web/src/Core/AuthMiddleware.php';
 require_once __DIR__ . '/../web/src/Services/SystemService.php';
 require_once __DIR__ . '/../web/src/Services/StorageService.php';
 require_once __DIR__ . '/../web/src/Services/UserService.php';
 require_once __DIR__ . '/../web/src/Services/SambaService.php';
 require_once __DIR__ . '/../web/src/Services/BackupService.php';
+require_once __DIR__ . '/../web/src/Services/AuthService.php';
 require_once __DIR__ . '/../web/src/Controllers/DashboardController.php';
 require_once __DIR__ . '/../web/src/Controllers/SambaController.php';
 require_once __DIR__ . '/../web/src/Controllers/BackupController.php';
 require_once __DIR__ . '/../web/src/Controllers/StorageController.php';
 require_once __DIR__ . '/../web/src/Controllers/UserController.php';
 require_once __DIR__ . '/../web/src/Controllers/SystemController.php';
+require_once __DIR__ . '/../web/src/Controllers/AuthController.php';
 
+use App\Core\AuthMiddleware;
+use App\Core\Request;
+use App\Services\AuthService;
 use App\Services\BackupService;
 use App\Services\SambaService;
 use App\Services\StorageService;
@@ -167,6 +173,61 @@ $_GET = [];
 $req = new \App\Core\Request();
 $testRouter->dispatch($req);
 assertTrue($matched, 'Router resuelve variables dinámicas en rutas REST ({param})');
+
+// 7. Pruebas de AuthService (Autenticación y Cuentas de Sistema)
+$auth = new AuthService();
+$loginSistemas = $auth->authenticate('sistemas', 'Ead2026#');
+assertTrue($loginSistemas['success'] && $loginSistemas['user']['username'] === 'sistemas', 'AuthService autentica satisfactoriamente al usuario sistemas con contraseña válida');
+assertTrue($loginSistemas['user']['is_admin'] === true, 'AuthService otorga privilegios de administrador a sistemas');
+
+$loginAdmin = $auth->authenticate('administrador', 'admin123');
+assertTrue($loginAdmin['success'] && $loginAdmin['user']['username'] === 'administrador', 'AuthService autentica satisfactoriamente al usuario administrador');
+
+$loginBadPass = $auth->authenticate('sistemas', 'password_erroneo');
+assertTrue(!$loginBadPass['success'], 'AuthService rechaza contraseñas inválidas');
+
+$loginUnknown = $auth->authenticate('usuario_inexistente', 'cualquiercosa');
+assertTrue(!$loginUnknown['success'], 'AuthService rechaza cuentas no existentes');
+
+$loginEmpty = $auth->authenticate('', '');
+assertTrue(!$loginEmpty['success'], 'AuthService rechaza campos de autenticación vacíos');
+
+$loginBadFormat = $auth->authenticate('bad user!!', 'pass123');
+assertTrue(!$loginBadFormat['success'], 'AuthService rechaza formato inválido de nombre de usuario');
+
+// 8. Pruebas de AuthMiddleware (Rutas Públicas y Sesiones)
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['REQUEST_URI'] = '/login';
+$_GET = [];
+$loginReq = new Request();
+assertTrue(AuthMiddleware::check($loginReq), 'AuthMiddleware permite acceso público sin sesión a /login');
+
+$_SERVER['REQUEST_URI'] = '/api/auth/login';
+$apiLoginReq = new Request();
+assertTrue(AuthMiddleware::check($apiLoginReq), 'AuthMiddleware permite acceso público sin sesión a /api/auth/login');
+
+// Con sesión activa
+$_SESSION['nas_user'] = ['username' => 'sistemas', 'is_admin' => true];
+$_SERVER['REQUEST_URI'] = '/';
+$homeReq = new Request();
+assertTrue(AuthMiddleware::check($homeReq), 'AuthMiddleware permite acceso a rutas protegidas con sesión activa');
+
+// 9. Pruebas de Diagnóstico del Sistema (SystemController::diagnostics)
+$sysCtrl = new \App\Controllers\SystemController();
+ob_start();
+// Mock de llamada a diagnostics sin invocar exit
+$diagSystem = new SystemService();
+$diagServices = $diagSystem->getServicesStatus();
+$diagMetrics = $diagSystem->getSystemMetrics();
+$diagStorage = (new StorageService())->getStorageOverview();
+assertTrue(is_array($diagServices) && count($diagServices) >= 5, 'Diagnósticos compila estado de demonios clave');
+assertTrue(isset($diagStorage['used_gb']), 'Diagnósticos incluye métricas de almacenamiento');
+
+// 10. Pruebas de Request (Mapeo de HEAD a GET)
+$_SERVER['REQUEST_METHOD'] = 'HEAD';
+$_SERVER['REQUEST_URI'] = '/';
+$headReq = new Request();
+assertTrue($headReq->getMethod() === 'GET', 'Request normaliza peticiones HTTP HEAD a GET para compatibilidad');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
