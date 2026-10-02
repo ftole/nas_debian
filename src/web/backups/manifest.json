@@ -1,5 +1,6 @@
 {
     "version": 0,
+    "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
     "menu": {
         "backups": {
             "label": "Backups",
