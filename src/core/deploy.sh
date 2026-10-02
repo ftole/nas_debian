@@ -35,7 +35,7 @@ trap 'log "[ERROR] Fallo en la línea $LINENO"' ERR
 # Restaura los parches de Cockpit desde la copia de seguridad más reciente.
 restaurar_parches_cockpit() {
     local orig ultimo
-    for orig in /usr/share/cockpit/identities/assets/*.js /usr/share/cockpit/storaged/storaged.js.gz; do
+    for orig in /usr/share/cockpit/storaged/storaged.js.gz; do
         [ -f "$orig" ] || continue
         case "$orig" in
             *.bak-*) continue ;;
@@ -50,76 +50,6 @@ restaurar_parches_cockpit() {
     done
 }
 
-# Aplica el parche de Identities con respaldo, verificación y escritura atómica.
-aplicar_parche_identities() {
-    local PATCH_PY PATCH_SALIDA
-    PATCH_PY=$(mktemp)
-    cat << 'PY' > "$PATCH_PY"
-import glob, os, shutil, time
-
-REEMPLAZOS = [
-    ("l.value=f.split(\"\\n\").filter(w=>!/^\\s*$/.test(w))",
-     "l.value=f.split(\"\\n\").filter(w=>w.startsWith(\"grp_\"))"),
-    ("if(u<1e3&&u!==0)return null;",
-     "if(u<1e3||u>=6e4)return null;"),
-    ("if(u<1e3)return null;",
-     "if(u<1e3||u>=6e4)return null;"),
-]
-
-total_reconocidos = 0
-for js in glob.glob("/usr/share/cockpit/identities/assets/*.js"):
-    try:
-        with open(js, "r", encoding="utf-8") as f:
-            contenido = f.read()
-        aplicados = 0
-        reconocidos = 0
-        for origen, destino in REEMPLAZOS:
-            if origen in contenido:
-                contenido = contenido.replace(origen, destino)
-                aplicados += 1
-                reconocidos += 1
-            elif destino in contenido:
-                reconocidos += 1
-        if reconocidos == 0:
-            continue
-        total_reconocidos += reconocidos
-        if aplicados == 0:
-            continue
-        respaldo = "%s.bak-%s" % (js, time.strftime("%Y%m%d_%H%M%S"))
-        shutil.copy2(js, respaldo)
-        for viejo in sorted(glob.glob(js + ".bak-*"))[:-3]:
-            try:
-                os.remove(viejo)
-            except OSError:
-                pass
-        for viejo in glob.glob(js + ".tmp"):
-            try:
-                os.remove(viejo)
-            except OSError:
-                pass
-        tmp = "%s.tmp" % js
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(contenido)
-        os.replace(tmp, js)
-        print("  [OK] Parche Identities aplicado en %s (respaldo: %s)" % (js, respaldo))
-    except Exception as e:
-        print("  [!] No se pudo parchear %s: %s" % (js, e))
-
-if total_reconocidos == 0:
-    print("  [!] Parche Identities no aplicado: no se encontraron patrones en los recursos instalados.")
-PY
-    if ! PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1); then
-        rm -f "$PATCH_PY"
-        advertir "Falló el parche de Cockpit Identities."
-        return 0
-    fi
-    rm -f "$PATCH_PY"
-    echo "$PATCH_SALIDA"
-    log "$PATCH_SALIDA"
-    if echo "$PATCH_SALIDA" | grep -qE "no se encontraron patrones|No se pudo parchear"; then
-        advertir "El parche de Cockpit Identities se omitió (patrones no encontrados)."
-    fi
-}
 
 # Aplica el parche de Storage con respaldo, verificación y escritura atómica.
 aplicar_parche_storage() {
@@ -621,7 +551,7 @@ install_deb_pkg() {
 }
 
 install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v4.6.1/cockpit-file-sharing_4.6.1-1trixie_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing" "5e807f5c61a6c18a7f2095e2917ff501c2540e207a460b188765f517a6ecb5a0"
-install_deb_pkg "https://github.com/45Drives/cockpit-identities/releases/download/v0.1.14-1/cockpit-identities_0.1.14-1trixie_all.deb" "cockpit-identities.deb" "/usr/share/cockpit/identities" "320e6607e288060222717507ffc9f9fe2b46c6e2b8bb88226549bef46982eb6a"
+
 install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator" "784b8b1d7e02224594d34e6d60945c72b54a557692a37fefbb0046146b74040e"
 
 cd /
@@ -636,8 +566,9 @@ if [ -f /usr/share/cockpit/users/manifest.json ]; then
 ACCOUNTS_EOF
 fi
 
-# 2. Parche Cockpit Identities (Filtrar exclusivamente grupos grp_* y usuarios reales 1000 <= UID < 60000)
-aplicar_parche_identities
+# 2. Desinstalar Cockpit Identities para forzar el uso del asistente TUI (sudo nas)
+DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq cockpit-identities >/dev/null 2>&1 || true
+rm -rf /usr/share/cockpit/identities
 
 # 3. Instalar Módulo Web Nativo de Backups (EAD) en Cockpit
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
