@@ -33,6 +33,7 @@
   --border-color: #3c3f42;
   --border-subtle: #292e34;
   --border-dark: #151515;
+  --border-light: #292e34;
 
   --text-main: #f0f0f0;
   --text-secondary: #d2d2d2;
@@ -41,12 +42,14 @@
 
   --accent-primary: #0066cc;
   --accent-primary-hover: #004080;
+  --accent-primary-light: rgba(0, 102, 204, 0.2);
   --accent-success: #3e8635;
   --accent-success-text: #5ba353;
   --accent-warning: #f0ab00;
   --accent-danger: #c9190b;
   --accent-purple: #6753ac;
-  --accent-info: #2b9af3;
+  --accent-cyan: #73bcf7;
+  --accent-info: #0066cc;
 
   --alert-success-bg: rgba(62, 134, 53, 0.12);
   --alert-info-bg: rgba(0, 102, 204, 0.12);
@@ -101,6 +104,7 @@
   --border-color: #d2d2d2;
   --border-subtle: #e0e0e0;
   --border-dark: #292e34;
+  --border-light: #e0e0e0;
 
   --text-main: #151515;
   --text-secondary: #4f5255;
@@ -109,11 +113,13 @@
 
   --accent-primary: #0066cc;
   --accent-primary-hover: #004080;
+  --accent-primary-light: #edf5fc;
   --accent-success: #3e8635;
   --accent-success-text: #1e4f18;
   --accent-warning: #f0ab00;
   --accent-danger: #c9190b;
   --accent-purple: #6753ac;
+  --accent-cyan: #0066cc;
   --accent-info: #0066cc;
 
   --alert-success-bg: #eef7ed;
@@ -364,12 +370,26 @@ code, kbd, pre, samp {
 .sidebar {
   width: 240px;
   background-color: var(--bg-sidebar);
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid #292e34;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   flex-shrink: 0;
   z-index: 50;
+}
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  top: 48px;
+  background-color: rgba(3, 3, 3, 0.6);
+  z-index: 45;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar-backdrop.active {
+  display: block;
 }
 
 .sidebar-nav {
@@ -458,6 +478,7 @@ code, kbd, pre, samp {
 .sidebar-footer-sub {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 11px;
   color: #8a8d90;
 }
@@ -473,35 +494,8 @@ code, kbd, pre, samp {
   background-color: var(--bg-body);
 }
 
-.page-top-bar {
-  padding: 10px 24px;
-  background-color: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.breadcrumbs {
-  font-size: 12px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.breadcrumb-separator {
-  color: var(--border-color);
-}
-
-.crumb-current {
-  color: var(--text-main);
-  font-weight: 600;
-}
-
 .page-container {
-  padding: 20px 24px 40px;
+  padding: 24px;
   width: 100%;
   max-width: 1440px;
   box-sizing: border-box;
@@ -514,19 +508,27 @@ code, kbd, pre, samp {
   display: block;
 }
 
-/* Encabezado de Página */
+/* Encabezado de Página (Estilo Cockpit PatternFly) */
 .page-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
+  align-items: center;
+  margin-bottom: 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
   gap: 16px;
   flex-wrap: wrap;
 }
 
 .page-head h2 {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
+  color: var(--text-main);
+  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
   color: var(--text-main);
   margin: 0 0 4px 0;
   display: flex;
@@ -917,6 +919,12 @@ code, kbd, pre, samp {
   border-radius: var(--radius-md);
   padding: 4px 10px;
   width: 320px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.search-box:focus-within {
+  border-color: var(--pf-primary);
+  box-shadow: 0 0 0 1px var(--pf-primary);
 }
 
 .search-box input {
@@ -1221,6 +1229,11 @@ code, kbd, pre, samp {
   font-weight: 600;
 }
 
+.term-cmd {
+  color: #f0f0f0;
+  font-weight: 600;
+}
+
 /* ==============================================================================
  * Toggle Switch e Items de Selección de Miembros
  * ============================================================================== */
@@ -1362,5 +1375,20 @@ code, kbd, pre, samp {
 @media (min-width: 901px) {
   .masthead .mobile-toggle {
     display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .btn-text-responsive {
+    display: none;
+  }
+  .brand-ip {
+    display: none;
+  }
+  .masthead {
+    padding: 0 10px;
+  }
+  .page-container {
+    padding: 16px;
   }
 }
