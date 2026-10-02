@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+putenv('APP_ENV=testing');
+
 /**
  * Pruebas unitarias e integrales para el entorno web MVC PHP 8 (App\).
  */
@@ -73,9 +75,20 @@ assertTrue(!$badUser['success'], 'UserService::createUser rechaza nombres de usu
 $badPass = $user->createUser('usuario_test', '123');
 assertTrue(!$badPass['success'], 'UserService::createUser rechaza contraseñas con menos de 6 caracteres');
 
-$badGroup = $user->createGroup('sinprefijo');
-// En nuestro método se auto-antepone grp_ o se valida:
-assertTrue(str_starts_with('grp_', 'grp_'), 'UserService fuerza o valida prefijo corporativo grp_*');
+$grp1 = $user->createGroup('marketing');
+assertTrue($grp1['success'] && str_contains($grp1['message'], 'grp_marketing'), 'UserService auto-antepone prefijo corporativo grp_*');
+
+$badGroupName = $user->createGroup('!!invalido!!');
+assertTrue(!$badGroupName['success'], 'UserService rechaza caracteres inválidos en nombre de grupo');
+
+$delRoot = $user->deleteUser('root');
+assertTrue(!$delRoot['success'], 'UserService rechaza eliminar cuenta protegida root');
+
+$delAdmin = $user->deleteUser('administrador');
+assertTrue(!$delAdmin['success'], 'UserService rechaza eliminar cuenta protegida administrador');
+
+$delMasterGrp = $user->deleteGroup('grp_sistemas');
+assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestro protegido grp_sistemas');
 
 // 4. Pruebas de SambaService
 $samba = new SambaService('/nonexistent/smb.conf');
@@ -84,6 +97,12 @@ assertTrue(is_array($shares), 'SambaService::listShares devuelve array de recurs
 
 $badShare = $samba->createShare(['name' => 'Recurso Con Espacios']);
 assertTrue(!$badShare['success'], 'SambaService::createShare rechaza nombres con espacios');
+
+$delGlobal = $samba->deleteShare('global');
+assertTrue(!$delGlobal['success'], 'SambaService rechaza eliminar sección protegida [global]');
+
+$delPrinters = $samba->deleteShare('printers');
+assertTrue(!$delPrinters['success'], 'SambaService rechaza eliminar sección protegida [printers]');
 
 // 5. Pruebas de BackupService
 $backup = new BackupService();
@@ -95,6 +114,59 @@ assertTrue(!$badTask['success'], 'BackupService::createTask rechaza identificado
 
 $badCron = $backup->createTask(['id' => 'tarea_valida', 'cron' => '0 23 * *']);
 assertTrue(!$badCron['success'], 'BackupService::createTask rechaza cron con menos de 5 campos');
+
+$badRunnerId = $backup->runTaskNow('!bad!');
+assertTrue(!$badRunnerId['success'], 'BackupService::runTaskNow valida identificador de tarea');
+
+// Validar que createTask maneja credenciales de dominio de Windows (DOMINIO\usuario)
+$tmpCredDir = sys_get_temp_dir() . '/test_bkp_cred_' . uniqid();
+$backupTest = new BackupService();
+$backupTest->credDir = $tmpCredDir;
+$backupTest->binDir = $tmpCredDir . '/bin';
+$backupTest->cronDir = $tmpCredDir . '/cron';
+$backupTest->bkpRoot = $tmpCredDir . '/bkp';
+$backupTest->logRoot = $tmpCredDir . '/log';
+$cifsTask = $backupTest->createTask([
+    'id' => 'cifs_domain',
+    'proto' => 'cifs',
+    'ip' => '10.0.0.5',
+    'share' => 'contabilidad',
+    'user' => 'EMPRESA\\admin',
+    'password' => 'Secret123',
+    'cron' => '0 1 * * *',
+]);
+assertTrue($cifsTask['success'], 'BackupService::createTask soporta credenciales de dominio Active Directory (DOMINIO\\usuario)');
+$credFile = $tmpCredDir . '/cifs_domain.cred';
+if (file_exists($credFile)) {
+    $cContent = (string) file_get_contents($credFile);
+    assertTrue(str_contains($cContent, 'domain=EMPRESA') && str_contains($cContent, 'username=admin'), 'BackupService desglosa dominio y usuario correctamente en archivo .cred');
+}
+// Limpiar sandbox temporal de prueba
+@unlink($credFile);
+@unlink($tmpCredDir . '/bin/backup_cifs_domain.sh');
+@unlink($tmpCredDir . '/cron/backup_cifs_domain');
+@rmdir($tmpCredDir . '/bin');
+@rmdir($tmpCredDir . '/cron');
+@rmdir($tmpCredDir . '/cred');
+@rmdir($tmpCredDir . '/bkp/cifs_domain');
+@rmdir($tmpCredDir . '/bkp');
+@rmdir($tmpCredDir . '/log');
+@rmdir($tmpCredDir);
+
+// 6. Pruebas de Router y enrutamiento REST
+$testRouter = new \App\Core\Router();
+$matched = false;
+$testRouter->get('/api/test/{param}', function ($req, $params) use (&$matched) {
+    if (isset($params['param']) && $params['param'] === 'valor123') {
+        $matched = true;
+    }
+});
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['REQUEST_URI'] = '/api/test/valor123';
+$_GET = [];
+$req = new \App\Core\Request();
+$testRouter->dispatch($req);
+assertTrue($matched, 'Router resuelve variables dinámicas en rutas REST ({param})');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
