@@ -32,86 +32,6 @@ advertir() {
 
 trap 'log "[ERROR] Fallo en la línea $LINENO"' ERR
 
-# Restaura los parches de Cockpit desde la copia de seguridad más reciente.
-restaurar_parches_cockpit() {
-    local orig="/usr/share/cockpit/storaged/storaged.js.gz"
-    local ultimo
-    if [ ! -f "$orig" ]; then
-        return 0
-    fi
-    ultimo=$(find "$(dirname "$orig")" -maxdepth 1 -type f -name "$(basename "$orig").bak-*" 2>/dev/null | sort | tail -n 1)
-    if [ -n "$ultimo" ] && [ -f "$ultimo" ]; then
-        cp -p "$ultimo" "$orig"
-        echo "  [•] Parche restaurado en $orig desde $ultimo"
-    else
-        echo "  [!] Sin respaldo disponible para $orig"
-    fi
-}
-
-
-# Aplica el parche de Storage con respaldo, verificación y escritura atómica.
-aplicar_parche_storage() {
-    local PATCH_PY PATCH_SALIDA
-    PATCH_PY=$(mktemp)
-    cat << 'PY' > "$PATCH_PY"
-import gzip, os, shutil, time, glob
-
-path = "/usr/share/cockpit/storaged/storaged.js.gz"
-if os.path.exists(path):
-    try:
-        with gzip.open(path, "rt", encoding="utf-8") as f:
-            contenido = f.read()
-        target1 = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path))return;"
-        repl1    = "if(o||(o=b.drives_multipath_blocks[t.path][0]),!o||Zr(b,o.path)||o.HintIgnore)return;"
-        target2 = "function yT(e,t){if(Zr(b,t.path))return;"
-        repl2    = "function yT(e,t){if(Zr(b,t.path)||t.HintIgnore)return;"
-        if target1 not in contenido and target2 not in contenido:
-            if repl1 in contenido or repl2 in contenido:
-                print("  [OK] Parche Storage ya aplicado.")
-            else:
-                print("  [!] Parche Storage omitido (patrones no encontrados).")
-        else:
-            respaldo = "%s.bak-%s" % (path, time.strftime("%Y%m%d_%H%M%S"))
-            shutil.copy2(path, respaldo)
-            for viejo in sorted(glob.glob(path + ".bak-*"))[:-3]:
-                try:
-                    os.remove(viejo)
-                except OSError:
-                    pass
-            contenido = contenido.replace(target1, repl1).replace(target2, repl2)
-            for viejo in glob.glob(path + ".tmp"):
-                try:
-                    os.remove(viejo)
-                except OSError:
-                    pass
-            tmp = "%s.tmp" % path
-            with gzip.open(tmp, "wt", encoding="utf-8") as f:
-                f.write(contenido)
-            os.replace(tmp, path)
-            print("  [OK] Parche Storage aplicado (respaldo: %s)." % respaldo)
-    except Exception as e:
-        print("  [!] No se pudo parchear %s: %s" % (path, e))
-PY
-    if ! PATCH_SALIDA=$(python3 "$PATCH_PY" 2>&1); then
-        rm -f "$PATCH_PY"
-        advertir "Falló el parche de Cockpit Storage."
-        return 0
-    fi
-    rm -f "$PATCH_PY"
-    echo "$PATCH_SALIDA"
-    log "$PATCH_SALIDA"
-    if echo "$PATCH_SALIDA" | grep -q "omitido"; then
-        advertir "El parche de Cockpit Storage se omitió (patrones no encontrados)."
-    fi
-}
-
-# Permite restaurar los parches de Cockpit y salir sin ejecutar el despliegue.
-for _arg in "$@"; do
-    if [ "$_arg" == "--restore-patches" ]; then
-        restaurar_parches_cockpit
-        exit 0
-    fi
-done
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=src/lib/colors.sh
@@ -175,19 +95,11 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
 fi
 if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
-    cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
+    nginx-light php-fpm php-cli \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
     exit 1
-fi
-
-# Comprobación de versión de Cockpit para seguridad conocida (H-02)
-COCKPIT_VER=$(dpkg-query -W -f='${Version}' cockpit 2>/dev/null || echo "")
-if [ -n "$COCKPIT_VER" ]; then
-    if dpkg --compare-versions "$COCKPIT_VER" lt "337-1+deb13u2" 2>/dev/null; then
-        advertir "La versión de Cockpit instalada ($COCKPIT_VER) es inferior a 337-1+deb13u2. Se recomienda actualizar para corregir posibles vulnerabilidades."
-    fi
 fi
 
 auto_tune_hardware() {
@@ -503,97 +415,102 @@ CRON_SCRUB
     fi
 fi
 
-echo " [3/9] Instalando extensiones de Cockpit (File Sharing, Identities, Navigator)..."
-TMP_DIR=$(mktemp -d)
-cd "$TMP_DIR"
-
-install_deb_pkg() {
-    local url="$1"
-    local filename="$2"
-    local plugin_dir="$3"
-    local expected_sha="$4"
-    if [ -z "$expected_sha" ]; then
-        echo "  [!] Aviso: no se especificó checksum SHA256 para $filename. Se omite por seguridad."
-        return
-    fi
-    if wget -q --spider "$url" 2>/dev/null; then
-        wget -q "$url" -O "$filename"
-        if [ ! -s "$filename" ]; then
-            echo "  [!] Aviso: la descarga de $filename quedo vacia."
-            return
-        fi
-        local actual_sha
-        actual_sha=$(sha256sum "$filename" 2>/dev/null | awk '{print $1}')
-        if [ "$actual_sha" != "$expected_sha" ]; then
-            echo "  [!] Aviso: checksum SHA256 invalido para $filename. Se omite por seguridad."
-            return
-        fi
-        if ! dpkg-deb -I "$filename" >/dev/null 2>&1; then
-            echo "  [!] Aviso: el archivo descargado $filename no es un paquete Debian válido."
-            return
-        fi
-        local pkg_arch
-        pkg_arch=$(dpkg-deb -f "$filename" Architecture 2>/dev/null || echo "")
-        if [ "$pkg_arch" != "all" ] && [ "$pkg_arch" != "amd64" ]; then
-            echo "  [!] Aviso: arquitectura '$pkg_arch' de $filename incompatible con Debian 13."
-            return
-        fi
-        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ./"$filename" >/dev/null 2>&1; then
-            echo "  [!] Aviso: no se pudo instalar $filename (posibles dependencias incompatibles). Se omitira el modulo."
-        elif [ -n "$plugin_dir" ] && [ ! -d "$plugin_dir" ]; then
-            echo "  [!] Aviso: $filename se instalo pero no se detecto el directorio $plugin_dir."
-        fi
-    else
-        echo "  [!] Aviso: no se pudo descargar $filename desde GitHub."
-    fi
-}
-
-install_deb_pkg "https://github.com/45Drives/cockpit-file-sharing/releases/download/v4.6.1/cockpit-file-sharing_4.6.1-1trixie_all.deb" "cockpit-file-sharing.deb" "/usr/share/cockpit/file-sharing" "5e807f5c61a6c18a7f2095e2917ff501c2540e207a460b188765f517a6ecb5a0"
-
-install_deb_pkg "https://github.com/45Drives/cockpit-navigator/releases/download/v0.5.10/cockpit-navigator_0.5.10-1focal_all.deb" "cockpit-navigator.deb" "/usr/share/cockpit/navigator" "784b8b1d7e02224594d34e6d60945c72b54a557692a37fefbb0046146b74040e"
-
-cd /
-rm -rf "$TMP_DIR"
-
-# 1. Ocultar menú nativo redundante 'Accounts' de Cockpit en favor de 'Identities'
-if [ -f /usr/share/cockpit/users/manifest.json ]; then
-    cat << 'ACCOUNTS_EOF' > /usr/share/cockpit/users/manifest.json
-{
-    "version": 1.0
-}
-ACCOUNTS_EOF
+echo " [3/9] Configurando entorno web nativo (Nginx-light + PHP-FPM ondemand + MVC)..."
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WEB_SRC=""
+if [ -d "$REPO_ROOT/web" ]; then
+    WEB_SRC="$REPO_ROOT/web"
+elif [ -d "$(dirname "${BASH_SOURCE[0]}")/../web" ]; then
+    WEB_SRC="$(dirname "${BASH_SOURCE[0]}")/../web"
 fi
 
-# 2. Desinstalar Cockpit Identities para forzar el uso del asistente TUI (sudo nas)
-DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq cockpit-identities >/dev/null 2>&1 || true
-rm -rf /usr/share/cockpit/identities
+# 1. Configurar Pool de PHP-FPM bajo demanda (pm = ondemand, ~0 MB RAM en reposo)
+PHP_POOL_DIR=$(find /etc/php -maxdepth 3 -type d -name "pool.d" 2>/dev/null | tail -1)
+if [ -z "$PHP_POOL_DIR" ]; then
+    PHP_POOL_DIR="/etc/php/8.2/fpm/pool.d"
+fi
+mkdir -p "$PHP_POOL_DIR" /run/php
 
-# 3. Instalar Módulo Web Nativo de Backups (EAD) en Cockpit
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -d "$SRC_DIR/web/backups" ]; then
-    mkdir -p /usr/share/cockpit/backups
-    cp -rf "$SRC_DIR/web/backups/"* /usr/share/cockpit/backups/
-    # Copiar PatternFly CSS desde Navigator (mismo archivo que usan todos los plugins 45Drives)
-    if [ -f /usr/share/cockpit/navigator/cockpit.css.gz ]; then
-        cp -f /usr/share/cockpit/navigator/cockpit.css.gz /usr/share/cockpit/backups/
-    fi
-    chmod -R 755 /usr/share/cockpit/backups
+cat << 'PHP_POOL_EOF' > "$PHP_POOL_DIR/nas-web.conf"
+[nas-web]
+user = www-data
+group = www-data
+listen = /run/php/php-fpm-nas.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 10
+pm.process_idle_timeout = 10s
+pm.max_requests = 500
+PHP_POOL_EOF
+
+# 2. Desplegar aplicación web MVC en /var/www/nas-web
+mkdir -p /var/www/nas-web
+if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
+    cp -rf "$WEB_SRC/"* /var/www/nas-web/
+fi
+chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
+chmod -R 755 /var/www/nas-web 2>/dev/null || true
+
+# 3. Configurar Host Virtual de Nginx
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root /var/www/nas-web/public;
+    index index.php index.html;
+
+    client_max_body_size 64M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php-fpm-nas.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+NGINX_EOF
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
+
+# 4. Configurar sudoers para www-data con permisos acotados y seguros
+cat << 'SUDOERS_EOF' > /etc/sudoers.d/nas-web
+Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /bin/systemctl restart smbd, /bin/systemctl restart nmbd, /bin/systemctl restart wsdd2, /bin/systemctl restart nginx, /bin/systemctl status smbd, /bin/systemctl status nmbd, /bin/systemctl status wsdd2, /bin/systemctl status nginx, /bin/systemctl status cron, /sbin/reboot, /bin/systemctl reboot
+Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *
+Cmnd_Alias NAS_USERS = /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/usermod *, /usr/sbin/groupadd *, /usr/sbin/groupdel *, /usr/bin/gpasswd *, /usr/bin/passwd *, /usr/sbin/chpasswd
+Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
+Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, /bin/cp /tmp/nas_backup_* /etc/cron.d/*, /bin/rm -f /etc/cron.d/backup_*, /bin/rm -f /usr/local/bin/backup_*.sh, /bin/rm -f /etc/backup-credentials/*, /bin/cp /tmp/cred_* /etc/backup-credentials/*, /bin/cp /tmp/runner_* /usr/local/bin/backup_*.sh, /bin/cp /tmp/cron_* /etc/cron.d/backup_*, /bin/chmod * /etc/backup-credentials/*, /bin/chmod * /usr/local/bin/backup_*.sh, /bin/chmod * /etc/cron.d/backup_*, /bin/sh -c /usr/local/bin/backup_*.sh *
+Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /bin/mkdir -p /srv/nas/*, /bin/chmod * /srv/nas/*, /bin/chown * /srv/nas/*, /usr/bin/setfacl * /srv/nas/*
+
+www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF
+SUDOERS_EOF
+chmod 0440 /etc/sudoers.d/nas-web
+if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
+    rm -f /etc/sudoers.d/nas-web
 fi
 
-# 4. Ocultar disco del sistema operativo de la interfaz de Almacenamiento (Cockpit Storage / UDisks2)
+# 5. Ocultar disco del sistema operativo de la interfaz de Almacenamiento (UDisks2)
 ROOT_DEV_OS=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
 ROOT_DISK_OS=$(lsblk -no PKNAME "$ROOT_DEV_OS" 2>/dev/null || basename "$ROOT_DEV_OS")
 if [ -n "$ROOT_DISK_OS" ]; then
     cat << UDEV_EOF > /etc/udev/rules.d/80-udisks2-hide-os.rules
-# Ocultar disco del sistema operativo ($ROOT_DISK_OS) de la interfaz de Almacenamiento (UDisks2 / Cockpit Storage)
+# Ocultar disco del sistema operativo ($ROOT_DISK_OS) de la interfaz de Almacenamiento
 KERNEL=="${ROOT_DISK_OS}*", ENV{UDISKS_IGNORE}="1"
 UDEV_EOF
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
     systemctl restart udisks2 2>/dev/null || true
-
-    # Parche Cockpit Storage (Ocultar unidades con HintIgnore)
-    aplicar_parche_storage
 fi
 
 # Parche WSDD2
@@ -701,7 +618,7 @@ cat << SMBCONF > /etc/samba/smb.conf
    logging = file
 SMBCONF
 
-echo " [7/9] Aplicando parches de compatibilidad en español y límites de cuentas para Cockpit..."
+echo " [7/9] Ajustando límites de cuentas de usuario del sistema..."
 sed -i 's/^UID_MIN.*/UID_MIN\t\t\t 1000/' /etc/login.defs 2>/dev/null || true
 grep -q "^SYS_UID_MAX" /etc/login.defs || echo -e "SYS_UID_MAX\t\t 999" >> /etc/login.defs
 grep -q "^SYS_GID_MAX" /etc/login.defs || echo -e "SYS_GID_MAX\t\t 999" >> /etc/login.defs
@@ -711,42 +628,11 @@ chmod 700 /root/.ssh "/home/$ADMIN_USER/.ssh" /etc/skel/.ssh 2>/dev/null || true
 chmod 755 /nonexistent/.ssh 2>/dev/null || true
 touch /var/log/btmp && chmod 660 /var/log/btmp
 
-mkdir -p /usr/local/sbin /usr/local/bin
-
-cat << 'CHAGE_WRAP' > /usr/local/sbin/chage
-#!/bin/bash
-exec /usr/bin/env LC_ALL=C LANG=C /usr/bin/chage "$@"
-CHAGE_WRAP
-chmod 755 /usr/local/sbin/chage
-
-cat << 'PASSWD_WRAP' > /usr/local/sbin/passwd
-#!/bin/bash
-if [ "$1" = "-S" ]; then
-    exec /usr/bin/env LC_ALL=C LANG=C /usr/bin/passwd "$@"
-fi
-exec /usr/bin/passwd "$@"
-PASSWD_WRAP
-chmod 755 /usr/local/sbin/passwd
-
-cat << 'LASTB_WRAP' > /usr/local/bin/lastb
-#!/bin/bash
-if [ -f /var/log/btmp ] && [ -s /var/log/btmp ]; then
-    /usr/bin/last -f /var/log/btmp "$@" 2>/dev/null || echo "btmp begins $(date -Iseconds)"
-else
-    echo "btmp begins $(date -Iseconds)"
-fi
-LASTB_WRAP
-chmod 755 /usr/local/bin/lastb
-if command -v dpkg-divert &>/dev/null; then
-    dpkg-divert --add --rename --divert /usr/bin/lastb.distrib /usr/bin/lastb 2>/dev/null || true
-fi
-ln -sf /usr/local/bin/lastb /usr/bin/lastb 2>/dev/null || true
-
 cat << MOTD > /etc/motd
 
 ======================================================
   SERVIDOR EAD-COL ($SERVER_ROLE) - IP: $SERVER_IP
-  * Panel Web   : https://${SERVER_IP}:9090
+  * Panel Web   : http://${SERVER_IP}
   * Red Windows : \\${SERVER_IP} ($SMB_NETBIOS)
 ======================================================
 
@@ -759,14 +645,20 @@ if ! testparm -s >/dev/null 2>&1; then
     log "[ERROR] testparm detectó errores en /etc/samba/smb.conf."
     exit 1
 fi
+
+PHP_FPM_SVC=$(systemctl list-unit-files --type=service 'php*-fpm.service' 2>/dev/null | awk '/php.*-fpm/ {print $1; exit}')
+if [ -z "$PHP_FPM_SVC" ]; then
+    PHP_FPM_SVC="php8.2-fpm"
+fi
+
 systemctl daemon-reload
-if ! systemctl restart smbd nmbd wsdd2 cockpit.socket cockpit.service 2>/dev/null; then
-    if ! systemctl restart smbd nmbd wsdd2 cockpit.socket 2>/dev/null; then
-        advertir "No se pudieron reiniciar todos los servicios Samba/Cockpit."
+if ! systemctl restart smbd nmbd wsdd2 nginx "$PHP_FPM_SVC" 2>/dev/null; then
+    if ! systemctl restart smbd nmbd wsdd2 nginx 2>/dev/null; then
+        advertir "No se pudieron reiniciar todos los servicios Samba/Nginx."
     fi
 fi
-if ! systemctl enable smbd nmbd wsdd2 cockpit.socket 2>/dev/null; then
-    advertir "No se pudieron habilitar todos los servicios Samba/Cockpit."
+if ! systemctl enable smbd nmbd wsdd2 nginx "$PHP_FPM_SVC" 2>/dev/null; then
+    advertir "No se pudieron habilitar todos los servicios Samba/Nginx."
 fi
 if ! systemctl enable cron 2>/dev/null; then
     advertir "No se pudo habilitar el servicio cron."
@@ -775,7 +667,7 @@ if ! systemctl start cron 2>/dev/null; then
     advertir "No se pudo iniciar el servicio cron."
 fi
 
-for _svc in smbd nmbd wsdd2 cockpit.socket cron; do
+for _svc in smbd nmbd wsdd2 nginx cron; do
     if systemctl is-active "$_svc" &>/dev/null; then
         echo "  [OK]  $_svc activo"
     else
@@ -792,9 +684,9 @@ if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; the
     fi
     if [ -n "$LOCAL_SUBNET" ]; then
         LOCAL_SUBNET=$(python3 -c "import ipaddress; print(ipaddress.ip_network('$LOCAL_SUBNET', strict=False))" 2>/dev/null || echo "$LOCAL_SUBNET")
-        ufw allow from "$LOCAL_SUBNET" to any port 9090 proto tcp comment 'Cockpit Web Admin (Subred Local)' 2>/dev/null || ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
+        ufw allow from "$LOCAL_SUBNET" to any port 80 proto tcp comment 'NAS Web Admin (Subred Local)' 2>/dev/null || ufw allow 80/tcp comment 'NAS Web Admin' 2>/dev/null || true
     else
-        ufw allow 9090/tcp comment 'Cockpit Web Admin' 2>/dev/null || true
+        ufw allow 80/tcp comment 'NAS Web Admin' 2>/dev/null || true
     fi
     ufw allow 137,138/udp comment 'Samba NetBIOS' 2>/dev/null || true
     ufw allow 139,445/tcp comment 'Samba SMB' 2>/dev/null || true
@@ -817,6 +709,6 @@ echo "==========================================================================
 echo " Rol del Servidor: $SERVER_ROLE"
 echo " Almacenamiento  : /srv/nas ($TARGET_DISK)"
 echo " Administrador   : $ADMIN_USER (con permisos sudo y Samba)"
-echo " Panel Web       : https://${SERVER_IP}:9090"
+echo " Panel Web       : http://${SERVER_IP}"
 printf " Red Windows     : \\\\\\\\%s (o \\\\\\\\%s)\n" "${SERVER_IP}" "$SMB_NETBIOS"
 echo "=============================================================================="
