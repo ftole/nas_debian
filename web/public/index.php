@@ -27,12 +27,14 @@ if (file_exists($composerAutoload)) {
     });
 }
 
+use App\Controllers\AuthController;
 use App\Controllers\BackupController;
 use App\Controllers\DashboardController;
 use App\Controllers\SambaController;
 use App\Controllers\StorageController;
 use App\Controllers\SystemController;
 use App\Controllers\UserController;
+use App\Core\AuthMiddleware;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Router;
@@ -53,11 +55,35 @@ set_exception_handler(function (\Throwable $e): void {
 $request = new Request();
 $router = new Router();
 
-// Rutas de Vistas
+// Middleware de autenticación y protección de sesiones
+AuthMiddleware::check($request);
+
+// Rutas de Autenticación (Login, Logout, Sesión)
+$router->get('/login', [AuthController::class, 'showLogin']);
+$router->post('/login', [AuthController::class, 'login']);
+$router->post('/api/auth/login', [AuthController::class, 'login']);
+$router->get('/logout', [AuthController::class, 'logout']);
+$router->post('/api/auth/logout', [AuthController::class, 'logout']);
+$router->get('/api/auth/me', [AuthController::class, 'me']);
+
+// Rutas de Vistas (Directas y amigables)
 $router->get('/', [DashboardController::class, 'index']);
+
+$modules = [
+    'dashboard', 'logs', 'storage', 'networking', 'services', 'terminal',
+    'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
+];
+foreach ($modules as $mod) {
+    $router->get('/' . $mod, function (Request $req) use ($mod): void {
+        (new DashboardController())->index($req, ['view' => $mod]);
+    });
+}
 
 // Rutas API: Métricas y Dashboard
 $router->get('/api/metrics', [DashboardController::class, 'metrics']);
+
+// Rutas API: Diagnóstico Integral del Sistema
+$router->get('/api/diagnostics', [SystemController::class, 'diagnostics']);
 
 // Rutas API: Recursos Compartidos (Samba)
 $router->get('/api/shares', [SambaController::class, 'list']);
