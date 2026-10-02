@@ -25,6 +25,8 @@ $diskTotal = (float) ($storage['total_gb'] ?? 0);
 $diskUsed = (float) ($storage['used_gb'] ?? 0);
 $diskPct = (float) ($storage['usage_percent'] ?? 0);
 $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), ENT_QUOTES, 'UTF-8');
+$activeView = htmlspecialchars((string) ($activeView ?? 'dashboard'), ENT_QUOTES, 'UTF-8');
+$sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? 'sistemas'), ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
 <html lang="es" data-theme="dark">
@@ -131,10 +133,14 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       <button class="btn btn-secondary btn-sm" id="btn-theme-toggle" onclick="toggleTheme()" title="Alternar tema Claro / Oscuro">
         <svg class="icon icon-sm" id="theme-toggle-icon"><use href="#icon-sun"></use></svg>
       </button>
-      <div class="user-pill" title="Sesión administrativa activa">
+      <div class="user-pill" title="Sesión activa: <?= $sessionUser ?>">
         <span class="status-dot status-ok"></span>
-        <span class="user-name">administrador</span>
+        <span class="user-name"><?= $sessionUser ?></span>
       </div>
+      <a href="/logout" class="btn btn-secondary btn-sm" id="btn-logout" title="Cerrar sesión segura">
+        <svg class="icon"><use href="#icon-power"></use></svg>
+        <span class="btn-text-responsive">Cerrar sesión</span>
+      </a>
     </div>
   </header>
 
@@ -149,7 +155,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
 
         <div class="nav-section-title">SISTEMA</div>
 
-        <div class="nav-item active" data-view="dashboard">
+        <div class="nav-item <?= $activeView === 'dashboard' ? 'active' : '' ?>" data-view="dashboard">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-dashboard"></use></svg>
             <span>Vista general</span>
@@ -157,7 +163,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge">OK</span>
         </div>
 
-        <div class="nav-item" data-view="logs">
+        <div class="nav-item <?= $activeView === 'logs' ? 'active' : '' ?>" data-view="logs">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-file"></use></svg>
             <span>Registros (Logs)</span>
@@ -165,7 +171,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge" id="badge-logs">Live</span>
         </div>
 
-        <div class="nav-item" data-view="storage">
+        <div class="nav-item <?= $activeView === 'storage' ? 'active' : '' ?>" data-view="storage">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-hard-drive"></use></svg>
             <span>Almacenamiento</span>
@@ -173,7 +179,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge" id="badge-storage"><?= round($diskTotal / 1024, 1) ?> TB</span>
         </div>
 
-        <div class="nav-item" data-view="networking">
+        <div class="nav-item <?= $activeView === 'networking' ? 'active' : '' ?>" data-view="networking">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-network"></use></svg>
             <span>Redes</span>
@@ -181,7 +187,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge">1 Gbps</span>
         </div>
 
-        <div class="nav-item" data-view="services">
+        <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-services"></use></svg>
             <span>Servicios</span>
@@ -189,7 +195,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge" id="badge-services">OK</span>
         </div>
 
-        <div class="nav-item" data-view="terminal">
+        <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
             <span>Terminal</span>
@@ -199,7 +205,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
 
         <div class="nav-section-title">DATOS Y COMPARTICIÓN</div>
 
-        <div class="nav-item" data-view="shares">
+        <div class="nav-item <?= $activeView === 'shares' ? 'active' : '' ?>" data-view="shares">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-folder"></use></svg>
             <span>Redes compartidas</span>
@@ -207,7 +213,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge" id="badge-shares">...</span>
         </div>
 
-        <div class="nav-item" data-view="backups">
+        <div class="nav-item <?= $activeView === 'backups' ? 'active' : '' ?>" data-view="backups">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-shield"></use></svg>
             <span>Respaldos</span>
@@ -215,7 +221,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge" id="badge-backups">...</span>
         </div>
 
-        <div class="nav-item" data-view="users">
+        <div class="nav-item <?= $activeView === 'users' ? 'active' : '' ?>" data-view="users">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-users"></use></svg>
             <span>Usuarios y grupos</span>
@@ -225,7 +231,15 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
 
         <div class="nav-section-title">HERRAMIENTAS</div>
 
-        <div class="nav-item" data-view="updates">
+        <div class="nav-item <?= $activeView === 'diagnostics' ? 'active' : '' ?>" data-view="diagnostics">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-wrench"></use></svg>
+            <span>Diagnóstico</span>
+          </div>
+          <span class="nav-badge" id="badge-diagnostics">Live</span>
+        </div>
+
+        <div class="nav-item <?= $activeView === 'updates' ? 'active' : '' ?>" data-view="updates">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-download"></use></svg>
             <span>Actualizaciones</span>
@@ -233,7 +247,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge badge-ok">Al día</span>
         </div>
 
-        <div class="nav-item" data-view="applications">
+        <div class="nav-item <?= $activeView === 'applications' ? 'active' : '' ?>" data-view="applications">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-apps"></use></svg>
             <span>Componentes</span>
@@ -241,7 +255,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <span class="nav-badge">Nativo</span>
         </div>
 
-        <div class="nav-item" data-view="domain">
+        <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-domain"></use></svg>
             <span>Dominio AD</span>
@@ -271,7 +285,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
     <main class="main-content">
 
       <!-- 1. VISTA GENERAL (DASHBOARD) -->
-      <section id="view-dashboard" class="view-section active">
+      <section id="view-dashboard" class="view-section <?= $activeView === 'dashboard' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-dashboard"></use></svg> Vista general del servidor</h2>
@@ -401,7 +415,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 2. REGISTROS (LOGS) -->
-      <section id="view-logs" class="view-section">
+      <section id="view-logs" class="view-section <?= $activeView === 'logs' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-file"></use></svg> Registros del sistema (journalctl)</h2>
@@ -433,7 +447,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 3. ALMACENAMIENTO (STORAGE) -->
-      <section id="view-storage" class="view-section">
+      <section id="view-storage" class="view-section <?= $activeView === 'storage' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Almacenamiento y discos físicos</h2>
@@ -474,7 +488,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 4. REDES (NETWORKING) -->
-      <section id="view-networking" class="view-section">
+      <section id="view-networking" class="view-section <?= $activeView === 'networking' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-network"></use></svg> Configuración y visibilidad de red</h2>
@@ -509,7 +523,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 5. SERVICIOS (SERVICES) -->
-      <section id="view-services" class="view-section">
+      <section id="view-services" class="view-section <?= $activeView === 'services' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Demonios y servicios del sistema</h2>
@@ -537,7 +551,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 6. TERMINAL -->
-      <section id="view-terminal" class="view-section">
+      <section id="view-terminal" class="view-section <?= $activeView === 'terminal' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Consola de terminal web</h2>
@@ -561,7 +575,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 7. REDES COMPARTIDAS (SHARES) -->
-      <section id="view-shares" class="view-section">
+      <section id="view-shares" class="view-section <?= $activeView === 'shares' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Carpetas y recursos compartidos (Samba)</h2>
@@ -596,7 +610,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 8. CENTRAL DE RESPALDOS (BACKUPS) -->
-      <section id="view-backups" class="view-section">
+      <section id="view-backups" class="view-section <?= $activeView === 'backups' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Central de copias de seguridad</h2>
@@ -632,7 +646,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 9. USUARIOS Y GRUPOS (USERS) -->
-      <section id="view-users" class="view-section">
+      <section id="view-users" class="view-section <?= $activeView === 'users' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Usuarios y grupos departamentales</h2>
@@ -697,7 +711,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 10. ACTUALIZACIONES (UPDATES) -->
-      <section id="view-updates" class="view-section">
+      <section id="view-updates" class="view-section <?= $activeView === 'updates' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-download"></use></svg> Actualizaciones de software</h2>
@@ -713,7 +727,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 11. COMPONENTES (APPLICATIONS) -->
-      <section id="view-applications" class="view-section">
+      <section id="view-applications" class="view-section <?= $activeView === 'applications' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Módulos y componentes del servidor</h2>
@@ -742,7 +756,7 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
       </section>
 
       <!-- 12. DOMINIO AD (DOMAIN) -->
-      <section id="view-domain" class="view-section">
+      <section id="view-domain" class="view-section <?= $activeView === 'domain' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-domain"></use></svg> Integración con Active Directory</h2>
@@ -754,6 +768,65 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
           <div class="panel-card-body">
             <p>El servidor opera actualmente en modo <strong>Servidor Autónomo (Standalone)</strong> en el grupo de trabajo <strong>TEAM-JOFRATO</strong>.</p>
             <p>Para unir este servidor a un controlador de dominio Active Directory, puedes utilizar la herramienta interactiva por consola: <code>sudo nas</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 13. DIAGNÓSTICO EN VIVO (DIAGNOSTICS) -->
+      <section id="view-diagnostics" class="view-section <?= $activeView === 'diagnostics' ? 'active' : '' ?>">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-wrench"></use></svg> Diagnóstico y salud integral del sistema</h2>
+            <p>Auditoría en tiempo real de demonios, almacenamiento, configuración Samba y tareas programadas</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="loadDiagnostics()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Ejecutar diagnóstico completo
+            </button>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Estado General</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-check-circle"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-overall-val"><span class="badge badge-ok">OK</span></div>
+            <div class="kpi-sub">
+              <span id="diag-overall-sub">Subsistemas operativos</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Demonios Activos</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-services"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-services-val">... / ...</div>
+            <div class="kpi-sub">
+              <span>Servicios clave en ejecución</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Configuración Samba</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-folder"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-samba-val"><span class="badge badge-ok">Válida</span></div>
+            <div class="kpi-sub">
+              <span>Sintaxis testparm sin errores</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card" style="margin-top:20px;">
+          <div class="panel-card-head">
+            <h3>Resultado de la última comprobación</h3>
+          </div>
+          <div class="panel-card-body" id="diagnostics-summary-container">
+            <p>Cargando diagnóstico en vivo del servidor...</p>
           </div>
         </div>
       </section>
@@ -975,6 +1048,9 @@ $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), EN
   <!-- Contenedor de Alertas Toast -->
   <div id="toast-container" style="position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
 
+  <script>
+    window.SERVER_ACTIVE_VIEW = "<?= $activeView ?>";
+  </script>
   <script src="/js/app.js"></script>
 </body>
 </html>
