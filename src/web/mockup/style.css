@@ -1249,3 +1249,38 @@ input:checked + .toggle-slider:before {
     grid-column: span 1;
   }
 }
+
+/* ==============================================================================
+ * Animaciones y Elementos Dinámicos
+ * ============================================================================== */
+.spin {
+  animation: spin 0.75s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.member-check-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+.member-check-item:hover {
+  background-color: var(--bg-surface);
+}
+.member-check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 13px;
+}
+
