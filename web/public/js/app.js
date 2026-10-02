@@ -64,8 +64,21 @@ function toggleTheme() {
 // ==============================================================================
 // 2. Navegación entre Vistas
 // ==============================================================================
-function switchView(viewName) {
+const VALID_VIEWS = [
+  'dashboard', 'logs', 'storage', 'networking', 'services', 'terminal',
+  'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
+];
+
+function switchView(viewName, updateHash = true) {
+  if (!VALID_VIEWS.includes(viewName)) {
+    viewName = 'dashboard';
+  }
+
   AppState.activeView = viewName;
+
+  if (updateHash && window.location.hash !== '#' + viewName) {
+    window.location.hash = '#' + viewName;
+  }
 
   // Actualizar sidebar nav
   document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
@@ -116,8 +129,23 @@ function switchView(viewName) {
     case 'logs':
       loadLogs();
       break;
+    case 'networking':
+      loadNetworking();
+      break;
+    case 'terminal':
+      loadTerminal();
+      break;
+    case 'diagnostics':
+      loadDiagnostics();
+      break;
     case 'updates':
       loadUpdates();
+      break;
+    case 'applications':
+      loadApplications();
+      break;
+    case 'domain':
+      loadDomain();
       break;
   }
 }
@@ -136,13 +164,23 @@ async function apiFetch(endpoint, options = {}) {
       },
     });
 
+    if (res.status === 401) {
+      showToast('Sesión no autorizada o expirada. Redirigiendo...', 'warning');
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 800);
+      throw new Error('Sesión expirada.');
+    }
+
     const data = await res.json();
     if (!res.ok || data.success === false) {
       throw new Error(data.error || data.message || `Error ${res.status}`);
     }
     return data;
   } catch (err) {
-    showToast(err.message, 'error');
+    if (err.message !== 'Sesión expirada.') {
+      showToast(err.message, 'error');
+    }
     throw err;
   }
 }
@@ -878,9 +916,113 @@ function escapeHtml(str) {
 }
 
 // ==============================================================================
-// 14. Inicialización al Cargar el DOM
+// 14. Módulos Adicionales: Redes, Terminal, Aplicaciones, Dominio y Diagnósticos
 // ==============================================================================
-document.addEventListener('DOMContentLoaded', () => {
+async function loadNetworking() {
+  try {
+    const res = await apiFetch('/api/metrics');
+    const d = res.data;
+    if (d && d.system) {
+      const hn = document.getElementById('masthead-hostname');
+      if (hn && d.system.hostname) hn.textContent = d.system.hostname;
+    }
+  } catch (e) {
+    // Manejado por apiFetch
+  }
+}
+
+function loadTerminal() {
+  const input = document.getElementById('terminal-input');
+  if (input) {
+    setTimeout(() => input.focus(), 80);
+  }
+}
+
+function loadApplications() {
+  // Vista informativa de tecnologías y componentes integrados
+}
+
+function loadDomain() {
+  // Vista informativa de configuración de Grupo de Trabajo / Directorio Activo
+}
+
+async function loadDiagnostics() {
+  const overallVal = document.getElementById('diag-overall-val');
+  const overallSub = document.getElementById('diag-overall-sub');
+  const servicesVal = document.getElementById('diag-services-val');
+  const sambaVal = document.getElementById('diag-samba-val');
+  const container = document.getElementById('diagnostics-summary-container');
+
+  if (container) {
+    container.innerHTML = '<p>Ejecutando auditoría y pruebas de salud del servidor...</p>';
+  }
+
+  try {
+    const res = await apiFetch('/api/diagnostics');
+    const d = res.data;
+
+    if (overallVal) {
+      if (d.overall_status === 'OK') {
+        overallVal.innerHTML = '<span class="badge badge-ok">Saludable (OK)</span>';
+      } else {
+        overallVal.innerHTML = '<span class="badge badge-warning">Atención requerida</span>';
+      }
+    }
+
+    if (overallSub) {
+      overallSub.textContent = `Host: ${d.hostname} | Uptime: ${d.uptime}`;
+    }
+
+    if (servicesVal) {
+      servicesVal.textContent = `${d.services_active} / ${d.services_total} Activos`;
+    }
+
+    if (sambaVal) {
+      sambaVal.innerHTML = d.testparm_ok
+        ? '<span class="badge badge-ok">Sintaxis Válida</span>'
+        : '<span class="badge badge-danger">Error de Configuración</span>';
+    }
+
+    if (container) {
+      const servicesList = Object.entries(d.services || {}).map(([svc, item]) => {
+        const isOk = item.active;
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-color); font-size:13px;">
+            <span><code>${escapeHtml(svc)}</code> &bull; ${escapeHtml(item.name || '')}</span>
+            ${isOk ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div>
+            <h4 style="margin:0 0 8px; font-size:14px;">Estado de Demonios Clave</h4>
+            <div style="background:var(--bg-body); border-radius:4px; padding:10px;">
+              ${servicesList}
+            </div>
+          </div>
+          <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:13px;">
+            <div><strong>Almacenamiento (/srv/nas):</strong> ${d.storage.used_gb} GB / ${d.storage.total_gb} GB (${d.storage.usage_percent}%)</div>
+            <div><strong>Recursos Samba:</strong> ${d.shares_count} activos</div>
+            <div><strong>Tareas de Respaldo:</strong> ${d.backups_count} programadas</div>
+          </div>
+        </div>
+      `;
+    }
+
+    showToast('Diagnóstico del sistema completado con éxito.', 'success');
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `<p style="color:var(--accent-danger);">Error al ejecutar diagnóstico: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+// ==============================================================================
+// 15. Inicialización Robusta al Cargar el DOM
+// ==============================================================================
+function initApp() {
   // Configurar listeners de navegación sidebar
   document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -904,10 +1046,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Listener de cambios en el hash de la URL (botones Atrás/Adelante y navegación)
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.slice(1);
+    if (hash && VALID_VIEWS.includes(hash)) {
+      switchView(hash, false);
+    }
+  });
+
   // Inicializar componentes interactivos
   initTerminal();
   populateShareGroupOptions();
-  refreshDashboardMetrics();
+
+  // Determinar vista inicial
+  const hash = window.location.hash ? window.location.hash.slice(1) : '';
+  const initialView = (hash && VALID_VIEWS.includes(hash))
+    ? hash
+    : (window.SERVER_ACTIVE_VIEW && VALID_VIEWS.includes(window.SERVER_ACTIVE_VIEW)
+        ? window.SERVER_ACTIVE_VIEW
+        : 'dashboard');
+
+  switchView(initialView, false);
 
   // Polling ligero de métricas cada 30 segundos
   AppState.refreshInterval = setInterval(() => {
@@ -915,4 +1074,10 @@ document.addEventListener('DOMContentLoaded', () => {
       refreshDashboardMetrics();
     }
   }, 30000);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
