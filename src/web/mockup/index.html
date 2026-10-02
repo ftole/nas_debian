@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>NAS Debian • Panel Web TEAM-JOFRATO</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ==============================================================================
+       Definición de Iconos SVG Inline (100% Offline • Cero dependencias externas)
+       ============================================================================== -->
+  <svg style="display:none;">
+    <defs>
+      <g id="icon-server"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></g>
+      <g id="icon-hard-drive"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></g>
+      <g id="icon-cpu"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></g>
+      <g id="icon-dashboard"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></g>
+      <g id="icon-folder"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></g>
+      <g id="icon-users"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></g>
+      <g id="icon-shield"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></g>
+      <g id="icon-wrench"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></g>
+      <g id="icon-sun"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></g>
+      <g id="icon-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></g>
+      <g id="icon-search"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></g>
+      <g id="icon-plus"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></g>
+      <g id="icon-trash"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></g>
+      <g id="icon-check-circle"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></g>
+      <g id="icon-alert-triangle"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></g>
+      <g id="icon-info"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></g>
+      <g id="icon-x-circle"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></g>
+      <g id="icon-lock"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>
+      <g id="icon-unlock"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></g>
+      <g id="icon-key"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5-3 3L8 9l-3 3 1.5 1.5L2 18v4h4l4.5-4.5 1.5 1.5 3-3-1.5-1.5 3.5-3.5 1.5 1.5 2-2z"/></g>
+      <g id="icon-clock"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></g>
+      <g id="icon-terminal"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></g>
+      <g id="icon-play"><polygon points="5 3 19 12 5 21 5 3"/></g>
+      <g id="icon-refresh"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></g>
+      <g id="icon-eye"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g>
+      <g id="icon-eye-off"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></g>
+      <g id="icon-menu"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></g>
+      <g id="icon-file"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></g>
+    </defs>
+  </svg>
+
+  <!-- Contenedor Principal de la App -->
+  <div class="app-layout">
+
+    <!-- ==============================================================================
+         BARRA LATERAL (SIDEBAR)
+         ============================================================================== -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">
+          <svg class="icon icon-lg"><use href="#icon-server"></use></svg>
+        </div>
+        <div class="brand-text">
+          <h1>NAS Debian</h1>
+          <p>TEAM-JOFRATO</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-title">Navegación Principal</div>
+
+        <div class="nav-item active" data-view="dashboard">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-dashboard"></use></svg>
+            <span>Dashboard</span>
+          </div>
+          <span class="nav-badge">OK</span>
+        </div>
+
+        <div class="nav-item" data-view="shares">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-folder"></use></svg>
+            <span>Recursos Samba</span>
+          </div>
+          <span class="nav-badge">5</span>
+        </div>
+
+        <div class="nav-item" data-view="users">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-users"></use></svg>
+            <span>Usuarios y Grupos</span>
+          </div>
+          <span class="nav-badge">6</span>
+        </div>
+
+        <div class="nav-item" data-view="backups">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-shield"></use></svg>
+            <span>Central Respaldos</span>
+          </div>
+          <span class="nav-badge">3</span>
+        </div>
+
+        <div class="nav-item" data-view="diagnostics">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-wrench"></use></svg>
+            <span>Mantenimiento</span>
+          </div>
+          <span class="nav-badge">Sys</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="server-quick-pill">
+          <span><span class="status-dot status-pulse"></span> SRV-NAS (10.10.1.2)</span>
+          <span class="badge badge-ok" style="font-size:10px;">Debian 13</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="toggleTheme()">
+          <svg class="icon icon-sm" id="theme-toggle-icon"><use href="#icon-sun"></use></svg>
+          <span id="theme-toggle-text">Modo Claro</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ==============================================================================
+         ÁREA DE CONTENIDO PRINCIPAL
+         ============================================================================== -->
+    <div class="main-wrapper">
+
+      <!-- Header Superior -->
+      <header class="top-header">
+        <div class="header-left">
+          <button class="mobile-toggle" id="mobile-menu-btn">
+            <svg class="icon"><use href="#icon-menu"></use></svg>
+          </button>
+          <div class="breadcrumbs">
+            <span>SRV-NAS</span>
+            <span>/</span>
+            <span class="crumb-current" id="current-view-title">Dashboard General</span>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <div class="header-meta-pill">
+            <span>Rol:</span> <strong>ARCHIVOS & BACKUP</strong>
+          </div>
+          <div class="header-meta-pill">
+            <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="showToast('Actualizando métricas del servidor...', 'info')">
+            <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+          </button>
+        </div>
+      </header>
+
+      <!-- Contenedor Dinámico de Vistas -->
+      <main class="page-container">
+
+        <!-- ==============================================================================
+             VISTA 1: DASHBOARD GENERAL
+             ============================================================================== -->
+        <section id="view-dashboard" class="view-section active">
+          <div class="page-head">
+            <div>
+              <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-dashboard"></use></svg> Estado General del Sistema</h2>
+              <p>Debian 13 (Trixie) x86_64 • Kernel 6.12.9-amd64 • Uptime: 14 días, 6 horas</p>
+            </div>
+            <div class="page-head-actions">
+              <button class="btn btn-primary" onclick="openModal('modal-new-share')">
+                <svg class="icon"><use href="#icon-plus"></use></svg> Nuevo Recurso
+              </button>
+              <button class="btn btn-secondary" onclick="openModal('modal-new-backup')">
+                <svg class="icon"><use href="#icon-shield"></use></svg> Nueva Tarea Backup
+              </button>
+            </div>
+          </div>
+
+          <!-- 4 Tarjetas Métricas KPI -->
+          <div class="card-grid-4">
+            
+            <!-- Tarjeta 1: Almacenamiento -->
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Almacenamiento (/srv/nas)</span>
+                <div class="kpi-icon-wrap kpi-icon-blue"><svg class="icon"><use href="#icon-hard-drive"></use></svg></div>
+              </div>
+              <div class="kpi-val">1.4 TB <small style="font-size:14px; font-weight:600; color:var(--text-secondary);">/ 4.0 TB</small></div>
+              <div class="progress-bar-wrap">
+                <div class="progress-bar-segmented">
+                  <div class="progress-seg" style="width: 22%; background: var(--accent-primary);" title="Archivos Compartidos (850 GB)"></div>
+                  <div class="progress-seg" style="width: 13%; background: var(--accent-purple);" title="Snapshots Respaldos (550 GB)"></div>
+                </div>
+              </div>
+              <div class="kpi-sub">
+                <span class="status-dot"></span>
+                <span>2.6 TB libres • <b>BTRFS</b> (zstd:3)</span>
+              </div>
+            </div>
+
+            <!-- Tarjeta 2: Memoria RAM & Sysctl -->
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Memoria RAM & Caché VFS</span>
+                <div class="kpi-icon-wrap kpi-icon-purple"><svg class="icon"><use href="#icon-cpu"></use></svg></div>
+              </div>
+              <div class="kpi-val">3.8 GB <small style="font-size:14px; font-weight:600; color:var(--text-secondary);">/ 16.0 GB</small></div>
+              <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" style="width: 24%; background: var(--accent-purple);"></div>
+              </div>
+              <div class="kpi-sub">
+                <span>Caché VFS: 6.2 GB • <code>dirty_bytes=256MB</code></span>
+              </div>
+            </div>
+
+            <!-- Tarjeta 3: Red y Samba -->
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Servicios de Red Samba</span>
+                <div class="kpi-icon-wrap kpi-icon-green"><svg class="icon"><use href="#icon-server"></use></svg></div>
+              </div>
+              <div class="kpi-val" style="color:var(--accent-success);">smbd: Activo</div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                <span class="badge badge-ok">wsdd2 OK</span>
+                <span class="badge badge-ok">cockpit OK</span>
+                <span class="badge badge-ok">cron OK</span>
+              </div>
+              <div class="kpi-sub">
+                <span>28 conexiones concurrentes activas</span>
+              </div>
+            </div>
+
+            <!-- Tarjeta 4: Disco & Resiliencia -->
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Rendimiento I/O & Protección</span>
+                <div class="kpi-icon-wrap kpi-icon-yellow"><svg class="icon"><use href="#icon-wrench"></use></svg></div>
+              </div>
+              <div class="kpi-val">Seagate 4TB</div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
+                <span class="tag-pill">readahead 4096K</span>
+                <span class="tag-pill">commit=2</span>
+              </div>
+              <div class="kpi-sub">
+                <span style="color:var(--accent-success);">✔ Resiliencia anti-apagones</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Banner Informativo Preventivo -->
+          <div class="alert-box alert-box-success">
+            <svg class="icon icon-lg"><use href="#icon-check-circle"></use></svg>
+            <div>
+              <strong>Estado Operativo Óptimo:</strong> Todos los subsistemas de archivos y respaldos funcionan con normalidad. 
+              El uso de disco está en 35% (muy por debajo del umbral preventivo del 85%).
+              Aceleración para entornos corporativos de Office y Excel activa con los módulos <code>acl_xattr</code> y <code>streams_xattr</code>.
+            </div>
+          </div>
+
+          <!-- Grilla de Acciones Rápidas y Actividad Reciente -->
+          <div class="card-grid-2">
+            
+            <!-- Acciones Rápidas -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon"><use href="#icon-wrench"></use></svg> Operaciones Rápidas del Servidor</h3>
+              </div>
+              <div class="panel-card-body" style="display:flex; flex-direction:column; gap:12px;">
+                <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('shares'); openModal('modal-new-share');">
+                  <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg>
+                  <span>Crear nueva carpeta compartida en Samba con ACLs granulares</span>
+                </button>
+                <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('users'); openModal('modal-new-user');">
+                  <svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg>
+                  <span>Dar de alta un usuario y sincronizar credenciales smbpasswd</span>
+                </button>
+                <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('backups'); runBackupTask('bkp_win_facturacion');">
+                  <svg class="icon" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
+                  <span>Disparar respaldo manual de servidor Windows (Facturación)</span>
+                </button>
+                <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('diagnostics'); runBtrfsScrubSimulation();">
+                  <svg class="icon" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg>
+                  <span>Iniciar auditoría criptográfica BTRFS Scrub contra Bit Rot</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Feed de Actividad Reciente -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon"><use href="#icon-clock"></use></svg> Registro de Actividad en Vivo</h3>
+                <span class="badge badge-ok">En vivo</span>
+              </div>
+              <div class="panel-card-body" style="display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
+                  <span class="badge badge-ok" style="font-size:10px;">Éxito</span>
+                  <div>
+                    <div>Snapshot completado: <b>bkp_win_facturacion</b></div>
+                    <div style="color:var(--text-muted); font-size:11px;">Deduplicación 88.6% • 0 bytes adicionales en inodos compartidos</div>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
+                  <span class="badge badge-blue" style="font-size:10px;">Samba</span>
+                  <div>
+                    <div>Sesión SMB iniciada por <b>carlos_m</b> desde 10.10.1.34</div>
+                    <div style="color:var(--text-muted); font-size:11px;">Acceso concedido a recurso [CAMPANA_UNO_OPERACIONES]</div>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px; border-bottom:1px solid var(--border-light); padding-bottom:8px;">
+                  <span class="badge badge-purple" style="font-size:10px;">WSDD2</span>
+                  <div>
+                    <div>Descubrimiento de red WSD respondido para host <b>SRV-NAS</b></div>
+                    <div style="color:var(--text-muted); font-size:11px;">Visible en explorador de Windows 10/11 sin SMBv1 ni NetBIOS obsoleto</div>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:flex-start; gap:10px; font-size:12.5px;">
+                  <span class="badge badge-ok" style="font-size:10px;">Scrub</span>
+                  <div>
+                    <div>Auditoría mensual BTRFS: 1,420,892 bloques validados</div>
+                    <div style="color:var(--text-muted); font-size:11px;">0 errores de corrupción silenciosa detectados en /srv/nas</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ==============================================================================
+             VISTA 2: RECURSOS COMPARTIDOS (SAMBA SHARES)
+             ============================================================================== -->
+        <section id="view-shares" class="view-section">
+          <div class="page-head">
+            <div>
+              <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Recursos Compartidos (Samba)</h2>
+              <p>Carpetas de red con soporte de módulos VFS (compatibilidad Excel +100 puestos) y esquemas POSIX</p>
+            </div>
+            <div class="page-head-actions">
+              <button class="btn btn-primary" onclick="openModal('modal-new-share')">
+                <svg class="icon"><use href="#icon-plus"></use></svg> Crear Nuevo Recurso
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de Filtros y Búsqueda -->
+          <div class="filter-toolbar">
+            <div class="filter-chips" id="shares-chips">
+              <button class="chip-btn active" onclick="filterShares('all', this)">Todos (5)</button>
+              <button class="chip-btn" onclick="filterShares('visible', this)">Visibles (3)</button>
+              <button class="chip-btn" onclick="filterShares('hidden', this)">Ocultos $ (2)</button>
+              <button class="chip-btn" onclick="filterShares('active', this)">Activos (5)</button>
+              <button class="chip-btn" onclick="filterShares('disabled', this)">Deshabilitados (0)</button>
+            </div>
+            <div class="search-box">
+              <svg class="icon"><use href="#icon-search"></use></svg>
+              <input type="text" id="shares-search-input" placeholder="Buscar recurso, grupo o ruta...">
+            </div>
+          </div>
+
+          <!-- Tabla de Recursos Compartidos -->
+          <div class="panel-card">
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Nombre de Recurso</th>
+                    <th>Visibilidad</th>
+                    <th>Esquema de Permisos</th>
+                    <th>Grupos Autorizados</th>
+                    <th>Ruta en Disco</th>
+                    <th>Estado</th>
+                    <th style="text-align:right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="shares-table-body">
+                  <!-- Inyectado dinámicamente con JavaScript -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Cuadro Explicativo de Esquemas de Seguridad -->
+          <div class="alert-box alert-box-info">
+            <svg class="icon icon-lg"><use href="#icon-info"></use></svg>
+            <div>
+              <strong>Esquemas de Permisos Soportados por el Asistente:</strong><br>
+              <b>Esquema 1:</b> Lectura y Escritura por Grupo (todos los grupos autorizados editan).<br>
+              <b>Esquema 2:</b> Solo Lectura General + Escritura Exclusiva (ACLs POSIX con <code>default ACL</code> inyectadas automáticamente).<br>
+              <b>Esquema 3:</b> Solo Lectura Estricta (ideal para auditoría y consulta histórica).<br>
+              <b>Esquema 4:</b> Acceso Público / Invitados (<code>guest ok = yes</code> sin solicitar contraseña).
+            </div>
+          </div>
+        </section>
+
+        <!-- ==============================================================================
+             VISTA 3: USUARIOS Y GRUPOS
+             ============================================================================== -->
+        <section id="view-users" class="view-section">
+          <div class="page-head">
+            <div>
+              <h2><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Gestión de Usuarios y Grupos</h2>
+              <p>Control de cuentas locales Debian 13 sincronizadas con la base de credenciales Samba (<code>smbpasswd</code>)</p>
+            </div>
+            <div class="page-head-actions">
+              <button class="btn btn-primary" onclick="openModal('modal-new-user')">
+                <svg class="icon"><use href="#icon-plus"></use></svg> Nuevo Usuario
+              </button>
+              <button class="btn btn-secondary" onclick="openModal('modal-new-group')">
+                <svg class="icon"><use href="#icon-plus"></use></svg> Nuevo Grupo (grp_*)
+              </button>
+            </div>
+          </div>
+
+          <!-- Sub-tabs para alternar entre Usuarios y Grupos -->
+          <div class="sub-tabs-bar">
+            <button class="sub-tab-btn active" id="subtab-users-btn" onclick="switchUserTab('users')">
+              <svg class="icon"><use href="#icon-users"></use></svg> Usuarios del Sistema y Samba (6)
+            </button>
+            <button class="sub-tab-btn" id="subtab-groups-btn" onclick="switchUserTab('groups')">
+              <svg class="icon"><use href="#icon-folder"></use></svg> Grupos de Seguridad `grp_*` (6)
+            </button>
+          </div>
+
+          <!-- Panel Sub-tab: Usuarios -->
+          <div id="panel-subtab-users">
+            <div class="filter-toolbar">
+              <div class="search-box" style="width:340px;">
+                <svg class="icon"><use href="#icon-search"></use></svg>
+                <input type="text" id="users-search-input" placeholder="Buscar por usuario, nombre o grupo...">
+              </div>
+            </div>
+
+            <div class="panel-card">
+              <div class="table-responsive">
+                <table class="nas-table">
+                  <thead>
+                    <tr>
+                      <th>Usuario (UID)</th>
+                      <th>Nombre Completo / Cargo</th>
+                      <th>Grupos Asignados</th>
+                      <th>Estado Samba</th>
+                      <th>Shell</th>
+                      <th style="text-align:right;">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-table-body">
+                    <!-- Inyectado dinámicamente con JavaScript -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel Sub-tab: Grupos -->
+          <div id="panel-subtab-groups" style="display:none;">
+            <div class="panel-card">
+              <div class="table-responsive">
+                <table class="nas-table">
+                  <thead>
+                    <tr>
+                      <th>Nombre del Grupo</th>
+                      <th>Nivel de Seguridad</th>
+                      <th>Miembros Asignados</th>
+                      <th>Carpetas Compartidas</th>
+                      <th style="text-align:right;">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="groups-table-body">
+                    <!-- Inyectado dinámicamente con JavaScript -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==============================================================================
+             VISTA 4: CENTRAL DE RESPALDOS MULTIPLATAFORMA
+             ============================================================================== -->
+        <section id="view-backups" class="view-section">
+          <div class="page-head">
+            <div>
+              <h2><svg class="icon" style="color:var(--accent-success);"><use href="#icon-shield"></use></svg> Central de Copias de Seguridad</h2>
+              <p>Motor de réplica multiplataforma (Windows CIFS 3.1.1 / Linux SSH) con deduplicación por Hardlinks (&gt;85% de ahorro)</p>
+            </div>
+            <div class="page-head-actions">
+              <button class="btn btn-primary" onclick="openModal('modal-new-backup')">
+                <svg class="icon"><use href="#icon-plus"></use></svg> Nueva Tarea de Respaldo
+              </button>
+            </div>
+          </div>
+
+          <!-- Métricas Resumen de Respaldos -->
+          <div class="card-grid-3">
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Snapshots Históricos Activos</span>
+                <div class="kpi-icon-wrap kpi-icon-green"><svg class="icon"><use href="#icon-clock"></use></svg></div>
+              </div>
+              <div class="kpi-val">38 Snapshots</div>
+              <div class="kpi-sub">Distribuidos en 3 servidores de origen</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Deduplicación por Hardlinks</span>
+                <div class="kpi-icon-wrap kpi-icon-purple"><svg class="icon"><use href="#icon-hard-drive"></use></svg></div>
+              </div>
+              <div class="kpi-val">86.4% <small style="font-size:13px; color:var(--text-secondary);">Ahorro Real</small></div>
+              <div class="kpi-sub">1.82 TB aparentes ocupan solo 248 GB en disco</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Resiliencia ante Apagones</span>
+                <div class="kpi-icon-wrap kpi-icon-blue"><svg class="icon"><use href="#icon-shield"></use></svg></div>
+              </div>
+              <div class="kpi-val" style="color:var(--accent-success);">Staging Atómico</div>
+              <div class="kpi-sub"><code>.inprogress_*</code> + trampas EXIT TERM INT</div>
+            </div>
+          </div>
+
+          <!-- Tabla de Tareas de Respaldo -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3><svg class="icon"><use href="#icon-server"></use></svg> Tareas de Réplica Programadas (cron.d)</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Identificador / Origen</th>
+                    <th>Protocolo</th>
+                    <th>Ruta de Origen</th>
+                    <th>Horario (Cron)</th>
+                    <th>Retención</th>
+                    <th>Snapshots</th>
+                    <th>Última Ejecución</th>
+                    <th style="text-align:right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="backup-tasks-table-body">
+                  <!-- Inyectado dinámicamente con JavaScript -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==============================================================================
+             VISTA 5: MANTENIMIENTO Y DIAGNÓSTICO
+             ============================================================================== -->
+        <section id="view-diagnostics" class="view-section">
+          <div class="page-head">
+            <div>
+              <h2><svg class="icon" style="color:var(--accent-warning);"><use href="#icon-wrench"></use></svg> Mantenimiento y Diagnóstico del Servidor</h2>
+              <p>Parches del kernel Debian 13, monitoreo preventivo, auditoría contra Bit Rot y pruebas de red en vivo</p>
+            </div>
+            <div class="page-head-actions">
+              <button class="btn btn-secondary" onclick="runLogrotateSimulation()">
+                <svg class="icon"><use href="#icon-refresh"></use></svg> Rotar Logs (logrotate -f)
+              </button>
+            </div>
+          </div>
+
+          <!-- Grid de Mantenimientos Periódicos -->
+          <div class="card-grid-3">
+            
+            <!-- Tarjeta 1: BTRFS Scrub -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon" style="color:var(--accent-success);"><use href="#icon-shield"></use></svg> BTRFS Scrub (Anti-Bit Rot)</h3>
+              </div>
+              <div class="panel-card-body">
+                <p style="font-size:12.5px; color:var(--text-secondary); margin-bottom:12px;">
+                  Auditoría criptográfica bloque a bloque en <code>/srv/nas</code>. Programado el día 1 de cada mes a las 02:00.
+                </p>
+                <div class="progress-bar-wrap">
+                  <div class="progress-bar-fill" id="scrub-progress-bar" style="width: 100%; background: var(--accent-success);"></div>
+                </div>
+                <div id="scrub-status-text" style="font-size:12px; color:var(--text-main); margin-bottom:14px;">
+                  ✔ Último scrub: 01 de Octubre a las 02:00. 1,420,892 bloques validados. 0 errores.
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-run-scrub" onclick="runBtrfsScrubSimulation()">
+                  <svg class="icon"><use href="#icon-play"></use></svg> Iniciar Scrub Manual Ahora
+                </button>
+              </div>
+            </div>
+
+            <!-- Tarjeta 2: TRIM SSD -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Descarte TRIM Flash (fstrim)</h3>
+              </div>
+              <div class="panel-card-body">
+                <p style="font-size:12.5px; color:var(--text-secondary); margin-bottom:12px;">
+                  Reciclaje periódico de sectores de memoria no referenciados para maximizar la vida útil y velocidad SSD.
+                </p>
+                <div id="trim-status-text" style="font-size:12px; color:var(--text-main); margin-bottom:16px;">
+                  ✔ Servicio <code>fstrim.timer</code> activo en systemd. Último descarte: 114.6 GiB liberados.
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-run-trim" onclick="runFstrimSimulation()">
+                  <svg class="icon"><use href="#icon-play"></use></svg> Ejecutar fstrim Manual
+                </button>
+              </div>
+            </div>
+
+            <!-- Tarjeta 3: Test de Conectividad en Vivo -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-terminal"></use></svg> Test de Red en Tiempo Real</h3>
+              </div>
+              <div class="panel-card-body">
+                <div class="form-group" style="margin-bottom:8px;">
+                  <label>Host / IP Remota:</label>
+                  <input type="text" class="form-control" id="test-conn-host" value="192.168.1.10">
+                </div>
+                <div class="form-group" style="margin-bottom:12px;">
+                  <label>Puerto / Protocolo:</label>
+                  <select class="form-control" id="test-conn-type">
+                    <option value="445">SMB / CIFS (Puerto 445)</option>
+                    <option value="22">SSH Túnel (Puerto 22)</option>
+                    <option value="5357">WSD Discovery (Puerto 5357)</option>
+                    <option value="ICMP">Ping ICMP</option>
+                  </select>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-test-conn" onclick="testConnectivitySimulation()">
+                  <svg class="icon"><use href="#icon-play"></use></svg> Probar Conexión
+                </button>
+                <div id="test-conn-result" style="margin-top:10px; font-size:12px;"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Parámetros del Kernel Sysctl & Udev -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3><svg class="icon"><use href="#icon-cpu"></use></svg> Inspección de Parámetros Kernel Debian 13 (/etc/sysctl.d/99-nas-tuning.conf)</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Directiva del Sistema</th>
+                    <th>Valor Aplicado</th>
+                    <th>Propósito Técnico</th>
+                    <th>Impacto en Producción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>vm.dirty_bytes</code></td>
+                    <td><strong style="color:var(--accent-success);">268,435,456 (256 MB)</strong></td>
+                    <td>Fuerza el vaciado a disco en bloques pequeños de 256MB</td>
+                    <td>Elimina congelamientos de I/O cuando clientes Windows saturan la red escribiendo archivos masivos.</td>
+                  </tr>
+                  <tr>
+                    <td><code>vm.dirty_background_bytes</code></td>
+                    <td><strong style="color:var(--accent-success);">67,108,864 (64 MB)</strong></td>
+                    <td>Despierta hilos pdflush en segundo plano tempranamente</td>
+                    <td>Mantiene el flujo de escritura constante y sin saturación súbita de RAM.</td>
+                  </tr>
+                  <tr>
+                    <td><code>fs.inotify.max_user_watches</code></td>
+                    <td><strong style="color:var(--accent-success);">524,288</strong></td>
+                    <td>Ampliación masiva de descriptores de monitoreo</td>
+                    <td>Permite a Samba y Cockpit observar directorios compartidos masivos sin agotar handles.</td>
+                  </tr>
+                  <tr>
+                    <td><code>net.ipv4.tcp_keepalive_time</code></td>
+                    <td><strong style="color:var(--accent-success);">120 segundos</strong></td>
+                    <td>Keepalive TCP acelerado (120s / 15s / 4 reintentos)</td>
+                    <td>Limpia sesiones SMB fantasma en 3 minutos si un equipo cliente se apaga o desconecta el cable.</td>
+                  </tr>
+                  <tr>
+                    <td><code>vm.vfs_cache_pressure</code></td>
+                    <td><strong style="color:var(--accent-success);">30</strong></td>
+                    <td>Priorización de retención de inodos y dentries en memoria</td>
+                    <td>Navegación instantánea en carpetas compartidas con más de 50,000 archivos.</td>
+                  </tr>
+                  <tr>
+                    <td><code>udev readahead</code></td>
+                    <td><strong style="color:var(--accent-success);">4096 KB (HDD) / 1024 KB (SSD)</strong></td>
+                    <td>Precarga de sectores secuenciales en hardware de almacenamiento</td>
+                    <td>Aumenta la tasa de transferencia sostenida y acelera las comparaciones diferenciales de rsync.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Visor de Logs del Servidor -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3><svg class="icon"><use href="#icon-terminal"></use></svg> Visor de Bitácoras del Sistema (/var/log/nas-backups.log & Samba)</h3>
+              <button class="btn btn-secondary btn-sm" onclick="showToast('Copiando log al portapapeles...', 'info')">
+                <svg class="icon"><use href="#icon-file"></use></svg> Copiar Log
+              </button>
+            </div>
+            <div class="panel-card-body" style="padding:0;">
+              <div class="live-terminal" id="system-logs-container">
+                <!-- Inyectado dinámicamente con JavaScript -->
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+      </main>
+    </div>
+
+  </div>
+
+  <!-- ==============================================================================
+       MODALES INTERACTIVOS
+       ============================================================================== -->
+
+  <!-- Modal 1: Crear Nuevo Recurso Compartido (Samba) -->
+  <div class="modal-overlay" id="modal-new-share">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Crear Nuevo Recurso Compartido (Samba)</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="form-new-share">
+        <div class="modal-body">
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Nombre del Recurso en Red Windows:</label>
+              <input type="text" class="form-control" id="new-share-name" placeholder="ej. VENTAS o DIRECCION" required>
+              <span class="form-hint">Se normaliza automáticamente sin espacios ni caracteres especiales.</span>
+            </div>
+
+            <div class="form-group">
+              <label>Visibilidad en Explorador de Windows:</label>
+              <div style="display:flex; gap:16px; margin-top:6px;">
+                <label style="display:flex; align-items:center; gap:6px; font-weight:normal; cursor:pointer;">
+                  <input type="radio" name="new-share-vis" id="new-share-vis-hidden" value="hidden" checked>
+                  <strong>Oculto ($) [Recomendado]</strong>
+                </label>
+                <label style="display:flex; align-items:center; gap:6px; font-weight:normal; cursor:pointer;">
+                  <input type="radio" name="new-share-vis" id="new-share-vis-visible" value="visible">
+                  <span>Visible en Red</span>
+                </label>
+              </div>
+              <span class="form-hint">Los recursos ocultos llevan el signo $ al final y no son visibles públicamente.</span>
+            </div>
+
+            <div class="form-group full-width">
+              <label>Ruta física en disco (/srv/nas):</label>
+              <input type="text" class="form-control" id="new-share-path" value="/srv/nas/VENTAS" required>
+              <span class="form-hint">Por seguridad el motor de despliegue exige que la ruta esté dentro de /srv/nas y sin enlaces simbólicos.</span>
+            </div>
+
+            <div class="form-group full-width">
+              <label>Descripción o Comentario:</label>
+              <input type="text" class="form-control" id="new-share-comment" placeholder="Carpeta de departamento">
+            </div>
+          </div>
+
+          <div style="margin: 16px 0 10px; font-weight: 700; font-size: 13.5px; color: var(--text-main);">
+            Selecciona el Esquema de Permisos POSIX:
+          </div>
+
+          <!-- Selector de 4 Esquemas -->
+          <div class="radio-tile-group">
+            <label class="radio-tile selected">
+              <input type="radio" name="new-share-scheme" value="1" checked style="display:none;">
+              <div class="radio-tile-title">
+                <svg class="icon"><use href="#icon-check-circle"></use></svg>
+                <span>1. Lectura y Escritura</span>
+              </div>
+              <div class="radio-tile-desc">Todos los grupos seleccionados pueden crear, editar y borrar archivos (máscara 0770).</div>
+            </label>
+
+            <label class="radio-tile">
+              <input type="radio" name="new-share-scheme" value="2" style="display:none;">
+              <div class="radio-tile-title">
+                <svg class="icon"><use href="#icon-lock"></use></svg>
+                <span>2. Solo Lectura + Escritura Exclusiva</span>
+              </div>
+              <div class="radio-tile-desc">La mayoría solo puede consultar/descargar; un único grupo puede modificar (write list).</div>
+            </label>
+
+            <label class="radio-tile">
+              <input type="radio" name="new-share-scheme" value="3" style="display:none;">
+              <div class="radio-tile-title">
+                <svg class="icon"><use href="#icon-eye"></use></svg>
+                <span>3. Solo Lectura Estricta</span>
+              </div>
+              <div class="radio-tile-desc">Bloqueo total de escritura desde la red para todos los usuarios (read only = yes).</div>
+            </label>
+
+            <label class="radio-tile">
+              <input type="radio" name="new-share-scheme" value="4" style="display:none;">
+              <div class="radio-tile-title">
+                <svg class="icon"><use href="#icon-users"></use></svg>
+                <span>4. Acceso Público</span>
+              </div>
+              <div class="radio-tile-desc">Acceso libre de lectura para cualquier persona sin solicitar usuario ni contraseña (guest ok).</div>
+            </label>
+          </div>
+
+          <!-- Selección de Grupos -->
+          <div class="form-group" id="new-share-groups-container">
+            <label>Grupos Autorizados con Acceso (`grp_*`):</label>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_sistemas" checked> grp_sistemas (Admin)
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_empleados"> grp_empleados
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_c1_cobranzas"> grp_c1_cobranzas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_c2_ventas"> grp_c2_ventas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_finanzas"> grp_finanzas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-share-grp-chk" value="grp_auditoria"> grp_auditoria
+              </label>
+            </div>
+          </div>
+
+          <!-- Selector Condicional para Esquema 2 -->
+          <div class="form-group" id="new-share-scheme2-wrapper" style="display:none; margin-top:8px;">
+            <label style="color:var(--accent-warning);">Grupo con Permiso de Escritura Exclusiva (write list):</label>
+            <select class="form-control" id="new-share-writelist-select">
+              <option value="grp_sistemas">grp_sistemas</option>
+              <option value="grp_finanzas">grp_finanzas</option>
+              <option value="grp_c2_ventas">grp_c2_ventas</option>
+              <option value="grp_c1_cobranzas">grp_c1_cobranzas</option>
+            </select>
+          </div>
+
+          <!-- Vista Previa smb.conf -->
+          <div style="margin-top:14px;">
+            <label style="font-size:11.5px; font-weight:700; color:var(--text-muted);">VISTA PREVIA smb.conf GENERADA AUTOMÁTICAMENTE:</label>
+            <div class="config-preview-box" id="new-share-smb-preview"></div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn btn-primary">
+            <svg class="icon"><use href="#icon-check-circle"></use></svg> Guardar Recurso en Samba
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Crear Nuevo Usuario -->
+  <div class="modal-overlay" id="modal-new-user">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Crear Nuevo Usuario de Red</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="form-new-user">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Identificador de Usuario (login):</label>
+            <input type="text" class="form-control" id="new-user-uid" placeholder="ej. juan_p" required>
+            <span class="form-hint">Debe empezar con minúscula y solo contener letras, números y guion bajo.</span>
+          </div>
+
+          <div class="form-group">
+            <label>Nombre Completo y Cargo:</label>
+            <input type="text" class="form-control" id="new-user-fullname" placeholder="Juan Pérez - Contabilidad" required>
+          </div>
+
+          <div class="form-group">
+            <label>Asignación de Grupos de Seguridad (`grp_*`):</label>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:4px;">
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-user-grp-chk" value="grp_empleados" checked> grp_empleados
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-user-grp-chk" value="grp_c1_cobranzas"> grp_c1_cobranzas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-user-grp-chk" value="grp_c2_ventas"> grp_c2_ventas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-user-grp-chk" value="grp_finanzas"> grp_finanzas
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+                <input type="checkbox" class="new-user-grp-chk" value="grp_sistemas"> grp_sistemas
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Contraseña de Acceso:</label>
+            <div style="display:flex; gap:8px;">
+              <input type="password" class="form-control" id="new-user-pass" placeholder="••••••••••••" required>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="generateSecurePassword()">Generar Segura</button>
+            </div>
+          </div>
+
+          <div class="alert-box alert-box-info" style="margin-top:14px; margin-bottom:0;">
+            <svg class="icon"><use href="#icon-info"></use></svg>
+            <div>
+              Al guardar, se creará el usuario local con shell <code>/usr/sbin/nologin</code> y se registrará automáticamente en la base Samba mediante <code>smbpasswd -a</code>.
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Crear Usuario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: Crear Nuevo Grupo -->
+  <div class="modal-overlay" id="modal-new-group">
+    <div class="modal-box" style="width:480px;">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-purple);"><use href="#icon-users"></use></svg> Crear Grupo de Seguridad</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="form-new-group">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Nombre del Grupo (Prefijo fijo <code>grp_</code>):</label>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="tag-pill" style="font-size:13px; padding:6px 10px;">grp_</span>
+              <input type="text" class="form-control" id="new-group-name" placeholder="operaciones" required>
+            </div>
+            <span class="form-hint">Ejemplo: grp_operaciones o grp_direccion</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Crear Grupo</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 4: Nueva Tarea de Backup -->
+  <div class="modal-overlay" id="modal-new-backup">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-success);"><use href="#icon-shield"></use></svg> Nueva Tarea de Respaldo Programada</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form id="form-new-backup">
+        <div class="modal-body">
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Identificador Único de Tarea:</label>
+              <input type="text" class="form-control" id="new-bkp-id" placeholder="ej. srv_facturacion" required>
+              <span class="form-hint">Se usará para el archivo cron en /etc/cron.d/backup_&lt;id&gt;</span>
+            </div>
+
+            <div class="form-group">
+              <label>Protocolo de Conexión:</label>
+              <select class="form-control" id="new-bkp-proto">
+                <option value="CIFS / SMB 3.1.1">Windows (CIFS / SMB 3.1.1 con credenciales AD)</option>
+                <option value="SSH (rsync -aAXH)">Linux Remoto (SSH con llaves / rsync)</option>
+              </select>
+            </div>
+
+            <div class="form-group full-width">
+              <label>Ruta de Origen Remoto:</label>
+              <input type="text" class="form-control" id="new-bkp-src" placeholder="//192.168.1.50/Compartido  o  root@192.168.1.60:/var/www" required>
+            </div>
+
+            <div class="form-group">
+              <label>Usuario (Soporta sintaxis DOMINIO\usuario):</label>
+              <input type="text" class="form-control" id="new-bkp-user" placeholder="TEAM-JOFRATO\svc_backup">
+            </div>
+
+            <div class="form-group">
+              <label>Contraseña de Red:</label>
+              <input type="password" class="form-control" id="new-bkp-pass" placeholder="••••••••••••">
+              <span class="form-hint">Se guardará en /etc/backup-credentials/ con permisos estrictos 0600 root:root.</span>
+            </div>
+
+            <div class="form-group">
+              <label>Frecuencia de Ejecución (Cron):</label>
+              <select class="form-control" id="new-bkp-cron">
+                <option value="0 2 * * *">Todos los días a las 02:00 AM (Predeterminado)</option>
+                <option value="0 */6 * * *">Cada 6 horas (00:00, 06:00, 12:00, 18:00)</option>
+                <option value="0 22 * * 1-5">De Lunes a Viernes a las 10:00 PM</option>
+                <option value="0 1 * * 0">Semanal los Domingos a la 01:00 AM</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Política de Retención (Número de Snapshots):</label>
+              <input type="number" class="form-control" id="new-bkp-retention" value="15" min="2" max="90">
+              <span class="form-hint">Al crearse el snapshot N+1, se elimina el más antiguo. Los archivos vigentes nunca se borran.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Tarea de Respaldo</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 5: Consola de Ejecución en Vivo de Backup -->
+  <div class="modal-overlay" id="modal-backup-runner">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-success);"><use href="#icon-terminal"></use></svg> Ejecución en Vivo: <span id="runner-task-title"></span></h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:0;">
+        <div class="live-terminal" id="backup-runner-terminal" style="height:440px;">
+          <!-- Salida progresiva simulada por JavaScript -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary modal-close">Cerrar Consola</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 6: Historial de Snapshots Deduplicados -->
+  <div class="modal-overlay" id="modal-snapshots">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-head">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-clock"></use></svg> Snapshots Deduplicados: <span id="modal-snapshots-task-name"></span></h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-info">
+          <svg class="icon"><use href="#icon-info"></use></svg>
+          <div>
+            Cada snapshot es una imagen completa e íntegra del sistema en ese instante. Gracias a los <b>Hardlinks de rsync</b>, los archivos no modificados comparten el mismo inodo en disco ocupando 0 bytes adicionales.
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="nas-table">
+            <thead>
+              <tr>
+                <th>Identificador de Snapshot</th>
+                <th>Fecha y Hora</th>
+                <th>Tamaño Lógico</th>
+                <th>Tamaño Físico Real</th>
+                <th>Deduplicación</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="snapshots-table-body">
+              <!-- Inyectado dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 7: Vista Previa de smb.conf de Recurso -->
+  <div class="modal-overlay" id="modal-share-preview">
+    <div class="modal-box" style="width:620px;">
+      <div class="modal-head">
+        <h3><svg class="icon"><use href="#icon-file"></use></svg> Configuración Samba (/etc/samba/smb.conf)</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="config-preview-box" id="modal-share-preview-code" style="max-height:300px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 8: Cambiar Contraseña -->
+  <div class="modal-overlay" id="modal-change-password">
+    <div class="modal-box" style="width:480px;">
+      <div class="modal-head">
+        <h3><svg class="icon"><use href="#icon-key"></use></svg> Cambiar Clave: <span id="change-pass-user-display"></span></h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <form onsubmit="event.preventDefault(); showToast('Contraseña actualizada en Debian y Samba', 'success'); closeModal('modal-change-password');">
+        <div class="modal-body">
+          <input type="hidden" id="change-pass-uid">
+          <div class="form-group">
+            <label>Nueva Contraseña:</label>
+            <input type="password" class="form-control" required placeholder="••••••••••••">
+          </div>
+          <div class="form-group">
+            <label>Confirmar Nueva Contraseña:</label>
+            <input type="password" class="form-control" required placeholder="••••••••••••">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Actualizar Clave</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Contenedor Flotante para Notificaciones Toast -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Carga de la Lógica Vanilla JavaScript -->
+  <script src="app.js"></script>
+</body>
+</html>
