@@ -6,7 +6,7 @@ Este documento describe la arquitectura, el motor de copias de seguridad, el mod
 
 El sistema cubre dos funciones excluyentes:
 
-1. **Servidor de archivos (NAS departamental):** almacenamiento en red para clientes Windows mediante Samba, con descubrimiento WSDD2 y panel Cockpit.
+1. **Servidor de archivos (NAS departamental):** almacenamiento en red para clientes Windows mediante Samba, con descubrimiento WSDD2 y panel web nativo.
 2. **Central de copias de seguridad:** repositorio dedicado a respaldar servidores Windows, servidores Linux, estaciones de trabajo y carpetas locales, con snapshots deduplicados y retención configurable.
 
 > [!IMPORTANT]
@@ -22,13 +22,13 @@ El sistema cubre dos funciones excluyentes:
           +----------------------------+----------------------------+
           |                            |                            |
   +-------+-------+          +---------+---------+        +---------+---------+
-  |  Samba/WSDD2  |          |  Cockpit + web    |        |  Motor de backups |
-  |  (SMB / WSD)  |          |  (panel Backups)  |        |  (CIFS/SSH/local) |
+  |  Samba/WSDD2  |          |  Web MVC (PHP)    |        |  Motor de backups |
+  |  (SMB / WSD)  |          |  (Nginx/PHP-FPM)  |        |  (CIFS/SSH/local) |
   +---------------+          +-------------------+        +-------------------+
           |                            |                            |
   +-------+-------+          +---------+---------+        +---------+---------+
-  |  VFS acl/ads  |          |  Python 3 API     |        |  Staging atómico  |
-  |  Office tuning|          |  JSON backend     |        |  .inprogress_*    |
+  |  VFS acl/ads  |          |  PHP 8 Services   |        |  Staging atómico  |
+  |  Office tuning|          |  proc_open args   |        |  .inprogress_*    |
   +---------------+          +-------------------+        +-------------------+
 ```
 
@@ -36,9 +36,9 @@ Componentes principales:
 
 - **Instalador y CLI `nas`** (`install.sh`): despliega el proyecto en `/opt/nas_debian` y crea el comando global `/usr/local/bin/nas`.
 - **Asistente de terminal** (`src/asistente.sh` y `src/modules/`): menú interactivo TUI de 9 módulos basado en `whiptail`.
-- **Motor de despliegue** (`src/core/deploy.sh`): particionado inteligente, formateo o conservación de datos (`--keep-data`), configuración optimizada de filesystem (`ext4` o `btrfs`), Samba, Cockpit, reglas `udev` y tuning de kernel `sysctl`.
-- **Motor de backups** (`src/modules/backups.sh` y `src/web/backups/backup_api.py`): runners autónomos de copia con staging atómico, chequeo preventivo de espacio y deduplicación.
-- **Panel web Cockpit** (`src/web/backups/`): interfaz web nativa PatternFly 4 para gestión gráfica de tareas, historial y bitácoras.
+- **Motor de despliegue** (`src/core/deploy.sh`): particionado inteligente, formateo o conservación de datos (`--keep-data`), configuración optimizada de filesystem (`ext4` o `btrfs`), Samba, Nginx + PHP-FPM, reglas `udev` y tuning de kernel `sysctl`.
+- **Motor de backups** (`src/modules/backups.sh` y `web/src/Services/BackupService.php`): runners autónomos de copia con staging atómico, chequeo preventivo de espacio y deduplicación.
+- **Panel web nativo** (`web/`): interfaz web moderna MVC en PHP 8 para administración global del sistema, Samba, almacenamiento y copias de seguridad.
 
 ### 2.1 Cuadro Maestro de Tecnologías, Subsistemas y Librerías
 
@@ -60,17 +60,16 @@ La siguiente matriz documenta exhaustivamente todos los componentes, librerías,
 | **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector Linux | Replicación remota cifrada por SSH con almacenamiento de firmas en `/root/.ssh/known_hosts_backup`. | Previene ataques de intermediario (*Man-in-the-Middle*) al registrar hosts nuevos automáticamente sin intervención manual y sin deshabilitar la comprobación de claves. |
 | **Tuning de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel | Configuración de límites del VFS, monitoreo inotify y reciclaje de memoria sucia. | `fs.inotify` masivo (524,288 watches); `tcp_keepalive` (120s/15s/4) limpia sesiones SMB inactivas en 3 minutos en lugar de 2 horas; `vm.dirty_bytes=256MB` fuerza ráfagas breves de escritura a disco, previniendo congelamientos de I/O por saturación de RAM. |
 | **Readahead Tuning udev (`60-nas-readahead.rules`)** | Subsistema de Bloques | Reglas udev persistentes para precarga de disco (`1024 KB` en SSD / `4096 KB` en HDD). | Aumenta el rendimiento sostenido en lecturas secuenciales pesadas a través de la red y agiliza las comparaciones diferenciales de `rsync`. |
-| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Oculta el disco del sistema en la interfaz de Cockpit Storage y UDisks2, impidiendo su borrado o modificación inadvertida. |
+| **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
-| **Cockpit + PatternFly 4 + 45Drives Plugins** | Interfaz Web | Panel administrativo modular sin servicios residentes pesados (activación por socket `systemd`). | Consumo despreciable de memoria en reposo, diseño responsivo estandarizado y gestión gráfica intuitiva. |
-| **Python 3 (`backup_api.py`)** | Backend API para Cockpit | Puente de comandos estructurado en JSON con saneamiento de parámetros. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
+| **Nginx-light + PHP-FPM ondemand + MVC PHP 8** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño responsivo estandarizado tipo Cockpit/PatternFly 4 100% offline. |
+| **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Servicios y controladores con ejecución estricta proc_open con array de argumentos. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
 | **whiptail + Bash 5** | Interfaz Visual TUI | Asistente de terminal interactivo con detección automática de recursos y validaciones en vivo. | Gestión integral del servidor desde la consola local o sesiones SSH sin necesidad de interfaz gráfica X11. |
 | **Control de Concurrencia con `flock`** | Programación de Tareas | Bloqueo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza la exclusión mutua de procesos impidiendo sobrecargas o escrituras simultáneas sobre una misma tarea. |
 | **Monitoreo de Umbrales de Espacio (`df -Pk`)** | Seguridad Operativa | Comprobación de capacidad previa al inicio de cada respaldo. | Emite alertas tempranas al superar el 85% de uso y cancela la copia si restan menos de 2 GB o se supera el 95%, evitando la corrupción por desbordamiento del filesystem. |
 | **`fstrim.timer`** | Mantenimiento para SSD | Tarea periódica de descarte de bloques no referenciados en almacenamiento flash. | Mantiene velocidades de escritura constantes y optimiza la vida útil de los dispositivos de estado sólido. |
 | **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Bitácoras | Rotación semanal/mensual con directiva `copytruncate` y compresión `gzip`. | Mantiene controlados los registros de actividad evitando que saturen el espacio de almacenamiento. |
 | **WSDD2 con Override Systemd** | Descubrimiento de Red | Implementación ligera del protocolo Web Services Discovery y LLMNR. | Visibilidad instantánea en el explorador de red de Windows 10/11 sin activar protocolos obsoletos ni inseguros como NetBIOS broadcast o SMBv1. |
-| **Aislamiento de Idioma (`LC_ALL=C LANG=C`)** | Compatibilidad de Sistema | Envoltorios de ejecución en `/usr/local/sbin/chage`, `passwd` y `lastb`. | Normaliza las salidas de utilidades administrativas al estándar en inglés, evitando fallos de parseo en Cockpit en servidores instalados en español. |
 | **ACLs POSIX (`setfacl`) con Herencia por Defecto** | Control de Acceso Granular | Configuración de permisos multi-grupo y reglas por defecto (`default ACL`) en carpetas compartidas. | Permite esquemas mixtos donde coexisten grupos con solo lectura y grupos con permisos de escritura exclusiva, garantizando que todo nuevo archivo herede los permisos correctos. |
 
 
@@ -101,7 +100,7 @@ La siguiente matriz documenta exhaustivamente todos los componentes, librerías,
 
 - **Lanzador de tareas:** Cada tarea programada en `cron` se despacha mediante `systemd-run --collect` asignando prioridad acotada (*nice/ionice*) para no impactar las operaciones interactivas de red.
 - **Exclusión mutua con `flock`:** Se aplica un cerrojo exclusivo sobre `/var/lock/backup_<tarea>.lock` (`flock -n 9`). Si una tarea previa continúa en curso, la nueva ejecución se omite limpiamente dejando constancia en el log.
-- **Protección contra apagones y manejadores de señales:** Los runners configuran interceptores de salida (`trap cleanup EXIT`, `trap 'exit 143' TERM`, `trap 'exit 130' INT`). Si la tarea es abortada manualmente (desde el asistente o Cockpit), se pierde la conexión de red o el servidor experimenta un apagón, el recurso remoto se desmonta de inmediato y el directorio temporal `.inprogress_*` se destruye, garantizando que el almacenamiento nunca aloje copias a medio escribir.
+- **Protección contra apagones y manejadores de señales:** Los runners configuran interceptores de salida (`trap cleanup EXIT`, `trap 'exit 143' TERM`, `trap 'exit 130' INT`). Si la tarea es abortada manualmente (desde el asistente o el panel web), se pierde la conexión de red o el servidor experimenta un apagón, el recurso remoto se desmonta de inmediato y el directorio temporal `.inprogress_*` se destruye, garantizando que el almacenamiento nunca aloje copias a medio escribir.
 
 ---
 
@@ -137,7 +136,7 @@ En `/etc/sysctl.d/99-nas-tuning.conf` se consolidan ajustes de alto rendimiento 
 ### 4.4 Reglas persistentes de almacenamiento (`udev`)
 
 - **Readahead dinámico (`/etc/udev/rules.d/60-nas-readahead.rules`):** Configura los parámetros de precarga secuencial `bdi/read_ahead_kb` y `queue/read_ahead_kb` según el tipo de almacenamiento asignado al NAS.
-- **Protección del disco del sistema operativo (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):** Inyecta `UDISKS_IGNORE="1"` sobre la unidad de disco raíz, impidiendo que herramientas web como Cockpit Storage la expongan para operaciones de formateo accidental.
+- **Protección del disco del sistema operativo (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):** Inyecta `UDISKS_IGNORE="1"` sobre la unidad de disco raíz, aislando el disco del sistema operativo de manipulaciones indebidas en UDisks2.
 
 ### 4.5 Samba Hardening y compatibilidad ofimática (+100 usuarios en Microsoft Office / Excel)
 
@@ -233,7 +232,7 @@ sudo nas uninstall
 - **Diagnóstico del servidor:** `sudo nas status` o mediante la opción [6] del asistente.
 - **Auditoría de servicios del sistema:**
   ```bash
-  systemctl status smbd nmbd wsdd2 cockpit.socket cron fstrim.timer
+  systemctl status smbd nmbd wsdd2 nginx php*-fpm cron fstrim.timer
   ```
 - **Verificación de BTRFS Scrub:**
   ```bash
