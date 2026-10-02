@@ -219,7 +219,10 @@ class BackupService
         @unlink($lock);
 
         if (DIRECTORY_SEPARATOR !== '\\') {
-            SystemService::sudo(['rm', '-f', $runner, $cron, $cred, $lock]);
+            SystemService::sudo(['rm', '-f', $runner]);
+            SystemService::sudo(['rm', '-f', $cron]);
+            SystemService::sudo(['rm', '-f', $cred]);
+            SystemService::sudo(['rm', '-f', $lock]);
         }
 
         if ($deleteBackups) {
@@ -241,6 +244,11 @@ class BackupService
      */
     public function runTaskNow(string $taskId): array
     {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return ['success' => false, 'error' => 'Identificador de tarea inválido.'];
+        }
+
         $runner = $this->binDir . '/backup_' . $taskId . '.sh';
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "Backup $taskId lanzado en segundo plano (modo dev)."];
@@ -251,7 +259,7 @@ class BackupService
         }
 
         // Ejecutar en segundo plano desacoplado
-        SystemService::sudo(['sh', '-c', "$runner >/dev/null 2>&1 &"]);
+        exec('nohup sudo -n ' . escapeshellarg($runner) . ' >/dev/null 2>&1 &');
 
         return ['success' => true, 'message' => "Tarea [$taskId] lanzada. Consulta la bitácora para ver el progreso."];
     }
