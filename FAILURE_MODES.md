@@ -30,12 +30,11 @@ Este documento describe cómo se comporta el sistema ante fallos y cómo verific
 | Disco en uso crítico (PV de LVM o miembro de RAID) | Aborta incondicionalmente sin opción a formateo ni alteración. | `failure_helpers.bats` (`disco_en_uso_critico`) |
 | Disco montado en otra ruta | Aborta salvo que se use `--ignore-in-use` y confirmación explícita `SI-FORMATEAR` (`--force` solo confirma discos libres). | `failure_helpers.bats` (`disco_en_uso`) |
 | Reutilización con datos (`--keep-data`) | Detecta partición `NAS_DATA` o válida con filesystem reconocido y monta sin formatear ni destruir datos. | Manual (VM) / `deploy.sh` |
-| Disco del sistema operativo (LVM/RAID/LUKS/Btrfs) | Se identifica, se excluye del menú y se oculta en Cockpit vía udev (`80-udisks2-hide-os.rules`). | `helpers.bats` (`resolver_discos_raiz`) |
+| Disco del sistema operativo (LVM/RAID/LUKS/Btrfs) | Se identifica, se excluye del menú y se aísla vía udev (`80-udisks2-hide-os.rules`). | `helpers.bats` (`resolver_discos_raiz`) |
 | Partición no detectada tras el particionado | Aborta para no formatear el disco completo. | Manual (VM) |
 | Re-despliegue sobre un servidor configurado | Se respalda `smb.conf` antes de regenerarlo y se avisa si `/srv/nas` ya está montado. | Manual (VM) |
-| Servicio que no arranca (`smbd`, `wsdd2`, `cockpit`) | Se reporta `[OK]`/`[!]` por servicio al finalizar. | Manual (VM) |
+| Servicio que no arranca (`smbd`, `wsdd2`, `nginx`, `php-fpm`) | Se reporta `[OK]`/`[!]` por servicio al finalizar. | Manual (VM) |
 | `cron` inactivo | Se habilita y arranca; si no, se avisa. | Manual (VM) |
-| Extensión `.deb` alterada | La verificación SHA256 falla y la extensión se omite. | Manual (VM) |
 | Archivo `sudoers` inválido | `visudo -c` lo descarta. | Manual (VM) |
 
 ### Usuarios y recursos compartidos
@@ -59,16 +58,17 @@ Este documento describe cómo se comporta el sistema ante fallos y cómo verific
 
 | Fallo | Comportamiento esperado | Verificación |
 | :--- | :--- | :--- |
-| IP, recurso, ruta, usuario o cron inválidos | Se responde con un error JSON y **no se escribe ningún archivo**. | `test_api.py` |
-| Ruta con `..` o raíz `/` | Se rechaza. | `test_api.py` |
+| IP, recurso, ruta, usuario o cron inválidos | Se responde con un error JSON y **no se escribe ningún archivo**. | `test_web.php` |
+| Ruta con `..` o raíz `/` | Se rechaza. | `test_web.php` |
 | Sin permisos de escritura | Se responde con un error JSON en lugar de una traza. | Revisión de código |
 | Carga de tareas fallida en el panel | Se muestra el error real, no una lista vacía. | Revisión de código |
 
 ## Ejecutar las pruebas
 
 ```bash
-bats tests/          # pruebas de shell (incluye inyección de fallos)
-pytest tests/ -q     # pruebas del backend web
+bats tests/            # pruebas de shell (incluye inyección de fallos)
+pytest tests/ -q       # pruebas del prototipo mockup
+php tests/test_web.php # pruebas unitarias de la suite web MVC PHP 8
 ```
 
 ## Principios de las pruebas
