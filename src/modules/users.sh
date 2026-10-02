@@ -77,7 +77,7 @@ crear_usuario_guiado() {
     # Política de aislamiento: Admin (Web+SSH) vs Empleado (Solo red)
     if echo "$GRUPO_FINAL" | grep -qw "grp_sistemas"; then
         SHELL_TYPE="/bin/bash"
-        PERM_TXT="Administrador del Servidor (Acceso Web Cockpit + Consola SSH + Red)"
+        PERM_TXT="Administrador del Servidor (Acceso Panel Web + Consola SSH + Red)"
     else
         SHELL_TYPE="/usr/sbin/nologin"
         PERM_TXT="Empleado de Red (Acceso exclusivo a carpetas Samba, sin consola ni web)"
