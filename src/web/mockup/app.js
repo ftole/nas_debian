@@ -277,6 +277,9 @@ const AppState = {
   fileBrowser: {
     currentPath: '/srv/nas',
     fileTree: {
+      '/srv': [
+        { name: 'nas', type: 'dir', size: '4.0 TB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' }
+      ],
       '/srv/nas': [
         { name: 'SISTEMAS', type: 'dir', size: '14.2 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' },
         { name: 'CAMPANA_UNO_OPERACIONES', type: 'dir', size: '28.6 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 17:30' },
@@ -290,9 +293,16 @@ const AppState = {
         { name: 'politicas_seguridad_2026.pdf', type: 'file', size: '1.8 MB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-20 09:15' },
         { name: 'inventario_servidores_ead.xlsx', type: 'file', size: '540 KB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 10:10' }
       ],
+      '/srv/nas/SISTEMAS/scripts_mantenimiento': [
+        { name: 'btrfs_scrub_audit.sh', type: 'file', size: '2.1 KB', owner: 'root', group: 'grp_sistemas', perms: '-rwxr-x---', octal: '0750', mtime: '2026-10-01 11:30' },
+        { name: 'fstrim_maintenance.sh', type: 'file', size: '1.4 KB', owner: 'root', group: 'grp_sistemas', perms: '-rwxr-x---', octal: '0750', mtime: '2026-09-28 09:10' }
+      ],
       '/srv/nas/CAMPANA_UNO_OPERACIONES': [
         { name: 'manuales_procedimientos', type: 'dir', size: '12.4 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 16:20' },
         { name: 'plantilla_cobranzas_c1.xlsx', type: 'file', size: '2.4 MB', owner: 'carlos_m', group: 'grp_c1_cobranzas', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-10-01 15:40' }
+      ],
+      '/srv/nas/CAMPANA_UNO_OPERACIONES/manuales_procedimientos': [
+        { name: 'guia_campana_c1_2026.docx', type: 'file', size: '3.1 MB', owner: 'carlos_m', group: 'grp_empleados', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-09-22 14:15' }
       ],
       '/srv/nas/CAMPANA_DOS_FINANZAS': [
         { name: 'estados_financieros_2026.xlsx', type: 'file', size: '14.8 MB', owner: 'patricia_r', group: 'grp_finanzas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 08:30' },
@@ -302,6 +312,17 @@ const AppState = {
         { name: 'windows', type: 'dir', size: '240 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
         { name: 'linux', type: 'dir', size: '180 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
         { name: 'facturacion', type: 'dir', size: '130 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
+      ],
+      '/srv/nas/BACKUPS_HISTORICOS/windows': [
+        { name: 'snapshot_2026-10-02_020000', type: 'dir', size: '18.4 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
+        { name: 'snapshot_2026-10-01_020000', type: 'dir', size: '18.3 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 02:00' }
+      ],
+      '/srv/nas/BACKUPS_HISTORICOS/linux': [
+        { name: 'snapshot_2026-10-02_033000', type: 'dir', size: '4.2 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
+        { name: 'snapshot_2026-10-01_033000', type: 'dir', size: '4.1 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 03:30' }
+      ],
+      '/srv/nas/BACKUPS_HISTORICOS/facturacion': [
+        { name: 'snapshot_2026-10-02_060000', type: 'dir', size: '32.1 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
       ],
       '/srv/nas/PUBLICO': [
         { name: 'formatos_vacaciones.docx', type: 'file', size: '120 KB', owner: 'nobody', group: 'nogroup', perms: '-rw-rw-rw-', octal: '0666', mtime: '2026-09-15 10:00' },
@@ -391,7 +412,8 @@ const AppState = {
   // ============================================================================
   terminal: {
     history: [],
-    historyIdx: -1
+    historyIdx: -1,
+    currentDir: '/srv/nas'
   },
 
   // Feed de eventos del Dashboard
@@ -528,7 +550,29 @@ function setupNavigation() {
   }
 }
 
+const VIEW_TITLES = {
+  dashboard: 'Vista general',
+  logs: 'Registros (Logs)',
+  storage: 'Almacenamiento',
+  networking: 'Redes',
+  services: 'Servicios',
+  terminal: 'Terminal',
+  filebrowser: 'Navegador de archivos',
+  shares: 'Redes compartidas',
+  backups: 'Respaldos',
+  users: 'Usuarios y grupos',
+  updates: 'Actualización software',
+  applications: 'Aplicaciones',
+  domain: 'Unirse a un dominio'
+};
+
 function switchView(viewId) {
+  const targetView = document.getElementById(`view-${viewId}`);
+  if (!targetView) {
+    console.warn(`Vista no encontrada: view-${viewId}`);
+    return;
+  }
+
   AppState.currentView = viewId;
 
   document.querySelectorAll('.nav-item').forEach(item => {
@@ -543,8 +587,12 @@ function switchView(viewId) {
     sec.classList.remove('active');
   });
 
-  const targetView = document.getElementById(`view-${viewId}`);
-  if (targetView) targetView.classList.add('active');
+  targetView.classList.add('active');
+
+  const titleEl = document.getElementById('current-view-title');
+  const titleName = VIEW_TITLES[viewId] || viewId;
+  if (titleEl) titleEl.innerText = titleName;
+  document.title = `Cockpit • ${titleName} • SRV-NAS (Debian 13)`;
 
   // Acciones al cambiar de vista
   if (viewId === 'terminal') {
@@ -867,9 +915,20 @@ function toggleService(serviceName) {
 // ==============================================================================
 // 6. TERMINAL WEB INTERACTIVA
 // ==============================================================================
+function updateTerminalPrompt() {
+  const promptEl = document.querySelector('.terminal-prompt');
+  if (promptEl) {
+    const cur = AppState.terminal.currentDir;
+    const displayDir = cur === '/root' ? '~' : cur;
+    promptEl.innerText = `root@SRV-NAS:${displayDir}#`;
+  }
+}
+
 function setupTerminal() {
   const input = document.getElementById('terminal-cmd-input');
   const output = document.getElementById('cockpit-terminal-output');
+
+  updateTerminalPrompt();
 
   if (output && output.children.length === 0) {
     appendTerminalOutput([
@@ -883,6 +942,18 @@ function setupTerminal() {
 
   if (input) {
     input.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        clearTerminalScreen();
+        return;
+      }
+      if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        const cur = AppState.terminal.currentDir === '/root' ? '~' : AppState.terminal.currentDir;
+        appendTerminalOutput(`root@SRV-NAS:${cur}# ${input.value}^C`, 'terminal-cmd-entry');
+        input.value = '';
+        return;
+      }
       if (e.key === 'Enter') {
         const cmd = input.value.trim();
         if (cmd) {
@@ -938,10 +1009,13 @@ function appendTerminalOutput(text, className = '') {
 }
 
 function executeTerminalCommand(cmd) {
-  // Mostrar el prompt y comando
-  appendTerminalOutput(`root@SRV-NAS:~# ${cmd}`, 'terminal-cmd-entry');
+  const cur = AppState.terminal.currentDir === '/root' ? '~' : AppState.terminal.currentDir;
+  appendTerminalOutput(`root@SRV-NAS:${cur}# ${cmd}`, 'terminal-cmd-entry');
 
-  const lower = cmd.toLowerCase().trim();
+  const trimmed = cmd.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (!trimmed) return;
 
   if (lower === 'clear' || lower === 'cls') {
     clearTerminalScreen();
@@ -955,13 +1029,136 @@ function executeTerminalCommand(cmd) {
       '  df -h                 : Reporte de sistemas de archivos montados',
       '  free -m               : Uso de memoria RAM y buffers VFS',
       '  ip a                  : Configuración y direcciones IP de interfaces',
-      '  systemctl status smbd : Diagnóstico del demonio Samba',
+      '  systemctl status <svc>: Diagnóstico de demonios (smbd, nmbd, wsdd2, cron, ssh, cockpit)',
       '  btrfs scrub status    : Auditoría contra Bit Rot en /srv/nas',
       '  testparm -s           : Verificación de sintaxis de smb.conf',
-      '  uptime                : Tiempo de actividad y promedio de carga',
-      '  uname -a              : Versión del kernel Linux',
-      '  clear                 : Limpiar pantalla de la consola'
+      '  ls / ls -la           : Listar archivos en directorio actual',
+      '  cd <directorio>       : Cambiar directorio de trabajo',
+      '  pwd                   : Imprimir ruta de trabajo actual',
+      '  whoami / id           : Identidad y credenciales POSIX del usuario',
+      '  ping <host>           : Probar conectividad con paquetes ICMP',
+      '  cat <archivo>         : Inspeccionar contenido de archivos del sistema',
+      '  uptime / uname -a     : Información de carga, tiempo y kernel',
+      '  clear                 : Limpiar pantalla de la consola (Ctrl+L)'
     ].join('\n'), 'term-info');
+    return;
+  }
+
+  if (lower === 'pwd') {
+    appendTerminalOutput(AppState.terminal.currentDir, 'term-cmd');
+    return;
+  }
+
+  if (lower === 'whoami') {
+    appendTerminalOutput('root', 'term-cmd');
+    return;
+  }
+
+  if (lower === 'hostname') {
+    appendTerminalOutput('SRV-NAS', 'term-cmd');
+    return;
+  }
+
+  if (lower === 'id') {
+    appendTerminalOutput('uid=0(root) gid=0(root) groups=0(root),1000(admin_nas),2000(grp_sistemas)', 'term-cmd');
+    return;
+  }
+
+  if (lower === 'date') {
+    appendTerminalOutput(new Date().toUTCString(), 'term-cmd');
+    return;
+  }
+
+  if (lower.startsWith('ping')) {
+    const parts = trimmed.split(/\s+/);
+    const target = (parts.length > 1 && !parts[parts.length - 1].startsWith('-')) ? parts[parts.length - 1] : '10.10.1.1';
+    appendTerminalOutput([
+      `PING ${target} (${target}) 56(84) bytes of data.`,
+      `64 bytes from ${target}: icmp_seq=1 ttl=64 time=0.342 ms`,
+      `64 bytes from ${target}: icmp_seq=2 ttl=64 time=0.298 ms`,
+      `64 bytes from ${target}: icmp_seq=3 ttl=64 time=0.315 ms`,
+      `--- ${target} ping statistics ---`,
+      `3 packets transmitted, 3 received, 0% packet loss, time 2045ms`,
+      `rtt min/avg/max/mdev = 0.298/0.318/0.342/0.018 ms`
+    ].join('\n'), 'term-cmd');
+    return;
+  }
+
+  if (lower === 'cd' || lower === 'cd ~') {
+    AppState.terminal.currentDir = '/root';
+    updateTerminalPrompt();
+    return;
+  }
+
+  if (lower.startsWith('cd ')) {
+    const dest = trimmed.slice(3).trim();
+    if (dest === '..' || dest === '../') {
+      const parts = AppState.terminal.currentDir.split('/').filter(Boolean);
+      parts.pop();
+      AppState.terminal.currentDir = parts.length ? '/' + parts.join('/') : '/';
+    } else if (dest.startsWith('/')) {
+      AppState.terminal.currentDir = dest.replace(/\/+$/, '') || '/';
+    } else {
+      const base = AppState.terminal.currentDir === '/' ? '' : AppState.terminal.currentDir;
+      AppState.terminal.currentDir = `${base}/${dest}`.replace(/\/+$/, '');
+    }
+    updateTerminalPrompt();
+    return;
+  }
+
+  if (lower === 'ls' || lower.startsWith('ls ') || lower === 'dir') {
+    const curPath = AppState.terminal.currentDir;
+    const items = AppState.fileBrowser.fileTree[curPath] || [
+      { name: 'SISTEMAS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---' },
+      { name: 'CAMPANA_UNO_OPERACIONES', type: 'dir', size: '4.0K', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---' },
+      { name: 'CAMPANA_DOS_FINANZAS', type: 'dir', size: '4.0K', owner: 'patricia_r', group: 'grp_finanzas', perms: 'drwxrwx---' },
+      { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---' },
+      { name: 'PUBLICO', type: 'dir', size: '4.0K', owner: 'nobody', group: 'nogroup', perms: 'drwxrwxrwx' }
+    ];
+
+    if (lower.includes('-l')) {
+      const lines = [`total ${items.length * 4}`];
+      items.forEach(i => {
+        lines.push(`${i.perms} 1 ${i.owner} ${i.group} ${String(i.size).padStart(8, ' ')} Oct  2 10:14 ${i.name}`);
+      });
+      appendTerminalOutput(lines.join('\n'), 'term-cmd');
+    } else {
+      const names = items.map(i => i.type === 'dir' ? i.name + '/' : i.name).join('  ');
+      appendTerminalOutput(names, 'term-cmd');
+    }
+    return;
+  }
+
+  if (lower.includes('cat /etc/os-release') || lower.includes('cat /etc/issue')) {
+    appendTerminalOutput([
+      'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"',
+      'NAME="Debian GNU/Linux"',
+      'VERSION_ID="13"',
+      'VERSION="13 (trixie)"',
+      'VERSION_CODENAME=trixie',
+      'ID=debian',
+      'HOME_URL="https://www.debian.org/"',
+      'SUPPORT_URL="https://www.debian.org/support"'
+    ].join('\n'), 'term-ok');
+    return;
+  }
+
+  if (lower.includes('smb.conf')) {
+    appendTerminalOutput([
+      '# /etc/samba/smb.conf (Generado automáticamente - NAS Debian 13)',
+      '[global]',
+      '   workgroup = TEAM-JOFRATO',
+      '   netbios name = SRV-NAS',
+      '   server role = standalone server',
+      '   server min protocol = SMB2_10',
+      '   server max protocol = SMB3_11',
+      '   vfs objects = acl_xattr streams_xattr',
+      '   store dos attributes = yes',
+      '   inherit permissions = yes',
+      '   use sendfile = yes',
+      '   aio read size = 16384',
+      '   max open files = 65535'
+    ].join('\n'), 'term-ok');
     return;
   }
 
@@ -1013,17 +1210,28 @@ function executeTerminalCommand(cmd) {
     return;
   }
 
-  if (lower.includes('smbd') || lower.includes('systemctl')) {
+  if (lower.includes('systemctl')) {
+    let svc = 'smbd.service';
+    let svcDesc = 'Samba SMB Daemon';
+    if (lower.includes('wsdd2')) { svc = 'wsdd2.service'; svcDesc = 'WSDD2 Web Services Discovery Daemon'; }
+    else if (lower.includes('nmbd')) { svc = 'nmbd.service'; svcDesc = 'Samba NetBIOS Nameserver'; }
+    else if (lower.includes('cockpit')) { svc = 'cockpit.socket'; svcDesc = 'Cockpit Web Service Socket'; }
+    else if (lower.includes('cron')) { svc = 'cron.service'; svcDesc = 'Regular background program processing daemon'; }
+    else if (lower.includes('ssh')) { svc = 'ssh.service'; svcDesc = 'OpenSSH server daemon'; }
+    else if (lower.includes('fstrim')) { svc = 'fstrim.timer'; svcDesc = 'Discard unused flash blocks on SSDs'; }
+
+    const sObj = AppState.services.find(s => s.name === svc);
+    const isAct = sObj ? sObj.status === 'active' : true;
+
     appendTerminalOutput([
-      '● smbd.service - Samba SMB Daemon',
-      '     Loaded: loaded (/lib/systemd/system/smbd.service; enabled; vendor preset: enabled)',
-      '     Active: active (running) since Sun 2026-09-18 04:00:12 UTC; 14 days ago',
-      '   Main PID: 1420 (smbd)',
-      '      Tasks: 29 (limit: 18940)',
-      '     Memory: 114.2M',
-      '        CPU: 12min 4.218s',
-      '     CGroup: /system.slice/smbd.service'
-    ].join('\n'), 'term-ok');
+      `● ${svc} - ${svcDesc}`,
+      `     Loaded: loaded (/lib/systemd/system/${svc}; enabled; vendor preset: enabled)`,
+      `     Active: ${isAct ? 'active (running)' : 'inactive (dead)'} since Sun 2026-09-18 04:00:12 UTC; 14 days ago`,
+      `   Main PID: 1420 (${svc.split('.')[0]})`,
+      `      Tasks: 12 (limit: 18940)`,
+      `     Memory: 48.2M`,
+      `     CGroup: /system.slice/${svc}`
+    ].join('\n'), isAct ? 'term-ok' : 'term-warn');
     return;
   }
 
@@ -1128,23 +1336,26 @@ function renderFileBrowser() {
 }
 
 function navigateToFileFolder(path) {
-  if (AppState.fileBrowser.fileTree[path]) {
-    AppState.fileBrowser.currentPath = path;
-    renderFileBrowser();
-  } else {
-    showToast(`El directorio ${path} está vacío o no contiene elementos.`, 'info');
+  if (!AppState.fileBrowser.fileTree[path]) {
+    AppState.fileBrowser.fileTree[path] = [];
   }
+  AppState.fileBrowser.currentPath = path;
+  renderFileBrowser();
 }
 
 function navigateUpFolder() {
   const current = AppState.fileBrowser.currentPath;
-  if (current === '/srv/nas') {
+  if (current === '/srv/nas' || current === '/srv') {
     showToast('Ya te encuentras en la raíz del almacenamiento (/srv/nas)', 'info');
     return;
   }
   const parts = current.split('/').filter(Boolean);
-  parts.pop();
-  AppState.fileBrowser.currentPath = '/' + parts.join('/');
+  if (parts.length > 2) {
+    parts.pop();
+    AppState.fileBrowser.currentPath = '/' + parts.join('/');
+  } else {
+    AppState.fileBrowser.currentPath = '/srv/nas';
+  }
   renderFileBrowser();
 }
 
@@ -1177,9 +1388,11 @@ function inspectFilePerms(name, fullPath, owner, group, perms, octal) {
 
 function deleteFileItem(name) {
   if (confirm(`¿Estás seguro de que deseas eliminar [${name}] de /srv/nas?`)) {
-    const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
+    const currentPath = AppState.fileBrowser.currentPath;
+    const list = AppState.fileBrowser.fileTree[currentPath];
     if (list) {
-      AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath] = list.filter(i => i.name !== name);
+      AppState.fileBrowser.fileTree[currentPath] = list.filter(i => i.name !== name);
+      delete AppState.fileBrowser.fileTree[`${currentPath}/${name}`];
       renderFileBrowser();
       showToast(`Elemento [${name}] eliminado de disco`, 'danger');
     }
@@ -1189,21 +1402,23 @@ function deleteFileItem(name) {
 function simulateFileUpload() {
   showToast('Cargando archivo simulado en /srv/nas...', 'info');
   setTimeout(() => {
-    const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
-    if (list) {
-      list.push({
-        name: `documento_cargado_${Date.now().toString().slice(-4)}.pdf`,
-        type: 'file',
-        size: '1.4 MB',
-        owner: 'admin_nas',
-        group: 'grp_sistemas',
-        perms: '-rw-rw-r--',
-        octal: '0664',
-        mtime: 'Hace un momento'
-      });
-      renderFileBrowser();
-      showToast('Archivo subido correctamente con permisos POSIX heredados', 'success');
+    const currentPath = AppState.fileBrowser.currentPath;
+    if (!AppState.fileBrowser.fileTree[currentPath]) {
+      AppState.fileBrowser.fileTree[currentPath] = [];
     }
+    const list = AppState.fileBrowser.fileTree[currentPath];
+    list.push({
+      name: `documento_cargado_${Date.now().toString().slice(-4)}.pdf`,
+      type: 'file',
+      size: '1.4 MB',
+      owner: 'admin_nas',
+      group: 'grp_sistemas',
+      perms: '-rw-rw-r--',
+      octal: '0664',
+      mtime: 'Hace un momento'
+    });
+    renderFileBrowser();
+    showToast('Archivo subido correctamente con permisos POSIX heredados', 'success');
   }, 700);
 }
 
@@ -1909,6 +2124,12 @@ function executeServerReboot() {
   }, 1000);
 }
 
+function runNetworkDiagnosticsInTerminal() {
+  switchView('terminal');
+  executeTerminalCommand('ip a');
+  setTimeout(() => executeTerminalCommand('ping -c 3 10.10.1.1'), 300);
+}
+
 // ==============================================================================
 // Manejo de Modales
 // ==============================================================================
@@ -1926,6 +2147,13 @@ function setupModals() {
       const modal = btn.closest('.modal-overlay');
       if (modal) closeModal(modal.id);
     });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const openModalEl = document.querySelector('.modal-overlay.open');
+      if (openModalEl) closeModal(openModalEl.id);
+    }
   });
 }
 
@@ -2165,22 +2393,23 @@ function setupForms() {
       const folderName = document.getElementById('new-folder-name').value.trim().replace(/\s+/g, '_');
       if (!folderName) return;
 
-      const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
-      if (list) {
-        list.push({
-          name: folderName,
-          type: 'dir',
-          size: '4.0 KB',
-          owner: 'root',
-          group: 'grp_sistemas',
-          perms: 'drwxrwx---',
-          octal: '2770',
-          mtime: 'Hace un momento'
-        });
-        AppState.fileBrowser.fileTree[`${AppState.fileBrowser.currentPath}/${folderName}`] = [];
-        renderFileBrowser();
-        showToast(`Carpeta [${folderName}] creada con permisos 2770`, 'success');
+      if (!AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath]) {
+        AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath] = [];
       }
+      const list = AppState.fileBrowser.fileTree[AppState.fileBrowser.currentPath];
+      list.push({
+        name: folderName,
+        type: 'dir',
+        size: '4.0 KB',
+        owner: 'root',
+        group: 'grp_sistemas',
+        perms: 'drwxrwx---',
+        octal: '2770',
+        mtime: 'Hace un momento'
+      });
+      AppState.fileBrowser.fileTree[`${AppState.fileBrowser.currentPath}/${folderName}`] = [];
+      renderFileBrowser();
+      showToast(`Carpeta [${folderName}] creada con permisos 2770`, 'success');
       closeModal('modal-new-folder');
       formNewFolder.reset();
     });
@@ -2310,14 +2539,25 @@ function setupForms() {
         AppState.domain.realm = domainName;
         AppState.domain.dc = dcIp;
 
+        const badgeDomain = document.getElementById('badge-domain');
+        if (badgeDomain) {
+          badgeDomain.innerText = 'OK';
+          badgeDomain.className = 'nav-badge badge-ok';
+        }
+
         const statusBox = document.getElementById('domain-current-status-box');
         if (statusBox) {
           statusBox.className = 'alert-box alert-box-success';
           statusBox.innerHTML = `
             <svg class="icon icon-lg"><use href="#icon-check-circle"></use></svg>
-            <div>
+            <div style="flex:1;">
               <strong>Servidor Integrado en Dominio:</strong> El host <code>SRV-NAS</code> se unió exitosamente al reino Active Directory <b>${domainName}</b>.
               Samba Winbind y SSSD se encuentran sincronizando cuentas de usuario corporativas.
+              <div style="margin-top:8px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="leaveDomain()">
+                  <svg class="icon"><use href="#icon-x-circle"></use></svg> Desvincular del Dominio
+                </button>
+              </div>
             </div>
           `;
         }
@@ -2325,4 +2565,29 @@ function setupForms() {
       }, 1400);
     });
   }
+}
+
+function leaveDomain() {
+  AppState.domain.isJoined = false;
+  AppState.domain.realm = '';
+  AppState.domain.dc = '';
+
+  const badgeDomain = document.getElementById('badge-domain');
+  if (badgeDomain) {
+    badgeDomain.innerText = 'AD';
+    badgeDomain.className = 'nav-badge';
+  }
+
+  const statusBox = document.getElementById('domain-current-status-box');
+  if (statusBox) {
+    statusBox.className = 'alert-box alert-box-info';
+    statusBox.innerHTML = `
+      <svg class="icon icon-lg"><use href="#icon-info"></use></svg>
+      <div>
+        <strong>Estado actual:</strong> El servidor opera actualmente en modo <b>Grupo de Trabajo Local</b> (<code>WORKGROUP: TEAM-JOFRATO</code>).
+        Para permitir que usuarios corporativos de Active Directory inicien sesión con sus credenciales Windows, configure los parámetros del dominio a continuación.
+      </div>
+    `;
+  }
+  showToast('Servidor desvinculado del dominio Active Directory', 'info');
 }
