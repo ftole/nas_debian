@@ -448,6 +448,7 @@ PHP_POOL_EOF
 
 # 2. Desplegar aplicación web MVC en /var/www/nas-web
 mkdir -p /var/www/nas-web
+rm -rf /var/www/nas-web/*
 if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
     cp -rf "$WEB_SRC/"* /var/www/nas-web/
 fi
