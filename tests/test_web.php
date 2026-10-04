@@ -183,6 +183,9 @@ assertTrue($loginSistemas['user']['is_admin'] === true, 'AuthService otorga priv
 $loginAdmin = $auth->authenticate('administrador', 'admin123');
 assertTrue($loginAdmin['success'] && $loginAdmin['user']['username'] === 'administrador', 'AuthService autentica satisfactoriamente al usuario administrador');
 
+$loginAdmin2 = $auth->authenticate('administrador', 'Admin123#');
+assertTrue($loginAdmin2['success'] && $loginAdmin2['user']['username'] === 'administrador', 'AuthService autentica satisfactoriamente al usuario administrador con Admin123#');
+
 $loginBadPass = $auth->authenticate('sistemas', 'password_erroneo');
 assertTrue(!$loginBadPass['success'], 'AuthService rechaza contraseñas inválidas');
 
