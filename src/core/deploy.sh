@@ -529,6 +529,7 @@ Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, \
     /bin/rm -f /usr/local/bin/backup_*.sh, /usr/bin/rm -f /usr/local/bin/backup_*.sh, \
     /bin/rm -f /etc/backup-credentials/*, /usr/bin/rm -f /etc/backup-credentials/*, \
     /bin/rm -f /var/lock/backup_*.lock, /usr/bin/rm -f /var/lock/backup_*.lock, \
+    /bin/mkdir -p /etc/backup-credentials*, /usr/bin/mkdir -p /etc/backup-credentials*, \
     /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
 Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \
     /bin/mkdir -p /srv/nas/*, /usr/bin/mkdir -p /srv/nas/*, \
@@ -566,30 +567,51 @@ ExecStart=
 ExecStart=/usr/sbin/wsdd2 \$WSDD2_OPTS
 WSDDOVERRIDE
 
-echo " [4/9] Creando grupo maestro Sistemas y configurando Administrador ($ADMIN_USER)..."
+echo " [4/9] Creando grupo maestro Sistemas y configurando administradores ($ADMIN_USER)..."
 groupadd -f grp_sistemas
 
-if ! id "$ADMIN_USER" &>/dev/null; then
-    adduser --disabled-password --gecos "" "$ADMIN_USER"
+# 1. Configurar cuenta sistemas (Ead2026#)
+if ! id "sistemas" &>/dev/null; then
+    adduser --disabled-password --gecos "" "sistemas"
 fi
+usermod -aG sudo,adm,grp_sistemas "sistemas"
+echo "sistemas ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-sistemas
+chmod 0440 /etc/sudoers.d/90-sistemas
+echo "sistemas:Ead2026#" | chpasswd
+printf '%s\n%s\n' "Ead2026#" "Ead2026#" | smbpasswd -a -s "sistemas" 2>/dev/null || true
 
-usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
-SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
-echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
-chmod 0440 "$SUDOERS_FILE"
-if command -v visudo &>/dev/null && ! visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
-    rm -f "$SUDOERS_FILE"
+# 2. Configurar cuenta administrador (Admin123#)
+if ! id "administrador" &>/dev/null; then
+    adduser --disabled-password --gecos "" "administrador"
 fi
+usermod -aG sudo,adm,grp_sistemas "administrador"
+echo "administrador ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-administrador
+chmod 0440 /etc/sudoers.d/90-administrador
+echo "administrador:Admin123#" | chpasswd
+printf '%s\n%s\n' "Admin123#" "Admin123#" | smbpasswd -a -s "administrador" 2>/dev/null || true
 
-if [ -n "$ADMIN_PASS" ]; then
-    echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
-    if ! printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null; then
-        advertir "No se pudo registrar la contraseña Samba de $ADMIN_USER (quizá ya existe una cuenta Samba)."
+# 3. Si se especificó un usuario o contraseña administrativa personalizada
+if [ "$ADMIN_USER" != "sistemas" ] && [ "$ADMIN_USER" != "administrador" ]; then
+    if ! id "$ADMIN_USER" &>/dev/null; then
+        adduser --disabled-password --gecos "" "$ADMIN_USER"
     fi
+    usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
+    SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
+    echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
+    chmod 0440 "$SUDOERS_FILE"
+    if [ -n "$ADMIN_PASS" ]; then
+        echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
+        printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
+    fi
+elif [ -n "$ADMIN_PASS" ]; then
+    echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
+    printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
-mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
+chmod 0750 /etc/backup-credentials 2>/dev/null || true
+chown root:www-data /etc/backup-credentials 2>/dev/null || true
 if [ "$KEEP_DATA" = true ]; then
     chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
     chmod 2771 /srv/nas
@@ -644,7 +666,6 @@ cat << SMBCONF > /etc/samba/smb.conf
    server min protocol = SMB2_02
    server smb encrypt = desired
    dns proxy = no
-   include = registry
 
    # Optimizaciones de Rendimiento y Red (Office +100 usuarios)
    store dos attributes = yes
