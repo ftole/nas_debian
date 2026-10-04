@@ -171,7 +171,10 @@ class BackupService
                 $credContent = "username=$user\npassword=$pass\n";
             }
 
-            $this->writeFileSecure($credFile, $credContent, 0600);
+            $wCred = $this->writeFileSecure($credFile, $credContent, 0600);
+            if (!$wCred) {
+                return ['success' => false, 'error' => 'No se pudo guardar el archivo de credenciales de respaldo.'];
+            }
             $runnerContent = $this->buildCifsRunner($taskId, $ip, $share, $credFile, $retention);
         } elseif ($proto === 'ssh') {
             $ip = trim($data['ip'] ?? '');
@@ -184,7 +187,10 @@ class BackupService
                 return ['success' => false, 'error' => 'La IP y la ruta del servidor Linux son obligatorias.'];
             }
 
-            $this->writeFileSecure($credFile, $pass . "\n", 0600);
+            $wCred = $this->writeFileSecure($credFile, $pass . "\n", 0600);
+            if (!$wCred) {
+                return ['success' => false, 'error' => 'No se pudo guardar el archivo de credenciales de respaldo.'];
+            }
             $runnerContent = $this->buildSshRunner($taskId, $ip, $port, $user, $path, $credFile, $retention);
         } elseif ($proto === 'local') {
             $path = trim($data['path'] ?? '/srv/nas/SISTEMAS');
@@ -194,11 +200,17 @@ class BackupService
         }
 
         // Escribir runner con permisos 755
-        $this->writeFileSecure($runnerFile, $runnerContent, 0755);
+        $wRunner = $this->writeFileSecure($runnerFile, $runnerContent, 0755);
+        if (!$wRunner) {
+            return ['success' => false, 'error' => 'No se pudo generar el ejecutable del runner de respaldo.'];
+        }
 
         // Escribir archivo cron
         $cronLine = "$cronExpr root $runnerFile >/dev/null 2>&1\n";
-        $this->writeFileSecure($cronFile, $cronLine, 0644);
+        $wCron = $this->writeFileSecure($cronFile, $cronLine, 0644);
+        if (!$wCron) {
+            return ['success' => false, 'error' => 'No se pudo registrar la tarea en cron.d.'];
+        }
 
         return ['success' => true, 'message' => "Tarea de respaldo [$taskId] programada exitosamente."];
     }
@@ -297,23 +309,28 @@ class BackupService
         }
     }
 
-    private function writeFileSecure(string $path, string $content, int $mode): void
+    private function writeFileSecure(string $path, string $content, int $mode): bool
     {
         $dir = dirname($path);
-        if (is_writable($dir) || is_writable($path)) {
-            @file_put_contents($path, $content);
+        $this->ensureDirectory($dir);
+
+        if (is_writable($dir) || (file_exists($path) && is_writable($path))) {
+            $w = @file_put_contents($path, $content);
             @chmod($path, $mode);
-            return;
+            return $w !== false;
         }
 
         $tmp = tempnam(sys_get_temp_dir(), 'nas_tmp_');
         if ($tmp !== false) {
             file_put_contents($tmp, $content);
             chmod($tmp, $mode);
-            SystemService::sudo(['cp', $tmp, $path]);
+            $cpRes = SystemService::sudo(['cp', $tmp, $path]);
             SystemService::sudo(['chmod', sprintf('%o', $mode), $path]);
             @unlink($tmp);
+            return ($cpRes['code'] === 0);
         }
+
+        return false;
     }
 
     private function removeDirectoryRecursive(string $dir): void
