@@ -54,7 +54,7 @@ class UserController
         Response::success(null, $res['message'] ?? 'Usuario creado.');
     }
 
-    public function deleteUser(Request $request, array $params): void
+    public function deleteUser(Request $request, array $params = []): void
     {
         $username = $params['username'] ?? $request->get('username');
         if (empty($username)) {
@@ -90,7 +90,7 @@ class UserController
         Response::success(null, $res['message'] ?? 'Grupo creado.');
     }
 
-    public function deleteGroup(Request $request, array $params): void
+    public function deleteGroup(Request $request, array $params = []): void
     {
         $groupName = $params['name'] ?? $request->get('name');
         if (empty($groupName)) {
