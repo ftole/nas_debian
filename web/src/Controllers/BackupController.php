@@ -43,7 +43,7 @@ class BackupController
         Response::success(null, $res['message'] ?? 'Tarea programada.');
     }
 
-    public function delete(Request $request, array $params): void
+    public function delete(Request $request, array $params = []): void
     {
         $id = $params['id'] ?? $request->get('id');
         if (empty($id)) {
@@ -62,7 +62,7 @@ class BackupController
         Response::success(null, $res['message'] ?? 'Tarea eliminada.');
     }
 
-    public function run(Request $request, array $params): void
+    public function run(Request $request, array $params = []): void
     {
         $id = $params['id'] ?? $request->get('id');
         if (empty($id)) {
@@ -79,7 +79,7 @@ class BackupController
         Response::success(null, $res['message'] ?? 'Respaldo iniciado.');
     }
 
-    public function logs(Request $request, array $params): void
+    public function logs(Request $request, array $params = []): void
     {
         $id = $params['id'] ?? $request->get('id');
         if (empty($id)) {
