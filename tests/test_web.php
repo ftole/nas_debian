@@ -232,6 +232,22 @@ $_SERVER['REQUEST_URI'] = '/';
 $headReq = new Request();
 assertTrue($headReq->getMethod() === 'GET', 'Request normaliza peticiones HTTP HEAD a GET para compatibilidad');
 
+// 11. Pruebas de compatibilidad de firmas de controladores con parámetros opcionales
+$sambaCtrl = new \App\Controllers\SambaController();
+$backupCtrl = new \App\Controllers\BackupController();
+$userCtrl = new \App\Controllers\UserController();
+assertTrue(is_callable([$sambaCtrl, 'delete']), 'SambaController::delete es invocable');
+assertTrue(is_callable([$backupCtrl, 'delete']), 'BackupController::delete es invocable');
+assertTrue(is_callable([$userCtrl, 'deleteUser']), 'UserController::deleteUser es invocable');
+
+// 12. Pruebas de AuthService::logout
+$auth->logout();
+assertTrue(empty($_SESSION['nas_user']), 'AuthService::logout limpia variables de sesión activa');
+
+// 13. Pruebas de validación de campos obligatorios en BackupService::createTask
+$emptyCifs = (new BackupService())->createTask(['id' => 'tarea_vacia', 'proto' => 'cifs']);
+assertTrue(!$emptyCifs['success'], 'BackupService::createTask rechaza CIFS sin IP o recurso compartido');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
