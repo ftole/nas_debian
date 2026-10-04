@@ -38,6 +38,7 @@ function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.add('active');
+    modal.classList.add('open');
   }
 }
 
@@ -45,6 +46,7 @@ function closeModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
     modal.classList.remove('active');
+    modal.classList.remove('open');
   }
 }
 
@@ -172,7 +174,13 @@ async function apiFetch(endpoint, options = {}) {
       throw new Error('Sesión expirada.');
     }
 
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Error en respuesta del servidor (${res.status} ${res.statusText || 'Error'})`);
+    }
+
     if (!res.ok || data.success === false) {
       throw new Error(data.error || data.message || `Error ${res.status}`);
     }
@@ -1046,11 +1054,33 @@ function initApp() {
     });
   }
 
-  // Listener de cambios en el hash de la URL (botones Atrás/Adelante y navegación)
+  // Listener de cambios en el hash de la URL (evitar re-ejecución si la vista ya está activa)
   window.addEventListener('hashchange', () => {
     const hash = window.location.hash.slice(1);
     if (hash && VALID_VIEWS.includes(hash)) {
-      switchView(hash, false);
+      if (AppState.activeView !== hash) {
+        switchView(hash, false);
+      }
+    }
+  });
+
+  // Cerrar modales al hacer clic fuera del diálogo
+  document.querySelectorAll('.modal-backdrop, .modal-overlay').forEach(modal => {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.classList.remove('active');
+        modal.classList.remove('open');
+      }
+    });
+  });
+
+  // Cerrar modal al presionar Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open').forEach(modal => {
+        modal.classList.remove('active');
+        modal.classList.remove('open');
+      });
     }
   });
 
