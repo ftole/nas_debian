@@ -87,12 +87,14 @@ $router->get('/api/diagnostics', [SystemController::class, 'diagnostics']);
 
 // Rutas API: Recursos Compartidos (Samba)
 $router->get('/api/shares', [SambaController::class, 'list']);
+$router->get('/api/shares/list', [SambaController::class, 'list']);
 $router->post('/api/shares', [SambaController::class, 'create']);
 $router->post('/api/shares/delete', [SambaController::class, 'delete']);
 $router->delete('/api/shares/{name}', [SambaController::class, 'delete']);
 
 // Rutas API: Central de Respaldos (Backups)
 $router->get('/api/backups', [BackupController::class, 'list']);
+$router->get('/api/backups/tasks', [BackupController::class, 'list']);
 $router->post('/api/backups', [BackupController::class, 'create']);
 $router->post('/api/backups/delete', [BackupController::class, 'delete']);
 $router->delete('/api/backups/{id}', [BackupController::class, 'delete']);
@@ -101,22 +103,27 @@ $router->get('/api/backups/{id}/logs', [BackupController::class, 'logs']);
 
 // Rutas API: Almacenamiento y Discos
 $router->get('/api/storage', [StorageController::class, 'overview']);
+$router->get('/api/storage/overview', [StorageController::class, 'overview']);
+$router->get('/api/storage/disks', [StorageController::class, 'overview']);
 $router->post('/api/storage/scrub', [StorageController::class, 'scrubStart']);
 $router->get('/api/storage/scrub', [StorageController::class, 'scrubStatus']);
 $router->post('/api/storage/trim', [StorageController::class, 'trim']);
 
 // Rutas API: Usuarios y Grupos
 $router->get('/api/users', [UserController::class, 'users']);
+$router->get('/api/users/list', [UserController::class, 'users']);
 $router->post('/api/users', [UserController::class, 'createUser']);
 $router->post('/api/users/delete', [UserController::class, 'deleteUser']);
 $router->delete('/api/users/{username}', [UserController::class, 'deleteUser']);
 $router->get('/api/groups', [UserController::class, 'groups']);
+$router->get('/api/groups/list', [UserController::class, 'groups']);
 $router->post('/api/groups', [UserController::class, 'createGroup']);
 $router->post('/api/groups/delete', [UserController::class, 'deleteGroup']);
 $router->delete('/api/groups/{name}', [UserController::class, 'deleteGroup']);
 
 // Rutas API: Sistema, Servicios y Logs
 $router->get('/api/services', [SystemController::class, 'services']);
+$router->get('/api/services/list', [SystemController::class, 'services']);
 $router->post('/api/services/manage', [SystemController::class, 'manageService']);
 $router->get('/api/logs', [SystemController::class, 'logs']);
 $router->post('/api/system/reboot', [SystemController::class, 'reboot']);
