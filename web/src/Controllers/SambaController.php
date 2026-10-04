@@ -43,7 +43,7 @@ class SambaController
         Response::success(null, $res['message'] ?? 'Recurso creado.');
     }
 
-    public function delete(Request $request, array $params): void
+    public function delete(Request $request, array $params = []): void
     {
         $name = $params['name'] ?? $request->get('name');
         if (empty($name)) {
