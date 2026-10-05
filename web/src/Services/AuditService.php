@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Core\Request;
+
 /**
  * Servicio de Auditoría Administrativa y Trazabilidad de Acciones del Sistema.
  * Registra eventos atómicamente en /var/log/nas-admin.log y los emite a syslog (LOCAL6).
@@ -70,17 +72,7 @@ class AuditService
 
     private static function resolveClientIp(): string
     {
-        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-            $candidate = trim($ips[0]);
-            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
-                return $candidate;
-            }
-        }
-        if (!empty($_SERVER['HTTP_CLIENT_IP']) && filter_var($_SERVER['HTTP_CLIENT_IP'], FILTER_VALIDATE_IP)) {
-            return $_SERVER['HTTP_CLIENT_IP'];
-        }
-        return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        return (new Request())->getClientIp();
     }
 
     private static function resolveCurrentUser(): string
