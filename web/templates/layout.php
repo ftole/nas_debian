@@ -44,7 +44,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
 </head>
 <body>
 
@@ -1323,6 +1323,6 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   <script>
     window.SERVER_ACTIVE_VIEW = "<?= $activeView ?>";
   </script>
-  <script src="/js/app.js"></script>
+  <script src="/js/app.js?v=<?= file_exists(__DIR__ . '/../public/js/app.js') ? filemtime(__DIR__ . '/../public/js/app.js') : '2' ?>"></script>
 </body>
 </html>
