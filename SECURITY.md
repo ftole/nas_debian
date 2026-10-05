@@ -122,6 +122,7 @@ El panel web nativo del servidor opera bajo un modelo de privilegios mínimos y 
 - **Escalada acotada mediante Sudoers:** El archivo `/etc/sudoers.d/nas-web` concede acceso administrativo exclusivamente a la lista blanca de comandos necesarios para la operación (`systemctl`, `journalctl`, `smbpasswd`, `pdbedit`, etc.), validado con `visudo -c`.
 - **Prevención de inyección de comandos:** Las clases de servicio en PHP 8 (`SystemService`, `UserService`, `StorageService`, etc.) utilizan obligatoriamente `proc_open` con arrays de parámetros para interactuar con utilidades del sistema operativo, eliminando la interpretación de shell y los riesgos de inyección.
 - **Entorno 100% Offline:** Todas las hojas de estilo, scripts y 36 iconos SVG residen localmente en el servidor, garantizando funcionamiento autónomo y protección contra vectores de ataque basados en CDNs externas o dependencias remotas.
+- **Cifrado en tránsito HTTPS (TLS 1.2 / TLS 1.3):** Conexión segura cifrada con certificado SSL/TLS autofirmado de 2048 bits y directivas de endurecimiento HTTP (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`) en el puerto 443.
 
 ## 5. Formateo y reutilización de almacenamiento
 
