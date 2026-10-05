@@ -47,7 +47,26 @@ class FileExplorerController
             return;
         }
 
-        Response::json($result);
+        $items = $result['items'] ?? [];
+        $breadcrumbs = $result['breadcrumbs'] ?? [];
+        $currentPath = $result['current_path'] ?? $path;
+        $totalItems = $result['total_items'] ?? count($items);
+
+        $payload = [
+            'success' => true,
+            'current_path' => $currentPath,
+            'breadcrumbs' => $breadcrumbs,
+            'items' => $items,
+            'total_items' => $totalItems,
+            'data' => [
+                'current_path' => $currentPath,
+                'breadcrumbs' => $breadcrumbs,
+                'items' => $items,
+                'total_items' => $totalItems,
+            ],
+        ];
+
+        Response::json($payload);
     }
 
     public function upload(Request $request): void
@@ -63,7 +82,11 @@ class FileExplorerController
             return;
         }
 
-        Response::json($result);
+        $payload = array_merge($result, [
+            'status' => 'success',
+            'data' => $result,
+        ]);
+        Response::json($payload);
     }
 
     public function mkdir(Request $request): void
