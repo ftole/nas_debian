@@ -18,6 +18,7 @@ require_once __DIR__ . '/../web/src/Services/UserService.php';
 require_once __DIR__ . '/../web/src/Services/SambaService.php';
 require_once __DIR__ . '/../web/src/Services/BackupService.php';
 require_once __DIR__ . '/../web/src/Services/AuthService.php';
+require_once __DIR__ . '/../web/src/Services/AuditService.php';
 require_once __DIR__ . '/../web/src/Controllers/DashboardController.php';
 require_once __DIR__ . '/../web/src/Controllers/SambaController.php';
 require_once __DIR__ . '/../web/src/Controllers/BackupController.php';
@@ -28,6 +29,7 @@ require_once __DIR__ . '/../web/src/Controllers/AuthController.php';
 
 use App\Core\AuthMiddleware;
 use App\Core\Request;
+use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\BackupService;
 use App\Services\SambaService;
@@ -247,6 +249,125 @@ assertTrue(empty($_SESSION['nas_user']), 'AuthService::logout limpia variables d
 // 13. Pruebas de validación de campos obligatorios en BackupService::createTask
 $emptyCifs = (new BackupService())->createTask(['id' => 'tarea_vacia', 'proto' => 'cifs']);
 assertTrue(!$emptyCifs['success'], 'BackupService::createTask rechaza CIFS sin IP o recurso compartido');
+
+// 14. Pruebas de Request::getClientIp
+$_SERVER['REMOTE_ADDR'] = '192.168.1.150';
+unset($_SERVER['HTTP_X_FORWARDED_FOR'], $_SERVER['HTTP_CLIENT_IP']);
+$ipReq1 = new Request();
+assertTrue($ipReq1->getClientIp() === '192.168.1.150', 'Request::getClientIp resuelve REMOTE_ADDR');
+
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '10.20.30.40, 192.168.1.150';
+$ipReq2 = new Request();
+assertTrue($ipReq2->getClientIp() === '10.20.30.40', 'Request::getClientIp prioriza primera IP de HTTP_X_FORWARDED_FOR');
+
+unset($_SERVER['HTTP_X_FORWARDED_FOR']);
+$_SERVER['HTTP_CLIENT_IP'] = '172.16.5.99';
+$ipReq3 = new Request();
+assertTrue($ipReq3->getClientIp() === '172.16.5.99', 'Request::getClientIp resuelve HTTP_CLIENT_IP');
+
+// 15. Pruebas de AuditService::log
+$_SESSION['nas_user'] = ['username' => 'test_admin', 'is_admin' => true];
+$tempLog = tempnam(sys_get_temp_dir(), 'nas_admin_test_');
+$origLogPath = AuditService::getLogPath();
+AuditService::setLogPath($tempLog);
+AuditService::log('share_create', 'VENTAS', 'SUCCESS', ['scheme' => 1]);
+AuditService::log('login_failure', 'unknown', 'FAILED', ['reason' => 'bad_pass']);
+$writtenLog = file_get_contents($tempLog);
+AuditService::setLogPath($origLogPath);
+@unlink($tempLog);
+
+assertTrue(str_contains($writtenLog, '[test_admin] [share_create] [VENTAS] [SUCCESS] {"scheme":1}'), 'AuditService escribe formato estructurado con JSON');
+assertTrue(str_contains($writtenLog, '[test_admin] [login_failure] [unknown] [FAILED] {"reason":"bad_pass"}'), 'AuditService registra fallos y detalles');
+
+
+// 16. Pruebas de SystemService::parseSambaAuditLog y filtros
+$sambaLogs = $system->parseSambaAuditLog(50);
+assertTrue(is_array($sambaLogs) && count($sambaLogs) > 0, 'SystemService::parseSambaAuditLog retorna eventos estructurados');
+assertTrue(isset($sambaLogs[0]['source']) && $sambaLogs[0]['source'] === 'samba_audit', 'parseSambaAuditLog asigna source=samba_audit');
+assertTrue(isset($sambaLogs[0]['action_label']) && isset($sambaLogs[0]['badge']), 'parseSambaAuditLog genera etiquetas amigables y badges');
+
+$sambaFiltered = $system->parseSambaAuditLog(50, 'Balance');
+assertTrue(is_array($sambaFiltered) && count($sambaFiltered) >= 1, 'parseSambaAuditLog soporta filtrado por subcadena q');
+$allMatchSamba = true;
+foreach ($sambaFiltered as $sl) {
+    if (!str_contains(strtolower(json_encode($sl)), 'balance')) {
+        $allMatchSamba = false;
+        break;
+    }
+}
+assertTrue($allMatchSamba, 'Todos los resultados filtrados de Samba contienen el término buscado');
+
+// 17. Pruebas de SystemService::parseAdminAuditLog y filtros
+$adminLogs = $system->parseAdminAuditLog(50);
+assertTrue(is_array($adminLogs) && count($adminLogs) > 0, 'SystemService::parseAdminAuditLog retorna eventos de administración');
+assertTrue(isset($adminLogs[0]['source']) && $adminLogs[0]['source'] === 'admin', 'parseAdminAuditLog asigna source=admin');
+assertTrue(isset($adminLogs[0]['action_label']) && isset($adminLogs[0]['status']), 'parseAdminAuditLog genera status y etiquetas');
+
+$adminFiltered = $system->parseAdminAuditLog(50, 'PUBLICO');
+assertTrue(is_array($adminFiltered) && count($adminFiltered) >= 1, 'parseAdminAuditLog soporta filtrado por query');
+
+// 18. Pruebas de SystemService::parseBackupAuditLog y filtros
+$backupLogs = $system->parseBackupAuditLog(50);
+assertTrue(is_array($backupLogs) && count($backupLogs) > 0, 'SystemService::parseBackupAuditLog retorna bitácora unificada de respaldos');
+assertTrue(isset($backupLogs[0]['source']) && $backupLogs[0]['source'] === 'backup', 'parseBackupAuditLog asigna source=backup');
+assertTrue(isset($backupLogs[0]['event_label']) && isset($backupLogs[0]['severity']), 'parseBackupAuditLog clasifica severidad y evento');
+
+$backupFiltered = $system->parseBackupAuditLog(50, 'CIFS');
+assertTrue(is_array($backupFiltered) && count($backupFiltered) >= 1, 'parseBackupAuditLog soporta filtrado por término');
+
+// 19. Pruebas de SystemService::getLogs (orígenes individuales y consolidación cronológica)
+$allLogs = $system->getLogs('all', 10);
+assertTrue(is_array($allLogs) && count($allLogs) <= 10, 'getLogs(all) consolida y respeta el límite solicitado');
+
+$sambaOnly = $system->getLogs('samba_audit', 10);
+$allSamba = true;
+foreach ($sambaOnly as $l) {
+    if ($l['source'] !== 'samba_audit') {
+        $allSamba = false;
+        break;
+    }
+}
+assertTrue($allSamba && count($sambaOnly) > 0, 'getLogs(samba_audit) retorna únicamente registros Samba');
+
+$adminOnly = $system->getLogs('admin', 10);
+$allAdmin = true;
+foreach ($adminOnly as $l) {
+    if ($l['source'] !== 'admin') {
+        $allAdmin = false;
+        break;
+    }
+}
+assertTrue($allAdmin && count($adminOnly) > 0, 'getLogs(admin) retorna únicamente registros administrativos');
+
+$backupOnly = $system->getLogs('backup', 10);
+$allBackup = true;
+foreach ($backupOnly as $l) {
+    if ($l['source'] !== 'backup') {
+        $allBackup = false;
+        break;
+    }
+}
+assertTrue($allBackup && count($backupOnly) > 0, 'getLogs(backup) retorna únicamente registros de respaldos');
+
+$systemOnly = $system->getLogs('system', 10);
+$allSystem = true;
+foreach ($systemOnly as $l) {
+    if ($l['source'] !== 'system') {
+        $allSystem = false;
+        break;
+    }
+}
+assertTrue($allSystem, 'getLogs(system) retorna únicamente registros del sistema');
+
+// Verificación del orden cronológico descendente en consolidación
+$isSortedDesc = true;
+for ($i = 0; $i < count($allLogs) - 1; $i++) {
+    if (strcmp($allLogs[$i]['timestamp'] ?? '', $allLogs[$i + 1]['timestamp'] ?? '') < 0) {
+        $isSortedDesc = false;
+        break;
+    }
+}
+assertTrue($isSortedDesc, 'getLogs(all) ordena los registros consolidados en orden cronológico descendente');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
