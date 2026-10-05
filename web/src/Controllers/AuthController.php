@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\AuthMiddleware;
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\SystemService;
 
@@ -63,6 +64,7 @@ class AuthController
 
         if (trim($username) === '' || trim($password) === '') {
             $err = 'Por favor ingresa tu usuario y contraseña.';
+            AuditService::log('login_failure', $username ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos']);
             if ($request->isJson()) {
                 Response::error($err, 400);
                 return;
@@ -76,6 +78,7 @@ class AuthController
 
         if (!$res['success']) {
             $err = $res['error'] ?? 'Usuario o contraseña incorrectos.';
+            AuditService::log('login_failure', $username, 'FAILED', ['error' => $err]);
             if ($request->isJson()) {
                 Response::error($err, 401);
                 return;
@@ -88,6 +91,7 @@ class AuthController
         // Proteger contra Session Fixation
         session_regenerate_id(true);
         $_SESSION['nas_user'] = $res['user'];
+        AuditService::log('login_success', $username, 'SUCCESS', ['role' => $res['user']['role'] ?? 'Administrador']);
 
         if ($request->isJson()) {
             Response::success($res['user'], 'Sesión iniciada con éxito.');
@@ -103,7 +107,9 @@ class AuthController
      */
     public function logout(Request $request): void
     {
+        $currentUser = $_SESSION['nas_user']['username'] ?? 'desconocido';
         $this->auth->logout();
+        AuditService::log('logout', $currentUser, 'SUCCESS');
 
         if ($request->isJson()) {
             Response::success(null, 'Sesión finalizada con éxito.');
