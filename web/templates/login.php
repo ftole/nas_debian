@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * Plantilla de Inicio de Sesión • Panel Web NAS & Central de Respaldos (Debian 13).
- * 100% Offline • Cero dependencias externas • Estilo sobrio Cockpit / PatternFly 4.
+ * 100% Offline • Cero dependencias externas • Modern Slate Design.
  *
  * @var string $hostname Nombre del servidor.
  * @var string $serverIp Dirección IP del host.
@@ -30,7 +30,7 @@ $safeServerIp = htmlspecialchars((string) ($serverIp ?? '10.10.1.2'), ENT_QUOTES
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/css/cockpit.css">
+  <link rel="stylesheet" href="/css/app.css">
   <style>
     body.login-page {
       display: flex;
