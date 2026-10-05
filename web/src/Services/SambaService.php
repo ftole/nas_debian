@@ -160,7 +160,7 @@ class SambaService
             'directory mask' => '0770',
             'force create mode' => '0770',
             'force directory mode' => '0770',
-            'vfs objects' => 'acl_xattr streams_xattr',
+            'vfs objects' => 'acl_xattr streams_xattr full_audit',
         ];
 
         // Limpiar formato de grupos para Samba (@nombre)
