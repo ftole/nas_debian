@@ -499,6 +499,10 @@ assertTrue($topWarn['success'] && str_contains($topWarn['output'], 'monitor inte
 $helpRes = $terminal->execute('help', '/srv/nas');
 assertTrue($helpRes['success'] && str_contains($helpRes['output'], 'Comandos rápidos del sistema'), 'TerminalService provee guía de comandos con help');
 
+// Comando ll con función integrada
+$llRes = $terminal->execute('ll', '/srv/nas');
+assertTrue($llRes['success'] && $llRes['exit_code'] === 0, 'TerminalService soporta alias/función ll de listar archivos');
+
 // Historial en base de datos
 $history = $terminal->getHistory(5);
 assertTrue(is_array($history), 'TerminalService::getHistory retorna historial estructurado');
