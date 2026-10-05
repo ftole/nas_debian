@@ -60,8 +60,8 @@ echo "[1/7] Deteniendo y deshabilitando servicios..."
 if [ "$DRY_RUN" == "true" ]; then
     echo "  [dry-run] detener y deshabilitar smbd, nmbd, wsdd2, nginx y php-fpm"
 else
-    systemctl stop smbd nmbd wsdd2 nginx php*-fpm cockpit.socket cockpit.service 2>/dev/null || true
-    systemctl disable smbd nmbd wsdd2 nginx php*-fpm cockpit.socket 2>/dev/null || true
+    systemctl stop smbd nmbd wsdd2 nginx php*-fpm 2>/dev/null || true
+    systemctl disable smbd nmbd wsdd2 nginx php*-fpm 2>/dev/null || true
 fi
 
 echo "[2/7] Desinstalando paquetes de Samba, Servidor Web y extensiones..."
@@ -70,9 +70,7 @@ if [ "$DRY_RUN" == "true" ]; then
 else
     DEBIAN_FRONTEND=noninteractive apt-get purge -y \
         samba samba-common samba-common-bin wsdd2 smbclient \
-        nginx-light php-fpm php-cli \
-        cockpit cockpit-storaged cockpit-networkmanager cockpit-packagekit \
-        cockpit-file-sharing cockpit-identities cockpit-navigator 2>/dev/null || true
+        nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 2>/dev/null || true
 fi
 echo "  Nota: no se ejecuta 'apt-get autoremove' automáticamente (evita borrar"
 echo "        dependencias que otros servicios puedan necesitar)."
@@ -113,10 +111,11 @@ fi
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, servidor web, certificados SSL, wrappers, parches, overrides, logrotate y udev"
+    echo "  [dry-run] eliminar /etc/samba, servidor web, base de datos sqlite, certificados SSL, wrappers, parches, overrides, logrotate y udev"
 else
     rm -rf /etc/samba
     rm -rf /var/www/nas-web
+    rm -rf /var/lib/nas
     rm -f /etc/ssl/certs/nas-web.crt /etc/ssl/private/nas-web.key
     rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
     rm -f /etc/php/*/fpm/pool.d/nas-web.conf /run/php/php-fpm-nas.sock
@@ -126,7 +125,6 @@ else
     if command -v dpkg-divert &>/dev/null; then
         dpkg-divert --remove --rename /usr/bin/lastb 2>/dev/null || true
     fi
-    rm -rf /usr/share/cockpit/file-sharing /usr/share/cockpit/identities /usr/share/cockpit/navigator /usr/share/cockpit/backups
     rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
     rm -f /etc/udev/rules.d/60-nas-readahead.rules
     rm -f /etc/sysctl.d/99-nas-tuning.conf
