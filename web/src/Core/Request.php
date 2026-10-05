@@ -72,8 +72,11 @@ class Request
         return $this->queryParams;
     }
 
-    public function getQuery(string $key, mixed $default = null): mixed
+    public function getQuery(?string $key = null, mixed $default = null): mixed
     {
+        if ($key === null) {
+            return $this->queryParams;
+        }
         return $this->queryParams[$key] ?? $default;
     }
 
