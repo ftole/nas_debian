@@ -68,6 +68,22 @@ class AuditService
                 // Silencioso ante contingencias de syslog
             }
         }
+
+        // 3. Persistencia estructurada en Base de Datos Nativa SQLite
+        try {
+            DatabaseService::insert('audit_logs', [
+                'timestamp' => $timestamp,
+                'ip' => $ip,
+                'username' => $user,
+                'action' => $action,
+                'target' => $target,
+                'status' => $statusUpper,
+                'details' => $detailsJson,
+                'source' => 'admin',
+            ]);
+        } catch (\Throwable) {
+            // Tolerante ante contingencias de base de datos
+        }
     }
 
     private static function resolveClientIp(): string
