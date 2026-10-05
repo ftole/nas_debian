@@ -232,11 +232,11 @@ class SystemService
             $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
         } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
             $lines = [
-                '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|open|ok|r|Balance_General_2026.xlsx',
-                '2026-10-05T10:16:05-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|open|ok|w|Presupuesto_Anual.xlsx',
-                '2026-10-05T10:17:12-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|rename|ok|borrador_acta.docx|acta_final.docx',
-                '2026-10-05T10:18:40-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|unlink|ok|archivo_temporal.tmp',
-                '2026-10-05T10:19:00-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|mkdir|ok|Reportes_Q3',
+                '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|openat|ok|r|Balance_General_2026.xlsx',
+                '2026-10-05T10:16:05-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|openat|ok|w|Presupuesto_Anual.xlsx',
+                '2026-10-05T10:17:12-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|renameat|ok|borrador_acta.docx|acta_final.docx',
+                '2026-10-05T10:18:40-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|unlinkat|ok|archivo_temporal.tmp',
+                '2026-10-05T10:19:00-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|mkdirat|ok|Reportes_Q3',
                 '2026-10-05T10:20:15-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|connect|ok|SISTEMAS',
             ];
         }
@@ -281,6 +281,7 @@ class SystemService
 
             switch ($action) {
                 case 'open':
+                case 'openat':
                     $isWrite = false;
                     if (isset($args[0]) && in_array(strtolower($args[0]), ['w', 'rw', 'a', 'write'], true)) {
                         $isWrite = true;
@@ -298,6 +299,7 @@ class SystemService
                     break;
 
                 case 'unlink':
+                case 'unlinkat':
                     $actionLabel = 'Eliminación de archivo';
                     $badge = 'err';
                     break;
@@ -308,11 +310,13 @@ class SystemService
                     break;
 
                 case 'mkdir':
+                case 'mkdirat':
                     $actionLabel = 'Creación de carpeta';
                     $badge = 'blue';
                     break;
 
                 case 'rename':
+                case 'renameat':
                     $actionLabel = 'Renombrado';
                     $badge = 'warn';
                     if (count($args) >= 2) {
