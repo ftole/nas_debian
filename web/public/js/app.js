@@ -202,11 +202,11 @@ async function apiFetch(endpoint, options = {}) {
     }
 
     if (!res.ok || data.success === false) {
-      throw new Error(data.error || data.message || `Error ${res.status}`);
+      throw new Error(data.error || data.message || data.output || `Error ${res.status}`);
     }
     return data;
   } catch (err) {
-    if (err.message !== 'Sesión expirada.') {
+    if (err.message !== 'Sesión expirada.' && !options.silentToast) {
       showToast(err.message, 'error');
     }
     throw err;
@@ -976,10 +976,15 @@ function initTerminal() {
 
 async function executeTerminalCommand(cmd) {
   const output = document.getElementById('terminal-output');
+  const input = document.getElementById('terminal-input');
   const promptUser = document.getElementById('terminal-prompt-prefix');
   const promptCwd = document.getElementById('term-prompt-cwd');
   const barCwd = document.getElementById('term-bar-cwd');
   if (!output) return;
+
+  if (AppState.terminal.isExecuting) return;
+  AppState.terminal.isExecuting = true;
+  if (input) input.disabled = true;
 
   const currentCwd = AppState.terminal.cwd || '/srv/nas';
   const promptPrefix = promptUser ? promptUser.textContent : `$`;
@@ -988,6 +993,11 @@ async function executeTerminalCommand(cmd) {
   const lower = cmd.trim().toLowerCase();
   if (lower === 'clear' || lower === 'cls') {
     output.textContent = '';
+    AppState.terminal.isExecuting = false;
+    if (input) {
+      input.disabled = false;
+      input.focus();
+    }
     return;
   }
 
@@ -998,26 +1008,41 @@ async function executeTerminalCommand(cmd) {
         command: cmd,
         cwd: currentCwd,
       }),
+      silentToast: true,
     });
 
-    const data = res.data;
-    if (data.output) {
-      output.textContent += data.output;
-      if (!data.output.endsWith('\n')) {
-        output.textContent += '\n';
+    const isClear = res.clear ?? res.data?.clear ?? false;
+    if (isClear) {
+      output.textContent = '';
+    } else {
+      const termOutput = res.output ?? res.data?.output ?? '';
+      const exitCode = res.exit_code ?? res.data?.exit_code ?? 0;
+      if (termOutput) {
+        output.textContent += termOutput;
+        if (!termOutput.endsWith('\n')) {
+          output.textContent += '\n';
+        }
+      } else if (exitCode !== 0) {
+        output.textContent += `[Proceso finalizado con código ${exitCode}]\n`;
       }
     }
 
-    if (data.cwd) {
-      AppState.terminal.cwd = data.cwd;
-      if (promptCwd) promptCwd.textContent = data.cwd;
-      if (barCwd) barCwd.textContent = data.cwd;
+    const newCwd = res.cwd ?? res.data?.cwd;
+    if (newCwd) {
+      AppState.terminal.cwd = newCwd;
+      if (promptCwd) promptCwd.textContent = newCwd;
+      if (barCwd) barCwd.textContent = newCwd;
     }
   } catch (err) {
     output.textContent += `[Error de ejecución]: ${err.message}\n`;
+  } finally {
+    AppState.terminal.isExecuting = false;
+    if (input) {
+      input.disabled = false;
+      input.focus();
+    }
+    output.scrollTop = output.scrollHeight;
   }
-
-  output.scrollTop = output.scrollHeight;
 }
 
 function clearTerminal() {
@@ -1133,15 +1158,18 @@ async function loadFiles(subpath = null) {
     const root = AppState.files.root || 'nas';
     const query = `/api/files/list?root=${encodeURIComponent(root)}&path=${encodeURIComponent(subpath)}`;
     const res = await apiFetch(query);
-    const data = res.data;
 
-    AppState.files.items = data.items || [];
+    const items = res.data?.items ?? res.items ?? [];
+    const breadcrumbs = res.data?.breadcrumbs ?? res.breadcrumbs ?? [];
+    const currentPath = res.data?.current_path ?? res.current_path ?? subpath ?? '';
 
-    renderFileBreadcrumbs(data.breadcrumbs || [], data.current_path || '');
+    AppState.files.items = items;
+
+    renderFileBreadcrumbs(breadcrumbs, currentPath);
 
     if (!tbody) return;
 
-    if (data.items.length === 0) {
+    if (items.length === 0) {
       tbody.innerHTML = `
         <tr>
           <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">
@@ -1152,18 +1180,23 @@ async function loadFiles(subpath = null) {
       return;
     }
 
-    tbody.innerHTML = data.items.map(item => {
+    tbody.innerHTML = items.map(item => {
       const isDir = item.is_dir;
       const icon = isDir ? '#icon-folder' : '#icon-file-text';
       const iconColor = isDir ? 'color:var(--accent-primary);' : 'color:var(--text-muted);';
+      const relPath = item.relative_path || item.path || '';
       const nameClick = isDir
-        ? `onclick="navigateToSubpath('${escapeHtml(item.relative_path)}')" style="cursor:pointer;"`
+        ? `onclick="navigateToSubpath('${escapeHtml(relPath)}')" style="cursor:pointer;"`
         : '';
       const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
 
       const downloadAction = isDir
-        ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(item.relative_path)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
-        : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(item.relative_path)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
+        ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
+        : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(relPath)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
+
+      const ownerStr = escapeHtml(item.owner || 'sistemas');
+      const groupStr = escapeHtml(item.group || 'grp_sistemas');
+      const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
 
       return `
         <tr>
@@ -1173,15 +1206,15 @@ async function loadFiles(subpath = null) {
               <span>${escapeHtml(item.name)}</span>
             </div>
           </td>
-          <td>${escapeHtml(item.size_formatted)}</td>
-          <td><code>${escapeHtml(item.permissions)}</code></td>
-          <td>${escapeHtml(item.owner)}:${escapeHtml(item.group)}</td>
-          <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.modified_at)}</td>
+          <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+          <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
+          <td>${ownerStr}:${groupStr}</td>
+          <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
           <td style="text-align:right;">
             <div style="display:flex; justify-content:flex-end; gap:6px;">
               ${downloadAction}
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(item.relative_path)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
-              <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(item.relative_path)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
             </div>
           </td>
         </tr>
@@ -1300,11 +1333,11 @@ async function uploadFiles(files) {
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const resp = JSON.parse(xhr.responseText);
-              if (resp.status === 'success') {
+              if (resp.status === 'success' || resp.success === true) {
                 successCount++;
                 resolve(resp);
               } else {
-                reject(new Error(resp.message || 'Error en respuesta del servidor'));
+                reject(new Error(resp.message || resp.error || 'Error en respuesta del servidor'));
               }
             } catch (err) {
               reject(err);
@@ -1464,7 +1497,7 @@ async function loadDomainStatus() {
 
   try {
     const res = await apiFetch('/api/domain/status');
-    const d = res.data;
+    const d = res.data || res;
     AppState.domain.status = d;
 
     const isJoined = d.joined;
@@ -1547,7 +1580,7 @@ async function handleDomainDiscover(e) {
       body: JSON.stringify({ domain }),
     });
 
-    const d = res.data;
+    const d = res.data || res;
     resultDiv.innerHTML = `
       <div style="background:var(--bg-surface); padding:12px; border-radius:6px; border:1px solid var(--border-color); font-size:13px;">
         <div style="color:var(--accent-success-text); font-weight:600; margin-bottom:6px;">Controlador de Dominio Detectado</div>
