@@ -719,6 +719,7 @@ cat << SMBCONF > /etc/samba/smb.conf
    map to guest = Bad User
    server min protocol = SMB2_02
    server smb encrypt = desired
+   server signing = auto
    dns proxy = no
 
    # Optimizaciones de Rendimiento y Red (Office +100 usuarios)
