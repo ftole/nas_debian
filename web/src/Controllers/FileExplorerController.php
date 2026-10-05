@@ -139,19 +139,119 @@ class FileExplorerController
         $root = (string) ($body['root'] ?? 'nas');
         $rawPath = (string) ($body['path'] ?? '');
         $path = $this->resolveSubpath($root, $rawPath);
+        $permanent = (bool) ($body['permanent'] ?? false);
+        $user = (string) ($_SESSION['nas_user']['username'] ?? 'sistemas');
 
         if ($path === '') {
             Response::error('Debe especificar la ruta del archivo o carpeta a eliminar.', 400);
             return;
         }
 
-        $result = $this->fileService->deleteItem($path);
+        $result = $this->fileService->deleteItem($path, $permanent, $user);
         if (!($result['success'] ?? false)) {
             Response::error($result['error'] ?? 'Fallo al eliminar el elemento.', 400);
             return;
         }
 
         Response::json($result);
+    }
+
+    public function trashList(Request $request): void
+    {
+        $result = $this->fileService->listTrash();
+        $count = $this->fileService->getTrashCount();
+        $payload = [
+            'success' => true,
+            'items' => $result['items'] ?? [],
+            'total' => $count,
+            'count' => $count,
+            'data' => [
+                'items' => $result['items'] ?? [],
+                'total' => $count,
+                'count' => $count,
+            ],
+        ];
+        Response::json($payload);
+    }
+
+    public function trashRestore(Request $request): void
+    {
+        $body = $request->getBody();
+        $id = (int) ($body['id'] ?? 0);
+        if ($id <= 0) {
+            Response::error('Identificador de elemento de papelera no válido.', 400);
+            return;
+        }
+
+        $result = $this->fileService->restoreTrashItem($id);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'Fallo al restaurar el elemento.', 400);
+            return;
+        }
+
+        Response::json($result);
+    }
+
+    public function trashDelete(Request $request): void
+    {
+        $body = $request->getBody();
+        $id = (int) ($body['id'] ?? 0);
+        if ($id <= 0) {
+            Response::error('Identificador de elemento de papelera no válido.', 400);
+            return;
+        }
+
+        $result = $this->fileService->deleteTrashItem($id);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'Fallo al eliminar de la papelera.', 400);
+            return;
+        }
+
+        Response::json($result);
+    }
+
+    public function trashEmpty(Request $request): void
+    {
+        $result = $this->fileService->emptyTrash();
+        Response::json($result);
+    }
+
+    public function content(Request $request): void
+    {
+        $root = (string) $request->getQuery('root', 'nas');
+        $rawPath = (string) $request->getQuery('path', '');
+        $path = $this->resolveSubpath($root, $rawPath);
+
+        if ($path === '') {
+            Response::error('Ruta de archivo no especificada.', 400);
+            return;
+        }
+
+        $result = $this->fileService->getFileContent($path);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'No se pudo obtener el contenido del archivo.', 400, $result);
+            return;
+        }
+
+        $payload = array_merge($result, [
+            'data' => $result,
+        ]);
+        Response::json($payload);
+    }
+
+    public function raw(Request $request): void
+    {
+        $root = (string) $request->getQuery('root', 'nas');
+        $rawPath = (string) $request->getQuery('path', '');
+        $path = $this->resolveSubpath($root, $rawPath);
+
+        if ($path === '') {
+            http_response_code(400);
+            echo 'Ruta no especificada.';
+            return;
+        }
+
+        $this->fileService->streamRawFile($path);
     }
 
     public function download(Request $request): void
