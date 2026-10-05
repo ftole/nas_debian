@@ -59,12 +59,25 @@ class FileExplorerService
 
         $candidate = $rootDir . '/' . $cleanSub;
         $realRoot = realpath($rootDir);
+        $realTrash = realpath(self::getTrashDir());
         $realCandidate = realpath($candidate);
+
+        // Bloqueo estricto del repositorio de papelera y cualquier contenido dentro de él
+        if ($realTrash !== false && $realCandidate !== false) {
+            if ($realCandidate === $realTrash || str_starts_with($realCandidate, $realTrash . DIRECTORY_SEPARATOR) || str_starts_with($realCandidate, $realTrash . '/')) {
+                return null;
+            }
+        }
 
         // Si el archivo/directorio aún no existe (ej. upload o mkdir), validamos el directorio padre
         if ($realCandidate === false) {
             $parent = dirname($candidate);
             $realParent = realpath($parent);
+            if ($realTrash !== false && $realParent !== false) {
+                if ($realParent === $realTrash || str_starts_with($realParent, $realTrash . DIRECTORY_SEPARATOR) || str_starts_with($realParent, $realTrash . '/')) {
+                    return null;
+                }
+            }
             if ($realParent !== false && $realRoot !== false && (str_starts_with($realParent, $realRoot) || $realParent === $realRoot)) {
                 return $candidate;
             }
@@ -406,7 +419,8 @@ class FileExplorerService
             ]);
         } catch (Throwable $e) {
             error_log('Error registrando metadatos en trash_items: ' . $e->getMessage());
-            $insertId = 0;
+            @rename($trashPath, $target);
+            return ['success' => false, 'error' => 'No se pudieron registrar los metadatos en la base de datos: ' . $e->getMessage()];
         }
 
         AuditService::log('trash_move', $subpath, 'SUCCESS', [
@@ -552,11 +566,18 @@ class FileExplorerService
 
         // Si ya existe un elemento con el mismo nombre en el destino, agregar sufijo restaurado
         if (file_exists($destination)) {
-            $ext = pathinfo($destination, PATHINFO_EXTENSION);
-            $base = pathinfo($destination, PATHINFO_FILENAME);
-            $suffix = '_restaurado_' . date('Ymd_His');
-            $newName = $base . $suffix . ($ext !== '' ? '.' . $ext : '');
-            $destination = $parentDir . '/' . $newName;
+            $isDirItem = (bool) ($item['is_dir'] ?? false);
+            $ext = $isDirItem ? '' : pathinfo($destination, PATHINFO_EXTENSION);
+            $base = $isDirItem ? $item['filename'] : pathinfo($destination, PATHINFO_FILENAME);
+            $counter = 0;
+            do {
+                $suffix = '_restaurado_' . date('Ymd_His') . ($counter > 0 ? "_{$counter}" : '');
+                $newName = $base . $suffix . ($ext !== '' ? '.' . $ext : '');
+                $candidateDest = $parentDir . '/' . $newName;
+                $counter++;
+            } while (file_exists($candidateDest));
+
+            $destination = $candidateDest;
             $destRel = ($destRel !== basename($destRel) ? dirname($destRel) . '/' : '') . $newName;
         }
 
@@ -748,6 +769,58 @@ class FileExplorerService
     }
 
     /**
+     * Guarda el contenido de texto plano o código editado desde el previsualizador web.
+     */
+    public function saveFileContent(string $subpath, string $content): array
+    {
+        $target = $this->resolveSafePath($subpath);
+        if ($target === null || is_dir($target)) {
+            return ['success' => false, 'error' => 'Ruta de archivo inválida o es un directorio.'];
+        }
+
+        $rootDir = self::getRootDir();
+        if ($target === $rootDir) {
+            return ['success' => false, 'error' => 'No se puede guardar sobre la raíz del almacenamiento.'];
+        }
+
+        $parent = dirname($target);
+        if (!is_dir($parent)) {
+            if (!@mkdir($parent, 02770, true)) {
+                return ['success' => false, 'error' => 'No se pudo crear la carpeta contenedora.'];
+            }
+            if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                @chgrp($parent, 'grp_sistemas');
+            }
+        }
+
+        $written = @file_put_contents($target, $content);
+        if ($written === false) {
+            return ['success' => false, 'error' => 'No se pudo guardar el archivo. Verifique permisos de escritura.'];
+        }
+
+        @chmod($target, 0660);
+        if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+            @chgrp($target, 'grp_sistemas');
+        }
+
+        $normalizedContent = (string) preg_replace('/(\r\n|\n|\r)$/D', '', $content);
+        $linesCount = $normalizedContent === '' ? (strlen($content) > 0 ? 1 : 0) : substr_count($normalizedContent, "\n") + 1;
+
+        AuditService::log('file_save', $subpath, 'SUCCESS', [
+            'bytes' => $written,
+            'lines' => $linesCount,
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'Archivo guardado correctamente.',
+            'bytes' => $written,
+            'size_formatted' => $this->formatBytes($written, false),
+            'lines_count' => $linesCount,
+        ];
+    }
+
+    /**
      * Transmite de forma segura el archivo en bruto (raw) para renderizado multimedia o embebido (PDF/Imágenes).
      */
     public function streamRawFile(string $subpath): void
@@ -784,6 +857,48 @@ class FileExplorerService
 
         if (ob_get_level()) {
             ob_end_clean();
+        }
+
+        // Soporte completo para peticiones HTTP Byte-Range (reproducción y desplazamiento en video/audio)
+        $rangeHeader = $_SERVER['HTTP_RANGE'] ?? '';
+        if ($rangeHeader !== '' && $size !== false && $size > 0 && preg_match('/bytes=(\d*)-(\d*)/i', $rangeHeader, $matches)) {
+            $start = $matches[1] !== '' ? (int) $matches[1] : 0;
+            $end = $matches[2] !== '' ? (int) $matches[2] : $size - 1;
+
+            if ($start > $end || $start >= $size) {
+                http_response_code(416);
+                header("Content-Range: bytes */{$size}");
+                return;
+            }
+
+            $end = min($end, $size - 1);
+            $length = $end - $start + 1;
+
+            http_response_code(206);
+            header('Content-Type: ' . $contentType);
+            header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+            header('Accept-Ranges: bytes');
+            header("Content-Range: bytes {$start}-{$end}/{$size}");
+            header('Content-Length: ' . $length);
+            header('Cache-Control: private, max-age=3600');
+
+            $handle = @fopen($target, 'rb');
+            if ($handle !== false) {
+                fseek($handle, $start);
+                $remaining = $length;
+                while ($remaining > 0 && !feof($handle)) {
+                    $chunk = min(65536, $remaining);
+                    $buffer = fread($handle, $chunk);
+                    if ($buffer === false || $buffer === '') {
+                        break;
+                    }
+                    echo $buffer;
+                    $remaining -= strlen($buffer);
+                    flush();
+                }
+                fclose($handle);
+            }
+            exit;
         }
 
         header('Content-Type: ' . $contentType);
