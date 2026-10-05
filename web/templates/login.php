@@ -30,7 +30,7 @@ $safeServerIp = htmlspecialchars((string) ($serverIp ?? '10.10.1.2'), ENT_QUOTES
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
   <style>
     body.login-page {
       display: flex;
