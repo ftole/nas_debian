@@ -222,7 +222,7 @@ async function refreshDashboardMetrics() {
 
   try {
     const res = await apiFetch('/api/metrics');
-    const d = res.data;
+    const d = res.data || res;
 
     if (d.system) {
       const ramVal = document.getElementById('kpi-ram-val');
@@ -533,7 +533,7 @@ async function viewBackupLogs(taskId) {
 
   try {
     const res = await apiFetch(`/api/backups/${encodeURIComponent(taskId)}/logs`);
-    if (content) content.textContent = res.data.logs || 'Sin contenido registrado aún.';
+    if (content) content.textContent = res.data?.logs ?? res.logs ?? 'Sin contenido registrado aún.';
   } catch (e) {
     if (content) content.textContent = 'Error al leer la bitácora: ' + e.message;
   }
@@ -566,7 +566,7 @@ async function loadStorage() {
 
   try {
     const res = await apiFetch('/api/storage');
-    const disks = res.data.disks || [];
+    const disks = res.data?.disks ?? res.disks ?? [];
 
     if (disks.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No se detectaron discos de bloque adicionales.</td></tr>';
@@ -1067,7 +1067,7 @@ async function loadUpdates() {
 
   try {
     const res = await apiFetch('/api/system/updates');
-    const u = res.data;
+    const u = res.data || res;
 
     container.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px;">
@@ -1119,7 +1119,7 @@ function escapeHtml(str) {
 async function loadNetworking() {
   try {
     const res = await apiFetch('/api/metrics');
-    const d = res.data;
+    const d = res.data || res;
     if (d && d.system) {
       const hn = document.getElementById('masthead-hostname');
       if (hn && d.system.hostname) hn.textContent = d.system.hostname;
@@ -1668,7 +1668,7 @@ async function loadDiagnostics() {
 
   try {
     const res = await apiFetch('/api/diagnostics');
-    const d = res.data;
+    const d = res.data || res;
 
     if (overallVal) {
       if (d.overall_status === 'OK') {
