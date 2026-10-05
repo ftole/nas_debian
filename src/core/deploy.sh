@@ -94,7 +94,7 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
     advertir "No se pudieron actualizar los repositorios (apt-get update)."
 fi
 if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules \
+    sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
     nginx-light php-fpm php-cli \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
@@ -455,15 +455,38 @@ fi
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
 
-# 3. Configurar Host Virtual de Nginx
+# 3. Generar Certificado SSL/TLS autofirmado para acceso HTTPS
+if [ ! -f /etc/ssl/certs/nas-web.crt ] || [ ! -f /etc/ssl/private/nas-web.key ]; then
+    mkdir -p /etc/ssl/certs /etc/ssl/private
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -subj "/C=ES/ST=Admin/L=Server/O=TEAM-JOFRATO/CN=${SMB_NETBIOS:-SRV-NAS}" \
+        -keyout /etc/ssl/private/nas-web.key \
+        -out /etc/ssl/certs/nas-web.crt 2>/dev/null || advertir "No se pudo generar el certificado SSL autofirmado."
+    chmod 600 /etc/ssl/private/nas-web.key 2>/dev/null || true
+    chmod 644 /etc/ssl/certs/nas-web.crt 2>/dev/null || true
+fi
+
+# 4. Configurar Host Virtual de Nginx (HTTP + HTTPS)
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
     server_name _;
     root /var/www/nas-web/public;
     index index.php index.html;
+
+    ssl_certificate /etc/ssl/certs/nas-web.crt;
+    ssl_certificate_key /etc/ssl/private/nas-web.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Cabeceras de seguridad
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
 
     client_max_body_size 64M;
 
@@ -475,6 +498,7 @@ server {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php-fpm-nas.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS on;
         include fastcgi_params;
     }
 
@@ -486,7 +510,7 @@ NGINX_EOF
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 
-# 4. Configurar sudoers para www-data con permisos acotados y seguros
+# 5. Configurar sudoers para www-data con permisos acotados y seguros
 cat << 'SUDOERS_EOF' > /etc/sudoers.d/nas-web
 Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \
     /bin/systemctl restart smbd, /usr/bin/systemctl restart smbd, \
@@ -545,7 +569,7 @@ if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/
     rm -f /etc/sudoers.d/nas-web
 fi
 
-# 5. Ocultar disco del sistema operativo de la interfaz de Almacenamiento (UDisks2)
+# 6. Ocultar disco del sistema operativo de la interfaz de Almacenamiento (UDisks2)
 ROOT_DEV_OS=$(findmnt -n -o SOURCE / 2>/dev/null || df / | tail -1 | awk '{print $1}')
 ROOT_DISK_OS=$(lsblk -no PKNAME "$ROOT_DEV_OS" 2>/dev/null || basename "$ROOT_DEV_OS")
 if [ -n "$ROOT_DISK_OS" ]; then
@@ -697,7 +721,7 @@ cat << MOTD > /etc/motd
 
 ======================================================
   SERVIDOR EAD-COL ($SERVER_ROLE) - IP: $SERVER_IP
-  * Panel Web   : http://${SERVER_IP}
+  * Panel Web   : https://${SERVER_IP} (o http://${SERVER_IP})
   * Red Windows : \\${SERVER_IP} ($SMB_NETBIOS)
 ======================================================
 
@@ -754,6 +778,7 @@ if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; the
     else
         ufw allow 80/tcp comment 'NAS Web Admin' 2>/dev/null || true
     fi
+    ufw allow 443/tcp comment 'NAS Web Admin HTTPS' 2>/dev/null || true
     ufw allow 137,138/udp comment 'Samba NetBIOS' 2>/dev/null || true
     ufw allow 139,445/tcp comment 'Samba SMB' 2>/dev/null || true
     ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP' 2>/dev/null || true
@@ -775,6 +800,6 @@ echo "==========================================================================
 echo " Rol del Servidor: $SERVER_ROLE"
 echo " Almacenamiento  : /srv/nas ($TARGET_DISK)"
 echo " Administrador   : $ADMIN_USER (con permisos sudo y Samba)"
-echo " Panel Web       : http://${SERVER_IP}"
+echo " Panel Web       : https://${SERVER_IP} (o http://${SERVER_IP})"
 printf " Red Windows     : \\\\\\\\%s (o \\\\\\\\%s)\n" "${SERVER_IP}" "$SMB_NETBIOS"
 echo "=============================================================================="
