@@ -28,7 +28,22 @@ class TerminalController
         $cwd = (string) ($body['cwd'] ?? '/srv/nas');
 
         $result = $this->terminalService->execute($cmd, $cwd);
-        Response::json($result);
+        $payload = [
+            'success' => true,
+            'output' => $result['output'] ?? '',
+            'exit_code' => $result['exit_code'] ?? 0,
+            'cwd' => $result['cwd'] ?? $cwd,
+            'time_ms' => $result['time_ms'] ?? 0,
+            'clear' => $result['clear'] ?? false,
+            'data' => [
+                'output' => $result['output'] ?? '',
+                'exit_code' => $result['exit_code'] ?? 0,
+                'cwd' => $result['cwd'] ?? $cwd,
+                'time_ms' => $result['time_ms'] ?? 0,
+                'clear' => $result['clear'] ?? false,
+            ],
+        ];
+        Response::json($payload);
     }
 
     public function history(Request $request): void
