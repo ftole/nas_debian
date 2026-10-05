@@ -414,32 +414,63 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
         </div>
       </section>
 
-      <!-- 2. REGISTROS (LOGS) -->
+      <!-- 2. REGISTROS (LOGS & AUDITORÍA) -->
       <section id="view-logs" class="view-section <?= $activeView === 'logs' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-file"></use></svg> Registros del sistema (journalctl)</h2>
-            <p>Bitácoras consolidadas de demonios de red, rsync y seguridad Debian 13</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-file"></use></svg> Auditoría y registros del sistema</h2>
+            <p>Trazabilidad integral: accesos Samba a archivos, auditoría administrativa, réplicas y eventos journald</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadLogs()">
+            <button class="btn btn-secondary" onclick="exportOrCopyLogs()" title="Copiar registros visibles al portapapeles">
+              <svg class="icon"><use href="#icon-copy"></use></svg> Copiar
+            </button>
+            <button class="btn btn-secondary" onclick="loadLogs()" title="Actualizar registros">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
             </button>
+          </div>
+        </div>
+
+        <!-- Barra de Filtros, Categorías y Búsqueda -->
+        <div class="filter-toolbar">
+          <div class="filter-chips" id="logs-filter-chips">
+            <button type="button" class="chip-btn active" data-source="all" onclick="setLogSource('all')">Todos</button>
+            <button type="button" class="chip-btn" data-source="samba_audit" onclick="setLogSource('samba_audit')">Auditoría Samba (Archivos)</button>
+            <button type="button" class="chip-btn" data-source="admin" onclick="setLogSource('admin')">Auditoría Web / Admin</button>
+            <button type="button" class="chip-btn" data-source="backup" onclick="setLogSource('backup')">Respaldos</button>
+            <button type="button" class="chip-btn" data-source="system" onclick="setLogSource('system')">Sistema (journald)</button>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div class="search-box">
+              <svg class="icon" style="color:var(--text-muted);"><use href="#icon-search"></use></svg>
+              <input type="text" id="logs-search-input" placeholder="Buscar por usuario, IP, acción o recurso..." oninput="debounceLogSearch()">
+            </div>
+            <select id="logs-limit-select" class="form-control" style="width:90px; padding:4px 8px; font-size:12px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border-color); border-radius:var(--radius-md);" onchange="loadLogs()">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="250">250</option>
+              <option value="500">500</option>
+            </select>
           </div>
         </div>
 
         <div class="panel-card">
           <div class="table-responsive">
             <table class="nas-table">
-              <thead>
+              <thead id="logs-table-head">
                 <tr>
-                  <th style="width:180px;">Timestamp</th>
-                  <th style="width:130px;">Servicio</th>
-                  <th>Mensaje del registro</th>
+                  <th style="width:160px;">Timestamp</th>
+                  <th style="width:100px;">Origen</th>
+                  <th style="width:130px;">Usuario / IP</th>
+                  <th style="width:150px;">Acción / Evento</th>
+                  <th style="width:160px;">Objetivo / Recurso</th>
+                  <th style="width:90px;">Estado</th>
+                  <th>Detalles</th>
                 </tr>
               </thead>
               <tbody id="logs-table-body">
-                <tr><td colspan="3" style="text-align:center;">Cargando registros...</td></tr>
+                <tr><td colspan="7" style="text-align:center;">Cargando registros...</td></tr>
               </tbody>
             </table>
           </div>
