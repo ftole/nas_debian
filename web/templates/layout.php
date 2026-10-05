@@ -44,7 +44,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/css/cockpit.css">
+  <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
 
@@ -82,6 +82,9 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       <symbol id="icon-eye-off" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
       <symbol id="icon-file" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></symbol>
+      <symbol id="icon-file-text" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+      <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></symbol>
       <symbol id="icon-network" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><path d="M6 10v4m12-4v4M12 10v12m-8 0h16"/></symbol>
       <symbol id="icon-services" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
       <symbol id="icon-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></symbol>
@@ -153,57 +156,15 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
     <aside class="sidebar">
       <nav class="sidebar-nav">
 
-        <div class="nav-section-title">SISTEMA</div>
+        <div class="nav-section-title">ALMACENAMIENTO Y RECURSOS</div>
 
-        <div class="nav-item <?= $activeView === 'dashboard' ? 'active' : '' ?>" data-view="dashboard">
+        <div class="nav-item <?= $activeView === 'files' ? 'active' : '' ?>" data-view="files">
           <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-dashboard"></use></svg>
-            <span>Vista general</span>
+            <svg class="icon"><use href="#icon-folder"></use></svg>
+            <span>Archivos</span>
           </div>
-          <span class="nav-badge">OK</span>
+          <span class="nav-badge" id="badge-files">Root</span>
         </div>
-
-        <div class="nav-item <?= $activeView === 'logs' ? 'active' : '' ?>" data-view="logs">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-file"></use></svg>
-            <span>Registros (Logs)</span>
-          </div>
-          <span class="nav-badge" id="badge-logs">Live</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'storage' ? 'active' : '' ?>" data-view="storage">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-hard-drive"></use></svg>
-            <span>Almacenamiento</span>
-          </div>
-          <span class="nav-badge" id="badge-storage"><?= round($diskTotal / 1024, 1) ?> TB</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'networking' ? 'active' : '' ?>" data-view="networking">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-network"></use></svg>
-            <span>Redes</span>
-          </div>
-          <span class="nav-badge">1 Gbps</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-services"></use></svg>
-            <span>Servicios</span>
-          </div>
-          <span class="nav-badge" id="badge-services">OK</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-terminal"></use></svg>
-            <span>Terminal</span>
-          </div>
-          <span class="nav-badge">CLI</span>
-        </div>
-
-        <div class="nav-section-title">DATOS Y COMPARTICIÓN</div>
 
         <div class="nav-item <?= $activeView === 'shares' ? 'active' : '' ?>" data-view="shares">
           <div class="nav-item-left">
@@ -221,6 +182,32 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           <span class="nav-badge" id="badge-backups">...</span>
         </div>
 
+        <div class="nav-item <?= $activeView === 'storage' ? 'active' : '' ?>" data-view="storage">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-hard-drive"></use></svg>
+            <span>Almacenamiento</span>
+          </div>
+          <span class="nav-badge" id="badge-storage"><?= round($diskTotal / 1024, 1) ?> TB</span>
+        </div>
+
+        <div class="nav-section-title">ADMINISTRACIÓN Y SISTEMA</div>
+
+        <div class="nav-item <?= $activeView === 'dashboard' ? 'active' : '' ?>" data-view="dashboard">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-dashboard"></use></svg>
+            <span>Vista general</span>
+          </div>
+          <span class="nav-badge">OK</span>
+        </div>
+
+        <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-terminal"></use></svg>
+            <span>Terminal</span>
+          </div>
+          <span class="nav-badge">CLI</span>
+        </div>
+
         <div class="nav-item <?= $activeView === 'users' ? 'active' : '' ?>" data-view="users">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-users"></use></svg>
@@ -229,7 +216,29 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           <span class="nav-badge" id="badge-users">...</span>
         </div>
 
-        <div class="nav-section-title">HERRAMIENTAS</div>
+        <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-domain"></use></svg>
+            <span>Dominio AD</span>
+          </div>
+          <span class="nav-badge" id="badge-domain">AD</span>
+        </div>
+
+        <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-services"></use></svg>
+            <span>Servicios</span>
+          </div>
+          <span class="nav-badge" id="badge-services">OK</span>
+        </div>
+
+        <div class="nav-item <?= $activeView === 'logs' ? 'active' : '' ?>" data-view="logs">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-file"></use></svg>
+            <span>Registros (Logs)</span>
+          </div>
+          <span class="nav-badge" id="badge-logs">Live</span>
+        </div>
 
         <div class="nav-item <?= $activeView === 'diagnostics' ? 'active' : '' ?>" data-view="diagnostics">
           <div class="nav-item-left">
@@ -237,6 +246,14 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             <span>Diagnóstico</span>
           </div>
           <span class="nav-badge" id="badge-diagnostics">Live</span>
+        </div>
+
+        <div class="nav-item <?= $activeView === 'networking' ? 'active' : '' ?>" data-view="networking">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-network"></use></svg>
+            <span>Redes</span>
+          </div>
+          <span class="nav-badge">1 Gbps</span>
         </div>
 
         <div class="nav-item <?= $activeView === 'updates' ? 'active' : '' ?>" data-view="updates">
@@ -253,14 +270,6 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             <span>Componentes</span>
           </div>
           <span class="nav-badge">Nativo</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-domain"></use></svg>
-            <span>Dominio AD</span>
-          </div>
-          <span class="nav-badge" id="badge-domain">AD</span>
         </div>
 
       </nav>
@@ -581,26 +590,127 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
         </div>
       </section>
 
-      <!-- 6. TERMINAL -->
-      <section id="view-terminal" class="view-section <?= $activeView === 'terminal' ? 'active' : '' ?>">
+      <!-- EXPLORADOR DE ARCHIVOS (FILES) -->
+      <section id="view-files" class="view-section <?= $activeView === 'files' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Consola de terminal web</h2>
-            <p>Diagnóstico rápido de estado mediante comandos permitidos</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Explorador de Archivos y Recursos</h2>
+            <p>Gestión directa de carpetas compartidas y respaldos con subida Drag-and-Drop y descargas ZIP</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadFiles()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+            </button>
+            <button class="btn btn-secondary" onclick="openNewFolderModal()">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Nueva carpeta
+            </button>
+            <button class="btn btn-primary" onclick="triggerFileInput()">
+              <svg class="icon"><use href="#icon-upload"></use></svg> Subir archivos
+            </button>
           </div>
         </div>
 
-        <div class="cockpit-terminal">
-          <div class="cockpit-terminal-bar">
-            <span>Terminal NAS • Debian 13</span>
+        <div class="panel-card">
+          <!-- Barra de navegación y herramientas -->
+          <div class="explorer-toolbar">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary);">Raíz:</label>
+              <select id="files-root-select" onchange="changeFilesRoot(this.value)" style="width:auto; padding:5px 10px;">
+                <option value="nas">Recursos Compartidos (/srv/nas)</option>
+                <option value="backups">Repositorio de Backups (/srv/nas/BACKUPS_HISTORICOS)</option>
+              </select>
+            </div>
+            <div class="file-breadcrumbs" id="files-breadcrumbs">
+              <span class="file-breadcrumb-current">/srv/nas</span>
+            </div>
+            <div>
+              <button class="btn btn-secondary btn-sm" id="btn-download-zip" onclick="downloadCurrentFolderZip()" title="Descargar la carpeta actual completa comprimida en archivo .zip">
+                <svg class="icon"><use href="#icon-download"></use></svg> Descargar ZIP
+              </button>
+            </div>
           </div>
-          <div class="cockpit-terminal-body" id="terminal-output">
-            <p>Consola de comandos NAS Debian 13 lista.</p>
-            <p>Escribe <code>help</code> para consultar comandos disponibles (status, shares, backups, disks, clear).</p>
+
+          <!-- Barra de progreso de subida -->
+          <div id="upload-progress-bar" class="upload-progress-bar">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:13px; font-weight:600;">
+              <span id="upload-file-label">Subiendo archivo...</span>
+              <span id="upload-percent-label">0%</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div id="upload-progress-fill" class="progress-bar-fill" style="width:0%; background:var(--accent-primary);"></div>
+            </div>
           </div>
-          <div style="display:flex; background:var(--bg-card); padding:8px; border-top:1px solid var(--border-color);">
-            <span style="padding:6px 10px; color:var(--accent-primary); font-family:monospace; font-weight:bold;">nas&gt;</span>
-            <input type="text" id="terminal-input" style="flex:1; background:transparent; border:none; color:var(--text-primary); font-family:monospace; outline:none;" placeholder="Escribe un comando...">
+
+          <!-- Contenedor con Dropzone y Tabla -->
+          <div class="file-dropzone-container" id="file-dropzone-container">
+            <div class="file-dropzone-overlay" id="file-dropzone-overlay">
+              <svg class="icon" style="width:48px; height:48px; color:var(--accent-primary);"><use href="#icon-upload"></use></svg>
+              <div class="dropzone-text">Suelta los archivos aquí para subirlos a esta carpeta</div>
+              <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 512 MB por archivo</div>
+            </div>
+
+            <input type="file" id="files-hidden-input" multiple style="display:none;" onchange="handleFileSelect(event)">
+
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th style="width:36px;"></th>
+                    <th>Nombre</th>
+                    <th>Tamaño</th>
+                    <th>Permisos</th>
+                    <th>Propietario / Grupo</th>
+                    <th>Última modificación</th>
+                    <th style="width:130px; text-align:right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="files-table-body">
+                  <tr><td colspan="7" style="text-align:center;">Cargando archivos...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TERMINAL WEB REAL -->
+      <section id="view-terminal" class="view-section <?= $activeView === 'terminal' ? 'active' : '' ?>">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Terminal interactiva del sistema</h2>
+            <p>Ejecución directa de comandos en bash con permisos controlados de administración</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="clearTerminal()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Limpiar consola
+            </button>
+          </div>
+        </div>
+
+        <div class="terminal-container">
+          <div class="terminal-bar">
+            <span>Terminal NAS • Debian 13 (Trixie)</span>
+            <span style="opacity:0.8;">bash | cwd: <span id="term-bar-cwd">/srv/nas</span></span>
+          </div>
+          <div class="terminal-chips">
+            <span style="font-size:11.5px; color:var(--text-muted); align-self:center; margin-right:4px;">Comandos rápidos:</span>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('uptime')">uptime</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('df -h /srv/nas')">df -h</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('free -m')">free -m</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('smbstatus')">smbstatus</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl status smbd')">status smbd</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl status wsdd2')">status wsdd2</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('realm list')">realm list</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('ls -la')">ls -la</button>
+          </div>
+          <div class="terminal-body" id="terminal-output">Servidor NAS Debian 13 (Trixie) - Consola Web de Administración
+Sesión activa: <?= $sessionUser ?> | Directorio de trabajo: /srv/nas
+Escribe 'help' o cualquier comando del sistema para ejecutar.
+
+</div>
+          <div class="terminal-input-row">
+            <span class="terminal-prompt-prefix" id="terminal-prompt-prefix"><?= $sessionUser ?>@<?= $hostname ?>:<span id="term-prompt-cwd">/srv/nas</span>$</span>
+            <input type="text" id="terminal-input" class="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Escribe un comando bash y pulsa Enter (↑/↓ para historial)...">
           </div>
         </div>
       </section>
@@ -790,15 +900,81 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       <section id="view-domain" class="view-section <?= $activeView === 'domain' ? 'active' : '' ?>">
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-domain"></use></svg> Integración con Active Directory</h2>
-            <p>Autenticación corporativa mediante dominios Windows y cuentas de red</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-domain"></use></svg> Integración con Active Directory (AD)</h2>
+            <p>Gestión corporativa de dominio con Kerberos, SSSD y realmd en Debian 13</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadDomainStatus()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar estado
+            </button>
           </div>
         </div>
 
-        <div class="panel-card">
+        <div class="card-grid-2">
+          <!-- Tarjeta de Estado del Dominio -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3>Estado de membresía de dominio</h3>
+            </div>
+            <div class="panel-card-body" id="domain-status-card">
+              <div style="text-align:center; padding:20px; color:var(--text-muted);">Consultando estado de dominio...</div>
+            </div>
+          </div>
+
+          <!-- Tarjeta de Descubrimiento de Dominio -->
+          <div class="panel-card">
+            <div class="panel-card-head">
+              <h3>Descubrir Controlador de Dominio (DC)</h3>
+            </div>
+            <div class="panel-card-body">
+              <p style="margin-bottom:14px; font-size:13px; color:var(--text-secondary);">Comprueba la conectividad DNS y Kerberos con el controlador antes de unirte:</p>
+              <form id="form-domain-discover" onsubmit="handleDomainDiscover(event)">
+                <div class="form-group">
+                  <label for="discover-domain-name">Nombre de dominio FQDN:</label>
+                  <input type="text" id="discover-domain-name" placeholder="ej. corp.miempresa.local" required>
+                </div>
+                <button type="submit" class="btn btn-secondary" id="btn-discover-domain">
+                  <svg class="icon"><use href="#icon-network"></use></svg> Probar y descubrir
+                </button>
+              </form>
+              <div id="domain-discover-result" style="margin-top:14px; display:none;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Formulario de Unión al Dominio -->
+        <div class="panel-card" style="margin-top:20px;" id="domain-join-panel">
+          <div class="panel-card-head">
+            <h3>Unir este servidor NAS a Active Directory</h3>
+          </div>
           <div class="panel-card-body">
-            <p>El servidor opera actualmente en modo <strong>Servidor Autónomo (Standalone)</strong> en el grupo de trabajo <strong>TEAM-JOFRATO</strong>.</p>
-            <p>Para unir este servidor a un controlador de dominio Active Directory, puedes utilizar la herramienta interactiva por consola: <code>sudo nas</code>.</p>
+            <form id="form-domain-join" onsubmit="handleDomainJoin(event)">
+              <div class="card-grid-2">
+                <div class="form-group">
+                  <label for="join-domain-name">Nombre de Dominio (FQDN):</label>
+                  <input type="text" id="join-domain-name" placeholder="ej. EMPRESA.LOCAL" required>
+                </div>
+                <div class="form-group">
+                  <label for="join-admin-user">Usuario Administrador del Dominio:</label>
+                  <input type="text" id="join-admin-user" placeholder="ej. Administrator o admin_ad" required>
+                </div>
+              </div>
+              <div class="card-grid-2">
+                <div class="form-group">
+                  <label for="join-admin-pass">Contraseña de Administrador:</label>
+                  <input type="password" id="join-admin-pass" placeholder="Contraseña de la cuenta con permisos en AD" required>
+                </div>
+                <div class="form-group">
+                  <label for="join-ou">Unidad Organizativa (OU) Opcional:</label>
+                  <input type="text" id="join-ou" placeholder="ej. OU=Servidores,DC=empresa,DC=local">
+                </div>
+              </div>
+              <div style="margin-top:10px;">
+                <button type="submit" class="btn btn-primary" id="btn-join-domain">
+                  <svg class="icon"><use href="#icon-domain"></use></svg> Unir al Dominio
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </section>
@@ -1055,6 +1231,71 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-backup-logs')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Nueva Carpeta en Explorador -->
+  <div class="modal-backdrop" id="modal-new-folder">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Crear nueva carpeta</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-folder')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-folder" onsubmit="submitNewFolder(event)">
+          <div class="form-group">
+            <label for="new-folder-name">Nombre de la carpeta:</label>
+            <input type="text" id="new-folder-name" required placeholder="ej. Documentos_2026" pattern="[A-Za-z0-9._-]+">
+            <small>Sin espacios ni caracteres especiales (/ \ : * ? &quot; &lt; &gt; |).</small>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-folder')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Crear carpeta</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Renombrar Archivo o Carpeta -->
+  <div class="modal-backdrop" id="modal-rename-file">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Renombrar elemento</h3>
+        <button class="modal-close" onclick="closeModal('modal-rename-file')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-rename-file" onsubmit="submitRenameFile(event)">
+          <input type="hidden" id="rename-file-oldpath">
+          <div class="form-group">
+            <label for="rename-file-newname">Nuevo nombre:</label>
+            <input type="text" id="rename-file-newname" required placeholder="Nuevo nombre">
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-file')">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Renombrar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Eliminar Archivo o Carpeta -->
+  <div class="modal-backdrop" id="modal-delete-file">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Confirmar eliminación</h3>
+        <button class="modal-close" onclick="closeModal('modal-delete-file')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="delete-file-path">
+        <p>¿Estás seguro de que deseas eliminar permanentemente <strong id="delete-file-name-label">este elemento</strong>?</p>
+        <p style="color:var(--accent-danger); font-size:12.5px; margin-top:8px;">Esta acción no se puede deshacer y borrará el contenido del disco.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-file')">Cancelar</button>
+        <button type="button" class="btn btn-danger" onclick="confirmDeleteFile()">Eliminar permanentemente</button>
       </div>
     </div>
   </div>
