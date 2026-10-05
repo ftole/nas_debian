@@ -411,6 +411,14 @@ class SystemService
             'trim_start' => 'Ejecutar TRIM SSD',
             'service_manage' => 'Gestionar servicio',
             'server_reboot' => 'Reinicio del servidor',
+            'trash_move' => 'Mover a papelera',
+            'trash_restore' => 'Restaurar de papelera',
+            'trash_delete' => 'Eliminar de papelera',
+            'trash_empty' => 'Vaciar papelera',
+            'file_save' => 'Guardar archivo',
+            'file_rename' => 'Renombrar elemento',
+            'dir_create' => 'Crear carpeta',
+            'file_upload' => 'Subir archivo',
         ];
 
         foreach ($lines as $line) {
