@@ -30,9 +30,12 @@ if (file_exists($composerAutoload)) {
 use App\Controllers\AuthController;
 use App\Controllers\BackupController;
 use App\Controllers\DashboardController;
+use App\Controllers\DomainController;
+use App\Controllers\FileExplorerController;
 use App\Controllers\SambaController;
 use App\Controllers\StorageController;
 use App\Controllers\SystemController;
+use App\Controllers\TerminalController;
 use App\Controllers\UserController;
 use App\Core\AuthMiddleware;
 use App\Core\Request;
@@ -128,6 +131,26 @@ $router->post('/api/services/manage', [SystemController::class, 'manageService']
 $router->get('/api/logs', [SystemController::class, 'logs']);
 $router->post('/api/system/reboot', [SystemController::class, 'reboot']);
 $router->get('/api/system/updates', [SystemController::class, 'updates']);
+
+// Rutas API: Consola Terminal Web Real
+$router->post('/api/terminal/exec', [TerminalController::class, 'exec']);
+$router->get('/api/terminal/history', [TerminalController::class, 'history']);
+
+// Rutas API: Explorador de Archivos y Almacenamiento (/srv/nas)
+$router->get('/api/files', [FileExplorerController::class, 'list']);
+$router->get('/api/files/list', [FileExplorerController::class, 'list']);
+$router->post('/api/files/upload', [FileExplorerController::class, 'upload']);
+$router->post('/api/files/mkdir', [FileExplorerController::class, 'mkdir']);
+$router->post('/api/files/rename', [FileExplorerController::class, 'rename']);
+$router->post('/api/files/delete', [FileExplorerController::class, 'delete']);
+$router->get('/api/files/download', [FileExplorerController::class, 'download']);
+
+// Rutas API: Integración con Active Directory (AD)
+$router->get('/api/domain', [DomainController::class, 'status']);
+$router->get('/api/domain/status', [DomainController::class, 'status']);
+$router->post('/api/domain/discover', [DomainController::class, 'discover']);
+$router->post('/api/domain/join', [DomainController::class, 'join']);
+$router->post('/api/domain/leave', [DomainController::class, 'leave']);
 
 // Despachar la petición entrante
 $router->dispatch($request);
