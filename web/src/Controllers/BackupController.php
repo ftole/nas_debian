@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\BackupService;
 
 /**
@@ -29,17 +30,24 @@ class BackupController
     public function create(Request $request): void
     {
         $data = $request->getBody();
-        if (empty($data['id'])) {
+        $id = trim($data['id'] ?? '');
+        if (empty($id)) {
             Response::error('El identificador de la tarea de backup es obligatorio.');
             return;
         }
 
         $res = $this->backup->createTask($data);
         if (!$res['success']) {
+            AuditService::log('backup_create', $id, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al programar tarea de backup.');
             return;
         }
 
+        AuditService::log('backup_create', $id, 'SUCCESS', [
+            'proto' => $data['proto'] ?? 'cifs',
+            'cron' => $data['cron'] ?? '',
+            'retention' => $data['retention'] ?? 30,
+        ]);
         Response::success(null, $res['message'] ?? 'Tarea programada.');
     }
 
@@ -55,10 +63,12 @@ class BackupController
         $res = $this->backup->deleteTask($id, $deleteBackups);
 
         if (!$res['success']) {
+            AuditService::log('backup_delete', $id, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al eliminar tarea de backup.');
             return;
         }
 
+        AuditService::log('backup_delete', $id, 'SUCCESS', ['delete_backups' => $deleteBackups]);
         Response::success(null, $res['message'] ?? 'Tarea eliminada.');
     }
 
@@ -72,10 +82,12 @@ class BackupController
 
         $res = $this->backup->runTaskNow($id);
         if (!$res['success']) {
+            AuditService::log('backup_run_manual', $id, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al lanzar respaldo.');
             return;
         }
 
+        AuditService::log('backup_run_manual', $id, 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Respaldo iniciado.');
     }
 
