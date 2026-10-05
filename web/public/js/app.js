@@ -26,6 +26,7 @@ const AppState = {
     selectedItemPath: null,
     currentPreviewFile: null,
     currentPreviewText: '',
+    isEditingPreview: false,
   },
   terminal: {
     cwd: '/srv/nas',
@@ -1331,32 +1332,34 @@ function renderFileGrid(items) {
   }
 
   container.innerHTML = items.map(item => {
-    const isDir = item.is_dir;
+    const isDir = Boolean(item.is_dir);
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
     const sizeStr = isDir ? 'Carpeta' : (item.size_formatted || '0 B');
 
     const previewBtn = !isDir
-      ? `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
+      ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'preview')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
       : '';
 
     const downloadBtn = isDir
-      ? `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
-      : `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); downloadFile('${escapeHtml(relPath)}')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
+      ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
+      : `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
 
     return `
       <div class="file-card ${isDir ? 'is-folder' : ''} ${isSelected ? 'selected' : ''}"
            data-path="${escapeHtml(relPath)}"
-           onclick="selectFileCard(this, '${escapeHtml(relPath)}')"
-           ondblclick="handleItemDblClick('${escapeHtml(relPath)}', '${escapeHtml(item.name)}', ${isDir})"
+           data-name="${escapeHtml(item.name)}"
+           data-is-dir="${isDir ? 'true' : 'false'}"
+           onclick="handleCardClick(this)"
+           ondblclick="handleCardDblClick(this)"
            title="${escapeHtml(item.name)} (${sizeStr})">
         
         <div class="file-card-actions">
           ${previewBtn}
           ${downloadBtn}
-          <button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
-          <button type="button" class="file-card-action-btn btn-danger-hover" onclick="event.stopPropagation(); openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
+          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
+          <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
         </div>
 
         <div class="file-card-icon-wrap">
@@ -1368,6 +1371,38 @@ function renderFileGrid(items) {
       </div>
     `;
   }).join('');
+}
+
+function handleCardClick(cardEl) {
+  const relPath = cardEl.getAttribute('data-path') || '';
+  selectFileCard(cardEl, relPath);
+}
+
+function handleCardDblClick(cardEl) {
+  const relPath = cardEl.getAttribute('data-path') || '';
+  const name = cardEl.getAttribute('data-name') || '';
+  const isDir = cardEl.getAttribute('data-is-dir') === 'true';
+  handleItemDblClick(relPath, name, isDir);
+}
+
+function handleCardAction(e, btn, action) {
+  e.stopPropagation();
+  const card = btn.closest('.file-card');
+  if (!card) return;
+  const relPath = card.getAttribute('data-path') || '';
+  const name = card.getAttribute('data-name') || '';
+  const isDir = card.getAttribute('data-is-dir') === 'true';
+
+  if (action === 'preview') {
+    previewFile(relPath, name);
+  } else if (action === 'download') {
+    if (isDir) downloadFolderZip(relPath);
+    else downloadFile(relPath);
+  } else if (action === 'rename') {
+    openRenameModal(relPath, name);
+  } else if (action === 'delete') {
+    openDeleteModal(relPath, name);
+  }
 }
 
 function renderFileTable(items) {
@@ -1386,31 +1421,28 @@ function renderFileTable(items) {
   }
 
   tbody.innerHTML = items.map(item => {
-    const isDir = item.is_dir;
+    const isDir = Boolean(item.is_dir);
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
-    const nameClick = isDir
-      ? `onclick="navigateToSubpath('${escapeHtml(relPath)}')" style="cursor:pointer;"`
-      : `onclick="previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" style="cursor:pointer;"`;
     const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
 
     const previewAction = !isDir
-      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
+      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'preview')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
       : '';
 
     const downloadAction = isDir
-      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
-      : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(relPath)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
+      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'download')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
+      : `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'download')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
 
     const ownerStr = escapeHtml(item.owner || 'sistemas');
     const groupStr = escapeHtml(item.group || 'grp_sistemas');
     const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
 
     return `
-      <tr>
+      <tr data-path="${escapeHtml(relPath)}" data-name="${escapeHtml(item.name)}" data-is-dir="${isDir ? 'true' : 'false'}">
         <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
         <td>
-          <div class="${nameClass}" ${nameClick}>
+          <div class="${nameClass}" onclick="handleTableRowClick(this)" style="cursor:pointer;">
             <span>${escapeHtml(item.name)}</span>
           </div>
         </td>
@@ -1422,13 +1454,46 @@ function renderFileTable(items) {
           <div style="display:flex; justify-content:flex-end; gap:6px;">
             ${previewAction}
             ${downloadAction}
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
           </div>
         </td>
       </tr>
     `;
   }).join('');
+}
+
+function handleTableRowClick(nameEl) {
+  const tr = nameEl.closest('tr');
+  if (!tr) return;
+  const relPath = tr.getAttribute('data-path') || '';
+  const name = tr.getAttribute('data-name') || '';
+  const isDir = tr.getAttribute('data-is-dir') === 'true';
+
+  if (isDir) {
+    navigateToSubpath(relPath);
+  } else {
+    previewFile(relPath, name);
+  }
+}
+
+function handleTableRowAction(btn, action) {
+  const tr = btn.closest('tr');
+  if (!tr) return;
+  const relPath = tr.getAttribute('data-path') || '';
+  const name = tr.getAttribute('data-name') || '';
+  const isDir = tr.getAttribute('data-is-dir') === 'true';
+
+  if (action === 'preview') {
+    previewFile(relPath, name);
+  } else if (action === 'download') {
+    if (isDir) downloadFolderZip(relPath);
+    else downloadFile(relPath);
+  } else if (action === 'rename') {
+    openRenameModal(relPath, name);
+  } else if (action === 'delete') {
+    openDeleteModal(relPath, name);
+  }
 }
 
 function selectFileCard(cardEl, relPath) {
@@ -1470,7 +1535,7 @@ function renderFileBreadcrumbs(breadcrumbs, currentPath) {
       return `<span class="file-breadcrumb-current">${escapeHtml(bc.name)}</span>`;
     }
     return `
-      <span class="file-breadcrumb-item" onclick="navigateToSubpath('${escapeHtml(bc.path)}')">${escapeHtml(bc.name)}</span>
+      <span class="file-breadcrumb-item" data-path="${escapeHtml(bc.path)}" onclick="navigateToSubpath(this.getAttribute('data-path'))">${escapeHtml(bc.name)}</span>
       <span class="file-breadcrumb-separator">/</span>
     `;
   }).join('');
@@ -1786,7 +1851,7 @@ async function loadTrash() {
       const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
 
       return `
-        <tr>
+        <tr data-id="${item.id}" data-filename="${escapeHtml(item.filename)}">
           <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
           <td><strong>${escapeHtml(item.filename)}</strong></td>
           <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
@@ -1795,10 +1860,10 @@ async function loadTrash() {
           <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.deleted_at || 'N/A')}</td>
           <td style="text-align:right;">
             <div style="display:flex; justify-content:flex-end; gap:6px;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="restoreTrashItem(${item.id}, '${escapeHtml(item.filename)}')" title="Restaurar a su carpeta original">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="handleTrashAction(this, 'restore')" title="Restaurar a su carpeta original">
                 <svg class="icon" style="color:var(--accent-success);"><use href="#icon-restore"></use></svg> Restaurar
               </button>
-              <button type="button" class="btn btn-danger btn-sm" onclick="deleteTrashItem(${item.id}, '${escapeHtml(item.filename)}')" title="Eliminar definitivamente">
+              <button type="button" class="btn btn-danger btn-sm" onclick="handleTrashAction(this, 'delete')" title="Eliminar definitivamente">
                 <svg class="icon"><use href="#icon-trash"></use></svg>
               </button>
             </div>
@@ -1810,6 +1875,18 @@ async function loadTrash() {
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar papelera: ${escapeHtml(err.message)}</td></tr>`;
     }
+  }
+}
+
+function handleTrashAction(btn, action) {
+  const tr = btn.closest('tr');
+  if (!tr) return;
+  const id = parseInt(tr.getAttribute('data-id'), 10);
+  const name = tr.getAttribute('data-filename') || '';
+  if (action === 'restore') {
+    restoreTrashItem(id, name);
+  } else if (action === 'delete') {
+    deleteTrashItem(id, name);
   }
 }
 
@@ -1885,11 +1962,12 @@ async function confirmEmptyTrash() {
 }
 
 // ==============================================================================
-// Previsualizador de Archivos (Previewer 100% Offline)
+// Previsualizador de Archivos (Previewer 100% Offline con Editor Integrado)
 // ==============================================================================
 async function previewFile(relPath, fileName) {
   AppState.files.currentPreviewFile = { relPath, fileName };
   AppState.files.currentPreviewText = '';
+  AppState.files.isEditingPreview = false;
 
   const modal = document.getElementById('modal-file-preview');
   if (!modal) return;
@@ -1898,8 +1976,13 @@ async function previewFile(relPath, fileName) {
   const metaEl = document.getElementById('preview-file-meta');
   const iconEl = document.getElementById('preview-header-icon');
   const copyBtn = document.getElementById('btn-preview-copy');
+  const editBtn = document.getElementById('btn-preview-edit');
+  const saveBtn = document.getElementById('btn-preview-save');
+  const editLabel = document.getElementById('btn-preview-edit-label');
   const loading = document.getElementById('preview-loading');
   const codeContainer = document.getElementById('preview-code-container');
+  const contentEl = document.getElementById('preview-code-content');
+  const editorEl = document.getElementById('preview-code-editor');
   const imgContainer = document.getElementById('preview-image-container');
   const pdfContainer = document.getElementById('preview-pdf-container');
   const mediaContainer = document.getElementById('preview-media-container');
@@ -1908,6 +1991,11 @@ async function previewFile(relPath, fileName) {
   if (titleEl) titleEl.textContent = fileName;
   if (metaEl) metaEl.textContent = 'Cargando información...';
   if (copyBtn) copyBtn.style.display = 'none';
+  if (editBtn) editBtn.style.display = 'none';
+  if (saveBtn) saveBtn.style.display = 'none';
+  if (editLabel) editLabel.textContent = 'Editar';
+  if (contentEl) contentEl.style.display = 'block';
+  if (editorEl) editorEl.style.display = 'none';
 
   const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
   const meta = getFileTypeMeta({ name: fileName, is_dir: false });
@@ -1995,26 +2083,31 @@ async function previewFile(relPath, fileName) {
 
     const lines = d.lines_count || (d.content ? d.content.split('\n').length : 0);
     const lineNumbersEl = document.getElementById('preview-line-numbers');
-    const contentEl = document.getElementById('preview-code-content');
-
-    if (lineNumbersEl) {
-      const numLines = Math.max(1, lines);
-      let numsHtml = '';
-      for (let i = 1; i <= numLines; i++) {
-        numsHtml += `${i}<br>`;
-      }
-      lineNumbersEl.innerHTML = numsHtml;
-    }
 
     if (contentEl) {
       contentEl.textContent = d.content || '';
     }
+    if (editorEl) {
+      editorEl.value = d.content || '';
+      editorEl.onscroll = () => {
+        if (lineNumbersEl) lineNumbersEl.scrollTop = editorEl.scrollTop;
+      };
+      editorEl.oninput = () => {
+        const val = editorEl.value;
+        AppState.files.currentPreviewText = val;
+        if (contentEl) contentEl.textContent = val;
+        updatePreviewLineNumbers(val);
+      };
+    }
+
+    updatePreviewLineNumbers(d.content || '');
 
     if (metaEl) {
       metaEl.textContent = `${d.size_formatted || '0 B'} • ${lines} línea(s) • ${d.extension ? d.extension.toUpperCase() : 'TEXTO'}`;
     }
 
     if (copyBtn) copyBtn.style.display = 'inline-flex';
+    if (editBtn) editBtn.style.display = 'inline-flex';
     if (loading) loading.style.display = 'none';
     if (codeContainer) codeContainer.style.display = 'flex';
 
@@ -2028,6 +2121,88 @@ async function previewFile(relPath, fileName) {
       if (bDet) bDet.textContent = err.message || 'Archivo no legible como texto plano.';
     }
     if (metaEl) metaEl.textContent = 'Archivo binario';
+  }
+}
+
+function updatePreviewLineNumbers(text) {
+  const lineNumbersEl = document.getElementById('preview-line-numbers');
+  if (!lineNumbersEl) return;
+  const count = text === '' ? 1 : Math.max(1, text.split('\n').length);
+  let numsHtml = '';
+  for (let i = 1; i <= count; i++) {
+    numsHtml += `${i}<br>`;
+  }
+  lineNumbersEl.innerHTML = numsHtml;
+}
+
+function togglePreviewEditMode() {
+  const contentEl = document.getElementById('preview-code-content');
+  const editorEl = document.getElementById('preview-code-editor');
+  const saveBtn = document.getElementById('btn-preview-save');
+  const editLabel = document.getElementById('btn-preview-edit-label');
+
+  AppState.files.isEditingPreview = !AppState.files.isEditingPreview;
+
+  if (AppState.files.isEditingPreview) {
+    if (contentEl) contentEl.style.display = 'none';
+    if (editorEl) {
+      editorEl.style.display = 'block';
+      editorEl.value = AppState.files.currentPreviewText || '';
+      editorEl.focus();
+    }
+    if (saveBtn) saveBtn.style.display = 'inline-flex';
+    if (editLabel) editLabel.textContent = 'Cancelar';
+  } else {
+    if (editorEl) editorEl.style.display = 'none';
+    if (contentEl) {
+      contentEl.style.display = 'block';
+      contentEl.textContent = AppState.files.currentPreviewText || '';
+    }
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (editLabel) editLabel.textContent = 'Editar';
+  }
+}
+
+async function saveCurrentPreviewFile() {
+  if (!AppState.files.currentPreviewFile?.relPath) return;
+
+  const editorEl = document.getElementById('preview-code-editor');
+  const content = editorEl ? editorEl.value : (AppState.files.currentPreviewText || '');
+  const relPath = AppState.files.currentPreviewFile.relPath;
+  const root = AppState.files.root || 'nas';
+  const saveBtn = document.getElementById('btn-preview-save');
+
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const res = await apiFetch('/api/files/save', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: root,
+        path: relPath,
+        content: content,
+      }),
+    });
+
+    AppState.files.currentPreviewText = content;
+    const contentEl = document.getElementById('preview-code-content');
+    if (contentEl) contentEl.textContent = content;
+
+    const metaEl = document.getElementById('preview-file-meta');
+    if (metaEl) {
+      const ext = AppState.files.currentPreviewFile.fileName.includes('.')
+        ? AppState.files.currentPreviewFile.fileName.split('.').pop().toUpperCase()
+        : 'TEXTO';
+      const lines = content === '' ? 1 : content.split('\n').length;
+      metaEl.textContent = `${res.size_formatted || '0 B'} • ${lines} línea(s) • ${ext}`;
+    }
+
+    showToast('Archivo guardado correctamente.', 'success');
+    togglePreviewEditMode();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
