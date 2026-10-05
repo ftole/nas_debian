@@ -239,6 +239,28 @@ class FileExplorerController
         Response::json($payload);
     }
 
+    public function save(Request $request): void
+    {
+        $body = $request->getBody();
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
+        $content = (string) ($body['content'] ?? '');
+
+        if ($path === '') {
+            Response::error('Ruta de archivo no especificada.', 400);
+            return;
+        }
+
+        $result = $this->fileService->saveFileContent($path, $content);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'Error al guardar el archivo.', 400);
+            return;
+        }
+
+        Response::json($result);
+    }
+
     public function raw(Request $request): void
     {
         $root = (string) $request->getQuery('root', 'nas');
