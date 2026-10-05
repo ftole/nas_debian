@@ -1405,6 +1405,12 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <button type="button" class="btn btn-secondary btn-sm" id="btn-preview-copy" onclick="copyPreviewContent()" title="Copiar contenido al portapapeles" style="display:none;">
             <svg class="icon"><use href="#icon-copy"></use></svg> Copiar
           </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-preview-edit" onclick="togglePreviewEditMode()" title="Editar archivo de texto" style="display:none;">
+            <svg class="icon"><use href="#icon-edit"></use></svg> <span id="btn-preview-edit-label">Editar</span>
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-preview-save" onclick="saveCurrentPreviewFile()" title="Guardar cambios en el archivo" style="display:none;">
+            <svg class="icon"><use href="#icon-check-circle"></use></svg> Guardar
+          </button>
           <button type="button" class="btn btn-secondary btn-sm" id="btn-preview-download" onclick="downloadPreviewFile()" title="Descargar archivo">
             <svg class="icon"><use href="#icon-download"></use></svg> Descargar
           </button>
@@ -1419,6 +1425,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div id="preview-code-container" class="preview-code-wrap" style="display:none;">
           <div class="preview-line-numbers" id="preview-line-numbers"></div>
           <pre class="preview-code-content" id="preview-code-content"></pre>
+          <textarea class="preview-code-editor" id="preview-code-editor" spellcheck="false" style="display:none;"></textarea>
         </div>
         <div id="preview-image-container" class="preview-media-wrap" style="display:none;">
           <img id="preview-img-element" class="preview-image" src="" alt="Previsualización de imagen">
