@@ -434,6 +434,7 @@ assertTrue(in_array('audit_logs', $tableNames), 'DatabaseService crea tabla audi
 assertTrue(in_array('terminal_history', $tableNames), 'DatabaseService crea tabla terminal_history');
 assertTrue(in_array('system_settings', $tableNames), 'DatabaseService crea tabla system_settings');
 assertTrue(in_array('domain_config', $tableNames), 'DatabaseService crea tabla domain_config');
+assertTrue(in_array('trash_items', $tableNames), 'DatabaseService crea tabla trash_items');
 
 $insId = DatabaseService::insert('system_settings', ['key' => 'test_k', 'value' => 'test_v']);
 assertTrue($insId > 0, 'DatabaseService::insert inserta registro y retorna ID');
@@ -510,16 +511,29 @@ assertTrue(is_array($history), 'TerminalService::getHistory retorna historial es
 // 22. Pruebas de FileExplorerService
 $fileExp = new FileExplorerService();
 
-// Verificación de protección Jail Traversal
+// Verificación de protección Jail Traversal y aislamiento de .trash
 $safePath = $fileExp->resolveSafePath('../../../etc/passwd');
 assertTrue($safePath === null || !str_contains($safePath, 'etc/passwd'), 'FileExplorerService::resolveSafePath bloquea escape de directorio (Path Traversal)');
 
-// Directorio temporal para pruebas completas de explorador
+$trashSafe = $fileExp->resolveSafePath('.trash');
+assertTrue($trashSafe === null, 'FileExplorerService::resolveSafePath bloquea acceso directo a .trash');
+
+$trashSubSafe = $fileExp->resolveSafePath('.trash/secreto.txt');
+assertTrue($trashSubSafe === null, 'FileExplorerService::resolveSafePath bloquea acceso a subrutas dentro de .trash');
+
+// Directorio y BD temporal para pruebas completas de explorador y papelera
 $tempExpDir = sys_get_temp_dir() . '/nas_test_explorer_' . uniqid();
 @mkdir($tempExpDir, 0770, true);
 file_put_contents($tempExpDir . '/documento.txt', 'Contenido confidencial');
 
 FileExplorerService::setRootDir($tempExpDir);
+$tempExpDb = sys_get_temp_dir() . '/nas_test_exp_db_' . uniqid() . '.sqlite';
+DatabaseService::setDbPath($tempExpDb);
+
+// Aislamiento: listDirectory debe excluir .trash
+@mkdir($tempExpDir . '/.trash', 0770, true);
+file_put_contents($tempExpDir . '/.trash/oculto.txt', 'no ver');
+
 $listRes = $fileExp->listDirectory('');
 assertTrue($listRes['success'], 'FileExplorerService::listDirectory retorna éxito en directorio válido');
 assertTrue(is_array($listRes['items']) && count($listRes['items']) >= 1, 'FileExplorerService lista archivos existentes');
@@ -527,6 +541,15 @@ assertTrue(($listRes['items'][0]['name'] ?? '') === 'documento.txt', 'FileExplor
 assertTrue(isset($listRes['data']) && is_array($listRes['data']['items']), 'FileExplorerService retorna bloque anidado data');
 assertTrue(isset($listRes['items'][0]['relative_path']) && isset($listRes['items'][0]['modified_at']), 'FileExplorerService provee relative_path y modified_at');
 assertTrue(isset($listRes['items'][0]['owner']) && isset($listRes['items'][0]['group']), 'FileExplorerService provee propietario y grupo POSIX');
+
+$hasTrashInList = false;
+foreach ($listRes['items'] as $it) {
+    if ($it['name'] === '.trash') {
+        $hasTrashInList = true;
+        break;
+    }
+}
+assertTrue(!$hasTrashInList, 'FileExplorerService::listDirectory excluye carpeta reservada .trash');
 
 // Crear subcarpeta
 $mkdirRes = $fileExp->createDirectory('', 'Subcarpeta_Test');
@@ -536,15 +559,80 @@ assertTrue($mkdirRes['success'] && is_dir($tempExpDir . '/Subcarpeta_Test'), 'Fi
 $renameRes = $fileExp->renameItem('documento.txt', 'documento_renombrado.txt');
 assertTrue($renameRes['success'] && file_exists($tempExpDir . '/documento_renombrado.txt'), 'FileExplorerService::renameItem renombra elemento');
 
-// Eliminar archivo
-$delRes = $fileExp->deleteItem('documento_renombrado.txt');
-assertTrue($delRes['success'] && !file_exists($tempExpDir . '/documento_renombrado.txt'), 'FileExplorerService::deleteItem elimina elemento');
+// Mover a papelera y consultar
+file_put_contents($tempExpDir . '/archivo_papelera.txt', "Linea 1\nLinea 2\nLinea 3");
+$trashMoveRes = $fileExp->moveToTrash('archivo_papelera.txt', 'operador_test');
+assertTrue($trashMoveRes['success'] && !file_exists($tempExpDir . '/archivo_papelera.txt'), 'FileExplorerService::moveToTrash mueve archivo a la papelera');
+assertTrue($fileExp->getTrashCount() >= 1, 'FileExplorerService::getTrashCount detecta elementos en papelera');
 
-// Limpieza de temporal
+$trashList = $fileExp->listTrash();
+assertTrue($trashList['success'] && count($trashList['items']) >= 1, 'FileExplorerService::listTrash retorna listado de elementos');
+$foundItem = null;
+foreach ($trashList['items'] as $ti) {
+    if ($ti['filename'] === 'archivo_papelera.txt') {
+        $foundItem = $ti;
+        break;
+    }
+}
+assertTrue($foundItem !== null && $foundItem['deleted_by'] === 'operador_test', 'listTrash registra metadatos de usuario y nombre original');
+
+// Restaurar desde papelera
+$restoreRes = $fileExp->restoreTrashItem($foundItem['id']);
+assertTrue($restoreRes['success'], 'FileExplorerService::restoreTrashItem restaura archivo desde papelera');
+assertTrue(file_exists($tempExpDir . '/archivo_papelera.txt'), 'Archivo restaurado existe nuevamente en la ruta original');
+assertTrue(file_get_contents($tempExpDir . '/archivo_papelera.txt') === "Linea 1\nLinea 2\nLinea 3", 'Contenido de archivo restaurado es íntegro');
+
+// Eliminar definitivamente de papelera
+$fileExp->moveToTrash('archivo_papelera.txt', 'operador_test');
+$trashListAfter = $fileExp->listTrash();
+$itemToDelete = $trashListAfter['items'][0];
+$delTrashRes = $fileExp->deleteTrashItem($itemToDelete['id']);
+assertTrue($delTrashRes['success'], 'FileExplorerService::deleteTrashItem elimina definitivamente de papelera');
+assertTrue($fileExp->getTrashCount() === 0, 'Contador de papelera se reduce tras eliminación');
+
+// Vaciar papelera con múltiples elementos
+file_put_contents($tempExpDir . '/item1.txt', 'dato1');
+file_put_contents($tempExpDir . '/item2.txt', 'dato2');
+$fileExp->moveToTrash('item1.txt', 'admin');
+$fileExp->moveToTrash('item2.txt', 'admin');
+assertTrue($fileExp->getTrashCount() === 2, 'Papelera contiene dos elementos previo a vaciado');
+$emptyRes = $fileExp->emptyTrash();
+assertTrue($emptyRes['success'] && $emptyRes['deleted_count'] >= 2, 'FileExplorerService::emptyTrash vacía papelera por completo');
+assertTrue($fileExp->getTrashCount() === 0, 'getTrashCount retorna 0 tras vaciar papelera');
+
+// Eliminación permanente directa con deleteItem(..., permanent: true)
+file_put_contents($tempExpDir . '/archivo_directo.txt', 'inmediato');
+$delDirect = $fileExp->deleteItem('archivo_directo.txt', true);
+assertTrue($delDirect['success'] && !file_exists($tempExpDir . '/archivo_directo.txt'), 'FileExplorerService::deleteItem con permanent=true elimina sin enviar a papelera');
+assertTrue($fileExp->getTrashCount() === 0, 'Eliminación permanente no altera la papelera');
+
+// Previsualizador de archivos: getFileContent
+file_put_contents($tempExpDir . '/codigo.php', "<?php\n// Test preview\necho 'Hola';\n");
+$contentRes = $fileExp->getFileContent('codigo.php');
+assertTrue($contentRes['success'], 'FileExplorerService::getFileContent lee archivo de texto');
+assertTrue($contentRes['lines_count'] === 3 && $contentRes['extension'] === 'php', 'getFileContent calcula líneas y extensión');
+assertTrue(str_contains($contentRes['content'], "echo 'Hola';"), 'getFileContent devuelve el contenido exacto');
+
+// Detección de binarios
+file_put_contents($tempExpDir . '/binario.dat', "\x7F\x45\x4C\x46\x00\x00\x00");
+$binRes = $fileExp->getFileContent('binario.dat');
+assertTrue(!$binRes['success'] && ($binRes['is_binary'] ?? false) === true, 'getFileContent detecta archivo binario y rechaza previsualización plana');
+
+// Límite de tamaño en previsualización
+$limitRes = $fileExp->getFileContent('codigo.php', 5);
+assertTrue(!$limitRes['success'] && str_contains($limitRes['error'], 'límite de previsualización'), 'getFileContent rechaza archivos que exceden tamaño máximo');
+
+// Limpieza de temporales de FileExplorer
 @rmdir($tempExpDir . '/Subcarpeta_Test');
 @unlink($tempExpDir . '/documento_renombrado.txt');
+@unlink($tempExpDir . '/codigo.php');
+@unlink($tempExpDir . '/binario.dat');
+@unlink($tempExpDir . '/.trash/oculto.txt');
+@rmdir($tempExpDir . '/.trash');
 @rmdir($tempExpDir);
 FileExplorerService::setRootDir(null);
+DatabaseService::setDbPath(null);
+@unlink($tempExpDb);
 
 // 23. Pruebas de DomainService
 $domain = new DomainService();
