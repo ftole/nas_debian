@@ -92,6 +92,13 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       <symbol id="icon-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
       <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+      <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="icon-list" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></symbol>
+      <symbol id="icon-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+      <symbol id="icon-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+      <symbol id="icon-video" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></symbol>
+      <symbol id="icon-archive" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
+      <symbol id="icon-restore" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
     </defs>
   </svg>
 
@@ -595,77 +602,143 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Explorador de Archivos y Recursos</h2>
-            <p>Gestión directa de carpetas compartidas y respaldos con subida Drag-and-Drop y descargas ZIP</p>
+            <p>Gestión directa de carpetas compartidas y respaldos con cuadrícula estilo Windows, previsualizador y papelera</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadFiles()">
+            <button class="btn btn-secondary" id="btn-open-trash" onclick="toggleTrashView()" title="Papelera de reciclaje y recuperación de archivos">
+              <svg class="icon" style="color:var(--accent-warning);"><use href="#icon-trash"></use></svg>
+              <span>Papelera</span>
+              <span class="badge badge-warn" id="badge-trash-count" style="margin-left:4px;">0</span>
+            </button>
+            <button class="btn btn-secondary" onclick="refreshCurrentFileView()" title="Actualizar lista de archivos">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
             </button>
-            <button class="btn btn-secondary" onclick="openNewFolderModal()">
+            <button class="btn btn-secondary" id="btn-new-folder" onclick="openNewFolderModal()">
               <svg class="icon"><use href="#icon-plus"></use></svg> Nueva carpeta
             </button>
-            <button class="btn btn-primary" onclick="triggerFileInput()">
+            <button class="btn btn-primary" id="btn-upload-files" onclick="triggerFileInput()">
               <svg class="icon"><use href="#icon-upload"></use></svg> Subir archivos
             </button>
           </div>
         </div>
 
         <div class="panel-card">
-          <!-- Barra de navegación y herramientas -->
-          <div class="explorer-toolbar">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary);">Raíz:</label>
-              <select id="files-root-select" onchange="changeFilesRoot(this.value)" style="width:auto; padding:5px 10px;">
-                <option value="nas">Recursos Compartidos (/srv/nas)</option>
-                <option value="backups">Repositorio de Backups (/srv/nas/BACKUPS_HISTORICOS)</option>
-              </select>
+          <!-- Vista Normal de Archivos -->
+          <div id="files-normal-view">
+            <!-- Barra de navegación y herramientas -->
+            <div class="explorer-toolbar">
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary);">Raíz:</label>
+                <select id="files-root-select" onchange="changeFilesRoot(this.value)" style="width:auto; padding:5px 10px;">
+                  <option value="nas">Recursos Compartidos (/srv/nas)</option>
+                  <option value="backups">Repositorio de Backups (/srv/nas/BACKUPS_HISTORICOS)</option>
+                </select>
+              </div>
+              <div class="file-breadcrumbs" id="files-breadcrumbs">
+                <span class="file-breadcrumb-current">/srv/nas</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <!-- Selector de Vista: Cuadrícula Windows / Lista Detallada -->
+                <div class="view-toggle-group">
+                  <button type="button" class="view-toggle-btn active" id="btn-view-grid" onclick="setFileViewMode('grid')" title="Vista en cuadrícula (iconos grandes estilo Windows)">
+                    <svg class="icon"><use href="#icon-grid"></use></svg>
+                  </button>
+                  <button type="button" class="view-toggle-btn" id="btn-view-list" onclick="setFileViewMode('list')" title="Vista en lista detallada">
+                    <svg class="icon"><use href="#icon-list"></use></svg>
+                  </button>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-download-zip" onclick="downloadCurrentFolderZip()" title="Descargar la carpeta actual completa comprimida en archivo .zip">
+                  <svg class="icon"><use href="#icon-download"></use></svg> Descargar ZIP
+                </button>
+              </div>
             </div>
-            <div class="file-breadcrumbs" id="files-breadcrumbs">
-              <span class="file-breadcrumb-current">/srv/nas</span>
+
+            <!-- Barra de progreso de subida -->
+            <div id="upload-progress-bar" class="upload-progress-bar">
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:13px; font-weight:600;">
+                <span id="upload-file-label">Subiendo archivo...</span>
+                <span id="upload-percent-label">0%</span>
+              </div>
+              <div class="progress-bar-wrap">
+                <div id="upload-progress-fill" class="progress-bar-fill" style="width:0%; background:var(--accent-primary);"></div>
+              </div>
             </div>
-            <div>
-              <button class="btn btn-secondary btn-sm" id="btn-download-zip" onclick="downloadCurrentFolderZip()" title="Descargar la carpeta actual completa comprimida en archivo .zip">
-                <svg class="icon"><use href="#icon-download"></use></svg> Descargar ZIP
-              </button>
+
+            <!-- Contenedor con Dropzone, Cuadrícula y Tabla -->
+            <div class="file-dropzone-container" id="file-dropzone-container">
+              <div class="file-dropzone-overlay" id="file-dropzone-overlay">
+                <svg class="icon" style="width:48px; height:48px; color:var(--accent-primary);"><use href="#icon-upload"></use></svg>
+                <div class="dropzone-text">Suelta los archivos aquí para subirlos a esta carpeta</div>
+                <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 512 MB por archivo</div>
+              </div>
+
+              <input type="file" id="files-hidden-input" multiple style="display:none;" onchange="handleFileSelect(event)">
+
+              <!-- Vista en Cuadrícula estilo Windows Explorer -->
+              <div class="file-grid-container" id="files-grid-container">
+                <div style="grid-column:1/-1; text-align:center; padding:30px; color:var(--text-muted);">Cargando archivos...</div>
+              </div>
+
+              <!-- Vista en Lista Detallada (Tabla) -->
+              <div class="table-responsive" id="files-table-container" style="display:none;">
+                <table class="nas-table">
+                  <thead>
+                    <tr>
+                      <th style="width:36px;"></th>
+                      <th>Nombre</th>
+                      <th>Tamaño</th>
+                      <th>Permisos</th>
+                      <th>Propietario / Grupo</th>
+                      <th>Última modificación</th>
+                      <th style="width:170px; text-align:right;">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="files-table-body">
+                    <tr><td colspan="7" style="text-align:center;">Cargando archivos...</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          <!-- Barra de progreso de subida -->
-          <div id="upload-progress-bar" class="upload-progress-bar">
-            <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:13px; font-weight:600;">
-              <span id="upload-file-label">Subiendo archivo...</span>
-              <span id="upload-percent-label">0%</span>
+          <!-- Vista de Papelera de Reciclaje -->
+          <div id="files-trash-view" style="display:none;">
+            <div class="trash-toolbar">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <button class="btn btn-secondary btn-sm" onclick="exitTrashView()" title="Regresar al explorador de archivos">
+                  <svg class="icon"><use href="#icon-restore"></use></svg> Volver a Archivos
+                </button>
+                <div style="font-size:13px; font-weight:600; color:var(--accent-warning); display:flex; align-items:center; gap:6px;">
+                  <svg class="icon"><use href="#icon-trash"></use></svg> Papelera de Reciclaje Confinada (/srv/nas/.trash)
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button class="btn btn-danger btn-sm" id="btn-empty-trash" onclick="openEmptyTrashModal()" title="Eliminar definitivamente todos los elementos">
+                  <svg class="icon"><use href="#icon-trash"></use></svg> Vaciar papelera
+                </button>
+              </div>
             </div>
-            <div class="progress-bar-wrap">
-              <div id="upload-progress-fill" class="progress-bar-fill" style="width:0%; background:var(--accent-primary);"></div>
-            </div>
-          </div>
 
-          <!-- Contenedor con Dropzone y Tabla -->
-          <div class="file-dropzone-container" id="file-dropzone-container">
-            <div class="file-dropzone-overlay" id="file-dropzone-overlay">
-              <svg class="icon" style="width:48px; height:48px; color:var(--accent-primary);"><use href="#icon-upload"></use></svg>
-              <div class="dropzone-text">Suelta los archivos aquí para subirlos a esta carpeta</div>
-              <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 512 MB por archivo</div>
+            <div style="padding:12px 20px; background:rgba(245, 158, 11, 0.08); border-bottom:1px solid var(--border-color); font-size:12.5px; color:var(--text-secondary); display:flex; align-items:center; gap:8px;">
+              <svg class="icon" style="color:var(--accent-warning); flex-shrink:0;"><use href="#icon-info"></use></svg>
+              <span>Los archivos eliminados se protegen aquí. Puedes restaurarlos en cualquier momento a su ubicación original o purgarlos definitivamente.</span>
             </div>
-
-            <input type="file" id="files-hidden-input" multiple style="display:none;" onchange="handleFileSelect(event)">
 
             <div class="table-responsive">
               <table class="nas-table">
                 <thead>
                   <tr>
                     <th style="width:36px;"></th>
-                    <th>Nombre</th>
+                    <th>Nombre original</th>
+                    <th>Ruta previa</th>
                     <th>Tamaño</th>
-                    <th>Permisos</th>
-                    <th>Propietario / Grupo</th>
-                    <th>Última modificación</th>
-                    <th style="width:130px; text-align:right;">Acciones</th>
+                    <th>Eliminado por</th>
+                    <th>Fecha de eliminación</th>
+                    <th style="width:140px; text-align:right;">Acciones</th>
                   </tr>
                 </thead>
-                <tbody id="files-table-body">
-                  <tr><td colspan="7" style="text-align:center;">Cargando archivos...</td></tr>
+                <tbody id="trash-table-body">
+                  <tr><td colspan="7" style="text-align:center;">Cargando papelera...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1285,17 +1358,104 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   <div class="modal-backdrop" id="modal-delete-file">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Confirmar eliminación</h3>
+        <h3 id="modal-delete-title"><svg class="icon" style="color:var(--accent-warning);"><use href="#icon-trash"></use></svg> Eliminar elemento</h3>
         <button class="modal-close" onclick="closeModal('modal-delete-file')">&times;</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="delete-file-path">
-        <p>¿Estás seguro de que deseas eliminar permanentemente <strong id="delete-file-name-label">este elemento</strong>?</p>
-        <p style="color:var(--accent-danger); font-size:12.5px; margin-top:8px;">Esta acción no se puede deshacer y borrará el contenido del disco.</p>
+        <p>¿Qué deseas hacer con <strong id="delete-file-name-label">este elemento</strong>?</p>
+
+        <div style="margin:16px 0; display:flex; flex-direction:column; gap:10px;">
+          <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); background:var(--bg-card-header);">
+            <input type="radio" name="delete_mode" id="del-mode-trash" value="trash" checked style="margin-top:3px;">
+            <div>
+              <strong style="color:var(--text-main); font-size:13.5px;">Mover a la papelera (Recomendado)</strong>
+              <div style="color:var(--text-muted); font-size:12px; margin-top:2px;">El elemento se traslada de forma segura a la papelera confinada y podrá restaurarse en cualquier momento con su ruta exacta.</div>
+            </div>
+          </label>
+
+          <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-color); background:var(--bg-card-header);">
+            <input type="radio" name="delete_mode" id="del-mode-permanent" value="permanent" style="margin-top:3px;">
+            <div>
+              <strong style="color:var(--accent-danger); font-size:13.5px;">Eliminar permanentemente del disco</strong>
+              <div style="color:var(--text-muted); font-size:12px; margin-top:2px;">Se eliminará directamente de los bloques de almacenamiento sin posibilidad de recuperación.</div>
+            </div>
+          </label>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-file')">Cancelar</button>
-        <button type="button" class="btn btn-danger" onclick="confirmDeleteFile()">Eliminar permanentemente</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDeleteFile()">Proceder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Previsualizador de Archivos 100% Offline -->
+  <div class="modal-backdrop" id="modal-file-preview">
+    <div class="modal-dialog modal-dialog-preview" style="max-width:960px; width:95vw; max-height:90vh; display:flex; flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div style="display:flex; align-items:center; gap:10px; overflow:hidden;">
+          <svg class="icon" id="preview-header-icon" style="flex-shrink:0; width:22px; height:22px; color:var(--accent-primary);"><use href="#icon-file-text"></use></svg>
+          <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <h3 id="preview-file-name" style="margin:0; font-size:15px; font-weight:600; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">Nombre_archivo.txt</h3>
+            <div id="preview-file-meta" style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">0 B • 0 líneas</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-preview-copy" onclick="copyPreviewContent()" title="Copiar contenido al portapapeles" style="display:none;">
+            <svg class="icon"><use href="#icon-copy"></use></svg> Copiar
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-preview-download" onclick="downloadPreviewFile()" title="Descargar archivo">
+            <svg class="icon"><use href="#icon-download"></use></svg> Descargar
+          </button>
+          <button class="modal-close" onclick="closeModal('modal-file-preview')">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" id="preview-modal-body" style="padding:0; flex:1; overflow-y:auto; display:flex; flex-direction:column; min-height:350px;">
+        <div id="preview-loading" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:50px; color:var(--text-muted); gap:12px;">
+          <svg class="icon spin" style="width:32px; height:32px; color:var(--accent-primary);"><use href="#icon-refresh"></use></svg>
+          <span>Cargando previsualización...</span>
+        </div>
+        <div id="preview-code-container" class="preview-code-wrap" style="display:none;">
+          <div class="preview-line-numbers" id="preview-line-numbers"></div>
+          <pre class="preview-code-content" id="preview-code-content"></pre>
+        </div>
+        <div id="preview-image-container" class="preview-media-wrap" style="display:none;">
+          <img id="preview-img-element" class="preview-image" src="" alt="Previsualización de imagen">
+        </div>
+        <div id="preview-pdf-container" style="display:none; flex:1; height:600px; width:100%;">
+          <iframe id="preview-pdf-frame" class="preview-pdf-frame" src="" style="width:100%; height:100%; border:none;"></iframe>
+        </div>
+        <div id="preview-media-container" class="preview-media-wrap" style="display:none;">
+          <video id="preview-video-element" controls style="max-width:100%; max-height:480px; border-radius:var(--radius-sm); display:none;"></video>
+          <audio id="preview-audio-element" controls style="width:100%; max-width:460px; display:none;"></audio>
+        </div>
+        <div id="preview-binary-container" class="preview-media-wrap" style="display:none; padding:40px; text-align:center;">
+          <svg class="icon" style="width:64px; height:64px; color:var(--text-muted); margin-bottom:12px;"><use href="#icon-archive"></use></svg>
+          <h4 id="preview-binary-name" style="margin-bottom:6px; font-size:16px;">archivo.bin</h4>
+          <p id="preview-binary-details" style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">Formato binario</p>
+          <button type="button" class="btn btn-primary" onclick="downloadPreviewFile()">
+            <svg class="icon"><use href="#icon-download"></use></svg> Descargar archivo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Vaciar Papelera -->
+  <div class="modal-backdrop" id="modal-empty-trash">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg> Vaciar papelera de reciclaje</h3>
+        <button class="modal-close" onclick="closeModal('modal-empty-trash')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>¿Estás seguro de que deseas eliminar permanentemente <strong>todos los elementos</strong> de la papelera?</p>
+        <p style="color:var(--accent-danger); font-size:12.5px; margin-top:8px;">Esta acción eliminará de forma irreversible todos los archivos y carpetas archivados en la papelera.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-empty-trash')">Cancelar</button>
+        <button type="button" class="btn btn-danger" onclick="confirmEmptyTrash()">Vaciar papelera permanentemente</button>
       </div>
     </div>
   </div>
