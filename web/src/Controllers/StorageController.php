@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\StorageService;
 
 /**
@@ -35,10 +36,12 @@ class StorageController
     {
         $res = $this->storage->startBtrfsScrub('/srv/nas');
         if (!$res['success']) {
+            AuditService::log('scrub_start', '/srv/nas', 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al iniciar scrub BTRFS.');
             return;
         }
 
+        AuditService::log('scrub_start', '/srv/nas', 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Scrub iniciado.');
     }
 
@@ -52,10 +55,12 @@ class StorageController
     {
         $res = $this->storage->runTrim('/srv/nas');
         if (!$res['success']) {
+            AuditService::log('trim_start', '/srv/nas', 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al ejecutar fstrim.');
             return;
         }
 
+        AuditService::log('trim_start', '/srv/nas', 'SUCCESS');
         Response::success(null, $res['message'] ?? 'fstrim completado.');
     }
 }
