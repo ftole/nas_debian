@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\SambaService;
 
 /**
@@ -29,17 +30,24 @@ class SambaController
     public function create(Request $request): void
     {
         $data = $request->getBody();
-        if (empty($data['name'])) {
+        $name = trim($data['name'] ?? '');
+        if (empty($name)) {
             Response::error('El nombre del recurso compartido es obligatorio.');
             return;
         }
 
         $res = $this->samba->createShare($data);
         if (!$res['success']) {
+            AuditService::log('share_create', $name, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al crear recurso compartido.');
             return;
         }
 
+        AuditService::log('share_create', $name, 'SUCCESS', [
+            'scheme' => $data['scheme'] ?? 1,
+            'comment' => $data['comment'] ?? '',
+            'hidden' => !empty($data['hidden']),
+        ]);
         Response::success(null, $res['message'] ?? 'Recurso creado.');
     }
 
@@ -55,10 +63,12 @@ class SambaController
         $res = $this->samba->deleteShare($name, $deleteFiles);
 
         if (!$res['success']) {
+            AuditService::log('share_delete', $name, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al eliminar recurso compartido.');
             return;
         }
 
+        AuditService::log('share_delete', $name, 'SUCCESS', ['delete_files' => $deleteFiles]);
         Response::success(null, $res['message'] ?? 'Recurso eliminado.');
     }
 }
