@@ -469,9 +469,39 @@ fi
 # 4. Configurar Host Virtual de Nginx (HTTP + HTTPS)
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
+# 1. Servidor HTTP (Puerto 80)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
+    server_name _;
+    root /var/www/nas-web/public;
+    index index.php index.html;
+
+    # Cabeceras de seguridad
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    client_max_body_size 64M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php-fpm-nas.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+
+# 2. Servidor HTTPS (Puerto 443)
+server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
     server_name _;
