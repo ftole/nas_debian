@@ -145,6 +145,7 @@ $router->post('/api/files/rename', [FileExplorerController::class, 'rename']);
 $router->post('/api/files/delete', [FileExplorerController::class, 'delete']);
 $router->get('/api/files/download', [FileExplorerController::class, 'download']);
 $router->get('/api/files/content', [FileExplorerController::class, 'content']);
+$router->post('/api/files/save', [FileExplorerController::class, 'save']);
 $router->get('/api/files/raw', [FileExplorerController::class, 'raw']);
 
 // Rutas API: Papelera de Reciclaje Confinada (/srv/nas/.trash)

@@ -915,6 +915,25 @@ code, kbd, pre, samp {
   flex: 1;
 }
 
+.preview-code-editor {
+  margin: 0;
+  padding: 16px;
+  background: transparent;
+  color: var(--text-terminal);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 4;
+  border: none;
+  outline: none;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .preview-media-wrap {
   display: flex;
   flex-direction: column;
