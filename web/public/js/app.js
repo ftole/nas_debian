@@ -13,6 +13,9 @@ const AppState = {
   activeView: 'dashboard',
   refreshInterval: null,
   groupsCache: [],
+  logSource: 'all',
+  logSearchTimer: null,
+  logsCache: [],
 };
 
 function showToast(message, type = 'info') {
@@ -247,12 +250,21 @@ async function loadDashboardActivity() {
       return;
     }
 
-    feed.innerHTML = logs.map(l => `
-      <div style="font-size:12px; border-bottom:1px solid var(--border-color); padding:4px 0;">
-        <span style="color:var(--accent-primary); font-family:monospace;">${l.unit}:</span>
-        <span>${escapeHtml(l.message)}</span>
-      </div>
-    `).join('');
+    feed.innerHTML = logs.map(l => {
+      const label = l.action_label || l.event_label || l.action || l.event || l.unit || 'Evento';
+      const detail = l.message || (l.target ? `${l.target}` : '');
+      const badge = l.badge || 'blue';
+      const tsShort = (l.timestamp || '').substring(11, 19) || l.timestamp || '';
+      return `
+        <div style="font-size:12px; border-bottom:1px solid var(--border-color); padding:4px 0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <span class="badge badge-${badge}">${escapeHtml(label)}</span>
+            <span style="color:var(--text-secondary);">${escapeHtml(detail)}</span>
+          </div>
+          <span style="font-size:10.5px; color:var(--text-muted); font-family:monospace; white-space:nowrap;">${escapeHtml(tsShort)}</span>
+        </div>
+      `;
+    }).join('');
   } catch (e) {
     feed.innerHTML = '<p style="color:var(--accent-danger);">No se pudo cargar la actividad reciente.</p>';
   }
@@ -773,30 +785,138 @@ async function restartService(service) {
 }
 
 // ==============================================================================
-// 10. Módulo: Registros del Sistema (Logs)
+// 10. Módulo: Registros del Sistema (Logs & Auditoría)
 // ==============================================================================
+function setLogSource(source) {
+  AppState.logSource = source;
+  document.querySelectorAll('#logs-filter-chips .chip-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-source') === source);
+  });
+  loadLogs();
+}
+
+function debounceLogSearch() {
+  if (AppState.logSearchTimer) {
+    clearTimeout(AppState.logSearchTimer);
+  }
+  AppState.logSearchTimer = setTimeout(() => {
+    loadLogs();
+  }, 300);
+}
+
 async function loadLogs() {
   const tbody = document.getElementById('logs-table-body');
   if (!tbody) return;
 
+  const source = AppState.logSource || 'all';
+  const limitSelect = document.getElementById('logs-limit-select');
+  const limit = limitSelect ? parseInt(limitSelect.value, 10) || 100 : 100;
+  const searchInput = document.getElementById('logs-search-input');
+  const query = searchInput ? searchInput.value.trim() : '';
+
   try {
-    const res = await apiFetch('/api/logs?limit=100');
+    let url = `/api/logs?source=${encodeURIComponent(source)}&limit=${limit}`;
+    if (query) {
+      url += `&q=${encodeURIComponent(query)}`;
+    }
+
+    const res = await apiFetch(url);
     const logs = res.data || [];
+    AppState.logsCache = logs;
 
     if (logs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Sin registros en journald.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No se encontraron registros de auditoría para los criterios seleccionados.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = logs.map(l => `
-      <tr>
-        <td><code>${escapeHtml(l.timestamp || '-')}</code></td>
-        <td><span class="tag-pill">${escapeHtml(l.unit || 'system')}</span></td>
-        <td style="font-family:monospace; font-size:12px;">${escapeHtml(l.message)}</td>
-      </tr>
-    `).join('');
+    tbody.innerHTML = logs.map(l => {
+      const srcBadge = matchSourceBadge(l.source);
+      const userText = l.user || l.task || 'sistema';
+      const ipText = l.ip ? `<small style="color:var(--text-muted); font-family:monospace; display:block;">${escapeHtml(l.ip)}</small>` : '';
+      const actionLabel = l.action_label || l.event_label || l.action || l.event || l.unit || 'registro';
+      const badgeType = l.badge || 'blue';
+      const targetText = l.target || l.task || l.unit || '-';
+      const status = (l.status || 'OK').toUpperCase();
+      const statusBadge = (status === 'SUCCESS' || status === 'OK') ? 'badge-ok' : (status === 'FAILED' || status === 'ERR' ? 'badge-err' : 'badge-warn');
+      const details = l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-');
+
+      return `
+        <tr>
+          <td><code style="font-size:11.5px;">${escapeHtml(l.timestamp || '-')}</code></td>
+          <td>${srcBadge}</td>
+          <td><strong>${escapeHtml(userText)}</strong>${ipText}</td>
+          <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span></td>
+          <td><code>${escapeHtml(targetText)}</code></td>
+          <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
+          <td style="font-family:monospace; font-size:11.5px; word-break:break-word; max-width:400px;">${escapeHtml(details)}</td>
+        </tr>
+      `;
+    }).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--accent-danger);">Error al leer journald: ${escapeHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:16px;">Error al consultar registros de auditoría: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function matchSourceBadge(source) {
+  switch (source) {
+    case 'samba_audit':
+      return '<span class="badge badge-purple">Samba</span>';
+    case 'admin':
+      return '<span class="badge badge-blue">Admin</span>';
+    case 'backup':
+      return '<span class="badge badge-ok">Backup</span>';
+    case 'system':
+    default:
+      return '<span class="badge badge-gray">Sistema</span>';
+  }
+}
+
+function exportOrCopyLogs() {
+  const logs = AppState.logsCache || [];
+  if (logs.length === 0) {
+    showToast('No hay registros cargados para copiar.', 'warning');
+    return;
+  }
+
+  const lines = logs.map(l => {
+    const ts = l.timestamp || '';
+    const src = (l.source || 'system').toUpperCase();
+    const user = l.user || l.task || 'sistema';
+    const ip = l.ip || '-';
+    const action = l.action_label || l.event_label || l.action || '-';
+    const target = l.target || '-';
+    const status = l.status || 'OK';
+    const msg = l.message || (l.details ? JSON.stringify(l.details) : '-');
+    return `[${ts}] [${src}] [${user}@${ip}] [${action}] [${target}] [${status}] ${msg}`;
+  });
+
+  const text = lines.join('\n');
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`${logs.length} registros copiados al portapapeles.`, 'success');
+    }).catch(() => {
+      fallbackCopyText(text, logs.length);
+    });
+  } else {
+    fallbackCopyText(text, logs.length);
+  }
+}
+
+function fallbackCopyText(text, count) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast(`${count} registros copiados al portapapeles.`, 'success');
+  } catch (err) {
+    showToast('No se pudo copiar al portapapeles.', 'error');
+  } finally {
+    document.body.removeChild(ta);
   }
 }
 
