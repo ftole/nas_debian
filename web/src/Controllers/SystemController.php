@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\SystemService;
 
 /**
@@ -39,19 +40,23 @@ class SystemController
 
         $res = $this->system->manageService($service, $action);
         if (!$res['success']) {
+            AuditService::log('service_manage', $service, 'FAILED', ['action' => $action, 'error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al gestionar servicio.');
             return;
         }
 
+        AuditService::log('service_manage', $service, 'SUCCESS', ['action' => $action]);
         Response::success(null, $res['message'] ?? 'Servicio actualizado.');
     }
 
     public function logs(Request $request): void
     {
-        $limit = max(10, min(500, (int) $request->getQuery('limit', 80)));
-        $unit = $request->getQuery('unit');
+        $limit = max(5, min(500, (int) $request->getQuery('limit', 100)));
+        $source = (string) $request->getQuery('source', 'all');
+        $query = $request->getQuery('q');
+        $qStr = (is_string($query) && trim($query) !== '') ? trim($query) : null;
 
-        $logs = $this->system->getJournalLogs($limit, is_string($unit) ? $unit : null);
+        $logs = $this->system->getLogs($source, $limit, $qStr);
         Response::success($logs);
     }
 
@@ -59,10 +64,12 @@ class SystemController
     {
         $res = $this->system->rebootServer();
         if ($res['code'] !== 0) {
+            AuditService::log('server_reboot', 'sistema', 'FAILED', ['error' => $res['stderr'] ?: $res['stdout']]);
             Response::error('Error al solicitar reinicio: ' . ($res['stderr'] ?: $res['stdout']));
             return;
         }
 
+        AuditService::log('server_reboot', 'sistema', 'SUCCESS');
         Response::success(null, 'Reinicio del servidor programado.');
     }
 
