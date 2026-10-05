@@ -26,15 +26,26 @@ require_once __DIR__ . '/../web/src/Controllers/StorageController.php';
 require_once __DIR__ . '/../web/src/Controllers/UserController.php';
 require_once __DIR__ . '/../web/src/Controllers/SystemController.php';
 require_once __DIR__ . '/../web/src/Controllers/AuthController.php';
+require_once __DIR__ . '/../web/src/Services/DatabaseService.php';
+require_once __DIR__ . '/../web/src/Services/TerminalService.php';
+require_once __DIR__ . '/../web/src/Services/FileExplorerService.php';
+require_once __DIR__ . '/../web/src/Services/DomainService.php';
+require_once __DIR__ . '/../web/src/Controllers/TerminalController.php';
+require_once __DIR__ . '/../web/src/Controllers/FileExplorerController.php';
+require_once __DIR__ . '/../web/src/Controllers/DomainController.php';
 
 use App\Core\AuthMiddleware;
 use App\Core\Request;
 use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\BackupService;
+use App\Services\DatabaseService;
+use App\Services\DomainService;
+use App\Services\FileExplorerService;
 use App\Services\SambaService;
 use App\Services\StorageService;
 use App\Services\SystemService;
+use App\Services\TerminalService;
 use App\Services\UserService;
 
 $passed = 0;
@@ -410,6 +421,87 @@ for ($i = 0; $i < count($allLogs) - 1; $i++) {
     }
 }
 assertTrue($isSortedDesc, 'getLogs(all) ordena los registros consolidados en orden cronológico descendente');
+
+// 20. Pruebas de DatabaseService (SQLite nativo)
+$tempDbPath = sys_get_temp_dir() . '/test_nas_' . uniqid() . '.sqlite';
+DatabaseService::setDbPath($tempDbPath);
+$pdo = DatabaseService::getConnection();
+assertTrue($pdo instanceof \PDO, 'DatabaseService::getConnection retorna instancia activa de PDO');
+
+$tables = DatabaseService::query("SELECT name FROM sqlite_master WHERE type='table'");
+$tableNames = array_column($tables, 'name');
+assertTrue(in_array('audit_logs', $tableNames), 'DatabaseService crea tabla audit_logs');
+assertTrue(in_array('terminal_history', $tableNames), 'DatabaseService crea tabla terminal_history');
+assertTrue(in_array('system_settings', $tableNames), 'DatabaseService crea tabla system_settings');
+assertTrue(in_array('domain_config', $tableNames), 'DatabaseService crea tabla domain_config');
+
+$insId = DatabaseService::insert('system_settings', ['key' => 'test_k', 'value' => 'test_v']);
+assertTrue($insId > 0, 'DatabaseService::insert inserta registro y retorna ID');
+$setting = DatabaseService::query("SELECT value FROM system_settings WHERE key = ?", ['test_k']);
+assertTrue(($setting[0]['value'] ?? '') === 'test_v', 'DatabaseService::query recupera valor insertado');
+DatabaseService::setDbPath(null);
+@unlink($tempDbPath);
+
+// 21. Pruebas de TerminalService
+$terminal = new TerminalService();
+$termRes = $terminal->execute('echo "ANTIGRAVITY_TEST"', '/srv/nas');
+assertTrue(isset($termRes['exit_code']) && $termRes['exit_code'] === 0, 'TerminalService ejecuta comando bash con código 0');
+assertTrue(str_contains($termRes['output'], 'ANTIGRAVITY_TEST'), 'TerminalService retorna salida estándar del comando');
+assertTrue(!empty($termRes['cwd']), 'TerminalService retorna directorio de trabajo actual');
+
+// Comando cd
+$cdRes = $terminal->execute('cd /tmp', '/srv/nas');
+assertTrue($cdRes['exit_code'] === 0, 'TerminalService soporta navegación con cd');
+assertTrue(str_contains($cdRes['cwd'], 'tmp'), 'TerminalService actualiza directorio de trabajo en cd');
+
+// Historial en base de datos
+$history = $terminal->getHistory(5);
+assertTrue(is_array($history), 'TerminalService::getHistory retorna historial estructurado');
+
+// 22. Pruebas de FileExplorerService
+$fileExp = new FileExplorerService();
+
+// Verificación de protección Jail Traversal
+$safePath = $fileExp->resolveSafePath('../../../etc/passwd');
+assertTrue($safePath === null || !str_contains($safePath, 'etc/passwd'), 'FileExplorerService::resolveSafePath bloquea escape de directorio (Path Traversal)');
+
+// Directorio temporal para pruebas completas de explorador
+$tempExpDir = sys_get_temp_dir() . '/nas_test_explorer_' . uniqid();
+@mkdir($tempExpDir, 0770, true);
+file_put_contents($tempExpDir . '/documento.txt', 'Contenido confidencial');
+
+FileExplorerService::setRootDir($tempExpDir);
+$listRes = $fileExp->listDirectory('');
+assertTrue($listRes['success'], 'FileExplorerService::listDirectory retorna éxito en directorio válido');
+assertTrue(is_array($listRes['items']) && count($listRes['items']) >= 1, 'FileExplorerService lista archivos existentes');
+assertTrue(($listRes['items'][0]['name'] ?? '') === 'documento.txt', 'FileExplorerService detecta nombre de archivo');
+
+// Crear subcarpeta
+$mkdirRes = $fileExp->createDirectory('', 'Subcarpeta_Test');
+assertTrue($mkdirRes['success'] && is_dir($tempExpDir . '/Subcarpeta_Test'), 'FileExplorerService::createDirectory crea subdirectorio');
+
+// Renombrar archivo
+$renameRes = $fileExp->renameItem('documento.txt', 'documento_renombrado.txt');
+assertTrue($renameRes['success'] && file_exists($tempExpDir . '/documento_renombrado.txt'), 'FileExplorerService::renameItem renombra elemento');
+
+// Eliminar archivo
+$delRes = $fileExp->deleteItem('documento_renombrado.txt');
+assertTrue($delRes['success'] && !file_exists($tempExpDir . '/documento_renombrado.txt'), 'FileExplorerService::deleteItem elimina elemento');
+
+// Limpieza de temporal
+@rmdir($tempExpDir . '/Subcarpeta_Test');
+@unlink($tempExpDir . '/documento_renombrado.txt');
+@rmdir($tempExpDir);
+FileExplorerService::setRootDir(null);
+
+// 23. Pruebas de DomainService
+$domain = new DomainService();
+$domainStatus = $domain->getStatus();
+assertTrue(isset($domainStatus['joined']), 'DomainService::getStatus retorna estado joined');
+assertTrue(isset($domainStatus['workgroup']), 'DomainService::getStatus retorna grupo de trabajo');
+
+$invalidDisc = $domain->discover('!!dominio_invalido!!');
+assertTrue(!$invalidDisc['success'], 'DomainService::discover rechaza nombres de dominio con formato inválido');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
