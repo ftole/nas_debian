@@ -459,9 +459,35 @@ assertTrue(str_contains($cdRes['cwd'], 'tmp'), 'TerminalService actualiza direct
 $badCd = $terminal->execute('cd /ruta_inexistente_9999', '/srv/nas');
 assertTrue($badCd['exit_code'] === 1 && str_contains($badCd['output'], 'bash: cd'), 'TerminalService maneja cd inexistente sin error fatal');
 
-// Detección de comandos interactivos incompatibles (su, sudo -i, nano, top)
+// Comando cd con comillas y rutas complejas
+$quotedCd = $terminal->execute('cd "/tmp"', '/srv/nas');
+assertTrue($quotedCd['exit_code'] === 0 && str_contains($quotedCd['cwd'], 'tmp'), 'TerminalService soporta cd con comillas dobles');
+
+$singleQuotedCd = $terminal->execute("cd '/tmp'", '/srv/nas');
+assertTrue($singleQuotedCd['exit_code'] === 0 && str_contains($singleQuotedCd['cwd'], 'tmp'), 'TerminalService soporta cd con comillas simples');
+
+$tildeCd = $terminal->execute('cd ~', '/tmp');
+assertTrue($tildeCd['exit_code'] === 0 && str_contains($tildeCd['cwd'], 'nas'), 'TerminalService soporta expansion de tilde (~)');
+
+$dashCd = $terminal->execute('cd -', '/srv/nas');
+assertTrue($dashCd['exit_code'] === 0 && str_contains($dashCd['cwd'], 'tmp'), 'TerminalService soporta retorno con cd -');
+
+// Comando exit/logout nativo amigable
+$exitRes = $terminal->execute('exit', '/srv/nas');
+assertTrue($exitRes['success'] && str_contains($exitRes['output'], 'consola web de administración integrada'), 'TerminalService maneja exit con mensaje amigable');
+
+// Detección de comandos interactivos incompatibles (su, sudo -i, sudo bash, nano, top, watch, tail -f)
 $suWarn = $terminal->execute('su -', '/srv/nas');
 assertTrue($suWarn['success'] && str_contains($suWarn['output'], 'Aviso de terminal interactiva'), 'TerminalService detecta su - y sugiere alternativas sin error fatal');
+
+$sudoBashWarn = $terminal->execute('sudo bash', '/srv/nas');
+assertTrue($sudoBashWarn['success'] && str_contains($sudoBashWarn['output'], 'Aviso de terminal interactiva'), 'TerminalService detecta sudo bash y previene bloqueo');
+
+$watchWarn = $terminal->execute('watch df -h', '/srv/nas');
+assertTrue($watchWarn['success'] && str_contains($watchWarn['output'], 'watch'), 'TerminalService detecta comando watch y evita bucle infinito');
+
+$tailfWarn = $terminal->execute('tail -f /var/log/syslog', '/srv/nas');
+assertTrue($tailfWarn['success'] && str_contains($tailfWarn['output'], 'tail -f'), 'TerminalService detecta tail -f y evita bloqueo indefinido');
 
 $nanoWarn = $terminal->execute('nano /etc/samba/smb.conf', '/srv/nas');
 assertTrue($nanoWarn['success'] && str_contains($nanoWarn['output'], 'editor interactivo'), 'TerminalService detecta nano y previene cuelgues');
