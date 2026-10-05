@@ -382,6 +382,7 @@ class FileExplorerService
 
         $totalSize = 0;
         $maxZipSize = 500 * 1024 * 1024; // Límite de seguridad: 500 MB
+        $addedEntries = 0;
 
         foreach ($files as $file) {
             if (!$file->isDir()) {
@@ -398,7 +399,12 @@ class FileExplorerService
                 }
 
                 $zip->addFile($filePath, $relativePath);
+                $addedEntries++;
             }
+        }
+
+        if ($addedEntries === 0) {
+            $zip->addEmptyDir($folderName);
         }
 
         $zip->close();
