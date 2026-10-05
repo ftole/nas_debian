@@ -95,7 +95,7 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
 fi
 if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
-    nginx-light php-fpm php-cli \
+    nginx-light php-fpm php-cli rsyslog \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
@@ -454,6 +454,7 @@ if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
 fi
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
+usermod -aG systemd-journal,adm www-data 2>/dev/null || true
 
 # 3. Generar Certificado SSL/TLS autofirmado para acceso HTTPS
 if [ ! -f /etc/ssl/certs/nas-web.crt ] || [ ! -f /etc/ssl/private/nas-web.key ]; then
@@ -678,6 +679,22 @@ else
     find -P /srv/nas -type f ! -type l -exec chmod 660 {} +
 fi
 
+# Bitácora maestra de respaldos y archivos de log de auditoría
+touch /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+chmod 0664 /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+setfacl -m u:www-data:rx /srv/nas/LOGS_BACKUP 2>/dev/null || true
+setfacl -d -m u:www-data:r /srv/nas/LOGS_BACKUP 2>/dev/null || true
+setfacl -m u:www-data:r /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+
+touch /var/log/nas-admin.log 2>/dev/null || true
+chown www-data:adm /var/log/nas-admin.log 2>/dev/null || true
+chmod 0640 /var/log/nas-admin.log 2>/dev/null || true
+
+mkdir -p /var/log/samba
+touch /var/log/samba/audit.log 2>/dev/null || true
+chown root:adm /var/log/samba/audit.log 2>/dev/null || true
+chmod 0640 /var/log/samba/audit.log 2>/dev/null || true
+
 # Rotación de logs de backup para evitar llenar el disco
 cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
 /srv/nas/LOGS_BACKUP/*.log {
@@ -689,6 +706,36 @@ cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
     compress
     delaycompress
     copytruncate
+}
+LOGROTATE_EOF
+
+# Rotación de logs de auditoría administrativa
+cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-admin
+/var/log/nas-admin.log {
+    weekly
+    maxsize 10M
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 www-data adm
+}
+LOGROTATE_EOF
+
+# Rotación de logs de auditoría de archivos Samba
+cat << 'LOGROTATE_EOF' > /etc/logrotate.d/samba-audit
+/var/log/samba/audit.log {
+    weekly
+    maxsize 20M
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 root adm
 }
 LOGROTATE_EOF
 
@@ -724,7 +771,12 @@ cat << SMBCONF > /etc/samba/smb.conf
 
    # Optimizaciones de Rendimiento y Red (Office +100 usuarios)
    store dos attributes = yes
-   vfs objects = acl_xattr streams_xattr
+   vfs objects = acl_xattr streams_xattr full_audit
+   full_audit:prefix = %u|%I|%m|%S
+   full_audit:success = connect disconnect mkdir rmdir rename unlink open
+   full_audit:failure = connect open unlink rmdir rename
+   full_audit:facility = LOCAL5
+   full_audit:priority = NOTICE
    inherit permissions = yes
    strict sync = yes
    max open files = 65535
@@ -737,6 +789,14 @@ cat << SMBCONF > /etc/samba/smb.conf
    max log size = 1000
    logging = file
 SMBCONF
+
+mkdir -p /etc/rsyslog.d
+cat << 'RSYSLOG_EOF' > /etc/rsyslog.d/50-samba-audit.conf
+# Enrutamiento de auditoría Samba (full_audit LOCAL5) a archivo dedicado
+local5.notice /var/log/samba/audit.log
+& stop
+RSYSLOG_EOF
+systemctl restart rsyslog 2>/dev/null || true
 
 echo " [7/9] Ajustando límites de cuentas de usuario del sistema..."
 sed -i 's/^UID_MIN.*/UID_MIN\t\t\t 1000/' /etc/login.defs 2>/dev/null || true
@@ -787,12 +847,18 @@ fi
 if ! systemctl start cron 2>/dev/null; then
     advertir "No se pudo iniciar el servicio cron."
 fi
+if systemctl list-unit-files --type=service 'rsyslog.service' 2>/dev/null | grep -q 'rsyslog'; then
+    systemctl enable rsyslog 2>/dev/null || true
+    systemctl restart rsyslog 2>/dev/null || true
+fi
 
-for _svc in smbd nmbd wsdd2 nginx cron; do
-    if systemctl is-active "$_svc" &>/dev/null; then
-        echo "  [OK]  $_svc activo"
-    else
-        echo "  [!]   $_svc NO está activo"
+for _svc in smbd nmbd wsdd2 nginx cron rsyslog; do
+    if systemctl list-unit-files --type=service "${_svc}.service" &>/dev/null; then
+        if systemctl is-active "$_svc" &>/dev/null; then
+            echo "  [OK]  $_svc activo"
+        else
+            echo "  [!]   $_svc NO está activo"
+        fi
     fi
 done
 
