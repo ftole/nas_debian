@@ -150,6 +150,18 @@ CREATE TABLE IF NOT EXISTS terminal_history (
     exit_code INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_term_time ON terminal_history(executed_at DESC);
+
+CREATE TABLE IF NOT EXISTS trash_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_path TEXT NOT NULL,
+    trash_name TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    is_dir INTEGER DEFAULT 0,
+    size_bytes INTEGER DEFAULT 0,
+    deleted_by TEXT NOT NULL,
+    deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash_items(deleted_at DESC);
 SQL;
 
         $pdo->exec($schema);
