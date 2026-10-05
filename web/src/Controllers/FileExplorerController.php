@@ -37,8 +37,8 @@ class FileExplorerController
 
     public function list(Request $request): void
     {
-        $root = (string) ($request->getQuery()['root'] ?? 'nas');
-        $rawPath = (string) ($request->getQuery()['path'] ?? '');
+        $root = (string) $request->getQuery('root', 'nas');
+        $rawPath = (string) $request->getQuery('path', '');
         $path = $this->resolveSubpath($root, $rawPath);
         $result = $this->fileService->listDirectory($path);
 
@@ -133,8 +133,8 @@ class FileExplorerController
 
     public function download(Request $request): void
     {
-        $root = (string) ($request->getQuery()['root'] ?? 'nas');
-        $rawPath = (string) ($request->getQuery()['path'] ?? '');
+        $root = (string) $request->getQuery('root', 'nas');
+        $rawPath = (string) $request->getQuery('path', '');
         $path = $this->resolveSubpath($root, $rawPath);
 
         $this->fileService->downloadItem($path);
