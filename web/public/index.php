@@ -144,6 +144,14 @@ $router->post('/api/files/mkdir', [FileExplorerController::class, 'mkdir']);
 $router->post('/api/files/rename', [FileExplorerController::class, 'rename']);
 $router->post('/api/files/delete', [FileExplorerController::class, 'delete']);
 $router->get('/api/files/download', [FileExplorerController::class, 'download']);
+$router->get('/api/files/content', [FileExplorerController::class, 'content']);
+$router->get('/api/files/raw', [FileExplorerController::class, 'raw']);
+
+// Rutas API: Papelera de Reciclaje Confinada (/srv/nas/.trash)
+$router->get('/api/files/trash', [FileExplorerController::class, 'trashList']);
+$router->post('/api/files/trash/restore', [FileExplorerController::class, 'trashRestore']);
+$router->post('/api/files/trash/delete', [FileExplorerController::class, 'trashDelete']);
+$router->post('/api/files/trash/empty', [FileExplorerController::class, 'trashEmpty']);
 
 // Rutas API: Integración con Active Directory (AD)
 $router->get('/api/domain', [DomainController::class, 'status']);
