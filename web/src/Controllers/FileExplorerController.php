@@ -21,9 +21,25 @@ class FileExplorerController
         $this->fileService = $service ?? new FileExplorerService();
     }
 
+    private function resolveSubpath(string $root, string $path): string
+    {
+        $clean = trim(str_replace(['\\', '..'], ['/', ''], $path), '/');
+        if ($root === 'backups') {
+            if ($clean === '') {
+                return 'BACKUPS_HISTORICOS';
+            }
+            if (!str_starts_with($clean, 'BACKUPS_HISTORICOS')) {
+                return 'BACKUPS_HISTORICOS/' . $clean;
+            }
+        }
+        return $clean;
+    }
+
     public function list(Request $request): void
     {
-        $path = (string) ($request->getQuery()['path'] ?? '');
+        $root = (string) ($request->getQuery()['root'] ?? 'nas');
+        $rawPath = (string) ($request->getQuery()['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
         $result = $this->fileService->listDirectory($path);
 
         if (!($result['success'] ?? false)) {
@@ -36,7 +52,9 @@ class FileExplorerController
 
     public function upload(Request $request): void
     {
-        $path = (string) ($_POST['path'] ?? '');
+        $root = (string) ($_POST['root'] ?? 'nas');
+        $rawPath = (string) ($_POST['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
         $files = $_FILES['files'] ?? $_FILES['file'] ?? [];
 
         $result = $this->fileService->uploadFiles($path, $files);
@@ -51,7 +69,9 @@ class FileExplorerController
     public function mkdir(Request $request): void
     {
         $body = $request->getBody();
-        $path = (string) ($body['path'] ?? '');
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
         $name = (string) ($body['name'] ?? '');
 
         if ($name === '') {
@@ -71,7 +91,9 @@ class FileExplorerController
     public function rename(Request $request): void
     {
         $body = $request->getBody();
-        $path = (string) ($body['path'] ?? '');
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['old_path'] ?? $body['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
         $newName = (string) ($body['new_name'] ?? '');
 
         if ($path === '' || $newName === '') {
@@ -91,7 +113,9 @@ class FileExplorerController
     public function delete(Request $request): void
     {
         $body = $request->getBody();
-        $path = (string) ($body['path'] ?? '');
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
 
         if ($path === '') {
             Response::error('Debe especificar la ruta del archivo o carpeta a eliminar.', 400);
@@ -109,11 +133,9 @@ class FileExplorerController
 
     public function download(Request $request): void
     {
-        $path = (string) ($request->getQuery()['path'] ?? '');
-        if ($path === '') {
-            Response::error('Ruta no especificada.', 400);
-            return;
-        }
+        $root = (string) ($request->getQuery()['root'] ?? 'nas');
+        $rawPath = (string) ($request->getQuery()['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
 
         $this->fileService->downloadItem($path);
     }
