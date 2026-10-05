@@ -629,7 +629,7 @@ code, kbd, pre, samp {
 .badge-err { background: var(--badge-err-bg); color: var(--badge-err-text); border: 1px solid var(--badge-err-border); }
 
 /* ==============================================================================
- * Explorador de Archivos (File Explorer) & Drag-and-Drop
+ * Explorador de Archivos (File Explorer) • Cuadrícula Windows, Previsualizador & Papelera
  * ============================================================================== */
 .explorer-toolbar {
   display: flex;
@@ -648,12 +648,15 @@ code, kbd, pre, samp {
   flex-wrap: wrap;
   gap: 6px;
   font-size: var(--font-size-sm);
+  flex: 1;
+  min-width: 200px;
 }
 .file-breadcrumb-item {
   color: var(--accent-primary);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 3px 7px;
   border-radius: var(--radius-xs);
+  transition: background 0.15s ease;
 }
 .file-breadcrumb-item:hover {
   background: var(--accent-primary-light);
@@ -665,12 +668,43 @@ code, kbd, pre, samp {
 .file-breadcrumb-current {
   color: var(--text-main);
   font-weight: 600;
-  padding: 2px 6px;
+  padding: 3px 7px;
+}
+
+/* Selector de Vista (Cuadrícula / Lista) */
+.view-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.view-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.view-toggle-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+.view-toggle-btn.active {
+  background: var(--accent-primary);
+  color: #ffffff;
 }
 
 .file-dropzone-container {
   position: relative;
-  min-height: 220px;
+  min-height: 260px;
 }
 
 .file-dropzone-overlay {
@@ -706,6 +740,121 @@ code, kbd, pre, samp {
   border-radius: var(--radius-sm);
 }
 
+/* ==============================================================================
+ * Cuadrícula estilo Windows Explorer (Grandes Iconos & Espacioso)
+ * ============================================================================== */
+.file-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 14px;
+  padding: 20px;
+}
+
+.file-card {
+  position: relative;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 10px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.file-card:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.file-card.selected {
+  background-color: var(--bg-selected);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.file-card-icon-wrap {
+  width: 54px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.file-card-icon {
+  width: 46px;
+  height: 46px;
+  transition: transform 0.15s ease;
+}
+.file-card:hover .file-card-icon {
+  transform: scale(1.06);
+}
+
+.file-card-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-main);
+  line-height: 1.35;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.file-card.is-folder .file-card-name {
+  font-weight: 600;
+}
+
+.file-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.file-card-actions {
+  display: none;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  gap: 3px;
+  background: var(--bg-card-header);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  padding: 2px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+.file-card:hover .file-card-actions {
+  display: flex;
+}
+.file-card-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.file-card-action-btn:hover {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+.file-card-action-btn.btn-danger-hover:hover {
+  background: var(--accent-danger);
+  color: #ffffff;
+}
+
+/* Tabla de archivos detallada */
 .file-row-name {
   display: flex;
   align-items: center;
@@ -719,6 +868,79 @@ code, kbd, pre, samp {
 .file-row-name.is-folder:hover {
   text-decoration: underline;
 }
+
+/* Toolbar de Papelera */
+.trash-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+  background-color: var(--bg-card-header);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* ==============================================================================
+ * Previsualizador de Archivos (Modal & Visores)
+ * ============================================================================== */
+.preview-code-wrap {
+  display: flex;
+  background: var(--bg-terminal);
+  border-top: 1px solid var(--border-terminal);
+  min-height: 380px;
+  max-height: 65vh;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.preview-line-numbers {
+  padding: 16px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-right: 1px solid var(--border-terminal);
+  color: #64748b;
+  user-select: none;
+  text-align: right;
+  min-width: 44px;
+  font-size: 12px;
+}
+.preview-code-content {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-terminal);
+  white-space: pre;
+  tab-size: 4;
+  overflow-x: auto;
+  flex: 1;
+}
+
+.preview-media-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.15);
+  min-height: 360px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.preview-image {
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.preview-pdf-frame {
+  width: 100%;
+  height: 68vh;
+  border: none;
+}
+
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
 
 /* ==============================================================================
  * Consola Terminal Web Real
