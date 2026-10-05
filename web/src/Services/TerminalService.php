@@ -34,8 +34,24 @@ class TerminalService
             return $emptyRes;
         }
 
-        // 1. Manejo nativo de comando 'cd' para persistir navegación de directorios
-        if ($command === 'cd' || str_starts_with($command, 'cd ')) {
+        // 1. Manejo nativo de comandos de cierre de sesion de consola
+        if ($command === 'exit' || $command === 'logout') {
+            $exitMsg = "Esta es una consola web de administración integrada persistente.\n" .
+                "• La consola se mantiene abierta para continuar ejecutando comandos.\n" .
+                "• Para cerrar la sesión de su cuenta en el panel web, pulse 'Cerrar Sesión' en la barra superior.\n";
+            $exitRes = [
+                'success' => true,
+                'output' => $exitMsg,
+                'exit_code' => 0,
+                'cwd' => $cleanCwd,
+                'time_ms' => 0,
+            ];
+            $exitRes['data'] = $exitRes;
+            return $exitRes;
+        }
+
+        // 2. Manejo nativo de comando 'cd' para persistir navegación de directorios (comandos cd puros)
+        if ($command === 'cd' || (str_starts_with($command, 'cd ') && !preg_match('/[&|;]/', $command))) {
             return $this->handleCdCommand($command, $cleanCwd);
         }
 
@@ -126,7 +142,12 @@ class TerminalService
             $execCommand = preg_replace('/^sudo\s+/', 'sudo -n ', $execCommand);
         }
 
-        // 6. Entorno local Windows (Simulación transparente)
+        // 6. Si es un comando ping sin límite de paquetes (-c), limitar a 4 para evitar bloqueos infinitos
+        if (preg_match('/^(sudo -n\s+)?ping\s+(?!.*-c\b)/i', $execCommand)) {
+            $execCommand = preg_replace('/(\bping\s+)/i', '$1-c 4 ', $execCommand);
+        }
+
+        // 7. Entorno local Windows (Simulación transparente)
         if (DIRECTORY_SEPARATOR === '\\') {
             $simOutput = sprintf("Simulación de comando en Windows: %s (cwd: %s)\n", $execCommand, $cleanCwd);
             $winRes = [
@@ -140,7 +161,7 @@ class TerminalService
             return $winRes;
         }
 
-        // 7. Ejecución real con proc_open en Debian 13
+        // 8. Ejecución real con proc_open en Debian 13
         $startTime = microtime(true);
         $descriptors = [
             0 => ['pipe', 'r'],
@@ -152,11 +173,19 @@ class TerminalService
             'TERM' => 'xterm-256color',
             'LANG' => 'C.UTF-8',
             'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'HOME' => self::DEFAULT_CWD,
             'PAGER' => 'cat',
             'SYSTEMD_PAGER' => 'cat',
         ]);
 
-        $process = @proc_open(['/bin/bash', '-c', $execCommand], $descriptors, $pipes, $cleanCwd, $env);
+        $cwdToken = '__NAS_CWD_' . bin2hex(random_bytes(6)) . '__';
+        $bashScript = sprintf(
+            'shopt -s expand_aliases; alias ll="ls -la"; alias la="ls -A"; alias l="ls -CF"; %s; __nas_ec=$?; printf "\n%s%%s\n" "$PWD"; exit $__nas_ec',
+            $execCommand,
+            $cwdToken
+        );
+
+        $process = @proc_open(['/bin/bash', '-c', $bashScript], $descriptors, $pipes, $cleanCwd, $env);
         if (!is_resource($process)) {
             $failRes = [
                 'success' => true,
@@ -221,6 +250,15 @@ class TerminalService
         fclose($pipes[2]);
         $exitCode = proc_close($process);
 
+        // Extraer el nuevo CWD si cambió durante la ejecución de bash (ej: cd compuesto, pushd, etc.)
+        if (preg_match('/\n' . preg_quote($cwdToken, '/') . '(.*?)\n?$/s', $stdout, $cwdMatch)) {
+            $detectedCwd = trim($cwdMatch[1]);
+            if ($detectedCwd !== '' && is_dir($detectedCwd)) {
+                $cleanCwd = realpath($detectedCwd) ?: $detectedCwd;
+            }
+            $stdout = substr($stdout, 0, -strlen($cwdMatch[0]));
+        }
+
         $elapsedMs = (int) round((microtime(true) - $startTime) * 1000);
         $fullOutput = $stdout !== '' ? $stdout : '';
         if ($stderr !== '') {
@@ -269,28 +307,56 @@ class TerminalService
             $isSudo = true;
         }
 
-        // 1. Sesiones de cambio de usuario interactivas (su, sudo -i, sudo -s, sudo su)
+        // 1. Sesiones de cambio de usuario interactivas (su, sudo -i, sudo -s, sudo su, sudo bash, sudo sh)
         if (preg_match('/^su(\s+.*)?$/i', $clean) ||
             preg_match('/^sudo\s+(-i|-s)(\s+.*)?$/i', $clean) ||
-            ($isSudo && preg_match('/^su(\s+.*)?$/i', $cmdWithoutSudo))) {
+            ($isSudo && preg_match('/^su(\s+.*)?$/i', $cmdWithoutSudo)) ||
+            ($isSudo && preg_match('/^(bash|sh|zsh|dash|csh|tcsh)(\s+.*)?$/i', $cmdWithoutSudo))) {
             return "El comando '{$clean}' requiere autenticación interactiva en una terminal TTY.\n" .
                 "• En esta consola web ya opera con los permisos autorizados de administración.\n" .
                 "• Para ejecutar tareas administrativas use directamente: sudo <comando> (ej. 'sudo systemctl restart smbd').\n" .
                 "• Para una sesión interactiva root completa con TTY, conéctese directamente por SSH al servidor.";
         }
 
+        // 2. Intento de lanzar subshells interactivas (bash, sh, zsh) sin argumentos de script
+        if (preg_match('/^(bash|sh|zsh|dash|csh|tcsh)$/i', $clean)) {
+            return "La consola web ya ejecuta cada comando dentro de una subshell Bash interactiva.\n" .
+                "• No es necesario invocar '{$clean}'. Escriba directamente cualquier comando que desee ejecutar.\n" .
+                "• Para una sesión interactiva SSH completa con TTY, conéctese directamente por SSH al servidor.";
+        }
+
+        // 3. Seguimiento continuo de archivos y registros que bloquean indefinidamente (tail -f, journalctl -f)
+        if (preg_match('/^tail\s+.*(-f|-F|--follow)\b/i', $cmdWithoutSudo)) {
+            return "El comando '{$clean}' realiza un seguimiento continuo bloqueante que requiere Ctrl+C (no disponible en consola web).\n" .
+                "• Para consultar los últimos registros en esta consola use: 'tail -n 50 <archivo>'.\n" .
+                "• O consulte las bitácoras en tiempo real en la pestaña 'Bitácoras y Auditoría' del panel web.";
+        }
+
+        if (preg_match('/^journalctl\s+.*(-f|--follow)\b/i', $cmdWithoutSudo)) {
+            return "El parámetro '-f' (follow) en journalctl realiza un seguimiento continuo bloqueante que requiere Ctrl+C.\n" .
+                "• Para consultar los últimos eventos del sistema use: 'journalctl -n 50' o 'journalctl -u <servicio> -n 50'.\n" .
+                "• O consulte las bitácoras del sistema en la pestaña 'Bitácoras y Auditoría'.";
+        }
+
+        // 4. Monitores continuos en bucle infinito
+        if (preg_match('/^watch(\s+.*)?$/i', $cmdWithoutSudo)) {
+            return "El comando 'watch' es un monitor interactivo en bucle continuo que requiere Ctrl+C.\n" .
+                "• Para ejecutar el comando una sola vez retire 'watch' (ej. 'df -h' en lugar de 'watch df -h').\n" .
+                "• Para métricas en tiempo real consulte la pestaña 'Dashboard' de este panel web.";
+        }
+
         // Extraer el primer binario del comando
         $parts = preg_split('/\s+/', $cmdWithoutSudo);
         $bin = strtolower(basename($parts[0] ?? ''));
 
-        // 2. Editores de texto interactivos
+        // 5. Editores de texto interactivos
         if (in_array($bin, ['nano', 'vi', 'vim', 'nvim', 'pico', 'emacs', 'joe', 'jed'], true)) {
             return "El editor interactivo '{$bin}' requiere una terminal interactiva (TTY).\n" .
                 "• Para visualizar archivos use: 'cat <archivo>', 'head -n 30 <archivo>' o 'tail -n 50 <archivo>'.\n" .
                 "• Para crear o gestionar archivos utilice el Explorador de Archivos Web o conéctese por SSH.";
         }
 
-        // 3. Monitores interactivos y herramientas de pantalla completa
+        // 6. Monitores interactivos y herramientas de pantalla completa
         if (in_array($bin, ['top', 'htop', 'btop', 'atop', 'iotop', 'iftop', 'nmon', 'glances'], true)) {
             return "El monitor interactivo '{$bin}' requiere una terminal interactiva de pantalla completa.\n" .
                 "• Para ver procesos de una sola vez use: 'ps aux | head -n 30' o 'ps -ef'.\n" .
@@ -298,19 +364,19 @@ class TerminalService
                 "• O consulte las gráficas y métricas en vivo en la pestaña 'Dashboard' de este panel web.";
         }
 
-        // 4. Conexiones remotas y multiplexores interactivos
+        // 7. Conexiones remotas y multiplexores interactivos
         if (in_array($bin, ['ssh', 'telnet', 'ftp', 'sftp', 'tmux', 'screen'], true)) {
             return "El comando '{$bin}' requiere una sesión interactiva no soportada en la consola web.\n" .
                 "• Ejecute conexiones remotas interactivas directamente desde la consola SSH de su equipo.";
         }
 
-        // 5. Cambio interactivo de credenciales
+        // 8. Cambio interactivo de credenciales
         if ($bin === 'passwd') {
             return "El comando 'passwd' requiere ingreso interactivo de contraseñas en TTY.\n" .
                 "• Para gestionar usuarios y contraseñas utilice la pestaña 'Usuarios y Grupos' del panel web.";
         }
 
-        // 6. Paginadores manuales interactivos
+        // 9. Paginadores manuales interactivos
         if (in_array($bin, ['less', 'more', 'man'], true)) {
             return "El comando '{$bin}' requiere control interactivo de teclado (TTY).\n" .
                 "• Para visualizar contenido utilice 'cat <archivo>', 'tail -n 50 <archivo>' o agregue '| cat'.";
@@ -322,8 +388,23 @@ class TerminalService
     private function handleCdCommand(string $cmd, string $currentCwd): array
     {
         $target = trim(substr($cmd, 2));
+
+        // Deshacer comillas que puedan envolver la ruta (ej: cd "/tmp" o cd 'VENTAS')
+        if ((str_starts_with($target, '"') && str_ends_with($target, '"') && strlen($target) >= 2) ||
+            (str_starts_with($target, "'") && str_ends_with($target, "'") && strlen($target) >= 2)) {
+            $target = substr($target, 1, -1);
+        }
+        $target = trim($target);
+
+        // Deshacer escapes de barra invertida en espacios (ej: cd Mi\ Carpeta)
+        $target = str_replace('\ ', ' ', $target);
+
         if ($target === '' || $target === '~') {
             $target = self::DEFAULT_CWD;
+        } elseif (str_starts_with($target, '~/')) {
+            $target = self::DEFAULT_CWD . substr($target, 1);
+        } elseif ($target === '-') {
+            $target = $_SESSION['terminal_old_cwd'] ?? self::DEFAULT_CWD;
         }
 
         if (!str_starts_with($target, '/')) {
@@ -343,9 +424,18 @@ class TerminalService
             return $errRes;
         }
 
+        if ($realTarget !== $currentCwd) {
+            $_SESSION['terminal_old_cwd'] = $currentCwd;
+        }
+
+        $output = '';
+        if (trim(substr($cmd, 2)) === '-') {
+            $output = $realTarget . "\n";
+        }
+
         $okRes = [
             'success' => true,
-            'output' => '',
+            'output' => $output,
             'exit_code' => 0,
             'cwd' => $realTarget,
             'time_ms' => 1,
