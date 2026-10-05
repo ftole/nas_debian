@@ -448,11 +448,30 @@ $termRes = $terminal->execute('echo "ANTIGRAVITY_TEST"', '/srv/nas');
 assertTrue(isset($termRes['exit_code']) && $termRes['exit_code'] === 0, 'TerminalService ejecuta comando bash con código 0');
 assertTrue(str_contains($termRes['output'], 'ANTIGRAVITY_TEST'), 'TerminalService retorna salida estándar del comando');
 assertTrue(!empty($termRes['cwd']), 'TerminalService retorna directorio de trabajo actual');
+assertTrue(isset($termRes['data']) && is_array($termRes['data']), 'TerminalService retorna estructura anidada data');
 
 // Comando cd
 $cdRes = $terminal->execute('cd /tmp', '/srv/nas');
 assertTrue($cdRes['exit_code'] === 0, 'TerminalService soporta navegación con cd');
 assertTrue(str_contains($cdRes['cwd'], 'tmp'), 'TerminalService actualiza directorio de trabajo en cd');
+
+// Comando cd a ruta inexistente
+$badCd = $terminal->execute('cd /ruta_inexistente_9999', '/srv/nas');
+assertTrue($badCd['exit_code'] === 1 && str_contains($badCd['output'], 'bash: cd'), 'TerminalService maneja cd inexistente sin error fatal');
+
+// Detección de comandos interactivos incompatibles (su, sudo -i, nano, top)
+$suWarn = $terminal->execute('su -', '/srv/nas');
+assertTrue($suWarn['success'] && str_contains($suWarn['output'], 'Aviso de terminal interactiva'), 'TerminalService detecta su - y sugiere alternativas sin error fatal');
+
+$nanoWarn = $terminal->execute('nano /etc/samba/smb.conf', '/srv/nas');
+assertTrue($nanoWarn['success'] && str_contains($nanoWarn['output'], 'editor interactivo'), 'TerminalService detecta nano y previene cuelgues');
+
+$topWarn = $terminal->execute('top', '/srv/nas');
+assertTrue($topWarn['success'] && str_contains($topWarn['output'], 'monitor interactivo'), 'TerminalService detecta top y sugiere ps o dashboard');
+
+// Comando help nativo
+$helpRes = $terminal->execute('help', '/srv/nas');
+assertTrue($helpRes['success'] && str_contains($helpRes['output'], 'Comandos rápidos del sistema'), 'TerminalService provee guía de comandos con help');
 
 // Historial en base de datos
 $history = $terminal->getHistory(5);
@@ -475,6 +494,9 @@ $listRes = $fileExp->listDirectory('');
 assertTrue($listRes['success'], 'FileExplorerService::listDirectory retorna éxito en directorio válido');
 assertTrue(is_array($listRes['items']) && count($listRes['items']) >= 1, 'FileExplorerService lista archivos existentes');
 assertTrue(($listRes['items'][0]['name'] ?? '') === 'documento.txt', 'FileExplorerService detecta nombre de archivo');
+assertTrue(isset($listRes['data']) && is_array($listRes['data']['items']), 'FileExplorerService retorna bloque anidado data');
+assertTrue(isset($listRes['items'][0]['relative_path']) && isset($listRes['items'][0]['modified_at']), 'FileExplorerService provee relative_path y modified_at');
+assertTrue(isset($listRes['items'][0]['owner']) && isset($listRes['items'][0]['group']), 'FileExplorerService provee propietario y grupo POSIX');
 
 // Crear subcarpeta
 $mkdirRes = $fileExp->createDirectory('', 'Subcarpeta_Test');
