@@ -180,7 +180,7 @@ class TerminalService
 
         $cwdToken = '__NAS_CWD_' . bin2hex(random_bytes(6)) . '__';
         $bashScript = sprintf(
-            'shopt -s expand_aliases; alias ll="ls -la"; alias la="ls -A"; alias l="ls -CF"; %s; __nas_ec=$?; printf "\n%s%%s\n" "$PWD"; exit $__nas_ec',
+            'll() { ls -la "$@"; }; la() { ls -A "$@"; }; l() { ls -CF "$@"; }; %s; __nas_ec=$?; printf "\n%s%%s\n" "$PWD"; exit $__nas_ec',
             $execCommand,
             $cwdToken
         );
