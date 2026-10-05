@@ -217,6 +217,11 @@ class SambaService
                 $shareProps['read only'] = 'no';
                 $shareProps['guest ok'] = 'yes';
                 $shareProps['public'] = 'yes';
+                $shareProps['guest only'] = 'yes';
+                $shareProps['create mask'] = '0777';
+                $shareProps['directory mask'] = '0777';
+                $shareProps['force create mode'] = '0777';
+                $shareProps['force directory mode'] = '0777';
                 SystemService::sudo(['chmod', '2777', $path]);
                 break;
         }
