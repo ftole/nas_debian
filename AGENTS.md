@@ -42,16 +42,17 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
 | `src/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente: `deploy_wizard`, `groups`, `shares`, `backups`, `users`, `diagnostics`. |
-| `web/` | Web (Nginx + PHP-FPM) | Entorno Web nativo MVC PHP 8: Dashboard, Samba, Backups, Almacenamiento, Usuarios y Sistema con estética Cockpit/PatternFly 4 100% offline. |
+| `web/` | Web (Nginx + PHP-FPM) | Entorno Web nativo MVC PHP 8: Dashboard, Samba, Backups, Almacenamiento, Usuarios, Sistema, Explorador de Archivos Drag-and-Drop, Terminal bash real, Dominio AD y base de datos SQLite con estética Slate UI 100% offline (cero dependencias externas). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8. |
+| `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
 | `FAILURE_MODES.md` | Markdown | Modos de fallo y su verificación (FMEA). |
-| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP. |
+| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP (con `php-sqlite3 php-zip`). |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
 | `SMB_DEBIAN.md` | Markdown | **Manual Técnico y Guía de Replicación** para usuarios y administradores. |
 | `SECURITY.md` | Markdown | **Modelo de seguridad**, rollback de actualizaciones, identidades SSH, credenciales y privilegios web. |
+| `DESIGN.md` | Markdown | **Sistema de Diseño Slate UI** (tokens, colores, tipografía nativa, 0% dependencias). |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
 
 ### 2.1 Cuadro Maestro de Tecnologías, Subsistemas y Librerías
@@ -69,12 +70,16 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **Staging Atómico (`.inprogress_*`)** | Pipeline de Backups | Escritura en directorio temporal oculto y promoción atómica (`mv`) al finalizar. | **Resiliencia crítica contra apagones y fallos de red**: las rutinas de limpieza (`trap cleanup EXIT TERM INT`) eliminan copias incompletas; el repositorio histórico únicamente expone snapshots 100% íntegros. |
 | **cifs-utils (`mount.cifs`) SMB 3.1.1** | Conector Windows | Montaje temporal en solo lectura (`ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30`). | Protocolo de cifrado y firmas modernas SMB 3.1.1; `noserverino` previene errores de inodos remotos; `cache=none` asegura lectura de datos frescos; `soft,timeo=30` evita cuelgues del kernel si el host remoto de Windows se reinicia o desconecta. |
 | **Desglose de Dominios Active Directory** | Autenticación de Red | Parser en el asistente y en la API que detecta sintaxis `DOMINIO\usuario` y `DOMINIO/usuario`. | Permite conectar a carpetas compartidas corporativas protegidas por Directorio Activo sin exponer contraseñas en memoria de procesos (`ps`) mediante archivos de credenciales `0600 root:root`. |
+| **Active Directory Nativo (`realmd`, `sssd`, `adcli`)** | Integración Corporativa AD | Pila completa de unión a dominio con Kerberos y demonio SSSD. | Autenticación corporativa de usuarios de dominio Windows directamente en el NAS y Samba, con control granular desde la web. |
 | **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector Linux | Replicación remota cifrada por SSH con almacenamiento de firmas en `/root/.ssh/known_hosts_backup`. | Previene ataques de intermediario (*Man-in-the-Middle*) al registrar hosts nuevos automáticamente sin intervención manual y sin deshabilitar la comprobación de claves. |
 | **Tuning de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel | Configuración de límites del VFS, monitoreo inotify y reciclaje de memoria sucia. | `fs.inotify` masivo (524,288 watches); `tcp_keepalive` (120s/15s/4) limpia sesiones SMB inactivas en 3 minutos en lugar de 2 horas; `vm.dirty_bytes=256MB` fuerza ráfagas breves de escritura a disco, previniendo congelamientos de I/O por saturación de RAM. |
 | **Readahead Tuning udev (`60-nas-readahead.rules`)** | Subsistema de Bloques | Reglas udev persistentes para precarga de disco (`1024 KB` en SSD / `4096 KB` en HDD). | Aumenta el rendimiento sostenido en lecturas secuenciales pesadas a través de la red y agiliza las comparaciones diferenciales de `rsync`. |
 | **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
-| **Nginx-light + PHP-FPM ondemand + MVC PHP 8** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño responsivo estandarizado tipo Cockpit/PatternFly 4 100% offline. |
+| **Nginx-light + PHP-FPM ondemand + Slate UI** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño espacioso Slate UI 100% offline (cero dependencias externas y cero Google Fonts). |
+| **Base de Datos SQLite Nativa (PDO)** | Almacenamiento Estructurado | SQLite en modo WAL (`/var/lib/nas/nas.sqlite`) sin demonios pesados residentes. | 0 MB de consumo de RAM en reposo; indexación ultrarrápida de auditoría, tareas, configuraciones e historial de comandos. |
+| **Explorador de Archivos Drag-and-Drop** | Gestión de Almacenamiento Web | Módulo para explorar `/srv/nas` con subida interactiva y descarga ZIP al vuelo. | Transferencia bidireccional ágil entre equipos clientes Windows y el NAS directamente en el navegador, con permisos `0660` y pertenencia a `grp_sistemas`. |
+| **Terminal Bash Interactiva Real** | Administración Web | Ejecución de comandos del sistema operativo mediante `proc_open` con flujos no bloqueantes y timeout. | Consola bash interactiva con persistencia de directorio de trabajo (`cwd`), comandos rápidos y navegación por historial (↑/↓). |
 | **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Servicios y controladores con ejecución estricta proc_open con array de argumentos. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
 | **whiptail + Bash 5** | Interfaz Visual TUI | Asistente de terminal interactivo con detección automática de recursos y validaciones en vivo. | Gestión integral del servidor desde la consola local o sesiones SSH sin necesidad de interfaz gráfica X11. |
 | **Control de Concurrencia con `flock`** | Programación de Tareas | Bloqueo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza la exclusión mutua de procesos impidiendo sobrecargas o escrituras simultáneas sobre una misma tarea. |
@@ -177,10 +182,10 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
 1. **Visibilidad en Red Windows (WSDD2):**
    * *Problema:* `wsdd2` en Debian 13 usa `DynamicUser=true` y falla al ejecutar `testparm` para leer `smb.conf`.
    * *Solución:* Override en `/etc/default/wsdd2` y `/etc/systemd/system/wsdd2.service.d/override.conf` con `WSDD2_OPTS="-N <NETBIOS> -G <WORKGROUP> -H <NETBIOS>"`.
-2. **Entorno Web Nativo Ultraligero (Nginx-light + PHP-FPM ondemand):**
-   * *Arquitectura:* Aplicación MVC en PHP 8 (`/var/www/nas-web`) servida por Nginx-light y pool PHP-FPM en modo `pm = ondemand`.
-   * *Estilos:* 100% Offline con diseño responsivo PatternFly 4 / Cockpit CSS y 36 iconos SVG incrustados; cero llamadas a CDNs.
-   * *Seguridad:* Invocación estricta de utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`) mediante `proc_open` con listas de argumentos y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
+2. **Entorno Web Nativo Ultraligero (Nginx-light + PHP-FPM ondemand + Slate UI):**
+   * *Arquitectura:* Aplicación MVC en PHP 8 (`/var/www/nas-web`) servida por Nginx-light y pool PHP-FPM en modo `pm = ondemand`. Base de datos SQLite integrada en `/var/lib/nas/nas.sqlite` con WAL mode (0 MB en reposo).
+   * *Estilos:* 100% Offline con diseño moderno y sereno Slate UI, tipografía nativa del sistema (`system-ui`), espaciado no saturado y 36 iconos SVG incrustados; cero llamadas a CDNs y desacoplamiento total de Cockpit.
+   * *Seguridad:* Invocación estricta de utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`) mediante `proc_open` con listas de argumentos y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
 3. **Optimización del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
    * Ampliación de descriptores inotify (`max_user_watches = 524288`), keepalive TCP SMB (`tcp_keepalive_time = 120`), retención de caché VFS (`vfs_cache_pressure = 30`) y control estricto de memoria sucia (`vm.dirty_bytes = 268435456`, `dirty_background_bytes = 67108864`).
 4. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
