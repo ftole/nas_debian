@@ -20,6 +20,12 @@ const AppState = {
     root: 'nas',
     currentPath: '',
     items: [],
+    viewMode: localStorage.getItem('nas_file_view') || 'grid',
+    inTrash: false,
+    trashItems: [],
+    selectedItemPath: null,
+    currentPreviewFile: null,
+    currentPreviewText: '',
   },
   terminal: {
     cwd: '/srv/nas',
@@ -80,6 +86,19 @@ function toggleTheme() {
   }
 }
 
+function escapeHtml(str) {
+  if (typeof str !== 'string') return String(str ?? '');
+  return str.replace(/[&<>'"]/g,
+    tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+}
+
 // ==============================================================================
 // 2. Navegación entre Vistas
 // ==============================================================================
@@ -132,6 +151,7 @@ function switchView(viewName, updateHash = true) {
       break;
     case 'files':
       loadFiles();
+      updateTrashBadge();
       break;
     case 'shares':
       loadShares();
@@ -1141,15 +1161,118 @@ function loadApplications() {
 }
 
 // ==============================================================================
-// 15. Módulo: Explorador de Archivos y Recursos (Files) & Drag-and-Drop
+// 15. Módulo: Explorador de Archivos (Cuadrícula Windows, Previsualizador & Papelera)
 // ==============================================================================
+
+function getFileTypeMeta(item) {
+  if (item.is_dir) {
+    return {
+      icon: '#icon-folder',
+      color: '#f59e0b',
+      typeLabel: 'Carpeta',
+      previewable: false,
+    };
+  }
+
+  const name = item.name || '';
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
+    return {
+      icon: '#icon-image',
+      color: '#a855f7',
+      typeLabel: `Imagen ${ext.toUpperCase()}`,
+      previewable: true,
+      mediaType: 'image',
+    };
+  }
+
+  if (ext === 'pdf') {
+    return {
+      icon: '#icon-file-text',
+      color: '#ef4444',
+      typeLabel: 'Documento PDF',
+      previewable: true,
+      mediaType: 'pdf',
+    };
+  }
+
+  if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) {
+    return {
+      icon: '#icon-video',
+      color: '#f43f5e',
+      typeLabel: `Video ${ext.toUpperCase()}`,
+      previewable: ['mp4', 'webm'].includes(ext),
+      mediaType: 'video',
+    };
+  }
+
+  if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) {
+    return {
+      icon: '#icon-music',
+      color: '#14b8a6',
+      typeLabel: `Audio ${ext.toUpperCase()}`,
+      previewable: ['mp3', 'wav', 'ogg'].includes(ext),
+      mediaType: 'audio',
+    };
+  }
+
+  if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) {
+    return {
+      icon: '#icon-archive',
+      color: '#eab308',
+      typeLabel: `Archivo comprimido (${ext.toUpperCase()})`,
+      previewable: false,
+    };
+  }
+
+  if (['txt', 'log', 'conf', 'sh', 'php', 'js', 'json', 'yml', 'yaml', 'ini', 'xml', 'sql', 'md', 'env', 'csv', 'py', 'css', 'html', 'bat', 'cmd'].includes(ext)) {
+    return {
+      icon: '#icon-file-text',
+      color: '#10b981',
+      typeLabel: `Texto / Código (${ext.toUpperCase()})`,
+      previewable: true,
+      mediaType: 'text',
+    };
+  }
+
+  return {
+    icon: '#icon-file',
+    color: '#94a3b8',
+    typeLabel: ext ? `Archivo .${ext}` : 'Archivo',
+    previewable: true,
+    mediaType: 'unknown',
+  };
+}
+
+function setFileViewMode(mode, triggerRender = true) {
+  AppState.files.viewMode = mode;
+  try {
+    localStorage.setItem('nas_file_view', mode);
+  } catch (e) {}
+
+  const btnGrid = document.getElementById('btn-view-grid');
+  const btnList = document.getElementById('btn-view-list');
+  if (btnGrid) btnGrid.classList.toggle('active', mode === 'grid');
+  if (btnList) btnList.classList.toggle('active', mode === 'list');
+
+  if (triggerRender) {
+    renderCurrentFiles();
+  }
+}
+
 async function loadFiles(subpath = null) {
   if (subpath === null) {
     subpath = AppState.files.currentPath || '';
   }
   AppState.files.currentPath = subpath;
 
+  const gridContainer = document.getElementById('files-grid-container');
   const tbody = document.getElementById('files-table-body');
+
+  if (gridContainer) {
+    gridContainer.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:30px; color:var(--text-muted);"><svg class="icon spin" style="width:24px; height:24px; color:var(--accent-primary); margin-bottom:8px;"><use href="#icon-refresh"></use></svg><br>Cargando archivos y recursos...</div>';
+  }
   if (tbody) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:18px;">Cargando archivos y directorios...</td></tr>';
   }
@@ -1164,67 +1287,169 @@ async function loadFiles(subpath = null) {
     const currentPath = res.data?.current_path ?? res.current_path ?? subpath ?? '';
 
     AppState.files.items = items;
-
     renderFileBreadcrumbs(breadcrumbs, currentPath);
-
-    if (!tbody) return;
-
-    if (items.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">
-            Esta carpeta está vacía. Arrastra archivos aquí desde tu equipo o utiliza el botón <strong>Subir archivos</strong>.
-          </td>
-        </tr>
-      `;
-      return;
-    }
-
-    tbody.innerHTML = items.map(item => {
-      const isDir = item.is_dir;
-      const icon = isDir ? '#icon-folder' : '#icon-file-text';
-      const iconColor = isDir ? 'color:var(--accent-primary);' : 'color:var(--text-muted);';
-      const relPath = item.relative_path || item.path || '';
-      const nameClick = isDir
-        ? `onclick="navigateToSubpath('${escapeHtml(relPath)}')" style="cursor:pointer;"`
-        : '';
-      const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
-
-      const downloadAction = isDir
-        ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
-        : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(relPath)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
-
-      const ownerStr = escapeHtml(item.owner || 'sistemas');
-      const groupStr = escapeHtml(item.group || 'grp_sistemas');
-      const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
-
-      return `
-        <tr>
-          <td><svg class="icon" style="${iconColor}"><use href="${icon}"></use></svg></td>
-          <td>
-            <div class="${nameClass}" ${nameClick}>
-              <span>${escapeHtml(item.name)}</span>
-            </div>
-          </td>
-          <td>${escapeHtml(item.size_formatted || '0 B')}</td>
-          <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
-          <td>${ownerStr}:${groupStr}</td>
-          <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
-          <td style="text-align:right;">
-            <div style="display:flex; justify-content:flex-end; gap:6px;">
-              ${downloadAction}
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
-              <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
-
+    renderCurrentFiles();
+    updateTrashBadge();
   } catch (e) {
+    if (gridContainer) {
+      gridContainer.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:var(--accent-danger); padding:24px;">Error al cargar archivos: ${escapeHtml(e.message)}</div>`;
+    }
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar archivos: ${escapeHtml(e.message)}</td></tr>`;
     }
+  }
+}
+
+function renderCurrentFiles() {
+  const isGrid = AppState.files.viewMode === 'grid';
+  const gridContainer = document.getElementById('files-grid-container');
+  const tableContainer = document.getElementById('files-table-container');
+
+  if (gridContainer) gridContainer.style.display = isGrid ? 'grid' : 'none';
+  if (tableContainer) tableContainer.style.display = isGrid ? 'none' : 'block';
+
+  if (isGrid) {
+    renderFileGrid(AppState.files.items);
+  } else {
+    renderFileTable(AppState.files.items);
+  }
+}
+
+function renderFileGrid(items) {
+  const container = document.getElementById('files-grid-container');
+  if (!container) return;
+
+  if (!items || items.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column:1/-1; text-align:center; padding:45px 20px; color:var(--text-muted);">
+        <svg class="icon" style="width:48px; height:48px; color:var(--text-muted); opacity:0.6; margin-bottom:12px;"><use href="#icon-folder"></use></svg>
+        <div style="font-size:15px; font-weight:600; color:var(--text-main); margin-bottom:4px;">Esta carpeta está vacía</div>
+        <div style="font-size:13px;">Arrastra archivos aquí desde tu equipo o pulsa el botón <strong>Subir archivos</strong>.</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = items.map(item => {
+    const isDir = item.is_dir;
+    const meta = getFileTypeMeta(item);
+    const relPath = item.relative_path || item.path || '';
+    const isSelected = AppState.files.selectedItemPath === relPath;
+    const sizeStr = isDir ? 'Carpeta' : (item.size_formatted || '0 B');
+
+    const previewBtn = !isDir
+      ? `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
+      : '';
+
+    const downloadBtn = isDir
+      ? `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
+      : `<button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); downloadFile('${escapeHtml(relPath)}')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
+
+    return `
+      <div class="file-card ${isDir ? 'is-folder' : ''} ${isSelected ? 'selected' : ''}"
+           data-path="${escapeHtml(relPath)}"
+           onclick="selectFileCard(this, '${escapeHtml(relPath)}')"
+           ondblclick="handleItemDblClick('${escapeHtml(relPath)}', '${escapeHtml(item.name)}', ${isDir})"
+           title="${escapeHtml(item.name)} (${sizeStr})">
+        
+        <div class="file-card-actions">
+          ${previewBtn}
+          ${downloadBtn}
+          <button type="button" class="file-card-action-btn" onclick="event.stopPropagation(); openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
+          <button type="button" class="file-card-action-btn btn-danger-hover" onclick="event.stopPropagation(); openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
+        </div>
+
+        <div class="file-card-icon-wrap">
+          <svg class="file-card-icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg>
+        </div>
+
+        <span class="file-card-name">${escapeHtml(item.name)}</span>
+        <span class="file-card-meta">${escapeHtml(sizeStr)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderFileTable(items) {
+  const tbody = document.getElementById('files-table-body');
+  if (!tbody) return;
+
+  if (!items || items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
+          Esta carpeta está vacía. Arrastra archivos aquí desde tu equipo o utiliza el botón <strong>Subir archivos</strong>.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = items.map(item => {
+    const isDir = item.is_dir;
+    const meta = getFileTypeMeta(item);
+    const relPath = item.relative_path || item.path || '';
+    const nameClick = isDir
+      ? `onclick="navigateToSubpath('${escapeHtml(relPath)}')" style="cursor:pointer;"`
+      : `onclick="previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" style="cursor:pointer;"`;
+    const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
+
+    const previewAction = !isDir
+      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="previewFile('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
+      : '';
+
+    const downloadAction = isDir
+      ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(relPath)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
+      : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(relPath)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
+
+    const ownerStr = escapeHtml(item.owner || 'sistemas');
+    const groupStr = escapeHtml(item.group || 'grp_sistemas');
+    const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
+
+    return `
+      <tr>
+        <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
+        <td>
+          <div class="${nameClass}" ${nameClick}>
+            <span>${escapeHtml(item.name)}</span>
+          </div>
+        </td>
+        <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+        <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
+        <td>${ownerStr}:${groupStr}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
+        <td style="text-align:right;">
+          <div style="display:flex; justify-content:flex-end; gap:6px;">
+            ${previewAction}
+            ${downloadAction}
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(relPath)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function selectFileCard(cardEl, relPath) {
+  document.querySelectorAll('.file-card.selected').forEach(c => c.classList.remove('selected'));
+  if (cardEl) cardEl.classList.add('selected');
+  AppState.files.selectedItemPath = relPath;
+}
+
+function handleItemDblClick(relPath, name, isDir) {
+  if (isDir) {
+    navigateToSubpath(relPath);
+  } else {
+    previewFile(relPath, name);
+  }
+}
+
+function refreshCurrentFileView() {
+  if (AppState.files.inTrash) {
+    loadTrash();
+  } else {
+    loadFiles();
   }
 }
 
@@ -1459,8 +1684,10 @@ async function submitRenameFile(e) {
 function openDeleteModal(relPath, name) {
   const pathInput = document.getElementById('delete-file-path');
   const label = document.getElementById('delete-file-name-label');
+  const radioTrash = document.getElementById('del-mode-trash');
   if (pathInput) pathInput.value = relPath;
   if (label) label.textContent = `"${name}"`;
+  if (radioTrash) radioTrash.checked = true;
   openModal('modal-delete-file');
 }
 
@@ -1468,20 +1695,356 @@ async function confirmDeleteFile() {
   const path = document.getElementById('delete-file-path')?.value;
   if (!path) return;
 
+  const isPermanent = document.getElementById('del-mode-permanent')?.checked === true;
+
   try {
     await apiFetch('/api/files/delete', {
       method: 'POST',
       body: JSON.stringify({
         root: AppState.files.root || 'nas',
         path: path,
+        permanent: isPermanent,
       }),
     });
 
     closeModal('modal-delete-file');
-    showToast('Elemento eliminado del almacenamiento.', 'info');
+    const msg = isPermanent
+      ? 'Elemento eliminado definitivamente del disco.'
+      : 'Elemento movido a la papelera de reciclaje.';
+    showToast(msg, isPermanent ? 'info' : 'success');
     loadFiles();
+    updateTrashBadge();
   } catch (err) {
     // Ya mostrado por apiFetch
+  }
+}
+
+// ==============================================================================
+// Papelera de Reciclaje (Trash)
+// ==============================================================================
+function toggleTrashView() {
+  AppState.files.inTrash = !AppState.files.inTrash;
+  const normalView = document.getElementById('files-normal-view');
+  const trashView = document.getElementById('files-trash-view');
+  const btnNewFolder = document.getElementById('btn-new-folder');
+  const btnUpload = document.getElementById('btn-upload-files');
+
+  if (AppState.files.inTrash) {
+    if (normalView) normalView.style.display = 'none';
+    if (trashView) trashView.style.display = 'block';
+    if (btnNewFolder) btnNewFolder.style.display = 'none';
+    if (btnUpload) btnUpload.style.display = 'none';
+    loadTrash();
+  } else {
+    exitTrashView();
+  }
+}
+
+function exitTrashView() {
+  AppState.files.inTrash = false;
+  const normalView = document.getElementById('files-normal-view');
+  const trashView = document.getElementById('files-trash-view');
+  const btnNewFolder = document.getElementById('btn-new-folder');
+  const btnUpload = document.getElementById('btn-upload-files');
+
+  if (trashView) trashView.style.display = 'none';
+  if (normalView) normalView.style.display = 'block';
+  if (btnNewFolder) btnNewFolder.style.display = '';
+  if (btnUpload) btnUpload.style.display = '';
+  loadFiles();
+}
+
+async function loadTrash() {
+  const tbody = document.getElementById('trash-table-body');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:18px;">Consultando papelera de reciclaje...</td></tr>';
+  }
+
+  try {
+    const res = await apiFetch('/api/files/trash');
+    const items = res.data?.items ?? res.items ?? [];
+    const count = res.data?.count ?? res.count ?? items.length;
+
+    updateTrashBadgeCount(count);
+
+    if (!tbody) return;
+
+    if (items.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
+            <svg class="icon" style="width:36px; height:36px; color:var(--accent-warning); opacity:0.7; margin-bottom:8px;"><use href="#icon-trash"></use></svg>
+            <div>La papelera de reciclaje está vacía.</div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+      const isDir = item.is_dir;
+      const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
+
+      return `
+        <tr>
+          <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
+          <td><strong>${escapeHtml(item.filename)}</strong></td>
+          <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
+          <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+          <td>${escapeHtml(item.deleted_by || 'sistemas')}</td>
+          <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.deleted_at || 'N/A')}</td>
+          <td style="text-align:right;">
+            <div style="display:flex; justify-content:flex-end; gap:6px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="restoreTrashItem(${item.id}, '${escapeHtml(item.filename)}')" title="Restaurar a su carpeta original">
+                <svg class="icon" style="color:var(--accent-success);"><use href="#icon-restore"></use></svg> Restaurar
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="deleteTrashItem(${item.id}, '${escapeHtml(item.filename)}')" title="Eliminar definitivamente">
+                <svg class="icon"><use href="#icon-trash"></use></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar papelera: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+async function updateTrashBadge() {
+  try {
+    const res = await apiFetch('/api/files/trash', { silentToast: true });
+    const count = res.data?.count ?? res.count ?? (res.data?.items?.length ?? 0);
+    updateTrashBadgeCount(count);
+  } catch (e) {
+    // Silencioso
+  }
+}
+
+function updateTrashBadgeCount(count) {
+  const badge = document.getElementById('badge-trash-count');
+  if (badge) {
+    badge.textContent = String(count);
+    badge.style.display = count > 0 ? 'inline-flex' : 'none';
+  }
+}
+
+async function restoreTrashItem(id, name) {
+  try {
+    await apiFetch('/api/files/trash/restore', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+
+    showToast(`Elemento "${name}" restaurado correctamente a su ubicación.`, 'success');
+    loadTrash();
+    updateTrashBadge();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+async function deleteTrashItem(id, name) {
+  if (!confirm(`¿Eliminar definitivamente "${name}"? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+
+  try {
+    await apiFetch('/api/files/trash/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+
+    showToast(`Elemento "${name}" eliminado definitivamente.`, 'info');
+    loadTrash();
+    updateTrashBadge();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+function openEmptyTrashModal() {
+  openModal('modal-empty-trash');
+}
+
+async function confirmEmptyTrash() {
+  try {
+    await apiFetch('/api/files/trash/empty', {
+      method: 'POST',
+    });
+
+    closeModal('modal-empty-trash');
+    showToast('Papelera vaciada por completo.', 'info');
+    loadTrash();
+    updateTrashBadge();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+// ==============================================================================
+// Previsualizador de Archivos (Previewer 100% Offline)
+// ==============================================================================
+async function previewFile(relPath, fileName) {
+  AppState.files.currentPreviewFile = { relPath, fileName };
+  AppState.files.currentPreviewText = '';
+
+  const modal = document.getElementById('modal-file-preview');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('preview-file-name');
+  const metaEl = document.getElementById('preview-file-meta');
+  const iconEl = document.getElementById('preview-header-icon');
+  const copyBtn = document.getElementById('btn-preview-copy');
+  const loading = document.getElementById('preview-loading');
+  const codeContainer = document.getElementById('preview-code-container');
+  const imgContainer = document.getElementById('preview-image-container');
+  const pdfContainer = document.getElementById('preview-pdf-container');
+  const mediaContainer = document.getElementById('preview-media-container');
+  const binaryContainer = document.getElementById('preview-binary-container');
+
+  if (titleEl) titleEl.textContent = fileName;
+  if (metaEl) metaEl.textContent = 'Cargando información...';
+  if (copyBtn) copyBtn.style.display = 'none';
+
+  const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+  const meta = getFileTypeMeta({ name: fileName, is_dir: false });
+  if (iconEl) {
+    iconEl.style.color = meta.color;
+    iconEl.querySelector('use')?.setAttribute('href', meta.icon);
+  }
+
+  // Ocultar todos los contenedores y mostrar cargando
+  [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer].forEach(c => {
+    if (c) c.style.display = 'none';
+  });
+  if (loading) loading.style.display = 'flex';
+
+  openModal('modal-file-preview');
+
+  const root = encodeURIComponent(AppState.files.root || 'nas');
+  const encodedPath = encodeURIComponent(relPath);
+
+  // 1. Imágenes
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
+    const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
+    const imgEl = document.getElementById('preview-img-element');
+    if (imgEl) {
+      imgEl.src = rawUrl;
+      imgEl.onload = () => {
+        if (loading) loading.style.display = 'none';
+        if (imgContainer) imgContainer.style.display = 'flex';
+        if (metaEl) metaEl.textContent = `Imagen ${ext.toUpperCase()} • ${imgEl.naturalWidth}x${imgEl.naturalHeight} px`;
+      };
+      imgEl.onerror = () => {
+        if (loading) loading.style.display = 'none';
+        if (binaryContainer) {
+          binaryContainer.style.display = 'block';
+          const bName = document.getElementById('preview-binary-name');
+          const bDet = document.getElementById('preview-binary-details');
+          if (bName) bName.textContent = fileName;
+          if (bDet) bDet.textContent = 'Error al cargar imagen para previsualización.';
+        }
+      };
+    }
+    return;
+  }
+
+  // 2. PDF
+  if (ext === 'pdf') {
+    const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}#toolbar=1`;
+    const frame = document.getElementById('preview-pdf-frame');
+    if (frame) frame.src = rawUrl;
+    if (loading) loading.style.display = 'none';
+    if (pdfContainer) pdfContainer.style.display = 'block';
+    if (metaEl) metaEl.textContent = 'Documento PDF (Visualizador nativo del navegador)';
+    return;
+  }
+
+  // 3. Audio / Video HTML5
+  if (['mp4', 'webm', 'mp3', 'wav', 'ogg'].includes(ext)) {
+    const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}`;
+    const isVid = ['mp4', 'webm'].includes(ext);
+    const vidEl = document.getElementById('preview-video-element');
+    const audEl = document.getElementById('preview-audio-element');
+
+    if (isVid && vidEl) {
+      vidEl.src = rawUrl;
+      vidEl.style.display = 'block';
+      if (audEl) audEl.style.display = 'none';
+    } else if (audEl) {
+      audEl.src = rawUrl;
+      audEl.style.display = 'block';
+      if (vidEl) vidEl.style.display = 'none';
+    }
+
+    if (loading) loading.style.display = 'none';
+    if (mediaContainer) mediaContainer.style.display = 'flex';
+    if (metaEl) metaEl.textContent = `${isVid ? 'Video' : 'Audio'} multimedia • ${ext.toUpperCase()}`;
+    return;
+  }
+
+  // 4. Archivos de Texto / Código / Configuración
+  try {
+    const res = await apiFetch(`/api/files/content?root=${root}&path=${encodedPath}`);
+    const d = res.data || res;
+
+    AppState.files.currentPreviewText = d.content || '';
+
+    const lines = d.lines_count || (d.content ? d.content.split('\n').length : 0);
+    const lineNumbersEl = document.getElementById('preview-line-numbers');
+    const contentEl = document.getElementById('preview-code-content');
+
+    if (lineNumbersEl) {
+      const numLines = Math.max(1, lines);
+      let numsHtml = '';
+      for (let i = 1; i <= numLines; i++) {
+        numsHtml += `${i}<br>`;
+      }
+      lineNumbersEl.innerHTML = numsHtml;
+    }
+
+    if (contentEl) {
+      contentEl.textContent = d.content || '';
+    }
+
+    if (metaEl) {
+      metaEl.textContent = `${d.size_formatted || '0 B'} • ${lines} línea(s) • ${d.extension ? d.extension.toUpperCase() : 'TEXTO'}`;
+    }
+
+    if (copyBtn) copyBtn.style.display = 'inline-flex';
+    if (loading) loading.style.display = 'none';
+    if (codeContainer) codeContainer.style.display = 'flex';
+
+  } catch (err) {
+    if (loading) loading.style.display = 'none';
+    if (binaryContainer) {
+      binaryContainer.style.display = 'block';
+      const bName = document.getElementById('preview-binary-name');
+      const bDet = document.getElementById('preview-binary-details');
+      if (bName) bName.textContent = fileName;
+      if (bDet) bDet.textContent = err.message || 'Archivo no legible como texto plano.';
+    }
+    if (metaEl) metaEl.textContent = 'Archivo binario';
+  }
+}
+
+function copyPreviewContent() {
+  if (!AppState.files.currentPreviewText) {
+    showToast('No hay contenido para copiar.', 'warning');
+    return;
+  }
+
+  navigator.clipboard.writeText(AppState.files.currentPreviewText)
+    .then(() => showToast('Contenido copiado al portapapeles.', 'success'))
+    .catch(() => showToast('No se pudo copiar al portapapeles.', 'error'));
+}
+
+function downloadPreviewFile() {
+  if (AppState.files.currentPreviewFile?.relPath) {
+    downloadFile(AppState.files.currentPreviewFile.relPath);
   }
 }
 
@@ -1816,6 +2379,10 @@ function initApp() {
       }
     }, false);
   }
+
+  // Inicializar estado del explorador de archivos y papelera
+  setFileViewMode(AppState.files.viewMode, false);
+  updateTrashBadge();
 
   // Determinar vista inicial
   const hash = window.location.hash ? window.location.hash.slice(1) : '';
