@@ -352,8 +352,9 @@ class TerminalService
         // 5. Editores de texto interactivos
         if (in_array($bin, ['nano', 'vi', 'vim', 'nvim', 'pico', 'emacs', 'joe', 'jed'], true)) {
             return "El editor interactivo '{$bin}' requiere una terminal interactiva (TTY).\n" .
-                "• Para visualizar archivos use: 'cat <archivo>', 'head -n 30 <archivo>' o 'tail -n 50 <archivo>'.\n" .
-                "• Para crear o gestionar archivos utilice el Explorador de Archivos Web o conéctese por SSH.";
+                "• Para previsualizar o editar archivos en la interfaz gráfica, use el Explorador de Archivos (haga clic en el archivo para el visor/editor integrado con guardado).\n" .
+                "• Para visualizar archivos en esta consola use: 'cat <archivo>', 'head -n 30 <archivo>' o 'tail -n 50 <archivo>'.\n" .
+                "• Para editar mediante consola interactiva a pantalla completa, conéctese por SSH.";
         }
 
         // 6. Monitores interactivos y herramientas de pantalla completa
