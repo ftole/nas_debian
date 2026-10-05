@@ -95,7 +95,8 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
 fi
 if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
-    nginx-light php-fpm php-cli rsyslog \
+    nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 rsyslog \
+    realmd sssd sssd-tools adcli libpam-sss libnss-sss krb5-user packagekit \
     cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
@@ -444,9 +445,19 @@ pm = ondemand
 pm.max_children = 10
 pm.process_idle_timeout = 10s
 pm.max_requests = 500
+php_admin_value[upload_max_filesize] = 512M
+php_admin_value[post_max_size] = 512M
+php_admin_value[max_execution_time] = 300
+php_admin_value[max_input_time] = 300
+php_admin_value[memory_limit] = 512M
 PHP_POOL_EOF
 
-# 2. Desplegar aplicación web MVC en /var/www/nas-web
+# 2. Directorio persistente para base de datos SQLite nativa
+mkdir -p /var/lib/nas
+chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
+chmod 0770 /var/lib/nas 2>/dev/null || true
+
+# 3. Desplegar aplicación web MVC en /var/www/nas-web
 mkdir -p /var/www/nas-web
 rm -rf /var/www/nas-web/*
 if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
@@ -454,9 +465,9 @@ if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
 fi
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
-usermod -aG systemd-journal,adm www-data 2>/dev/null || true
+usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || true
 
-# 3. Generar Certificado SSL/TLS autofirmado para acceso HTTPS
+# 4. Generar Certificado SSL/TLS autofirmado para acceso HTTPS
 if [ ! -f /etc/ssl/certs/nas-web.crt ] || [ ! -f /etc/ssl/private/nas-web.key ]; then
     mkdir -p /etc/ssl/certs /etc/ssl/private
     openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
@@ -483,7 +494,7 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    client_max_body_size 64M;
+    client_max_body_size 512M;
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -519,7 +530,7 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    client_max_body_size 64M;
+    client_max_body_size 512M;
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -570,6 +581,11 @@ Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload 
     /bin/systemctl status cron, /usr/bin/systemctl status cron, \
     /bin/systemctl status php*-fpm*, /usr/bin/systemctl status php*-fpm*, \
     /sbin/reboot, /usr/sbin/reboot, /bin/systemctl reboot, /usr/bin/systemctl reboot
+Cmnd_Alias NAS_SERVICES_AD = /bin/systemctl restart sssd, /usr/bin/systemctl restart sssd, \
+    /bin/systemctl status sssd, /usr/bin/systemctl status sssd, \
+    /bin/systemctl stop sssd, /usr/bin/systemctl stop sssd, \
+    /bin/systemctl start sssd, /usr/bin/systemctl start sssd
+Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm *, /usr/bin/realm *, /usr/sbin/adcli *, /usr/bin/adcli *, /usr/bin/kinit *, /usr/bin/klist *
 Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *, /usr/bin/smbclient *
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/usermod *, /usr/sbin/groupadd *, /usr/sbin/groupdel *, /usr/bin/gpasswd *, /usr/bin/passwd *, /usr/sbin/chpasswd
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /bin/btrfs scrub *, /sbin/fstrim *, /usr/sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
@@ -593,7 +609,7 @@ Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /t
     /usr/bin/setfacl * /srv/nas/*, /bin/setfacl * /srv/nas/*, \
     /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
 
-www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF
+www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
 SUDOERS_EOF
 chmod 0440 /etc/sudoers.d/nas-web
 if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
