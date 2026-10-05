@@ -113,10 +113,11 @@ fi
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, servidor web, wrappers, parches, overrides, logrotate y udev"
+    echo "  [dry-run] eliminar /etc/samba, servidor web, certificados SSL, wrappers, parches, overrides, logrotate y udev"
 else
     rm -rf /etc/samba
     rm -rf /var/www/nas-web
+    rm -f /etc/ssl/certs/nas-web.crt /etc/ssl/private/nas-web.key
     rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
     rm -f /etc/php/*/fpm/pool.d/nas-web.conf /run/php/php-fpm-nas.sock
     rm -f /etc/sudoers.d/nas-web
