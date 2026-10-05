@@ -280,11 +280,53 @@ assertTrue(str_contains($writtenLog, '[test_admin] [share_create] [VENTAS] [SUCC
 assertTrue(str_contains($writtenLog, '[test_admin] [login_failure] [unknown] [FAILED] {"reason":"bad_pass"}'), 'AuditService registra fallos y detalles');
 
 
-// 16. Pruebas de SystemService::parseSambaAuditLog y filtros
+// 16. Pruebas de SystemService::parseSambaAuditLog y filtros con fixtures herméticos
+$origSambaPath = SystemService::$sambaAuditPath;
+$origAdminPath = SystemService::$adminAuditPath;
+$origBackupPath = SystemService::$backupAuditPath;
+
+$tempSamba = tempnam(sys_get_temp_dir(), 'nas_samba_test_');
+$tempAdmin = tempnam(sys_get_temp_dir(), 'nas_admin_test_');
+$tempBackup = tempnam(sys_get_temp_dir(), 'nas_bkp_test_');
+
+file_put_contents($tempSamba, implode("\n", [
+    '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|openat|ok|r|Balance_General_2026.xlsx',
+    '2026-10-05T10:16:05-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|openat|ok|w|Presupuesto_Anual.xlsx',
+    '2026-10-05T10:17:12-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|renameat|ok|borrador_acta.docx|acta_final.docx',
+    '2026-10-05T10:18:40-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|unlinkat|ok|archivo_temporal.tmp',
+    '2026-10-05T10:19:00-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|mkdirat|ok|Reportes_Q3',
+    '2026-10-05T10:19:30-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|rmdir|ok|Carpeta_Vieja',
+    '2026-10-05T10:20:15-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|connect|ok|SISTEMAS',
+]) . "\n");
+
+file_put_contents($tempAdmin, implode("\n", [
+    '[2026-10-05 10:14:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {"role":"Administrador"}',
+    '[2026-10-05 10:15:00] [10.10.1.250] [sistemas] [share_create] [PUBLICO] [SUCCESS] {"scheme":4,"comment":"Acceso general"}',
+    '[2026-10-05 10:20:00] [10.10.1.250] [sistemas] [user_create] [operador1] [SUCCESS] {"groups":["grp_operaciones"]}',
+    '[2026-10-05 10:25:00] [10.10.1.250] [sistemas] [backup_create] [win_contabilidad] [SUCCESS] {"proto":"cifs","cron":"0 23 * * *"}',
+    '[2026-10-05 10:30:00] [10.10.1.250] [sistemas] [service_manage] [smbd] [SUCCESS] {"action":"restart"}',
+]) . "\n");
+
+file_put_contents($tempBackup, implode("\n", [
+    '[2026-10-05 23:00:01] [win_contabilidad] [LOCK_ACQUIRED] [info] Bloqueo de ejecucion exclusivo adquirido',
+    '[2026-10-05 23:00:02] [win_contabilidad] [SPACE_CHECK] [info] Espacio verificado: 45000 MB libres (25% en uso)',
+    '[2026-10-05 23:00:04] [win_contabilidad] [MOUNT_SUCCESS] [info] Recurso CIFS //10.10.1.50/Contabilidad montado exitosamente',
+    '[2026-10-05 23:00:15] [win_contabilidad] [RSYNC_COMPLETED] [info] Sincronizacion rsync finalizada correctamente',
+    '[2026-10-05 23:00:16] [win_contabilidad] [SNAPSHOT_PROMOTED] [notice] Snapshot promovido: snapshot_2026-10-05_230000',
+    '[2026-10-05 23:00:17] [win_contabilidad] [ROTATION_PRUNED] [info] Rotado snapshot antiguo: snapshot_2026-09-01_230000',
+    '[2026-10-05 23:00:18] [win_contabilidad] [BACKUP_COMPLETED] [notice] Respaldo CIFS win_contabilidad finalizado con exito',
+]) . "\n");
+
+SystemService::$sambaAuditPath = $tempSamba;
+SystemService::$adminAuditPath = $tempAdmin;
+SystemService::$backupAuditPath = $tempBackup;
+
 $sambaLogs = $system->parseSambaAuditLog(50);
 assertTrue(is_array($sambaLogs) && count($sambaLogs) > 0, 'SystemService::parseSambaAuditLog retorna eventos estructurados');
 assertTrue(isset($sambaLogs[0]['source']) && $sambaLogs[0]['source'] === 'samba_audit', 'parseSambaAuditLog asigna source=samba_audit');
 assertTrue(isset($sambaLogs[0]['action_label']) && isset($sambaLogs[0]['badge']), 'parseSambaAuditLog genera etiquetas amigables y badges');
+$rmdirMatches = array_values(array_filter($sambaLogs, fn($l) => $l['action'] === 'rmdir'));
+assertTrue(count($rmdirMatches) >= 1 && $rmdirMatches[0]['action_label'] === 'Eliminación de carpeta', 'parseSambaAuditLog parsea correctamente rmdir');
 
 $sambaFiltered = $system->parseSambaAuditLog(50, 'Balance');
 assertTrue(is_array($sambaFiltered) && count($sambaFiltered) >= 1, 'parseSambaAuditLog soporta filtrado por subcadena q');
@@ -368,6 +410,14 @@ for ($i = 0; $i < count($allLogs) - 1; $i++) {
     }
 }
 assertTrue($isSortedDesc, 'getLogs(all) ordena los registros consolidados en orden cronológico descendente');
+
+// Restaurar rutas originales y limpiar temporales
+SystemService::$sambaAuditPath = $origSambaPath;
+SystemService::$adminAuditPath = $origAdminPath;
+SystemService::$backupAuditPath = $origBackupPath;
+@unlink($tempSamba);
+@unlink($tempAdmin);
+@unlink($tempBackup);
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
