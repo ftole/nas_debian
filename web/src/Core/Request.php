@@ -92,4 +92,19 @@ class Request
         $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
         return str_contains($accept, 'application/json') || str_starts_with($this->path, '/api');
     }
+
+    public function getClientIp(): string
+    {
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $candidate = trim($ips[0]);
+            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                return $candidate;
+            }
+        }
+        if (!empty($_SERVER['HTTP_CLIENT_IP']) && filter_var($_SERVER['HTTP_CLIENT_IP'], FILTER_VALIDATE_IP)) {
+            return $_SERVER['HTTP_CLIENT_IP'];
+        }
+        return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    }
 }
