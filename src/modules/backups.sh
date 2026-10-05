@@ -242,16 +242,32 @@ CRED_FILE="CRED_FILE_PLACEHOLDER"
 MOUNT_POINT="${MOUNT_ROOT:-/mnt/backup_sources}/$TASK"
 BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
+MASTER_LOG="/srv/nas/LOGS_BACKUP/backups_master.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
+
+log_backup_event() {
+    local evt="$1"
+    local sev="$2"
+    local msg="$3"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    echo "$entry" >> "$LOG_FILE"
+    mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
+    echo "$entry" >> "$MASTER_LOG"
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+}
+
 cleanup() {
     local status=$?
     umount "$MOUNT_POINT" 2>/dev/null || true
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
@@ -267,8 +283,9 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
-flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+flock -n 9 || { log_backup_event "LOCK_OMITTED" "warning" "Backup omitido: ya hay una ejecucion en curso ($DATE_STR)"; echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
+log_backup_event "LOCK_ACQUIRED" "info" "Bloqueo de ejecucion exclusivo adquirido"
 echo "=== INICIANDO BACKUP: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 
 mkdir -p "$MOUNT_POINT" "$BKP_DIR"
@@ -277,10 +294,14 @@ DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $
 read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
 if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        log_backup_event "SPACE_CHECK" "err" "Espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso)"
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
     elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        log_backup_event "SPACE_CHECK" "warning" "Uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres)"
         echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    else
+        log_backup_event "SPACE_CHECK" "info" "Espacio disponible verificado: $((DISPONIBLE_KB / 1024)) MB libres (${USO_PORCENTAJE}% en uso)"
     fi
 fi
 umount "$MOUNT_POINT" 2>/dev/null || true
@@ -288,11 +309,17 @@ umount "$MOUNT_POINT" 2>/dev/null || true
 CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
 CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
 if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    log_backup_event "BACKUP_FAILED" "err" "Propietario o permisos inseguros en $CRED_FILE"
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
 # Montaje en solo lectura
-mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft 2>> "$LOG_FILE"
+if mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft 2>> "$LOG_FILE"; then
+    log_backup_event "MOUNT_SUCCESS" "info" "Recurso CIFS //$SRC_IP/$SRC_SHARE montado exitosamente"
+else
+    log_backup_event "MOUNT_FAILED" "err" "Fallo al montar recurso CIFS //$SRC_IP/$SRC_SHARE"
+    exit 1
+fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
@@ -304,9 +331,11 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
 fi
 
 if ! rsync "${RSYNC_OPTS[@]}" "$MOUNT_POINT/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+    log_backup_event "RSYNC_FAILED" "err" "Fallo durante la sincronizacion rsync CIFS"
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
     btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
@@ -318,6 +347,7 @@ mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
 btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 umount "$MOUNT_POINT" 2>/dev/null || true
 
@@ -333,10 +363,12 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
         btrfs property set "$old" ro false 2>/dev/null || true
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
+        log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
+log_backup_event "BACKUP_COMPLETED" "notice" "Respaldo CIFS $TASK finalizado con exito"
 RUNNER_EOF
 
                 sed -i "s|TASK_NAME_PLACEHOLDER|$TASK_NAME|g" "$RUNNER"
@@ -480,15 +512,31 @@ SRC_USER="LNX_USER_PLACEHOLDER"
 CRED_FILE="CRED_FILE_PLACEHOLDER"
 BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
+MASTER_LOG="/srv/nas/LOGS_BACKUP/backups_master.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
+
+log_backup_event() {
+    local evt="$1"
+    local sev="$2"
+    local msg="$3"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    echo "$entry" >> "$LOG_FILE"
+    mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
+    echo "$entry" >> "$MASTER_LOG"
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+}
+
 cleanup() {
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
@@ -504,8 +552,9 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
-flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+flock -n 9 || { log_backup_event "LOCK_OMITTED" "warning" "Backup omitido: ya hay una ejecucion en curso ($DATE_STR)"; echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
+log_backup_event "LOCK_ACQUIRED" "info" "Bloqueo de ejecucion exclusivo adquirido"
 echo "=== INICIANDO BACKUP LINUX SSH: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
@@ -513,10 +562,14 @@ DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $
 read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
 if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        log_backup_event "SPACE_CHECK" "err" "Espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso)"
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
     elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        log_backup_event "SPACE_CHECK" "warning" "Uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres)"
         echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    else
+        log_backup_event "SPACE_CHECK" "info" "Espacio disponible verificado: $((DISPONIBLE_KB / 1024)) MB libres (${USO_PORCENTAJE}% en uso)"
     fi
 fi
 
@@ -532,13 +585,17 @@ fi
 CRED_OWNER=$(stat -c '%U:%G' "$CRED_FILE" 2>/dev/null)
 CRED_MODE=$(stat -c '%a' "$CRED_FILE" 2>/dev/null)
 if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
+    log_backup_event "BACKUP_FAILED" "err" "Propietario o permisos inseguros en $CRED_FILE"
     echo "=== ABORTADO: propietario o permisos inseguros en $CRED_FILE ===" >> "$LOG_FILE"
     exit 1
 fi
+mkdir -p "$STAGE_SNAPSHOT"
 if ! SSHPASS=$(cat "$CRED_FILE") sshpass -e rsync "${RSYNC_OPTS[@]}" "$SRC_USER@$SRC_IP:$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+    log_backup_event "RSYNC_FAILED" "err" "Fallo durante la sincronizacion rsync SSH"
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
     btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
@@ -550,6 +607,7 @@ mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
 btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -562,10 +620,12 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
         btrfs property set "$old" ro false 2>/dev/null || true
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
+        log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
+log_backup_event "BACKUP_COMPLETED" "notice" "Respaldo SSH $TASK finalizado con exito"
 RUNNER_EOF
 
                 sed -i "s|TASK_NAME_PLACEHOLDER|$TASK_NAME|g" "$RUNNER"
@@ -646,15 +706,31 @@ TASK="TASK_NAME_PLACEHOLDER"
 SRC_PATH="LOC_SRC_PLACEHOLDER"
 BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
+MASTER_LOG="/srv/nas/LOGS_BACKUP/backups_master.log"
 RETENTION=RETENTION_PLACEHOLDER
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 STAGE_SNAPSHOT="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL_SNAPSHOT="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
+
+log_backup_event() {
+    local evt="$1"
+    local sev="$2"
+    local msg="$3"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    echo "$entry" >> "$LOG_FILE"
+    mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
+    echo "$entry" >> "$MASTER_LOG"
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+}
+
 cleanup() {
     local status=$?
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
+        log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
         btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
@@ -670,8 +746,9 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 exec 9>"${LOCK_DIR:-/var/lock}/backup_${TASK}.lock"
-flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
+flock -n 9 || { log_backup_event "LOCK_OMITTED" "warning" "Backup omitido: ya hay una ejecucion en curso ($DATE_STR)"; echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ===" >> "$LOG_FILE"; exit 0; }
 
+log_backup_event "LOCK_ACQUIRED" "info" "Bloqueo de ejecucion exclusivo adquirido"
 echo "=== INICIANDO BACKUP LOCAL: $TASK ($DATE_STR) ===" >> "$LOG_FILE"
 mkdir -p "$BKP_DIR"
 rm -rf "$BKP_DIR"/.inprogress_*
@@ -679,10 +756,14 @@ DF_INFO=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $
 read -r DISPONIBLE_KB USO_PORCENTAJE <<< "$DF_INFO"
 if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
     if [ "$DISPONIBLE_KB" -lt 2097152 ] || [ "$USO_PORCENTAJE" -gt 95 ]; then
+        log_backup_event "SPACE_CHECK" "err" "Espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso)"
         echo "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($((DISPONIBLE_KB / 1024)) MB libres, ${USO_PORCENTAJE}% en uso) ===" >> "$LOG_FILE"
         exit 1
     elif [ "$USO_PORCENTAJE" -gt 85 ]; then
+        log_backup_event "SPACE_CHECK" "warning" "Uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres)"
         echo "=== ADVERTENCIA: uso de disco elevado en $BKP_DIR (${USO_PORCENTAJE}% en uso, $((DISPONIBLE_KB / 1024)) MB libres) ===" >> "$LOG_FILE"
+    else
+        log_backup_event "SPACE_CHECK" "info" "Espacio disponible verificado: $((DISPONIBLE_KB / 1024)) MB libres (${USO_PORCENTAJE}% en uso)"
     fi
 fi
 
@@ -695,10 +776,13 @@ if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
 fi
 
+mkdir -p "$STAGE_SNAPSHOT"
 if ! rsync "${RSYNC_OPTS[@]}" "$SRC_PATH/" "$STAGE_SNAPSHOT/" >> "$LOG_FILE" 2>&1; then
+    log_backup_event "RSYNC_FAILED" "err" "Fallo en la sincronizacion rsync local"
     echo "=== BACKUP FALLIDO ===" >> "$LOG_FILE"
     exit 1
 fi
+log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
     btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
@@ -710,6 +794,7 @@ mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
 btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
 if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
@@ -722,10 +807,12 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
         btrfs property set "$old" ro false 2>/dev/null || true
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
+        log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
     done < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | head -n -"$RETENTION")
 fi
 
 echo "=== BACKUP FINALIZADO CON ÉXITO: $DATE_STR ===" >> "$LOG_FILE"
+log_backup_event "BACKUP_COMPLETED" "notice" "Respaldo local $TASK finalizado con exito"
 RUNNER_EOF
 
                 sed -i "s|TASK_NAME_PLACEHOLDER|$TASK_NAME|g" "$RUNNER"
