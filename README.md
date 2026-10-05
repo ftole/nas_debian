@@ -194,6 +194,7 @@ sudo ufw default allow outgoing
 
 sudo ufw allow 22/tcp comment 'SSH'
 sudo ufw allow 80/tcp comment 'Panel Web Admin (Nginx)'
+sudo ufw allow 443/tcp comment 'Panel Web Admin HTTPS'
 sudo ufw allow 137,138/udp comment 'Samba NetBIOS'
 sudo ufw allow 139,445/tcp comment 'Samba SMB'
 sudo ufw allow 3702/udp comment 'WSDD2 WSD Discovery UDP'
