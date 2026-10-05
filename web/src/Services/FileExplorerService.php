@@ -112,17 +112,39 @@ class FileExplorerService
             $perms = @fileperms($fullPath);
             $permsStr = $perms !== false ? substr(sprintf('%o', $perms), -4) : '0660';
 
+            $uid = @fileowner($fullPath);
+            $gid = @filegroup($fullPath);
+            $owner = 'sistemas';
+            $group = 'grp_sistemas';
+            if ($uid !== false && function_exists('posix_getpwuid')) {
+                $pw = @posix_getpwuid($uid);
+                if (is_array($pw) && !empty($pw['name'])) {
+                    $owner = $pw['name'];
+                }
+            }
+            if ($gid !== false && function_exists('posix_getgrgid')) {
+                $gr = @posix_getgrgid($gid);
+                if (is_array($gr) && !empty($gr['name'])) {
+                    $group = $gr['name'];
+                }
+            }
+
+            $dateFormatted = $mtime > 0 ? date('Y-m-d H:i:s', $mtime) : 'N/A';
             $itemRelPath = ($relPath !== '' ? $relPath . '/' : '') . $entry;
 
             $items[] = [
                 'name' => $entry,
                 'path' => $itemRelPath,
+                'relative_path' => $itemRelPath,
                 'is_dir' => $isDir,
                 'type' => $this->detectFileType($entry, $isDir),
                 'size_bytes' => $size,
                 'size_formatted' => $this->formatBytes($size, $isDir),
-                'mtime' => $mtime > 0 ? date('Y-m-d H:i:s', $mtime) : 'N/A',
+                'mtime' => $dateFormatted,
+                'modified_at' => $dateFormatted,
                 'permissions' => $permsStr,
+                'owner' => $owner,
+                'group' => $group,
                 'is_snapshot' => str_starts_with($entry, 'snapshot_'),
             ];
         }
@@ -150,13 +172,21 @@ class FileExplorerService
             }
         }
 
-        return [
+        $listPayload = [
             'success' => true,
             'current_path' => $relPath,
             'breadcrumbs' => $breadcrumbs,
             'items' => $items,
             'total_items' => count($items),
         ];
+        $listPayload['data'] = [
+            'current_path' => $relPath,
+            'breadcrumbs' => $breadcrumbs,
+            'items' => $items,
+            'total_items' => count($items),
+        ];
+
+        return $listPayload;
     }
 
     /**
@@ -229,11 +259,17 @@ class FileExplorerService
             }
         }
 
+        $isOk = count($uploaded) > 0;
         return [
-            'success' => count($uploaded) > 0,
+            'success' => $isOk,
+            'status' => $isOk ? 'success' : 'error',
             'uploaded' => $uploaded,
             'failed' => $failed,
             'message' => sprintf('%d archivo(s) subido(s) con éxito.', count($uploaded)),
+            'data' => [
+                'uploaded' => $uploaded,
+                'failed' => $failed,
+            ],
         ];
     }
 
