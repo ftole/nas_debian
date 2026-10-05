@@ -773,8 +773,8 @@ cat << SMBCONF > /etc/samba/smb.conf
    store dos attributes = yes
    vfs objects = acl_xattr streams_xattr full_audit
    full_audit:prefix = %u|%I|%m|%S
-   full_audit:success = connect disconnect mkdir rmdir rename unlink open
-   full_audit:failure = connect open unlink rmdir rename
+   full_audit:success = connect disconnect mkdirat renameat unlinkat openat open
+   full_audit:failure = connect openat open unlinkat renameat
    full_audit:facility = LOCAL5
    full_audit:priority = NOTICE
    inherit permissions = yes
