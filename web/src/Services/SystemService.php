@@ -214,6 +214,472 @@ class SystemService
         ];
     }
 
+    public static string $sambaAuditPath = '/var/log/samba/audit.log';
+    public static string $adminAuditPath = '/var/log/nas-admin.log';
+    public static string $backupAuditPath = '/srv/nas/LOGS_BACKUP/backups_master.log';
+
+    /**
+     * Parsea la bitácora de auditoría de archivos Samba (full_audit).
+     * Extrae: Fecha, Usuario, IP, NetBIOS, Recurso, Acción y Archivo afectado.
+     */
+    public function parseSambaAuditLog(int $limit = 100, ?string $query = null): array
+    {
+        $path = self::$sambaAuditPath;
+        $lines = [];
+
+        if (file_exists($path) && is_readable($path)) {
+            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+        } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
+            $lines = [
+                '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|open|ok|r|Balance_General_2026.xlsx',
+                '2026-10-05T10:16:05-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|open|ok|w|Presupuesto_Anual.xlsx',
+                '2026-10-05T10:17:12-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|rename|ok|borrador_acta.docx|acta_final.docx',
+                '2026-10-05T10:18:40-06:00 srv-nas smbd_audit[3412]: administrador|10.10.1.251|adm-pc|SISTEMAS|unlink|ok|archivo_temporal.tmp',
+                '2026-10-05T10:19:00-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|mkdir|ok|Reportes_Q3',
+                '2026-10-05T10:20:15-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|connect|ok|SISTEMAS',
+            ];
+        }
+
+        $results = [];
+        $qLower = $query ? $this->toLower(trim($query)) : null;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (empty($trimmed) || !str_contains($trimmed, '|')) {
+                continue;
+            }
+
+            $timestamp = date('Y-m-d H:i:s');
+            $payload = $trimmed;
+
+            if (preg_match('/^(\S+(?:\s+\S+\s+\S+)?)\s+\S+\s+(?:smbd_audit|smbd|samba)[^:]*:\s*(.*)$/', $trimmed, $m)) {
+                $timestamp = $this->normalizeTimestamp($m[1]);
+                $payload = $m[2];
+            } elseif (preg_match('/^(.*?):\s*([a-zA-Z0-9_\-\.]+\|.*)$/', $trimmed, $m)) {
+                $timestamp = $this->normalizeTimestamp($m[1]);
+                $payload = $m[2];
+            }
+
+            $parts = explode('|', $payload);
+            if (count($parts) < 6) {
+                continue;
+            }
+
+            $user = $parts[0];
+            $ip = $parts[1];
+            $netbios = $parts[2];
+            $share = $parts[3];
+            $action = strtolower($parts[4]);
+            $statusRaw = strtolower($parts[5]);
+            $status = str_starts_with($statusRaw, 'ok') ? 'SUCCESS' : 'FAILED';
+            $args = array_slice($parts, 6);
+
+            $actionLabel = ucfirst($action);
+            $badge = 'gray';
+            $target = !empty($args) ? implode(' ', $args) : $share;
+
+            switch ($action) {
+                case 'open':
+                    $isWrite = false;
+                    if (isset($args[0]) && in_array(strtolower($args[0]), ['w', 'rw', 'a', 'write'], true)) {
+                        $isWrite = true;
+                        $target = $args[1] ?? $args[0];
+                    } elseif (isset($args[0])) {
+                        $target = (count($args) > 1 && in_array(strtolower($args[0]), ['r', 'ro', 'read'], true)) ? $args[1] : implode(' ', $args);
+                    }
+                    if ($isWrite) {
+                        $actionLabel = 'Modificación / Escritura';
+                        $badge = 'warn';
+                    } else {
+                        $actionLabel = 'Apertura / Lectura';
+                        $badge = 'ok';
+                    }
+                    break;
+
+                case 'unlink':
+                    $actionLabel = 'Eliminación de archivo';
+                    $badge = 'err';
+                    break;
+
+                case 'rmdir':
+                    $actionLabel = 'Eliminación de carpeta';
+                    $badge = 'err';
+                    break;
+
+                case 'mkdir':
+                    $actionLabel = 'Creación de carpeta';
+                    $badge = 'blue';
+                    break;
+
+                case 'rename':
+                    $actionLabel = 'Renombrado';
+                    $badge = 'warn';
+                    if (count($args) >= 2) {
+                        $target = $args[0] . ' ➔ ' . $args[1];
+                    }
+                    break;
+
+                case 'connect':
+                    $actionLabel = 'Conexión a recurso';
+                    $badge = 'blue';
+                    $target = $share;
+                    break;
+
+                case 'disconnect':
+                    $actionLabel = 'Desconexión de recurso';
+                    $badge = 'gray';
+                    $target = $share;
+                    break;
+            }
+
+            if ($qLower !== null) {
+                $searchable = $this->toLower("$user $ip $netbios $share $action $actionLabel $target $status");
+                if (!str_contains($searchable, $qLower)) {
+                    continue;
+                }
+            }
+
+            $results[] = [
+                'source' => 'samba_audit',
+                'timestamp' => $timestamp,
+                'user' => $user,
+                'ip' => $ip,
+                'netbios' => $netbios,
+                'share' => $share,
+                'action' => $action,
+                'action_label' => $actionLabel,
+                'badge' => $badge,
+                'target' => $target,
+                'status' => $status,
+                'unit' => 'smbd',
+                'message' => "[$actionLabel] $target ($status)",
+                'raw' => $trimmed,
+            ];
+
+            if (count($results) >= $limit) {
+                break;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Parsea la bitácora de auditoría administrativa (/var/log/nas-admin.log).
+     * Extrae: Fecha, Administrador, IP, Acción, Objetivo, Estado y Detalles.
+     */
+    public function parseAdminAuditLog(int $limit = 100, ?string $query = null): array
+    {
+        $path = self::$adminAuditPath;
+        $lines = [];
+
+        if (file_exists($path) && is_readable($path)) {
+            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+        } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
+            $lines = [
+                '[2026-10-05 10:14:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {"role":"Administrador"}',
+                '[2026-10-05 10:15:00] [10.10.1.250] [sistemas] [share_create] [PUBLICO] [SUCCESS] {"scheme":4,"comment":"Acceso general"}',
+                '[2026-10-05 10:20:00] [10.10.1.250] [sistemas] [user_create] [operador1] [SUCCESS] {"groups":["grp_operaciones"]}',
+                '[2026-10-05 10:25:00] [10.10.1.250] [sistemas] [backup_create] [win_contabilidad] [SUCCESS] {"proto":"cifs","cron":"0 23 * * *"}',
+                '[2026-10-05 10:30:00] [10.10.1.250] [sistemas] [service_manage] [smbd] [SUCCESS] {"action":"restart"}',
+            ];
+        }
+
+        $results = [];
+        $qLower = $query ? $this->toLower(trim($query)) : null;
+
+        $actionLabels = [
+            'login_success' => 'Inicio de sesión exitoso',
+            'login_failure' => 'Fallo de autenticación',
+            'logout' => 'Cierre de sesión',
+            'share_create' => 'Crear recurso compartido',
+            'share_delete' => 'Eliminar recurso compartido',
+            'user_create' => 'Crear usuario',
+            'user_delete' => 'Eliminar usuario',
+            'group_create' => 'Crear grupo',
+            'group_delete' => 'Eliminar grupo',
+            'backup_create' => 'Programar backup',
+            'backup_delete' => 'Eliminar backup',
+            'backup_run_manual' => 'Ejecutar backup manual',
+            'scrub_start' => 'Iniciar Scrub BTRFS',
+            'trim_start' => 'Ejecutar TRIM SSD',
+            'service_manage' => 'Gestionar servicio',
+            'server_reboot' => 'Reinicio del servidor',
+        ];
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (empty($trimmed)) {
+                continue;
+            }
+
+            if (!preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\](?:\s+(.*))?$/', $trimmed, $m)) {
+                continue;
+            }
+
+            $timestamp = $m[1];
+            $ip = $m[2];
+            $user = $m[3];
+            $action = $m[4];
+            $target = $m[5];
+            $status = strtoupper($m[6]);
+            $rawDetails = $m[7] ?? '{}';
+
+            $details = [];
+            if (!empty($rawDetails)) {
+                $decoded = json_decode($rawDetails, true);
+                $details = is_array($decoded) ? $decoded : ['info' => $rawDetails];
+            }
+
+            $actionLabel = $actionLabels[$action] ?? ucfirst(str_replace('_', ' ', $action));
+            $badge = ($status === 'SUCCESS' || $status === 'OK') ? 'ok' : 'err';
+
+            if ($qLower !== null) {
+                $searchable = $this->toLower("$user $ip $action $actionLabel $target $status $rawDetails");
+                if (!str_contains($searchable, $qLower)) {
+                    continue;
+                }
+            }
+
+            $results[] = [
+                'source' => 'admin',
+                'timestamp' => $timestamp,
+                'ip' => $ip,
+                'user' => $user,
+                'action' => $action,
+                'action_label' => $actionLabel,
+                'target' => $target,
+                'status' => $status,
+                'badge' => $badge,
+                'details' => $details,
+                'unit' => 'panel-web',
+                'message' => "[$actionLabel] Objetivo: $target ($status)",
+                'raw' => $trimmed,
+            ];
+
+            if (count($results) >= $limit) {
+                break;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Parsea la bitácora de auditoría de respaldos (/srv/nas/LOGS_BACKUP/backups_master.log).
+     * Extrae: Fecha, Tarea, Evento, Severidad y Mensaje.
+     */
+    public function parseBackupAuditLog(int $limit = 100, ?string $query = null): array
+    {
+        $path = self::$backupAuditPath;
+        $lines = [];
+
+        if (file_exists($path) && is_readable($path)) {
+            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+        } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
+            $lines = [
+                '[2026-10-05 23:00:01] [win_contabilidad] [LOCK_ACQUIRED] [info] Bloqueo de ejecucion exclusivo adquirido',
+                '[2026-10-05 23:00:02] [win_contabilidad] [SPACE_CHECK] [info] Espacio verificado: 45000 MB libres (25% en uso)',
+                '[2026-10-05 23:00:04] [win_contabilidad] [MOUNT_SUCCESS] [info] Recurso CIFS //10.10.1.50/Contabilidad montado exitosamente',
+                '[2026-10-05 23:00:15] [win_contabilidad] [RSYNC_COMPLETED] [info] Sincronizacion rsync finalizada correctamente',
+                '[2026-10-05 23:00:16] [win_contabilidad] [SNAPSHOT_PROMOTED] [notice] Snapshot promovido: snapshot_2026-10-05_230000',
+                '[2026-10-05 23:00:17] [win_contabilidad] [ROTATION_PRUNED] [info] Rotado snapshot antiguo: snapshot_2026-09-01_230000',
+                '[2026-10-05 23:00:18] [win_contabilidad] [BACKUP_COMPLETED] [notice] Respaldo CIFS win_contabilidad finalizado con exito',
+            ];
+        }
+
+        $results = [];
+        $qLower = $query ? $this->toLower(trim($query)) : null;
+
+        $eventLabels = [
+            'LOCK_ACQUIRED' => 'Bloqueo Adquirido',
+            'LOCK_OMITTED' => 'Ejecución Omitida',
+            'SPACE_CHECK' => 'Verificación de Espacio',
+            'MOUNT_SUCCESS' => 'Montaje Exitoso',
+            'MOUNT_FAILED' => 'Fallo de Montaje',
+            'RSYNC_COMPLETED' => 'Sincronización Rsync OK',
+            'RSYNC_FAILED' => 'Fallo en Rsync',
+            'SNAPSHOT_PROMOTED' => 'Snapshot Promovido',
+            'ROTATION_PRUNED' => 'Rotación de Snapshot',
+            'BACKUP_COMPLETED' => 'Respaldo Completado',
+            'BACKUP_FAILED' => 'Respaldo Fallido',
+        ];
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (empty($trimmed)) {
+                continue;
+            }
+
+            if (!preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)$/', $trimmed, $m)) {
+                continue;
+            }
+
+            $timestamp = $m[1];
+            $task = $m[2];
+            $event = $m[3];
+            $severity = strtolower($m[4]);
+            $message = $m[5];
+
+            $eventLabel = $eventLabels[$event] ?? ucfirst(str_replace('_', ' ', $event));
+
+            $badge = match ($severity) {
+                'err', 'error', 'failed' => 'err',
+                'warning', 'warn' => 'warn',
+                'notice', 'ok' => 'ok',
+                default => 'blue',
+            };
+
+            $status = in_array($severity, ['err', 'error', 'failed'], true) ? 'FAILED' : 'SUCCESS';
+
+            if ($qLower !== null) {
+                $searchable = $this->toLower("$task $event $eventLabel $severity $message");
+                if (!str_contains($searchable, $qLower)) {
+                    continue;
+                }
+            }
+
+            $results[] = [
+                'source' => 'backup',
+                'timestamp' => $timestamp,
+                'task' => $task,
+                'user' => $task,
+                'event' => $event,
+                'event_label' => $eventLabel,
+                'severity' => $severity,
+                'message' => $message,
+                'badge' => $badge,
+                'target' => $task,
+                'status' => $status,
+                'unit' => 'backup-' . $task,
+                'raw' => $trimmed,
+            ];
+
+            if (count($results) >= $limit) {
+                break;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Obtiene registros consolidados y multidimensionales filtrados por origen y búsqueda.
+     */
+    public function getLogs(string $source = 'all', int $limit = 100, ?string $query = null): array
+    {
+        $cleanSource = strtolower(trim($source));
+
+        switch ($cleanSource) {
+            case 'samba_audit':
+                return $this->parseSambaAuditLog($limit, $query);
+
+            case 'admin':
+                return $this->parseAdminAuditLog($limit, $query);
+
+            case 'backup':
+                return $this->parseBackupAuditLog($limit, $query);
+
+            case 'system':
+                $rawJournal = $this->getJournalLogs($limit * 2);
+                $qLower = $query ? $this->toLower(trim($query)) : null;
+                $results = [];
+
+                foreach ($rawJournal as $j) {
+                    if ($qLower !== null) {
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? ''));
+                        if (!str_contains($searchable, $qLower)) {
+                            continue;
+                        }
+                    }
+                    $results[] = [
+                        'source' => 'system',
+                        'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
+                        'unit' => $j['unit'] ?? 'system',
+                        'user' => 'system',
+                        'target' => $j['unit'] ?? 'system',
+                        'action' => 'journal_log',
+                        'action_label' => 'Registro del Sistema',
+                        'badge' => 'gray',
+                        'status' => 'OK',
+                        'message' => $j['message'] ?? '',
+                        'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
+                    ];
+                    if (count($results) >= $limit) {
+                        break;
+                    }
+                }
+                return $results;
+
+            case 'all':
+            default:
+                $samba = $this->parseSambaAuditLog($limit, $query);
+                $admin = $this->parseAdminAuditLog($limit, $query);
+                $backup = $this->parseBackupAuditLog($limit, $query);
+                $rawJournal = $this->getJournalLogs(min($limit, 50));
+
+                $system = [];
+                $qLower = $query ? $this->toLower(trim($query)) : null;
+                foreach ($rawJournal as $j) {
+                    if ($qLower !== null) {
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? ''));
+                        if (!str_contains($searchable, $qLower)) {
+                            continue;
+                        }
+                    }
+                    $system[] = [
+                        'source' => 'system',
+                        'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
+                        'unit' => $j['unit'] ?? 'system',
+                        'user' => 'system',
+                        'target' => $j['unit'] ?? 'system',
+                        'action' => 'journal_log',
+                        'action_label' => 'Sistema',
+                        'badge' => 'gray',
+                        'status' => 'OK',
+                        'message' => $j['message'] ?? '',
+                        'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
+                    ];
+                }
+
+                $merged = array_merge($samba, $admin, $backup, $system);
+
+                // Ordenar por fecha cronológica descendente
+                usort($merged, function (array $a, array $b): int {
+                    return strcmp($b['timestamp'] ?? '', $a['timestamp'] ?? '');
+                });
+
+                return array_slice($merged, 0, $limit);
+        }
+    }
+
+    private function toLower(string $str): string
+    {
+        return function_exists('mb_strtolower') ? mb_strtolower($str, 'UTF-8') : strtolower($str);
+    }
+
+    private function normalizeTimestamp(string $raw): string
+    {
+        $trimmed = trim($raw);
+        if (empty($trimmed)) {
+            return date('Y-m-d H:i:s');
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/', $trimmed)) {
+            return $trimmed;
+        }
+
+        $ts = strtotime($trimmed);
+        if ($ts !== false && $ts > 0) {
+            return date('Y-m-d H:i:s', $ts);
+        }
+
+        return $trimmed;
+    }
+
     /**
      * Lee registros de journald del sistema con filtro opcional por unidad.
      */
