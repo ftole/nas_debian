@@ -16,6 +16,20 @@ const AppState = {
   logSource: 'all',
   logSearchTimer: null,
   logsCache: [],
+  files: {
+    root: 'nas',
+    currentPath: '',
+    items: [],
+  },
+  terminal: {
+    cwd: '/srv/nas',
+    history: [],
+    historyIndex: -1,
+    isExecuting: false,
+  },
+  domain: {
+    status: null,
+  },
 };
 
 function showToast(message, type = 'info') {
@@ -70,7 +84,7 @@ function toggleTheme() {
 // 2. Navegación entre Vistas
 // ==============================================================================
 const VALID_VIEWS = [
-  'dashboard', 'logs', 'storage', 'networking', 'services', 'terminal',
+  'dashboard', 'files', 'logs', 'storage', 'networking', 'services', 'terminal',
   'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
 ];
 
@@ -116,6 +130,9 @@ function switchView(viewName, updateHash = true) {
     case 'dashboard':
       refreshDashboardMetrics();
       break;
+    case 'files':
+      loadFiles();
+      break;
     case 'shares':
       loadShares();
       break;
@@ -150,7 +167,7 @@ function switchView(viewName, updateHash = true) {
       loadApplications();
       break;
     case 'domain':
-      loadDomain();
+      loadDomainStatus();
       break;
   }
 }
@@ -921,7 +938,7 @@ function fallbackCopyText(text, count) {
 }
 
 // ==============================================================================
-// 11. Módulo: Terminal Interactiva Simula/Diagnóstico
+// 11. Módulo: Consola Terminal Web Real (Bash Interactivo)
 // ==============================================================================
 function initTerminal() {
   const input = document.getElementById('terminal-input');
@@ -934,58 +951,86 @@ function initTerminal() {
       input.value = '';
       if (!cmd) return;
 
-      output.innerHTML += `<p><span style="color:var(--accent-primary); font-weight:bold;">nas&gt;</span> ${escapeHtml(cmd)}</p>`;
+      AppState.terminal.history.push(cmd);
+      AppState.terminal.historyIndex = AppState.terminal.history.length;
 
-      const lower = cmd.toLowerCase();
-      if (lower === 'clear' || lower === 'cls') {
-        output.innerHTML = '';
-        return;
+      await executeTerminalCommand(cmd);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (AppState.terminal.history.length > 0 && AppState.terminal.historyIndex > 0) {
+        AppState.terminal.historyIndex--;
+        input.value = AppState.terminal.history[AppState.terminal.historyIndex];
       }
-
-      if (lower === 'help') {
-        output.innerHTML += `
-          <p>Comandos de diagnóstico disponibles:</p>
-          <p>  <code>status</code>    - Muestra estado de servicios y métricas</p>
-          <p>  <code>shares</code>    - Lista recursos compartidos de Samba</p>
-          <p>  <code>backups</code>   - Lista tareas de respaldo y retention</p>
-          <p>  <code>disks</code>     - Lista dispositivos de almacenamiento</p>
-          <p>  <code>clear</code>     - Limpia la pantalla de la terminal</p>
-        `;
-      } else if (lower === 'status') {
-        try {
-          const res = await apiFetch('/api/metrics');
-          output.innerHTML += `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
-        } catch (err) {
-          output.innerHTML += `<p style="color:var(--accent-danger);">Error: ${escapeHtml(err.message)}</p>`;
-        }
-      } else if (lower === 'shares') {
-        try {
-          const res = await apiFetch('/api/shares');
-          output.innerHTML += `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
-        } catch (err) {
-          output.innerHTML += `<p style="color:var(--accent-danger);">Error: ${escapeHtml(err.message)}</p>`;
-        }
-      } else if (lower === 'backups') {
-        try {
-          const res = await apiFetch('/api/backups');
-          output.innerHTML += `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
-        } catch (err) {
-          output.innerHTML += `<p style="color:var(--accent-danger);">Error: ${escapeHtml(err.message)}</p>`;
-        }
-      } else if (lower === 'disks') {
-        try {
-          const res = await apiFetch('/api/storage');
-          output.innerHTML += `<pre>${JSON.stringify(res.data, null, 2)}</pre>`;
-        } catch (err) {
-          output.innerHTML += `<p style="color:var(--accent-danger);">Error: ${escapeHtml(err.message)}</p>`;
-        }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (AppState.terminal.historyIndex < AppState.terminal.history.length - 1) {
+        AppState.terminal.historyIndex++;
+        input.value = AppState.terminal.history[AppState.terminal.historyIndex];
       } else {
-        output.innerHTML += `<p style="color:var(--accent-warning);">Comando no reconocido: ${escapeHtml(cmd)}. Escribe <code>help</code>.</p>`;
+        AppState.terminal.historyIndex = AppState.terminal.history.length;
+        input.value = '';
       }
-
-      output.scrollTop = output.scrollHeight;
     }
   });
+}
+
+async function executeTerminalCommand(cmd) {
+  const output = document.getElementById('terminal-output');
+  const promptUser = document.getElementById('terminal-prompt-prefix');
+  const promptCwd = document.getElementById('term-prompt-cwd');
+  const barCwd = document.getElementById('term-bar-cwd');
+  if (!output) return;
+
+  const currentCwd = AppState.terminal.cwd || '/srv/nas';
+  const promptPrefix = promptUser ? promptUser.textContent : `$`;
+  output.textContent += `${promptPrefix} ${cmd}\n`;
+
+  const lower = cmd.trim().toLowerCase();
+  if (lower === 'clear' || lower === 'cls') {
+    output.textContent = '';
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/terminal/exec', {
+      method: 'POST',
+      body: JSON.stringify({
+        command: cmd,
+        cwd: currentCwd,
+      }),
+    });
+
+    const data = res.data;
+    if (data.output) {
+      output.textContent += data.output;
+      if (!data.output.endsWith('\n')) {
+        output.textContent += '\n';
+      }
+    }
+
+    if (data.cwd) {
+      AppState.terminal.cwd = data.cwd;
+      if (promptCwd) promptCwd.textContent = data.cwd;
+      if (barCwd) barCwd.textContent = data.cwd;
+    }
+  } catch (err) {
+    output.textContent += `[Error de ejecución]: ${err.message}\n`;
+  }
+
+  output.scrollTop = output.scrollHeight;
+}
+
+function clearTerminal() {
+  const output = document.getElementById('terminal-output');
+  if (output) output.textContent = '';
+}
+
+function runQuickCommand(cmd) {
+  const input = document.getElementById('terminal-input');
+  if (input) {
+    input.focus();
+    executeTerminalCommand(cmd);
+  }
 }
 
 // ==============================================================================
@@ -1070,8 +1115,511 @@ function loadApplications() {
   // Vista informativa de tecnologías y componentes integrados
 }
 
-function loadDomain() {
-  // Vista informativa de configuración de Grupo de Trabajo / Directorio Activo
+// ==============================================================================
+// 15. Módulo: Explorador de Archivos y Recursos (Files) & Drag-and-Drop
+// ==============================================================================
+async function loadFiles(subpath = null) {
+  if (subpath === null) {
+    subpath = AppState.files.currentPath || '';
+  }
+  AppState.files.currentPath = subpath;
+
+  const tbody = document.getElementById('files-table-body');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:18px;">Cargando archivos y directorios...</td></tr>';
+  }
+
+  try {
+    const root = AppState.files.root || 'nas';
+    const query = `/api/files/list?root=${encodeURIComponent(root)}&path=${encodeURIComponent(subpath)}`;
+    const res = await apiFetch(query);
+    const data = res.data;
+
+    AppState.files.items = data.items || [];
+
+    renderFileBreadcrumbs(data.breadcrumbs || [], data.current_path || '');
+
+    if (!tbody) return;
+
+    if (data.items.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">
+            Esta carpeta está vacía. Arrastra archivos aquí desde tu equipo o utiliza el botón <strong>Subir archivos</strong>.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = data.items.map(item => {
+      const isDir = item.is_dir;
+      const icon = isDir ? '#icon-folder' : '#icon-file-text';
+      const iconColor = isDir ? 'color:var(--accent-primary);' : 'color:var(--text-muted);';
+      const nameClick = isDir
+        ? `onclick="navigateToSubpath('${escapeHtml(item.relative_path)}')" style="cursor:pointer;"`
+        : '';
+      const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
+
+      const downloadAction = isDir
+        ? `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFolderZip('${escapeHtml(item.relative_path)}')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
+        : `<button type="button" class="btn btn-secondary btn-sm" onclick="downloadFile('${escapeHtml(item.relative_path)}')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
+
+      return `
+        <tr>
+          <td><svg class="icon" style="${iconColor}"><use href="${icon}"></use></svg></td>
+          <td>
+            <div class="${nameClass}" ${nameClick}>
+              <span>${escapeHtml(item.name)}</span>
+            </div>
+          </td>
+          <td>${escapeHtml(item.size_formatted)}</td>
+          <td><code>${escapeHtml(item.permissions)}</code></td>
+          <td>${escapeHtml(item.owner)}:${escapeHtml(item.group)}</td>
+          <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.modified_at)}</td>
+          <td style="text-align:right;">
+            <div style="display:flex; justify-content:flex-end; gap:6px;">
+              ${downloadAction}
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openRenameModal('${escapeHtml(item.relative_path)}', '${escapeHtml(item.name)}')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="openDeleteModal('${escapeHtml(item.relative_path)}', '${escapeHtml(item.name)}')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (e) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar archivos: ${escapeHtml(e.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderFileBreadcrumbs(breadcrumbs, currentPath) {
+  const container = document.getElementById('files-breadcrumbs');
+  if (!container) return;
+
+  const rootLabel = AppState.files.root === 'backups' ? '/srv/nas/BACKUPS_HISTORICOS' : '/srv/nas';
+
+  if (!breadcrumbs || breadcrumbs.length === 0) {
+    container.innerHTML = `<span class="file-breadcrumb-current">${escapeHtml(rootLabel)}</span>`;
+    return;
+  }
+
+  container.innerHTML = breadcrumbs.map((bc, idx) => {
+    const isLast = idx === breadcrumbs.length - 1;
+    if (isLast) {
+      return `<span class="file-breadcrumb-current">${escapeHtml(bc.name)}</span>`;
+    }
+    return `
+      <span class="file-breadcrumb-item" onclick="navigateToSubpath('${escapeHtml(bc.path)}')">${escapeHtml(bc.name)}</span>
+      <span class="file-breadcrumb-separator">/</span>
+    `;
+  }).join('');
+}
+
+function changeFilesRoot(rootKey) {
+  AppState.files.root = rootKey;
+  AppState.files.currentPath = '';
+  loadFiles('');
+}
+
+function navigateToSubpath(path) {
+  loadFiles(path);
+}
+
+function triggerFileInput() {
+  const input = document.getElementById('files-hidden-input');
+  if (input) input.click();
+}
+
+function handleFileSelect(e) {
+  const files = e.target.files;
+  if (files && files.length > 0) {
+    uploadFiles(files);
+  }
+  e.target.value = '';
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('file-dropzone-container');
+  if (dz) dz.classList.add('drag-active');
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('file-dropzone-container');
+  if (dz) dz.classList.remove('drag-active');
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('file-dropzone-container');
+  if (dz) dz.classList.remove('drag-active');
+
+  const files = e.dataTransfer ? e.dataTransfer.files : null;
+  if (files && files.length > 0) {
+    uploadFiles(files);
+  }
+}
+
+async function uploadFiles(files) {
+  const progressBar = document.getElementById('upload-progress-bar');
+  const progressFill = document.getElementById('upload-progress-fill');
+  const fileLabel = document.getElementById('upload-file-label');
+  const percentLabel = document.getElementById('upload-percent-label');
+
+  if (progressBar) progressBar.style.display = 'block';
+
+  let successCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (fileLabel) fileLabel.textContent = `Subiendo (${i + 1}/${files.length}): ${file.name}`;
+    if (percentLabel) percentLabel.textContent = '0%';
+    if (progressFill) progressFill.style.width = '0%';
+
+    try {
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/files/upload', true);
+
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable) {
+            const percent = Math.round((evt.loaded / evt.total) * 100);
+            if (percentLabel) percentLabel.textContent = `${percent}%`;
+            if (progressFill) progressFill.style.width = `${percent}%`;
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const resp = JSON.parse(xhr.responseText);
+              if (resp.status === 'success') {
+                successCount++;
+                resolve(resp);
+              } else {
+                reject(new Error(resp.message || 'Error en respuesta del servidor'));
+              }
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            reject(new Error(`Fallo HTTP ${xhr.status}: ${xhr.statusText}`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Error de red durante la subida'));
+
+        const formData = new FormData();
+        formData.append('root', AppState.files.root || 'nas');
+        formData.append('path', AppState.files.currentPath || '');
+        formData.append('file', file);
+
+        xhr.send(formData);
+      });
+    } catch (err) {
+      showToast(`Error al subir "${file.name}": ${err.message}`, 'error');
+    }
+  }
+
+  if (progressBar) {
+    setTimeout(() => {
+      progressBar.style.display = 'none';
+      if (progressFill) progressFill.style.width = '0%';
+    }, 1200);
+  }
+
+  if (successCount > 0) {
+    showToast(`Se subieron con éxito ${successCount} archivo(s).`, 'success');
+  }
+  loadFiles();
+}
+
+function downloadFile(relPath) {
+  const root = encodeURIComponent(AppState.files.root || 'nas');
+  const path = encodeURIComponent(relPath);
+  window.location.href = `/api/files/download?root=${root}&path=${path}`;
+}
+
+function downloadFolderZip(relPath) {
+  const root = encodeURIComponent(AppState.files.root || 'nas');
+  const path = encodeURIComponent(relPath);
+  window.location.href = `/api/files/download?root=${root}&path=${path}`;
+}
+
+function downloadCurrentFolderZip() {
+  const root = encodeURIComponent(AppState.files.root || 'nas');
+  const path = encodeURIComponent(AppState.files.currentPath || '');
+  window.location.href = `/api/files/download?root=${root}&path=${path}`;
+}
+
+function openNewFolderModal() {
+  const input = document.getElementById('new-folder-name');
+  if (input) input.value = '';
+  openModal('modal-new-folder');
+  if (input) setTimeout(() => input.focus(), 100);
+}
+
+async function submitNewFolder(e) {
+  e.preventDefault();
+  const input = document.getElementById('new-folder-name');
+  const name = input ? input.value.trim() : '';
+  if (!name) return;
+
+  try {
+    await apiFetch('/api/files/mkdir', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: AppState.files.root || 'nas',
+        path: AppState.files.currentPath || '',
+        name: name,
+      }),
+    });
+
+    closeModal('modal-new-folder');
+    showToast(`Carpeta "${name}" creada exitosamente.`, 'success');
+    loadFiles();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+function openRenameModal(relPath, currentName) {
+  const oldpathInput = document.getElementById('rename-file-oldpath');
+  const newnameInput = document.getElementById('rename-file-newname');
+  if (oldpathInput) oldpathInput.value = relPath;
+  if (newnameInput) newnameInput.value = currentName;
+  openModal('modal-rename-file');
+  if (newnameInput) setTimeout(() => newnameInput.focus(), 100);
+}
+
+async function submitRenameFile(e) {
+  e.preventDefault();
+  const oldPath = document.getElementById('rename-file-oldpath')?.value;
+  const newName = document.getElementById('rename-file-newname')?.value.trim();
+  if (!oldPath || !newName) return;
+
+  try {
+    await apiFetch('/api/files/rename', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: AppState.files.root || 'nas',
+        old_path: oldPath,
+        new_name: newName,
+      }),
+    });
+
+    closeModal('modal-rename-file');
+    showToast(`Elemento renombrado a "${newName}".`, 'success');
+    loadFiles();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+function openDeleteModal(relPath, name) {
+  const pathInput = document.getElementById('delete-file-path');
+  const label = document.getElementById('delete-file-name-label');
+  if (pathInput) pathInput.value = relPath;
+  if (label) label.textContent = `"${name}"`;
+  openModal('modal-delete-file');
+}
+
+async function confirmDeleteFile() {
+  const path = document.getElementById('delete-file-path')?.value;
+  if (!path) return;
+
+  try {
+    await apiFetch('/api/files/delete', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: AppState.files.root || 'nas',
+        path: path,
+      }),
+    });
+
+    closeModal('modal-delete-file');
+    showToast('Elemento eliminado del almacenamiento.', 'info');
+    loadFiles();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
+}
+
+// ==============================================================================
+// 16. Módulo: Active Directory (Domain)
+// ==============================================================================
+async function loadDomainStatus() {
+  const card = document.getElementById('domain-status-card');
+  const joinPanel = document.getElementById('domain-join-panel');
+  if (!card) return;
+
+  card.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">Consultando estado de dominio...</div>';
+
+  try {
+    const res = await apiFetch('/api/domain/status');
+    const d = res.data;
+    AppState.domain.status = d;
+
+    const isJoined = d.joined;
+    const badge = isJoined
+      ? '<span class="badge badge-ok">Unido al Dominio</span>'
+      : '<span class="badge badge-gray">Servidor Autónomo (Standalone)</span>';
+
+    const sssdBadge = d.sssd_active
+      ? '<span class="badge badge-ok">Activo</span>'
+      : '<span class="badge badge-gray">Inactivo</span>';
+
+    let actionBtn = '';
+    if (isJoined) {
+      actionBtn = `
+        <div style="margin-top:16px;">
+          <button type="button" class="btn btn-danger btn-sm" onclick="handleDomainLeave()">
+            <svg class="icon"><use href="#icon-power"></use></svg> Desvincular del Dominio
+          </button>
+        </div>
+      `;
+      if (joinPanel) joinPanel.style.display = 'none';
+    } else {
+      if (joinPanel) joinPanel.style.display = 'block';
+    }
+
+    card.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="info-row">
+          <span class="info-label">Estado de Membresía:</span>
+          <div class="info-val">${badge}</div>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Dominio / Realm:</span>
+          <strong class="info-val">${escapeHtml(d.domain || d.realm || 'Ninguno (Modo Workgroup)')}</strong>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Grupo de Trabajo (Workgroup):</span>
+          <strong class="info-val">${escapeHtml(d.workgroup || 'TEAM-JOFRATO')}</strong>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Controlador de Dominio (KDC):</span>
+          <strong class="info-val">${escapeHtml(d.kdc || 'N/A')}</strong>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Servicio SSSD (Autenticación):</span>
+          <div class="info-val">${sssdBadge}</div>
+        </div>
+        ${actionBtn}
+      </div>
+    `;
+
+    const badgeDomain = document.getElementById('badge-domain');
+    if (badgeDomain) {
+      badgeDomain.textContent = isJoined ? 'AD OK' : 'AD';
+      badgeDomain.className = isJoined ? 'nav-badge badge-ok' : 'nav-badge';
+    }
+
+  } catch (err) {
+    card.innerHTML = `<p style="color:var(--accent-danger);">Error al consultar estado del dominio: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function handleDomainDiscover(e) {
+  e.preventDefault();
+  const domainInput = document.getElementById('discover-domain-name');
+  const resultDiv = document.getElementById('domain-discover-result');
+  const btn = document.getElementById('btn-discover-domain');
+  if (!domainInput || !resultDiv) return;
+
+  const domain = domainInput.value.trim();
+  if (!domain) return;
+
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<p style="color:var(--text-muted); font-size:13px;">Buscando controladores de dominio Kerberos / DNS...</p>';
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await apiFetch('/api/domain/discover', {
+      method: 'POST',
+      body: JSON.stringify({ domain }),
+    });
+
+    const d = res.data;
+    resultDiv.innerHTML = `
+      <div style="background:var(--bg-surface); padding:12px; border-radius:6px; border:1px solid var(--border-color); font-size:13px;">
+        <div style="color:var(--accent-success-text); font-weight:600; margin-bottom:6px;">Controlador de Dominio Detectado</div>
+        <div><strong>Dominio:</strong> ${escapeHtml(d.domain_name || domain)}</div>
+        <div><strong>Realm:</strong> ${escapeHtml(d.realm_name || 'N/A')}</div>
+        <div><strong>Servidores KDC:</strong> ${escapeHtml(Array.isArray(d.kdc) ? d.kdc.join(', ') : (d.kdc || 'N/A'))}</div>
+        <div><strong>Software:</strong> ${escapeHtml(d.server_software || 'Active Directory')}</div>
+      </div>
+    `;
+    showToast(`Dominio "${domain}" descubierto exitosamente.`, 'success');
+  } catch (err) {
+    resultDiv.innerHTML = `<div style="color:var(--accent-danger); font-size:13px;">No se pudo descubrir el dominio: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleDomainJoin(e) {
+  e.preventDefault();
+  const domain = document.getElementById('join-domain-name')?.value.trim();
+  const user = document.getElementById('join-admin-user')?.value.trim();
+  const password = document.getElementById('join-admin-pass')?.value;
+  const ou = document.getElementById('join-ou')?.value.trim();
+  const btn = document.getElementById('btn-join-domain');
+
+  if (!domain || !user || !password) {
+    showToast('Por favor completa todos los campos requeridos para la unión.', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Uniendo al dominio...';
+  }
+
+  try {
+    await apiFetch('/api/domain/join', {
+      method: 'POST',
+      body: JSON.stringify({ domain, user, password, ou }),
+    });
+
+    showToast(`Servidor unido con éxito al dominio ${domain}.`, 'success');
+    const passInput = document.getElementById('join-admin-pass');
+    if (passInput) passInput.value = '';
+    loadDomainStatus();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg class="icon"><use href="#icon-domain"></use></svg> Unir al Dominio';
+    }
+  }
+}
+
+async function handleDomainLeave() {
+  const user = prompt('Introduce el usuario administrador del dominio para desvincular (ej. Administrator):');
+  if (!user) return;
+  const password = prompt('Introduce la contraseña del administrador del dominio:');
+  if (!password) return;
+
+  try {
+    await apiFetch('/api/domain/leave', {
+      method: 'POST',
+      body: JSON.stringify({ user, password }),
+    });
+
+    showToast('El servidor fue desvinculado del dominio Active Directory.', 'info');
+    loadDomainStatus();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  }
 }
 
 async function loadDiagnostics() {
@@ -1207,6 +1755,34 @@ function initApp() {
   // Inicializar componentes interactivos
   initTerminal();
   populateShareGroupOptions();
+
+  // Configurar listeners de la dropzone para Explorador de Archivos
+  const dropzone = document.getElementById('file-dropzone-container');
+  if (dropzone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('drag-active');
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('drag-active');
+      }, false);
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt ? dt.files : null;
+      if (files && files.length > 0) {
+        uploadFiles(files);
+      }
+    }, false);
+  }
 
   // Determinar vista inicial
   const hash = window.location.hash ? window.location.hash.slice(1) : '';
