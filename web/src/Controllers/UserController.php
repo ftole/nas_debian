@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Services\AuditService;
 use App\Services\UserService;
 
 /**
@@ -47,10 +48,12 @@ class UserController
 
         $res = $this->user->createUser($username, $password, (array) $groups, $isAdmin);
         if (!$res['success']) {
+            AuditService::log('user_create', $username, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al crear usuario.');
             return;
         }
 
+        AuditService::log('user_create', $username, 'SUCCESS', ['groups' => (array) $groups, 'is_admin' => $isAdmin]);
         Response::success(null, $res['message'] ?? 'Usuario creado.');
     }
 
@@ -64,10 +67,12 @@ class UserController
 
         $res = $this->user->deleteUser($username);
         if (!$res['success']) {
+            AuditService::log('user_delete', $username, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al eliminar usuario.');
             return;
         }
 
+        AuditService::log('user_delete', $username, 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Usuario eliminado.');
     }
 
@@ -83,10 +88,12 @@ class UserController
 
         $res = $this->user->createGroup($groupName);
         if (!$res['success']) {
+            AuditService::log('group_create', $groupName, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al crear grupo.');
             return;
         }
 
+        AuditService::log('group_create', $groupName, 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Grupo creado.');
     }
 
@@ -100,10 +107,12 @@ class UserController
 
         $res = $this->user->deleteGroup($groupName);
         if (!$res['success']) {
+            AuditService::log('group_delete', $groupName, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al eliminar grupo.');
             return;
         }
 
+        AuditService::log('group_delete', $groupName, 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Grupo eliminado.');
     }
 }
