@@ -130,9 +130,12 @@ else
     rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
     rm -f /etc/udev/rules.d/60-nas-readahead.rules
     rm -f /etc/sysctl.d/99-nas-tuning.conf
-    rm -f /etc/logrotate.d/nas-backups /etc/logrotate.d/nas-deploy
+    rm -f /etc/logrotate.d/nas-backups /etc/logrotate.d/nas-deploy /etc/logrotate.d/nas-admin /etc/logrotate.d/samba-audit
+    rm -f /etc/rsyslog.d/50-samba-audit.conf
+    rm -f /var/log/nas-admin.log /var/log/samba/audit.log /srv/nas/LOGS_BACKUP/backups_master.log
     rm -f /etc/default/wsdd2
     rm -rf /etc/systemd/system/wsdd2.service.d
+    systemctl restart rsyslog 2>/dev/null || true
     udevadm control --reload-rules 2>/dev/null || true
     systemctl daemon-reload
 fi
