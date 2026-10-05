@@ -6,3 +6,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.swp
+
+# SQLite y datos locales de desarrollo
+web/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
