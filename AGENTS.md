@@ -36,6 +36,9 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | Archivo / Ruta | Tipo | Descripción |
 | :--- | :--- | :--- |
 | `install.sh` | Script Bash CLI | **Instalador Remoto Oficial y Gestor CLI** para desplegar el comando `nas`, con auto-actualización (`update`) y desinstalación limpia. |
+| `test_remote.py` | Python CLI / TUI | **Suite Interactiva de Pruebas Remotas y Diagnóstico** con persistencia en `.env`, auditoría SSH/SSL, Samba, deduplicación por hardlinks y rollback. |
+| `test_remote.sh` | Bash CLI / TUI | **Lanzador y Suite Bash para Pruebas Remotas** con OpenSSH (`accept-new`), curl y fallback nativo. |
+| `.env.example` | Plantilla Config | **Plantilla documentada de credenciales locales** para pruebas remotas en Debian 13. |
 | `src/asistente.sh` | Script Bash (TUI `whiptail`) | **Asistente Visual Interactivo** con colores nativos, detección dinámica de discos/IP/usuario, validación en vivo, ciclo de edición y 9 módulos de gestión. |
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS` o `BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
@@ -45,6 +48,8 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `web/` | Web (Nginx + PHP-FPM) | Entorno Web nativo MVC PHP 8: Dashboard, Samba, Backups, Almacenamiento, Usuarios, Sistema, Explorador de Archivos Drag-and-Drop, Terminal bash real, Dominio AD y base de datos SQLite con estética Slate UI 100% offline (cero dependencias externas). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
+| `tests/test_remote.bats` | BATS | Pruebas unitarias del script de pruebas remotas `test_remote.sh`. |
+| `tests/test_remote_runner.py` | pytest | Pruebas unitarias de parsing .env, política accept-new de claves de host y ejecución remota. |
 | `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
 | `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, problemas/soluciones y diagramas SVG. |
 | `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
