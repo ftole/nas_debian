@@ -667,7 +667,9 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             <!-- Contenedor con Dropzone, Cuadrícula y Tabla -->
             <div class="file-dropzone-container" id="file-dropzone-container">
               <div class="file-dropzone-overlay" id="file-dropzone-overlay">
-                <svg class="icon" style="width:48px; height:48px; color:var(--accent-primary);"><use href="#icon-upload"></use></svg>
+                <div class="dropzone-icon-wrap">
+                  <svg class="icon" style="width:36px; height:36px;"><use href="#icon-upload"></use></svg>
+                </div>
                 <div class="dropzone-text">Suelta los archivos aquí para subirlos a esta carpeta</div>
                 <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 512 MB por archivo</div>
               </div>
@@ -1324,7 +1326,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-folder')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Crear carpeta</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-folder">Crear carpeta</button>
           </div>
         </form>
       </div>
@@ -1347,7 +1349,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-file')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Renombrar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-rename-file">Renombrar</button>
           </div>
         </form>
       </div>
@@ -1462,7 +1464,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-empty-trash')">Cancelar</button>
-        <button type="button" class="btn btn-danger" onclick="confirmEmptyTrash()">Vaciar papelera permanentemente</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-empty-trash" onclick="confirmEmptyTrash()">Vaciar papelera permanentemente</button>
       </div>
     </div>
   </div>
