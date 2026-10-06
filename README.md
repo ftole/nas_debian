@@ -140,11 +140,63 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP 
 
 ---
 
+## 🧪 Pruebas Remotas y Diagnóstico Automatizado
+
+El proyecto incluye una suite interactiva y automatizada para realizar pruebas remotas continuas contra una máquina de pruebas Debian 13 desde Windows (PowerShell/CMD) o Bash/Linux.
+
+### Configuración Rápida (`.env`)
+
+Copia la plantilla `.env.example` y define los parámetros de conexión de tu máquina de pruebas:
+
+```bash
+cp .env.example .env
+```
+
+Variables disponibles en `.env`:
+- `NAS_TEST_IP`: Dirección IP o host del servidor remoto Debian 13.
+- `NAS_TEST_PORT`: Puerto SSH (por defecto 22).
+- `NAS_TEST_USER`: Usuario con acceso sudo (ej. `sistemas`).
+- `NAS_TEST_PASSWORD`: Contraseña del usuario SSH.
+- `NAS_ROOT_PASSWORD`: Contraseña de root/sudo.
+
+*Si `.env` no existe, el asistente interactivo te solicitará cada dato en el primer inicio, probará la conexión y lo creará automáticamente.*
+
+### Ejecución de Pruebas
+
+```bash
+# En Windows o con Python 3:
+python test_remote.py
+
+# En Bash / Linux / WSL:
+bash test_remote.sh
+```
+
+### Acciones Directas por CLI
+
+Puedes ejecutar pruebas específicas sin ingresar al menú interactivo:
+
+```bash
+python test_remote.py install     # Despliegue limpio y verificación de servicios
+python test_remote.py web         # Auditoría HTTP->HTTPS, SSL, HSTS, CSRF y API
+python test_remote.py samba       # Comprobación SMB y registro full_audit
+python test_remote.py backups     # Snapshots con deduplicación por hardlinks
+python test_remote.py update      # Prueba de actualizador y rollback
+python test_remote.py uninstall   # Desinstalación y verificación de limpieza
+python test_remote.py suite       # Batería completa End-to-End con reporte tabular
+python test_remote.py status      # Diagnóstico en vivo de recursos y servicios
+python test_remote.py console     # Consola SSH interactiva directa
+```
+
+---
+
 ## 📂 Estructura del Repositorio
 
 ```text
 nas_debian/
 ├── install.sh             -> Instalador remoto oficial y gestor CLI `nas`
+├── test_remote.py         -> Suite interactiva y CLI de pruebas remotas en Python
+├── test_remote.sh         -> Lanzador y suite de pruebas remotas en Bash
+├── .env.example           -> Plantilla documentada de credenciales para pruebas
 ├── docs/                  -> Documentación técnica completa y guías operativas
 │   ├── assets/            -> Diagramas vectoriales SVG del sistema
 │   ├── arquitectura.md    -> Arquitectura detallada, capas y flujo de procesos
