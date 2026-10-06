@@ -103,6 +103,25 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     exit 1
 fi
 
+# Parche: las utilidades shadow (useradd/usermod/chpasswd/...) invocan
+# /usr/sbin/sss_cache por ruta absoluta tras cada cambio de cuentas. En un servidor
+# autónomo con SSSD sin configurar esto genera ruido y errores en stderr. Se instala
+# un wrapper (mediante dpkg-divert) que delega en el binario original únicamente
+# cuando el equipo está unido a un dominio Active Directory.
+if [ -x /usr/sbin/sss_cache ] && [ ! -e /usr/sbin/sss_cache.distrib ]; then
+    if dpkg-divert --local --rename --add /usr/sbin/sss_cache >/dev/null 2>&1; then
+        cat << 'SSS_CACHE_EOF' > /usr/sbin/sss_cache
+#!/bin/bash
+# Wrapper NAS: solo invalida la caché de SSSD si el equipo está unido a un dominio.
+if [ -f /etc/sssd/sssd.conf ]; then
+    exec /usr/sbin/sss_cache.distrib "$@"
+fi
+exit 0
+SSS_CACHE_EOF
+        chmod 0755 /usr/sbin/sss_cache
+    fi
+fi
+
 auto_tune_hardware() {
     local DISCO="$1"
     local DISCO_BASE
@@ -484,6 +503,13 @@ chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
 usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || true
 
+# 3.1 Inicializar la base de datos SQLite nativa (evita la creación perezosa en la primera petición)
+if command -v php >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 && [ -f /var/www/nas-web/src/Services/DatabaseService.php ]; then
+    if ! runuser -u www-data -- php -r "require '/var/www/nas-web/src/Services/DatabaseService.php'; \App\Services\DatabaseService::getConnection();" >/dev/null 2>&1; then
+        advertir "No se pudo inicializar la base de datos SQLite en /var/lib/nas/nas.sqlite."
+    fi
+fi
+
 # 4. Generar Certificado SSL/TLS autofirmado para acceso HTTPS
 if [ ! -f /etc/ssl/certs/nas-web.crt ] || [ ! -f /etc/ssl/private/nas-web.key ]; then
     mkdir -p /etc/ssl/certs /etc/ssl/private
@@ -650,42 +676,57 @@ WSDDOVERRIDE
 echo " [4/9] Creando grupo maestro Sistemas y configurando administradores ($ADMIN_USER)..."
 groupadd -f grp_sistemas
 
-# 1. Configurar cuenta sistemas (Ead2026#)
-if ! id "sistemas" &>/dev/null; then
-    adduser --disabled-password --gecos "" "sistemas"
-fi
-usermod -aG sudo,adm,grp_sistemas "sistemas"
-echo "sistemas ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-sistemas
-chmod 0440 /etc/sudoers.d/90-sistemas
-echo "sistemas:Ead2026#" | chpasswd
-printf '%s\n%s\n' "Ead2026#" "Ead2026#" | smbpasswd -a -s "sistemas" 2>/dev/null || true
-
-# 2. Configurar cuenta administrador (Admin123#)
-if ! id "administrador" &>/dev/null; then
-    adduser --disabled-password --gecos "" "administrador"
-fi
-usermod -aG sudo,adm,grp_sistemas "administrador"
-echo "administrador ALL=(ALL:ALL) ALL" > /etc/sudoers.d/90-administrador
-chmod 0440 /etc/sudoers.d/90-administrador
-echo "administrador:Admin123#" | chpasswd
-printf '%s\n%s\n' "Admin123#" "Admin123#" | smbpasswd -a -s "administrador" 2>/dev/null || true
-
-# 3. Si se especificó un usuario o contraseña administrativa personalizada
-if [ "$ADMIN_USER" != "sistemas" ] && [ "$ADMIN_USER" != "administrador" ]; then
-    if ! id "$ADMIN_USER" &>/dev/null; then
-        adduser --disabled-password --gecos "" "$ADMIN_USER"
+# 1. Crear las cuentas administrativas base del sistema SIN contraseña por defecto.
+#    Estas cuentas quedan bloqueadas hasta que el operador les asigne una clave.
+for _cuenta in sistemas administrador; do
+    if ! id "$_cuenta" &>/dev/null; then
+        adduser --disabled-password --gecos "" "$_cuenta"
     fi
-    usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
-    SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
-    echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
-    chmod 0440 "$SUDOERS_FILE"
-    if [ -n "$ADMIN_PASS" ]; then
-        echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
-        printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
+    usermod -aG sudo,adm,grp_sistemas "$_cuenta"
+    echo "$_cuenta ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
+    chmod 0440 "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
+done
+
+# 2. Configurar la cuenta administradora designada para este despliegue.
+if ! id "$ADMIN_USER" &>/dev/null; then
+    adduser --disabled-password --gecos "" "$ADMIN_USER"
+fi
+usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
+SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
+echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
+
+# 3. Asignar contraseña: la suministrada por el operador o una aleatoria fuerte generada aquí.
+CLAVE_GENERADA=false
+if [ -z "$ADMIN_PASS" ]; then
+    ADMIN_PASS=$(openssl rand -base64 18 2>/dev/null | tr -d '\n')
+    if [ -z "$ADMIN_PASS" ]; then
+        ADMIN_PASS=$(tr -dc 'A-Za-z0-9!@#%^_+' </dev/urandom | head -c 24)
     fi
-elif [ -n "$ADMIN_PASS" ]; then
-    echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
-    printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null || true
+    CLAVE_GENERADA=true
+fi
+
+if printf '%s\n' "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd; then
+    printf '%s\n%s\n' "$ADMIN_PASS" "$ADMIN_PASS" | smbpasswd -a -s "$ADMIN_USER" 2>/dev/null \
+        || advertir "No se pudo registrar $ADMIN_USER en la base de credenciales Samba (smbpasswd)."
+else
+    advertir "No se pudo asignar la contraseña Linux a $ADMIN_USER (chpasswd rechazó la clave; revisa la política de complejidad)."
+fi
+
+# 4. Bloquear las credenciales de las cuentas base que no hayan sido designadas.
+for _cuenta in sistemas administrador; do
+    if [ "$_cuenta" != "$ADMIN_USER" ]; then
+        usermod -L "$_cuenta" 2>/dev/null || true
+        smbpasswd -d -s "$_cuenta" 2>/dev/null || true
+    fi
+done
+
+if [ "$CLAVE_GENERADA" = true ]; then
+    echo "  [!] Contraseña generada para '$ADMIN_USER': $ADMIN_PASS"
+    echo "      Guárdala ahora: no se volverá a mostrar. Cámbiala con 'sudo passwd $ADMIN_USER'."
+    log "[ADVERTENCIA] Se generó una contraseña aleatoria para $ADMIN_USER."
+else
+    echo "  [OK] Contraseña de '$ADMIN_USER' establecida con la clave suministrada."
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
