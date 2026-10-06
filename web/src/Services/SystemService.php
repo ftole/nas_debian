@@ -45,14 +45,72 @@ class SystemService
         }
         fclose($pipes[0]);
 
-        // Ajustamos timeout de lectura
-        stream_set_timeout($pipes[1], $timeout);
-        stream_set_timeout($pipes[2], $timeout);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
 
-        $stdout = (string) stream_get_contents($pipes[1]);
+        $stdout = '';
+        $stderr = '';
+        $deadline = microtime(true) + $timeout;
+        $pipesOpen = [1 => true, 2 => true];
+
+        while ($pipesOpen[1] || $pipesOpen[2]) {
+            $read = [];
+            if ($pipesOpen[1]) {
+                $read[] = $pipes[1];
+            }
+            if ($pipesOpen[2]) {
+                $read[] = $pipes[2];
+            }
+
+            $write = null;
+            $except = null;
+
+            $numChanged = @stream_select($read, $write, $except, 0, 50000);
+
+            if ($numChanged > 0) {
+                foreach ($read as $stream) {
+                    $chunk = fread($stream, 8192);
+                    if ($chunk !== false && $chunk !== '') {
+                        if ($stream === $pipes[1]) {
+                            $stdout .= $chunk;
+                        } else {
+                            $stderr .= $chunk;
+                        }
+                    } elseif (feof($stream)) {
+                        if ($stream === $pipes[1]) {
+                            $pipesOpen[1] = false;
+                        } else {
+                            $pipesOpen[2] = false;
+                        }
+                    }
+                }
+            }
+
+            $status = proc_get_status($process);
+            if (!$status['running']) {
+                while (($chunk = fread($pipes[1], 8192)) !== false && $chunk !== '') {
+                    $stdout .= $chunk;
+                }
+                while (($chunk = fread($pipes[2], 8192)) !== false && $chunk !== '') {
+                    $stderr .= $chunk;
+                }
+                break;
+            }
+
+            if (microtime(true) >= $deadline) {
+                @proc_terminate($process, 9);
+                $stderr .= sprintf("\n[!] Tiempo de ejecución agotado (límite: %d segundos).\n", $timeout);
+                break;
+            }
+        }
+
+        while (($chunk = fread($pipes[1], 8192)) !== false && $chunk !== '') {
+            $stdout .= $chunk;
+        }
+        while (($chunk = fread($pipes[2], 8192)) !== false && $chunk !== '') {
+            $stderr .= $chunk;
+        }
         fclose($pipes[1]);
-
-        $stderr = (string) stream_get_contents($pipes[2]);
         fclose($pipes[2]);
 
         $status = proc_close($process);
@@ -754,9 +812,23 @@ class SystemService
     {
         $commit = 'Desconocido';
         $date = 'N/A';
+        $version = '1.0.0';
+        $channel = 'GitHub main';
 
         $repoDir = dirname(__DIR__, 2);
-        if (file_exists($repoDir . '/.git')) {
+        $versionFile = $repoDir . '/version.json';
+        if (file_exists($versionFile)) {
+            $raw = @file_get_contents($versionFile);
+            if ($raw !== false) {
+                $verData = json_decode($raw, true);
+                if (is_array($verData)) {
+                    $commit = $verData['commit'] ?? $commit;
+                    $date = $verData['date'] ?? $date;
+                    $version = $verData['version'] ?? $version;
+                    $channel = $verData['channel'] ?? $channel;
+                }
+            }
+        } elseif (file_exists($repoDir . '/.git')) {
             $res = self::runCommand(['git', '-C', $repoDir, 'log', '-1', '--format=%h|%cd|%s', '--date=short']);
             if ($res['code'] === 0 && !empty($res['stdout'])) {
                 $parts = explode('|', $res['stdout'], 3);
@@ -766,10 +838,11 @@ class SystemService
         }
 
         return [
+            'version' => $version,
             'installed_commit' => $commit,
             'commit_date' => $date,
             'has_updates' => false,
-            'channel' => 'GitHub main',
+            'channel' => $channel,
         ];
     }
 }
