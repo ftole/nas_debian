@@ -23,8 +23,8 @@
   <!-- Barra Central: Soporte keep-data -->
   <g transform="translate(30, 98)">
     <rect width="900" height="42" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="4,4"/>
-    <text x="30" y="26" fill="#38bdf8" font-size="12" font-weight="700">MODO REUTILIZACIÓN (--keep-data):</text>
-    <text x="280" y="26" fill="#cbd5e1" font-size="11.5">Monta discos con datos preexistentes en /srv/nas sin formatear ni perder información (detecta ext4/btrfs automáticamente)</text>
+    <text x="24" y="26" fill="#38bdf8" font-size="11.5" font-weight="700">MODO REUTILIZACIÓN (--keep-data):</text>
+    <text x="270" y="26" fill="#cbd5e1" font-size="11">Monta particiones con datos previos en /srv/nas sin formatear (soporta ext4 y Btrfs)</text>
   </g>
 
   <!-- Columna Izquierda: ROL ARCHIVOS -->
@@ -33,23 +33,23 @@
     <rect x="0" y="0" width="435" height="5" rx="2" fill="url(#role-nas)"/>
     
     <text x="24" y="32" fill="#60a5fa" font-size="15" font-weight="700">ROL: ARCHIVOS (NAS Departamental)</text>
-    <text x="24" y="50" fill="#94a3b8" font-size="11.5">Recursos compartidos visibles • Colaboración multiusuario (+100 puestos)</text>
+    <text x="24" y="50" fill="#94a3b8" font-size="11">Recursos visibles • Multiusuario concurrente (+100 puestos)</text>
 
     <!-- HDD -->
     <rect x="20" y="65" width="395" height="115" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="35" y="88" fill="#f8fafc" font-size="13" font-weight="700">Disco HDD Mecánico (rotational=1)</text>
     <text x="35" y="108" fill="#38bdf8" font-size="11" font-weight="600">Filesystem: ext4 optimizado</text>
-    <text x="35" y="126" fill="#94a3b8" font-size="10.5">• Opciones: rw,noatime,commit=2 (vaciado en 2s anti-apagón)</text>
-    <text x="35" y="143" fill="#94a3b8" font-size="10.5">• tune2fs -m 1: recupera el 4% de espacio reservado para root</text>
-    <text x="35" y="160" fill="#10b981" font-size="10.5">• readahead: 4096 KB para transferencias secuenciales pesadas</text>
+    <text x="35" y="126" fill="#94a3b8" font-size="10">• rw,noatime,commit=2 (vaciado en 2s anti-apagón)</text>
+    <text x="35" y="143" fill="#94a3b8" font-size="10">• tune2fs -m 1: recupera el 4% para usuarios</text>
+    <text x="35" y="160" fill="#10b981" font-size="10">• readahead: 4096 KB para lectura continua</text>
 
     <!-- SSD -->
     <rect x="20" y="195" width="395" height="120" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="35" y="218" fill="#f8fafc" font-size="13" font-weight="700">Unidad SSD Flash / NVMe (rotational=0)</text>
     <text x="35" y="238" fill="#38bdf8" font-size="11" font-weight="600">Filesystem: ext4 optimizado</text>
-    <text x="35" y="256" fill="#94a3b8" font-size="10.5">• Opciones: rw,noatime,commit=5 (equilibrio durabilidad flash)</text>
-    <text x="35" y="273" fill="#94a3b8" font-size="10.5">• Mantenimiento: activación continua de systemd fstrim.timer</text>
-    <text x="35" y="290" fill="#10b981" font-size="10.5">• readahead: 1024 KB para latencia ultrabaja en I/O aleatorio</text>
+    <text x="35" y="256" fill="#94a3b8" font-size="10">• rw,noatime,commit=5 (equilibrio flash)</text>
+    <text x="35" y="273" fill="#94a3b8" font-size="10">• Mantenimiento: servicio fstrim.timer activo</text>
+    <text x="35" y="290" fill="#10b981" font-size="10">• readahead: 1024 KB para latencia ultrabaja</text>
   </g>
 
   <!-- Columna Derecha: ROL BACKUP -->
@@ -58,22 +58,22 @@
     <rect x="0" y="0" width="435" height="5" rx="2" fill="url(#role-bkp)"/>
     
     <text x="24" y="32" fill="#34d399" font-size="15" font-weight="700">ROL: BACKUP (Central de Respaldos)</text>
-    <text x="24" y="50" fill="#94a3b8" font-size="11.5">Recursos ocultos ($) • Repositorio histórico deduplicado e inmutable</text>
+    <text x="24" y="50" fill="#94a3b8" font-size="11">Recursos ocultos ($) • Repositorio histórico deduplicado</text>
 
     <!-- HDD -->
     <rect x="20" y="65" width="395" height="115" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="35" y="88" fill="#f8fafc" font-size="13" font-weight="700">Disco HDD Mecánico (rotational=1)</text>
     <text x="35" y="108" fill="#34d399" font-size="11" font-weight="600">Filesystem: BTRFS con Zstandard</text>
-    <text x="35" y="126" fill="#94a3b8" font-size="10.5">• Opciones: rw,noatime,compress=zstd:3,space_cache=v2,autodefrag</text>
-    <text x="35" y="143" fill="#94a3b8" font-size="10.5">• Ahorro de espacio entre 20% y 40% sin sobrecarga de CPU</text>
-    <text x="35" y="160" fill="#10b981" font-size="10.5">• btrfs scrub mensual (día 1 a las 02:00) contra Bit Rot</text>
+    <text x="35" y="126" fill="#94a3b8" font-size="10">• compress=zstd:3,space_cache=v2,autodefrag</text>
+    <text x="35" y="143" fill="#94a3b8" font-size="10">• Ahorro de espacio entre 20% y 40% en disco</text>
+    <text x="35" y="160" fill="#10b981" font-size="10">• btrfs scrub mensual (día 1, 02:00) anti Bit Rot</text>
 
     <!-- SSD -->
     <rect x="20" y="195" width="395" height="120" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="35" y="218" fill="#f8fafc" font-size="13" font-weight="700">Unidad SSD Flash / NVMe (rotational=0)</text>
     <text x="35" y="238" fill="#34d399" font-size="11" font-weight="600">Filesystem: BTRFS con Zstandard</text>
-    <text x="35" y="256" fill="#94a3b8" font-size="10.5">• Opciones: rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async</text>
-    <text x="35" y="273" fill="#94a3b8" font-size="10.5">• Descarte asíncrono y fstrim.timer para preservar celdas</text>
-    <text x="35" y="290" fill="#10b981" font-size="10.5">• btrfs scrub mensual con sumas SHA256 bloque a bloque</text>
+    <text x="35" y="256" fill="#94a3b8" font-size="10">• compress=zstd:3,space_cache=v2,ssd,discard=async</text>
+    <text x="35" y="273" fill="#94a3b8" font-size="10">• Descarte asíncrono y fstrim.timer para flash</text>
+    <text x="35" y="290" fill="#10b981" font-size="10">• btrfs scrub mensual con sumas criptográficas</text>
   </g>
 </svg>
