@@ -71,6 +71,24 @@ function closeModal(modalId) {
   if (modal) {
     modal.classList.remove('active');
     modal.classList.remove('open');
+    if (modalId === 'modal-file-preview') {
+      const vidEl = document.getElementById('preview-video-element');
+      if (vidEl) {
+        vidEl.pause();
+        vidEl.src = '';
+      }
+      const audEl = document.getElementById('preview-audio-element');
+      if (audEl) {
+        audEl.pause();
+        audEl.src = '';
+      }
+      const pdfFrame = document.getElementById('preview-pdf-frame');
+      if (pdfFrame) {
+        pdfFrame.src = '';
+      }
+      AppState.files.currentPreviewFile = null;
+      AppState.files.isEditingPreview = false;
+    }
   }
 }
 
@@ -870,7 +888,7 @@ async function loadLogs() {
     tbody.innerHTML = logs.map(l => {
       const srcBadge = matchSourceBadge(l.source);
       const userText = l.user || l.task || 'sistema';
-      const ipText = l.ip ? `<small style="color:var(--text-muted); font-family:monospace; display:block;">${escapeHtml(l.ip)}</small>` : '';
+      const ipText = l.ip ? `<span class="table-logs-ip">${escapeHtml(l.ip)}</span>` : '';
       const actionLabel = l.action_label || l.event_label || l.action || l.event || l.unit || 'registro';
       const badgeType = l.badge || 'blue';
       const targetText = l.target || l.task || l.unit || '-';
@@ -880,13 +898,13 @@ async function loadLogs() {
 
       return `
         <tr>
-          <td><code style="font-size:11.5px;">${escapeHtml(l.timestamp || '-')}</code></td>
+          <td class="table-logs-timestamp"><code>${escapeHtml(l.timestamp || '-')}</code></td>
           <td>${srcBadge}</td>
-          <td><strong>${escapeHtml(userText)}</strong>${ipText}</td>
+          <td><span class="table-logs-user">${escapeHtml(userText)}</span>${ipText}</td>
           <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span></td>
-          <td><code>${escapeHtml(targetText)}</code></td>
+          <td class="table-logs-target"><code>${escapeHtml(targetText)}</code></td>
           <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
-          <td style="font-family:monospace; font-size:11.5px; word-break:break-word; max-width:400px;">${escapeHtml(details)}</td>
+          <td class="table-logs-details">${escapeHtml(details)}</td>
         </tr>
       `;
     }).join('');
@@ -1319,6 +1337,7 @@ function renderCurrentFiles() {
 function renderFileGrid(items) {
   const container = document.getElementById('files-grid-container');
   if (!container) return;
+  container.textContent = '';
 
   if (!items || items.length === 0) {
     container.innerHTML = `
@@ -1331,7 +1350,9 @@ function renderFileGrid(items) {
     return;
   }
 
-  container.innerHTML = items.map(item => {
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  const html = items.map(item => {
     const isDir = Boolean(item.is_dir);
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
@@ -1371,6 +1392,9 @@ function renderFileGrid(items) {
       </div>
     `;
   }).join('');
+
+  const fragment = range.createContextualFragment(html);
+  container.appendChild(fragment);
 }
 
 function handleCardClick(cardEl) {
@@ -1408,6 +1432,7 @@ function handleCardAction(e, btn, action) {
 function renderFileTable(items) {
   const tbody = document.getElementById('files-table-body');
   if (!tbody) return;
+  tbody.textContent = '';
 
   if (!items || items.length === 0) {
     tbody.innerHTML = `
@@ -1420,10 +1445,13 @@ function renderFileTable(items) {
     return;
   }
 
-  tbody.innerHTML = items.map(item => {
+  const range = document.createRange();
+  range.selectNodeContents(tbody);
+  const html = items.map(item => {
     const isDir = Boolean(item.is_dir);
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
+    const isSelected = AppState.files.selectedItemPath === relPath;
     const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
 
     const previewAction = !isDir
@@ -1439,10 +1467,15 @@ function renderFileTable(items) {
     const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
 
     return `
-      <tr data-path="${escapeHtml(relPath)}" data-name="${escapeHtml(item.name)}" data-is-dir="${isDir ? 'true' : 'false'}">
+      <tr class="file-table-row ${isSelected ? 'selected' : ''}"
+          data-path="${escapeHtml(relPath)}"
+          data-name="${escapeHtml(item.name)}"
+          data-is-dir="${isDir ? 'true' : 'false'}"
+          onclick="handleTableRowSelect(this)"
+          ondblclick="handleTableRowDblClick(this)">
         <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
         <td>
-          <div class="${nameClass}" onclick="handleTableRowClick(this)" style="cursor:pointer;">
+          <div class="${nameClass}" onclick="handleTableRowNameClick(event, this)">
             <span>${escapeHtml(item.name)}</span>
           </div>
         </td>
@@ -1461,20 +1494,42 @@ function renderFileTable(items) {
       </tr>
     `;
   }).join('');
+
+  const fragment = range.createContextualFragment(html);
+  tbody.appendChild(fragment);
 }
 
-function handleTableRowClick(nameEl) {
+function handleTableRowSelect(tr) {
+  const relPath = tr.getAttribute('data-path') || '';
+  selectTableRow(tr, relPath);
+}
+
+function handleTableRowDblClick(tr) {
+  const relPath = tr.getAttribute('data-path') || '';
+  const name = tr.getAttribute('data-name') || '';
+  const isDir = tr.getAttribute('data-is-dir') === 'true';
+  handleItemDblClick(relPath, name, isDir);
+}
+
+function handleTableRowNameClick(e, nameEl) {
+  e.stopPropagation();
   const tr = nameEl.closest('tr');
   if (!tr) return;
   const relPath = tr.getAttribute('data-path') || '';
   const name = tr.getAttribute('data-name') || '';
   const isDir = tr.getAttribute('data-is-dir') === 'true';
-
+  selectTableRow(tr, relPath);
   if (isDir) {
     navigateToSubpath(relPath);
   } else {
     previewFile(relPath, name);
   }
+}
+
+function selectTableRow(tr, relPath) {
+  document.querySelectorAll('#files-table-body tr.selected').forEach(r => r.classList.remove('selected'));
+  if (tr) tr.classList.add('selected');
+  AppState.files.selectedItemPath = relPath;
 }
 
 function handleTableRowAction(btn, action) {
@@ -1595,73 +1650,84 @@ async function uploadFiles(files) {
   const progressFill = document.getElementById('upload-progress-fill');
   const fileLabel = document.getElementById('upload-file-label');
   const percentLabel = document.getElementById('upload-percent-label');
+  const uploadBtn = document.getElementById('btn-upload-files');
+
+  if (uploadBtn) {
+    uploadBtn.disabled = true;
+    uploadBtn.classList.add('is-loading');
+  }
 
   if (progressBar) progressBar.style.display = 'block';
 
   let successCount = 0;
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    if (fileLabel) fileLabel.textContent = `Subiendo (${i + 1}/${files.length}): ${file.name}`;
-    if (percentLabel) percentLabel.textContent = '0%';
-    if (progressFill) progressFill.style.width = '0%';
-
-    try {
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/files/upload', true);
-
-        xhr.upload.onprogress = (evt) => {
-          if (evt.lengthComputable) {
-            const percent = Math.round((evt.loaded / evt.total) * 100);
-            if (percentLabel) percentLabel.textContent = `${percent}%`;
-            if (progressFill) progressFill.style.width = `${percent}%`;
-          }
-        };
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const resp = JSON.parse(xhr.responseText);
-              if (resp.status === 'success' || resp.success === true) {
-                successCount++;
-                resolve(resp);
-              } else {
-                reject(new Error(resp.message || resp.error || 'Error en respuesta del servidor'));
-              }
-            } catch (err) {
-              reject(err);
-            }
-          } else {
-            reject(new Error(`Fallo HTTP ${xhr.status}: ${xhr.statusText}`));
-          }
-        };
-
-        xhr.onerror = () => reject(new Error('Error de red durante la subida'));
-
-        const formData = new FormData();
-        formData.append('root', AppState.files.root || 'nas');
-        formData.append('path', AppState.files.currentPath || '');
-        formData.append('file', file);
-
-        xhr.send(formData);
-      });
-    } catch (err) {
-      showToast(`Error al subir "${file.name}": ${err.message}`, 'error');
-    }
-  }
-
-  if (progressBar) {
-    setTimeout(() => {
-      progressBar.style.display = 'none';
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (fileLabel) fileLabel.textContent = `Subiendo (${i + 1}/${files.length}): ${file.name}`;
+      if (percentLabel) percentLabel.textContent = '0%';
       if (progressFill) progressFill.style.width = '0%';
-    }, 1200);
-  }
 
-  if (successCount > 0) {
-    showToast(`Se subieron con éxito ${successCount} archivo(s).`, 'success');
+      try {
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/files/upload', true);
+
+          xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) {
+              const percent = Math.round((evt.loaded / evt.total) * 100);
+              if (percentLabel) percentLabel.textContent = `${percent}%`;
+              if (progressFill) progressFill.style.width = `${percent}%`;
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const resp = JSON.parse(xhr.responseText);
+                if (resp.status === 'success' || resp.success === true) {
+                  successCount++;
+                  resolve(resp);
+                } else {
+                  reject(new Error(resp.message || resp.error || 'Error en respuesta del servidor'));
+                }
+              } catch (err) {
+                reject(err);
+              }
+            } else {
+              reject(new Error(`Fallo HTTP ${xhr.status}: ${xhr.statusText}`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error('Error de red durante la subida'));
+
+          const formData = new FormData();
+          formData.append('root', AppState.files.root || 'nas');
+          formData.append('path', AppState.files.currentPath || '');
+          formData.append('file', file);
+
+          xhr.send(formData);
+        });
+      } catch (err) {
+        showToast(`Error al subir "${file.name}": ${err.message}`, 'error');
+      }
+    }
+  } finally {
+    if (uploadBtn) {
+      uploadBtn.disabled = false;
+      uploadBtn.classList.remove('is-loading');
+    }
+    if (progressBar) {
+      setTimeout(() => {
+        progressBar.style.display = 'none';
+        if (progressFill) progressFill.style.width = '0%';
+      }, 1200);
+    }
+    if (successCount > 0) {
+      showToast(`Se subieron con éxito ${successCount} archivo(s).`, 'success');
+    }
+    loadFiles();
   }
-  loadFiles();
 }
 
 function downloadFile(relPath) {
@@ -1695,6 +1761,12 @@ async function submitNewFolder(e) {
   const name = input ? input.value.trim() : '';
   if (!name) return;
 
+  const btn = document.getElementById('btn-submit-new-folder') || e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/files/mkdir', {
       method: 'POST',
@@ -1710,6 +1782,11 @@ async function submitNewFolder(e) {
     loadFiles();
   } catch (err) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -1728,6 +1805,12 @@ async function submitRenameFile(e) {
   const newName = document.getElementById('rename-file-newname')?.value.trim();
   if (!oldPath || !newName) return;
 
+  const btn = document.getElementById('btn-submit-rename-file') || e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/files/rename', {
       method: 'POST',
@@ -1743,6 +1826,11 @@ async function submitRenameFile(e) {
     loadFiles();
   } catch (err) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -1759,6 +1847,12 @@ function openDeleteModal(relPath, name) {
 async function confirmDeleteFile() {
   const path = document.getElementById('delete-file-path')?.value;
   if (!path) return;
+
+  const btn = document.getElementById('btn-confirm-delete');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
 
   const isPermanent = document.getElementById('del-mode-permanent')?.checked === true;
 
@@ -1781,6 +1875,11 @@ async function confirmDeleteFile() {
     updateTrashBadge();
   } catch (err) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -1846,12 +1945,15 @@ async function loadTrash() {
       return;
     }
 
-    tbody.innerHTML = items.map(item => {
+    tbody.textContent = '';
+    const range = document.createRange();
+    range.selectNodeContents(tbody);
+    const html = items.map(item => {
       const isDir = item.is_dir;
       const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
 
       return `
-        <tr data-id="${item.id}" data-filename="${escapeHtml(item.filename)}">
+        <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
           <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
           <td><strong>${escapeHtml(item.filename)}</strong></td>
           <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
@@ -1871,6 +1973,9 @@ async function loadTrash() {
         </tr>
       `;
     }).join('');
+
+    const fragment = range.createContextualFragment(html);
+    tbody.appendChild(fragment);
   } catch (err) {
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar papelera: ${escapeHtml(err.message)}</td></tr>`;
@@ -1878,15 +1983,29 @@ async function loadTrash() {
   }
 }
 
-function handleTrashAction(btn, action) {
+function selectTrashRow(tr) {
+  document.querySelectorAll('#trash-table-body tr.selected').forEach(r => r.classList.remove('selected'));
+  if (tr) tr.classList.add('selected');
+}
+
+async function handleTrashAction(btn, action) {
   const tr = btn.closest('tr');
   if (!tr) return;
   const id = parseInt(tr.getAttribute('data-id'), 10);
   const name = tr.getAttribute('data-filename') || '';
-  if (action === 'restore') {
-    restoreTrashItem(id, name);
-  } else if (action === 'delete') {
-    deleteTrashItem(id, name);
+
+  btn.disabled = true;
+  btn.classList.add('is-loading');
+
+  try {
+    if (action === 'restore') {
+      await restoreTrashItem(id, name);
+    } else if (action === 'delete') {
+      await deleteTrashItem(id, name);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
   }
 }
 
@@ -1947,6 +2066,12 @@ function openEmptyTrashModal() {
 }
 
 async function confirmEmptyTrash() {
+  const btn = document.getElementById('btn-confirm-empty-trash');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/files/trash/empty', {
       method: 'POST',
@@ -1958,6 +2083,11 @@ async function confirmEmptyTrash() {
     updateTrashBadge();
   } catch (err) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -2507,18 +2637,16 @@ function initApp() {
   document.querySelectorAll('.modal-backdrop, .modal-overlay').forEach(modal => {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) {
-        modal.classList.remove('active');
-        modal.classList.remove('open');
+        closeModal(modal.id);
       }
     });
   });
 
-  // Cerrar modal al presionar Escape
+  // Cerrar modal y previsualizador de forma inmediata al presionar Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open').forEach(modal => {
-        modal.classList.remove('active');
-        modal.classList.remove('open');
+        closeModal(modal.id);
       });
     }
   });
@@ -2527,26 +2655,42 @@ function initApp() {
   initTerminal();
   populateShareGroupOptions();
 
-  // Configurar listeners de la dropzone para Explorador de Archivos
+  // Configurar listeners de la dropzone reactiva para Explorador de Archivos
   const dropzone = document.getElementById('file-dropzone-container');
   if (dropzone) {
-    ['dragenter', 'dragover'].forEach(eventName => {
-      dropzone.addEventListener(eventName, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.add('drag-active');
-      }, false);
-    });
+    let dragCounter = 0;
+    dropzone.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      dropzone.classList.add('drag-active');
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    }, false);
 
-    ['dragleave', 'drop'].forEach(eventName => {
-      dropzone.addEventListener(eventName, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      if (!dropzone.classList.contains('drag-active')) {
+        dropzone.classList.add('drag-active');
+      }
+    }, false);
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
         dropzone.classList.remove('drag-active');
-      }, false);
-    });
+      }
+    }, false);
 
     dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0;
+      dropzone.classList.remove('drag-active');
       const dt = e.dataTransfer;
       const files = dt ? dt.files : null;
       if (files && files.length > 0) {
@@ -2554,6 +2698,18 @@ function initApp() {
       }
     }, false);
   }
+
+  // Prevenir navegación accidental del navegador al arrastrar fuera de la dropzone
+  window.addEventListener('dragover', (e) => {
+    if (AppState.activeView === 'files') {
+      e.preventDefault();
+    }
+  }, false);
+  window.addEventListener('drop', (e) => {
+    if (AppState.activeView === 'files') {
+      e.preventDefault();
+    }
+  }, false);
 
   // Inicializar estado del explorador de archivos y papelera
   setFileViewMode(AppState.files.viewMode, false);
