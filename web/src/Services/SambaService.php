@@ -337,31 +337,48 @@ class SambaService
             $buffer .= "\n";
         }
 
-        $tmpFile = tempnam(sys_get_temp_dir(), 'smbconf_');
-        if ($tmpFile === false) {
-            return ['success' => false, 'error' => 'No se pudo crear archivo temporal para smb.conf.'];
+        $lockFile = '/var/lock/nas_smbconf.lock';
+        if (DIRECTORY_SEPARATOR === '\\' || !is_dir('/var/lock') || !is_writable('/var/lock')) {
+            $lockFile = sys_get_temp_dir() . '/nas_smbconf.lock';
         }
 
-        file_put_contents($tmpFile, $buffer);
+        $lockFp = @fopen($lockFile, 'c+');
+        if ($lockFp !== false) {
+            flock($lockFp, LOCK_EX);
+        }
 
-        // Validar con testparm -s
-        $tpRes = SystemService::runCommand(['testparm', '-s', $tmpFile]);
-        if ($tpRes['code'] !== 0) {
+        try {
+            $tmpFile = tempnam(sys_get_temp_dir(), 'smbconf_');
+            if ($tmpFile === false) {
+                return ['success' => false, 'error' => 'No se pudo crear archivo temporal para smb.conf.'];
+            }
+
+            file_put_contents($tmpFile, $buffer);
+
+            // Validar con testparm -s
+            $tpRes = SystemService::runCommand(['testparm', '-s', $tmpFile]);
+            if ($tpRes['code'] !== 0) {
+                @unlink($tmpFile);
+                return [
+                    'success' => false,
+                    'error' => 'La configuración generada tiene errores de sintaxis en testparm: ' . ($tpRes['stderr'] ?: $tpRes['stdout']),
+                ];
+            }
+
+            // Copiar a /etc/samba/smb.conf con sudo
+            $cpRes = SystemService::sudo(['cp', $tmpFile, $this->confPath]);
             @unlink($tmpFile);
-            return [
-                'success' => false,
-                'error' => 'La configuración generada tiene errores de sintaxis en testparm: ' . ($tpRes['stderr'] ?: $tpRes['stdout']),
-            ];
+
+            if ($cpRes['code'] !== 0) {
+                return ['success' => false, 'error' => 'Error al escribir en ' . $this->confPath . ': ' . $cpRes['stderr']];
+            }
+
+            return ['success' => true];
+        } finally {
+            if ($lockFp !== false) {
+                flock($lockFp, LOCK_UN);
+                fclose($lockFp);
+            }
         }
-
-        // Copiar a /etc/samba/smb.conf con sudo
-        $cpRes = SystemService::sudo(['cp', $tmpFile, $this->confPath]);
-        @unlink($tmpFile);
-
-        if ($cpRes['code'] !== 0) {
-            return ['success' => false, 'error' => 'Error al escribir en ' . $this->confPath . ': ' . $cpRes['stderr']];
-        }
-
-        return ['success' => true];
     }
 }
