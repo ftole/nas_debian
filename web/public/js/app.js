@@ -49,7 +49,9 @@ function showToast(message, type = 'info') {
   toast.style.minWidth = '280px';
   toast.style.transition = 'opacity 0.3s ease';
 
-  toast.innerHTML = `<div>${message}</div>`;
+  const msgDiv = document.createElement('div');
+  msgDiv.textContent = String(message ?? '');
+  toast.appendChild(msgDiv);
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -218,17 +220,33 @@ function switchView(viewName, updateHash = true) {
 }
 
 // ==============================================================================
-// 3. Clientes API Asíncronos (Fetch)
+// 3. Clientes API Asíncronos (Fetch) & Autenticación
 // ==============================================================================
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute('content') : '';
+}
+
 async function apiFetch(endpoint, options = {}) {
   try {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    };
+
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrf = getCsrfToken();
+      if (csrf) {
+        headers['X-CSRF-Token'] = csrf;
+      }
+    }
+
     const res = await fetch(endpoint, {
       ...options,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+      method,
+      headers,
     });
 
     if (res.status === 401) {
@@ -255,6 +273,21 @@ async function apiFetch(endpoint, options = {}) {
       showToast(err.message, 'error');
     }
     throw err;
+  }
+}
+
+async function logoutSession() {
+  const btn = document.getElementById('btn-logout');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+  try {
+    await apiFetch('/logout', { method: 'POST' });
+  } catch (e) {
+    // Si la llamada falla o redirige
+  } finally {
+    window.location.href = '/login';
   }
 }
 
@@ -290,6 +323,21 @@ async function refreshDashboardMetrics() {
       if (bShares) bShares.textContent = d.counts.shares;
       if (bBackups) bBackups.textContent = d.counts.backups;
       if (bUsers) bUsers.textContent = d.counts.users;
+    }
+
+    if (d.services && Array.isArray(d.services)) {
+      const netBadges = document.getElementById('kpi-network-badges');
+      if (netBadges) {
+        netBadges.innerHTML = d.services
+          .filter(s => ['smbd', 'wsdd2', 'nginx'].includes(s.service) || (s.service && s.service.includes('fpm')))
+          .map(s => {
+            const label = (s.service && s.service.includes('fpm')) ? 'php-fpm' : s.service;
+            const cls = s.active ? 'badge-ok' : 'badge-danger';
+            const statusTxt = s.active ? ((s.service && s.service.includes('fpm')) ? 'ondemand' : 'OK') : 'OFF';
+            return `<span class="badge ${cls}">${escapeHtml(label)} ${statusTxt}</span>`;
+          })
+          .join(' ');
+      }
     }
 
     loadDashboardActivity();
@@ -1225,6 +1273,13 @@ async function loadNetworking() {
     if (d && d.system) {
       const hn = document.getElementById('masthead-hostname');
       if (hn && d.system.hostname) hn.textContent = d.system.hostname;
+      const netHn = document.getElementById('net-info-hostname');
+      if (netHn && d.system.hostname) netHn.textContent = d.system.hostname;
+      const netPath = document.getElementById('net-info-path');
+      if (netPath && d.system.hostname) {
+        const ip = d.system.ip || '10.10.1.2';
+        netPath.innerHTML = `<code>\\\\${escapeHtml(d.system.hostname)}</code> o <code>\\\\${escapeHtml(ip)}</code>`;
+      }
     }
   } catch (e) {
     // Manejado por apiFetch
@@ -1739,6 +1794,10 @@ async function uploadFiles(files) {
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', '/api/files/upload', true);
+          const csrf = getCsrfToken();
+          if (csrf) {
+            xhr.setRequestHeader('X-CSRF-Token', csrf);
+          }
 
           xhr.upload.onprogress = (evt) => {
             if (evt.lengthComputable) {
@@ -2637,11 +2696,13 @@ async function loadDiagnostics() {
     }
 
     if (container) {
-      const servicesList = Object.entries(d.services || {}).map(([svc, item]) => {
+      const servicesArray = Array.isArray(d.services) ? d.services : Object.values(d.services || {});
+      const servicesList = servicesArray.map(item => {
         const isOk = item.active;
+        const svcName = item.service || '';
         return `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border-color); font-size:13px;">
-            <span><code>${escapeHtml(svc)}</code> &bull; ${escapeHtml(item.name || '')}</span>
+            <span><code>${escapeHtml(svcName)}</code> &bull; ${escapeHtml(item.name || '')}</span>
             ${isOk ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}
           </div>
         `;
