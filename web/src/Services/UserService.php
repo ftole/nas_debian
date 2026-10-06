@@ -201,8 +201,39 @@ class UserService
     public function deleteUser(string $username): array
     {
         $username = strtolower(trim($username));
-        if ($username === 'root' || $username === 'administrador') {
-            return ['success' => false, 'error' => "Por seguridad no es posible eliminar la cuenta protegida '$username'."];
+        $protectedUsers = [
+            'root', 'administrador', 'sistemas', 'www-data', 'nobody', 'daemon',
+            'bin', 'sys', 'sync', 'games', 'man', 'lp', 'mail', 'news', 'uucp',
+            'proxy', 'backup', 'list', 'irc', 'gnats', 'systemd-network', 'systemd-resolve',
+        ];
+        if (in_array($username, $protectedUsers, true)) {
+            return ['success' => false, 'error' => "Por seguridad no es posible eliminar la cuenta protegida del sistema '$username'."];
+        }
+
+        // Evitar que el usuario autenticado elimine su propia cuenta activa
+        if (session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) {
+            $currentUser = $_SESSION['nas_user']['username'] ?? null;
+            if ($currentUser !== null && strtolower((string) $currentUser) === $username) {
+                return ['success' => false, 'error' => 'No es posible eliminar la propia cuenta de usuario activa.'];
+            }
+        }
+
+        // En entornos Linux reales, validar que no sea una cuenta de sistema (UID < 1000)
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            if (function_exists('posix_getpwnam')) {
+                $pw = @posix_getpwnam($username);
+                if (is_array($pw) && isset($pw['uid']) && (int) $pw['uid'] < 1000) {
+                    return ['success' => false, 'error' => "Por seguridad no es posible eliminar cuentas del sistema con UID menor a 1000 (UID: {$pw['uid']})."];
+                }
+            } else {
+                $idRes = SystemService::runCommand(['id', '-u', $username]);
+                if ($idRes['code'] === 0 && is_numeric(trim($idRes['stdout']))) {
+                    $uid = (int) trim($idRes['stdout']);
+                    if ($uid < 1000) {
+                        return ['success' => false, 'error' => "Por seguridad no es posible eliminar cuentas del sistema con UID menor a 1000 (UID: $uid)."];
+                    }
+                }
+            }
         }
 
         if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
