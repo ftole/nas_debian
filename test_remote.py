@@ -17,6 +17,7 @@ import argparse
 import getpass
 import http.client
 import io
+import json
 import os
 import pathlib
 import re
@@ -876,6 +877,12 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
     else:
         log_info(f"Respuesta anónima en endpoint protegido: HTTP {code_unauth}")
 
+    # Limpiar intentos previos para que la autenticación sea determinista entre ejecuciones.
+    manager.run_command(
+        "sqlite3 /var/lib/nas/nas.sqlite 'DELETE FROM login_attempts;' 2>/dev/null || true",
+        sudo=True, timeout=10,
+    )
+
     # 4. Prueba de Autenticación Válida (Login)
     log_info(f"Auditoría 4: Probando autenticación válida en /api/auth/login como '{manager.user}'...")
     auth_success = False
@@ -895,9 +902,11 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
         req_auth = urllib.request.Request(f"https://{host_ip}:{https_port}/api/auth/login", data=login_payload, headers=login_headers)
         with urllib.request.urlopen(req_auth, context=ssl_ctx, timeout=8) as r_login:
             if r_login.status == 200:
-                raw_new_cookie = dict(r_login.getheaders()).get("set-cookie", "")
-                if raw_new_cookie:
-                    session_cookie = raw_new_cookie.split(";")[0]
+                # session_regenerate_id(true) emite una cookie nueva: capturarla sin
+                # depender del uso de mayúsculas/minúsculas del encabezado Set-Cookie.
+                for _hk, _hv in r_login.getheaders():
+                    if _hk.lower() == "set-cookie" and "PHPSESSID" in _hv:
+                        session_cookie = _hv.split(";")[0]
                 auth_success = True
                 log_success(f"Autenticación exitosa en panel web: HTTP 200 OK (Usuario: {manager.user})")
     except Exception as ex_auth:
@@ -914,6 +923,72 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
 
     if not auth_success:
         log_warn("No se pudo verificar el inicio de sesión en el panel web con las credenciales configuradas.")
+
+    # 4.1 Prueba End-to-End de ESCRITURA (ejercita el sudo de www-data: mkdir/chown/chmod/cp/reload)
+    log_info("Auditoría 4.1: Creación/borrado E2E de un recurso compartido temporal...")
+    e2e_write_ok = False
+    share_e2e = "NAS_E2E_TMP"
+    if auth_success and session_cookie:
+        csrf_live = csrf_token
+        try:
+            req_dash = urllib.request.Request(
+                f"https://{host_ip}:{https_port}/",
+                headers={"Cookie": session_cookie, "User-Agent": "NAS-Debian-Tester/1.0"},
+            )
+            with urllib.request.urlopen(req_dash, context=ssl_ctx, timeout=10) as rd:
+                dash_body = rd.read().decode("utf-8", errors="replace")
+            m_dash = re.search(r'name="csrf-token"\s+content="([a-f0-9]{64})"', dash_body, re.IGNORECASE)
+            if m_dash:
+                csrf_live = m_dash.group(1)
+        except Exception as e_dash:
+            log_warn(f"No se pudo leer el token CSRF del dashboard: {e_dash}")
+
+        base_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-CSRF-Token": csrf_live,
+            "Cookie": session_cookie,
+            "User-Agent": "NAS-Debian-Tester/1.0",
+        }
+        try:
+            create_payload = json.dumps({
+                "name": share_e2e,
+                "comment": "Recurso temporal de prueba E2E",
+                "scheme": 1,
+                "groups": ["grp_sistemas"],
+                "hidden": False,
+            }).encode("utf-8")
+            req_create = urllib.request.Request(
+                f"https://{host_ip}:{https_port}/api/shares",
+                data=create_payload, headers=base_headers, method="POST",
+            )
+            with urllib.request.urlopen(req_create, context=ssl_ctx, timeout=20) as rc:
+                body_create = rc.read().decode("utf-8", errors="replace")
+            if '"success":true' in body_create:
+                log_success("Recurso temporal creado vía API: sudo de www-data operativo.")
+                e2e_write_ok = True
+            else:
+                log_error(f"Creación de recurso E2E no confirmada: {body_create[:200]}")
+
+            del_payload = json.dumps({"name": share_e2e, "delete_files": True}).encode("utf-8")
+            req_del = urllib.request.Request(
+                f"https://{host_ip}:{https_port}/api/shares/delete",
+                data=del_payload, headers=base_headers, method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_del, context=ssl_ctx, timeout=20).read()
+                log_success("Recurso temporal E2E eliminado correctamente.")
+            except Exception as e_del:
+                log_warn(f"No se pudo eliminar el recurso E2E {share_e2e}: {e_del}")
+        except urllib.error.HTTPError as he:
+            log_error(f"Fallo E2E de escritura (HTTP {he.code}): revise la sesión autenticada y el sudoers de www-data.")
+        except Exception as e_c:
+            log_error(f"Fallo E2E de creación de recurso: {e_c}")
+    else:
+        log_warn("E2E de escritura omitido: no se dispone de sesión autenticada.")
+
+    if auth_success and not e2e_write_ok:
+        all_ok = False
 
     # 5. Consulta de Endpoints de la API
     log_info("Auditoría 5: Verificando disponibilidad de endpoints JSON de la API...")
