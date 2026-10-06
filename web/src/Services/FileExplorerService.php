@@ -876,7 +876,12 @@ class FileExplorerService
 
             http_response_code(206);
             header('Content-Type: ' . $contentType);
-            header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+            if ($ext === 'svg') {
+                header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
+                header("Content-Security-Policy: default-src 'none'; sandbox");
+            } else {
+                header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+            }
             header('Accept-Ranges: bytes');
             header("Content-Range: bytes {$start}-{$end}/{$size}");
             header('Content-Length: ' . $length);
@@ -902,7 +907,12 @@ class FileExplorerService
         }
 
         header('Content-Type: ' . $contentType);
-        header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+        if ($ext === 'svg') {
+            header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
+            header("Content-Security-Policy: default-src 'none'; sandbox");
+        } else {
+            header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+        }
         header('Accept-Ranges: bytes');
         header('Cache-Control: private, max-age=3600');
         if ($size !== false) {
@@ -957,10 +967,26 @@ class FileExplorerService
         $maxZipSize = 500 * 1024 * 1024; // Límite de seguridad: 500 MB
         $addedEntries = 0;
 
+        $realTargetDir = realpath($targetDir);
+        if ($realTargetDir === false) {
+            http_response_code(404);
+            echo 'Directorio no encontrado.';
+            return;
+        }
+
         foreach ($files as $file) {
             if (!$file->isDir()) {
                 $filePath = $file->getRealPath();
-                $relativePath = substr($filePath, strlen($targetDir) + 1);
+                if ($filePath === false) {
+                    continue;
+                }
+
+                // Verificar canónicamente que el archivo resida dentro de $realTargetDir (bloquear symlinks externos)
+                if (!str_starts_with($filePath, $realTargetDir . DIRECTORY_SEPARATOR) && !str_starts_with($filePath, $realTargetDir . '/')) {
+                    continue;
+                }
+
+                $relativePath = substr($filePath, strlen($realTargetDir) + 1);
                 $totalSize += $file->getSize();
 
                 if ($totalSize > $maxZipSize) {
@@ -1074,7 +1100,7 @@ class FileExplorerService
         return $size;
     }
 
-    private function detectFileType(string $filename, bool $isDir): string
+    public function detectFileType(string $filename, bool $isDir): string
     {
         if ($isDir) {
             return 'folder';
