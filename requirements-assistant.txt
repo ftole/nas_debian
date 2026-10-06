@@ -1,0 +1,5 @@
+# Dependencias para el Asistente de Administración Remota NAS (Windows)
+# Se empaqueta con PyInstaller; PyInstaller se instala en el job de build.
+paramiko>=3.4.0
+keyring>=24.0.0
+colorama>=0.4.6
