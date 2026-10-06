@@ -46,8 +46,8 @@ class AuthService
             ];
         }
 
-        // Modo suite de pruebas unitarias o desarrollo explícito
-        if ($this->dryRun || getenv('APP_ENV') === 'testing') {
+        // Modo suite de pruebas unitarias explícito
+        if (getenv('APP_ENV') === 'testing') {
             if (isset(self::$mockUsers[$cleanUsername])) {
                 $expected = self::$mockUsers[$cleanUsername];
                 if ($password === $expected || ($cleanUsername === 'administrador' && in_array($password, ['Admin123#', 'admin123', 'Ead2026#'], true))) {
