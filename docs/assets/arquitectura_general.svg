@@ -41,17 +41,17 @@
     <!-- Caja 1.1 -->
     <rect x="20" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="34" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Equipos Windows (SMB 3.1.1)</text>
-    <text x="235" y="60" fill="#94a3b8" font-size="10">+100 puestos</text>
+    <text x="278" y="60" text-anchor="end" fill="#94a3b8" font-size="10">+100 puestos</text>
 
     <!-- Caja 1.2 -->
     <rect x="315" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="329" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Servidores Linux (SSH / rsync)</text>
-    <text x="525" y="60" fill="#94a3b8" font-size="10">Llaves/TOFU</text>
+    <text x="573" y="60" text-anchor="end" fill="#94a3b8" font-size="10">Llaves/TOFU</text>
 
     <!-- Caja 1.3 -->
     <rect x="610" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="624" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
-    <text x="825" y="60" fill="#94a3b8" font-size="10">HTTPS / CLI</text>
+    <text x="868" y="60" text-anchor="end" fill="#94a3b8" font-size="10">HTTPS / CLI</text>
   </g>
 
   <!-- Capa 2: Interfaces de Gestión -->
@@ -89,22 +89,22 @@
     <text x="30" y="85" fill="#10b981" font-size="9.5">+100 puestos Excel sin lock</text>
 
     <!-- Motor de Backups -->
-    <rect x="245" y="36" width="215" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="255" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
-    <text x="255" y="70" fill="#94a3b8" font-size="10">rsync --link-dest (Hardlinks)</text>
-    <text x="255" y="85" fill="#38bdf8" font-size="9.5">Staging atómico .inprogress</text>
+    <rect x="240" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="250" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
+    <text x="250" y="70" fill="#94a3b8" font-size="10">rsync --link-dest (Hardlinks)</text>
+    <text x="250" y="85" fill="#38bdf8" font-size="9.5">Staging atómico .inprogress</text>
 
     <!-- Active Directory & Red -->
-    <rect x="480" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="490" y="54" fill="#f8fafc" font-size="12" font-weight="600">AD &amp; Descubrimiento</text>
-    <text x="490" y="70" fill="#94a3b8" font-size="10">realmd / sssd / adcli</text>
-    <text x="490" y="85" fill="#f59e0b" font-size="9.5">WSDD2 con override systemd</text>
+    <rect x="460" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="470" y="54" fill="#f8fafc" font-size="12" font-weight="600">AD &amp; Descubrimiento</text>
+    <text x="470" y="70" fill="#94a3b8" font-size="10">realmd / sssd / adcli</text>
+    <text x="470" y="85" fill="#f59e0b" font-size="9.5">WSDD2 con override systemd</text>
 
     <!-- SQLite WAL & Seguridad -->
-    <rect x="705" y="36" width="175" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="715" y="54" fill="#f8fafc" font-size="12" font-weight="600">SQLite WAL &amp; Aud</text>
-    <text x="715" y="70" fill="#94a3b8" font-size="10">nas.sqlite (0MB en reposo)</text>
-    <text x="715" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + proc_open</text>
+    <rect x="680" y="36" width="200" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="692" y="54" fill="#f8fafc" font-size="12" font-weight="600">SQLite WAL &amp; Aud</text>
+    <text x="692" y="70" fill="#94a3b8" font-size="10">nas.sqlite (~0MB reposo)</text>
+    <text x="692" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + proc_open</text>
   </g>
 
   <!-- Capa 4: Kernel y Almacenamiento -->
