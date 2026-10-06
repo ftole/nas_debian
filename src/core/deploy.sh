@@ -463,6 +463,23 @@ rm -rf /var/www/nas-web/*
 if [ -n "$WEB_SRC" ] && [ -d "$WEB_SRC" ]; then
     cp -rf "$WEB_SRC/"* /var/www/nas-web/
 fi
+
+GIT_COMMIT="release"
+GIT_DATE="$(date +%Y-%m-%d)"
+if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    GIT_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "release")
+    GIT_DATE=$(git -C "$REPO_ROOT" log -1 --format=%cd --date=short 2>/dev/null || date +%Y-%m-%d)
+fi
+
+cat << VERSION_EOF > /var/www/nas-web/version.json
+{
+  "version": "1.0.0",
+  "commit": "$GIT_COMMIT",
+  "date": "$GIT_DATE",
+  "channel": "GitHub main"
+}
+VERSION_EOF
+
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
 usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || true
@@ -481,35 +498,12 @@ fi
 # 4. Configurar Host Virtual de Nginx (HTTP + HTTPS)
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
-# 1. Servidor HTTP (Puerto 80)
+# 1. Servidor HTTP (Puerto 80: Redirección forzada a HTTPS)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    root /var/www/nas-web/public;
-    index index.php index.html;
-
-    # Cabeceras de seguridad
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    client_max_body_size 512M;
-
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php-fpm-nas.sock;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-
-    location ~ /\. {
-        deny all;
-    }
+    return 301 https://$host$request_uri;
 }
 
 # 2. Servidor HTTPS (Puerto 443)
@@ -526,6 +520,7 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     # Cabeceras de seguridad
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
@@ -553,61 +548,74 @@ rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 
 # 5. Configurar sudoers para www-data con permisos acotados y seguros
-cat << 'SUDOERS_EOF' > /etc/sudoers.d/nas-web
-Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \
-    /bin/systemctl restart smbd, /usr/bin/systemctl restart smbd, \
-    /bin/systemctl restart nmbd, /usr/bin/systemctl restart nmbd, \
-    /bin/systemctl restart wsdd2, /usr/bin/systemctl restart wsdd2, \
-    /bin/systemctl restart nginx, /usr/bin/systemctl restart nginx, \
-    /bin/systemctl start smbd, /usr/bin/systemctl start smbd, \
-    /bin/systemctl start nmbd, /usr/bin/systemctl start nmbd, \
-    /bin/systemctl start wsdd2, /usr/bin/systemctl start wsdd2, \
-    /bin/systemctl start nginx, /usr/bin/systemctl start nginx, \
-    /bin/systemctl stop smbd, /usr/bin/systemctl stop smbd, \
-    /bin/systemctl stop nmbd, /usr/bin/systemctl stop nmbd, \
-    /bin/systemctl stop wsdd2, /usr/bin/systemctl stop wsdd2, \
-    /bin/systemctl stop nginx, /usr/bin/systemctl stop nginx, \
-    /bin/systemctl restart php*-fpm*, /usr/bin/systemctl restart php*-fpm*, \
-    /bin/systemctl reload php*-fpm*, /usr/bin/systemctl reload php*-fpm*, \
-    /bin/systemctl start php*-fpm*, /usr/bin/systemctl start php*-fpm*, \
-    /bin/systemctl stop php*-fpm*, /usr/bin/systemctl stop php*-fpm*, \
-    /bin/systemctl restart cron, /usr/bin/systemctl restart cron, \
-    /bin/systemctl start cron, /usr/bin/systemctl start cron, \
-    /bin/systemctl stop cron, /usr/bin/systemctl stop cron, \
-    /bin/systemctl status smbd, /usr/bin/systemctl status smbd, \
-    /bin/systemctl status nmbd, /usr/bin/systemctl status nmbd, \
-    /bin/systemctl status wsdd2, /usr/bin/systemctl status wsdd2, \
-    /bin/systemctl status nginx, /usr/bin/systemctl status nginx, \
-    /bin/systemctl status cron, /usr/bin/systemctl status cron, \
-    /bin/systemctl status php*-fpm*, /usr/bin/systemctl status php*-fpm*, \
+cat << SUDOERS_EOF > /etc/sudoers.d/nas-web
+Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \\
+    /bin/systemctl restart smbd, /usr/bin/systemctl restart smbd, \\
+    /bin/systemctl restart nmbd, /usr/bin/systemctl restart nmbd, \\
+    /bin/systemctl restart wsdd2, /usr/bin/systemctl restart wsdd2, \\
+    /bin/systemctl restart nginx, /usr/bin/systemctl restart nginx, \\
+    /bin/systemctl start smbd, /usr/bin/systemctl start smbd, \\
+    /bin/systemctl start nmbd, /usr/bin/systemctl start nmbd, \\
+    /bin/systemctl start wsdd2, /usr/bin/systemctl start wsdd2, \\
+    /bin/systemctl start nginx, /usr/bin/systemctl start nginx, \\
+    /bin/systemctl stop smbd, /usr/bin/systemctl stop smbd, \\
+    /bin/systemctl stop nmbd, /usr/bin/systemctl stop nmbd, \\
+    /bin/systemctl stop wsdd2, /usr/bin/systemctl stop wsdd2, \\
+    /bin/systemctl stop nginx, /usr/bin/systemctl stop nginx, \\
+    /bin/systemctl restart php${PHP_VER}-fpm, /usr/bin/systemctl restart php${PHP_VER}-fpm, \\
+    /bin/systemctl reload php${PHP_VER}-fpm, /usr/bin/systemctl reload php${PHP_VER}-fpm, \\
+    /bin/systemctl start php${PHP_VER}-fpm, /usr/bin/systemctl start php${PHP_VER}-fpm, \\
+    /bin/systemctl stop php${PHP_VER}-fpm, /usr/bin/systemctl stop php${PHP_VER}-fpm, \\
+    /bin/systemctl status php${PHP_VER}-fpm, /usr/bin/systemctl status php${PHP_VER}-fpm, \\
+    /bin/systemctl restart cron, /usr/bin/systemctl restart cron, \\
+    /bin/systemctl start cron, /usr/bin/systemctl start cron, \\
+    /bin/systemctl stop cron, /usr/bin/systemctl stop cron, \\
+    /bin/systemctl status smbd, /usr/bin/systemctl status smbd, \\
+    /bin/systemctl status nmbd, /usr/bin/systemctl status nmbd, \\
+    /bin/systemctl status wsdd2, /usr/bin/systemctl status wsdd2, \\
+    /bin/systemctl status nginx, /usr/bin/systemctl status nginx, \\
+    /bin/systemctl status cron, /usr/bin/systemctl status cron, \\
     /sbin/reboot, /usr/sbin/reboot, /bin/systemctl reboot, /usr/bin/systemctl reboot
-Cmnd_Alias NAS_SERVICES_AD = /bin/systemctl restart sssd, /usr/bin/systemctl restart sssd, \
-    /bin/systemctl status sssd, /usr/bin/systemctl status sssd, \
-    /bin/systemctl stop sssd, /usr/bin/systemctl stop sssd, \
+Cmnd_Alias NAS_SERVICES_AD = /bin/systemctl restart sssd, /usr/bin/systemctl restart sssd, \\
+    /bin/systemctl status sssd, /usr/bin/systemctl status sssd, \\
+    /bin/systemctl stop sssd, /usr/bin/systemctl stop sssd, \\
     /bin/systemctl start sssd, /usr/bin/systemctl start sssd
-Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm *, /usr/bin/realm *, /usr/sbin/adcli *, /usr/bin/adcli *, /usr/bin/kinit *, /usr/bin/klist *
-Cmnd_Alias NAS_SAMBA = /usr/bin/testparm *, /usr/bin/smbstatus *, /usr/bin/pdbedit *, /usr/bin/smbpasswd *, /usr/bin/smbclient *
-Cmnd_Alias NAS_USERS = /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/usermod *, /usr/sbin/groupadd *, /usr/sbin/groupdel *, /usr/bin/gpasswd *, /usr/bin/passwd *, /usr/sbin/chpasswd
-Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub *, /bin/btrfs scrub *, /sbin/fstrim *, /usr/sbin/fstrim *, /bin/df *, /bin/lsblk *, /usr/bin/smartctl *
-Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_*.sh, \
-    /bin/cp /tmp/nas_* /etc/cron.d/backup_*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_*, \
-    /bin/cp /tmp/nas_* /usr/local/bin/backup_*.sh, /usr/bin/cp /tmp/nas_* /usr/local/bin/backup_*.sh, \
-    /bin/cp /tmp/nas_* /etc/backup-credentials/*, /usr/bin/cp /tmp/nas_* /etc/backup-credentials/*, \
-    /bin/chmod * /etc/backup-credentials/*, /usr/bin/chmod * /etc/backup-credentials/*, \
-    /bin/chmod * /usr/local/bin/backup_*.sh, /usr/bin/chmod * /usr/local/bin/backup_*.sh, \
-    /bin/chmod * /etc/cron.d/backup_*, /usr/bin/chmod * /etc/cron.d/backup_*, \
-    /bin/rm -f /etc/cron.d/backup_*, /usr/bin/rm -f /etc/cron.d/backup_*, \
-    /bin/rm -f /usr/local/bin/backup_*.sh, /usr/bin/rm -f /usr/local/bin/backup_*.sh, \
-    /bin/rm -f /etc/backup-credentials/*, /usr/bin/rm -f /etc/backup-credentials/*, \
-    /bin/rm -f /var/lock/backup_*.lock, /usr/bin/rm -f /var/lock/backup_*.lock, \
-    /bin/mkdir -p /etc/backup-credentials*, /usr/bin/mkdir -p /etc/backup-credentials*, \
-    /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
-Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \
-    /bin/mkdir -p /srv/nas/*, /usr/bin/mkdir -p /srv/nas/*, \
-    /bin/chmod * /srv/nas/*, /usr/bin/chmod * /srv/nas/*, \
-    /bin/chown * /srv/nas/*, /usr/bin/chown * /srv/nas/*, \
-    /usr/bin/setfacl * /srv/nas/*, /bin/setfacl * /srv/nas/*, \
-    /bin/rm -rf /srv/nas/*, /usr/bin/rm -rf /srv/nas/*
+Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm list, /usr/sbin/realm join [a-zA-Z0-9_.-]*, /usr/sbin/realm leave, /usr/sbin/realm leave [a-zA-Z0-9_.-]*, \\
+    /usr/bin/realm list, /usr/bin/realm join [a-zA-Z0-9_.-]*, /usr/bin/realm leave, /usr/bin/realm leave [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/adcli info [a-zA-Z0-9_.-]*, /usr/bin/adcli info [a-zA-Z0-9_.-]*, \\
+    /usr/bin/kinit [a-zA-Z0-9_.-]*, /usr/bin/klist
+Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstatus, /usr/bin/pdbedit -L -s, \\
+    /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
+    /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
+Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/sbin/userdel -r [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -aG [a-zA-Z0-9_,.-]* [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd
+Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
+    /usr/bin/btrfs scrub status /srv/nas*, /bin/btrfs scrub status /srv/nas*, \\
+    /sbin/fstrim -v /srv/nas*, /usr/sbin/fstrim -v /srv/nas*
+Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
+    /bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
+    /bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
+    /bin/cp /tmp/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/cp /tmp/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
+    /bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
+    /bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
+    /bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
+    /bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
+    /bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
+    /bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
+    /bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, /usr/bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, \\
+    /bin/mkdir -p /etc/backup-credentials, /usr/bin/mkdir -p /etc/backup-credentials, \\
+    /bin/mkdir -p /usr/local/bin, /usr/bin/mkdir -p /usr/local/bin, \\
+    /bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
+    /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
+Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \\
+    /bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chown root:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /usr/bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /usr/bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*
 
 www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
 SUDOERS_EOF
