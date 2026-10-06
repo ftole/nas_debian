@@ -220,6 +220,11 @@ class BackupService
      */
     public function deleteTask(string $taskId, bool $deleteBackups = false): array
     {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return ['success' => false, 'error' => 'Identificador de tarea inválido.'];
+        }
+
         $runner = $this->binDir . '/backup_' . $taskId . '.sh';
         $cron = $this->cronDir . '/backup_' . $taskId;
         $cred = $this->credDir . '/' . $taskId . '.cred';
@@ -281,6 +286,11 @@ class BackupService
      */
     public function getTaskLogs(string $taskId, int $lines = 100): string
     {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return '';
+        }
+
         $logFile = $this->logRoot . '/backup_' . $taskId . '.log';
         if (DIRECTORY_SEPARATOR === '\\' || !file_exists($logFile)) {
             return "[2026-10-02 23:00:01] === INICIANDO BACKUP: {$taskId} ===\n" .
