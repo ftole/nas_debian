@@ -162,6 +162,14 @@ CREATE TABLE IF NOT EXISTS trash_items (
     deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash_items(deleted_at DESC);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT NOT NULL,
+    username TEXT NOT NULL,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(ip, attempted_at DESC);
 SQL;
 
         $pdo->exec($schema);
