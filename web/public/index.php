@@ -59,7 +59,9 @@ $request = new Request();
 $router = new Router();
 
 // Middleware de autenticación y protección de sesiones
-AuthMiddleware::check($request);
+if (!AuthMiddleware::check($request)) {
+    return;
+}
 
 // Rutas de Autenticación (Login, Logout, Sesión)
 $router->get('/login', [AuthController::class, 'showLogin']);
