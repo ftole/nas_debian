@@ -59,16 +59,22 @@ class BackupController
             return;
         }
 
+        $cleanId = strtolower(trim((string) $id));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $cleanId)) {
+            Response::error('Identificador de tarea inválido.');
+            return;
+        }
+
         $deleteBackups = (bool) $request->get('delete_backups', false);
-        $res = $this->backup->deleteTask($id, $deleteBackups);
+        $res = $this->backup->deleteTask($cleanId, $deleteBackups);
 
         if (!$res['success']) {
-            AuditService::log('backup_delete', $id, 'FAILED', ['error' => $res['error'] ?? '']);
+            AuditService::log('backup_delete', $cleanId, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al eliminar tarea de backup.');
             return;
         }
 
-        AuditService::log('backup_delete', $id, 'SUCCESS', ['delete_backups' => $deleteBackups]);
+        AuditService::log('backup_delete', $cleanId, 'SUCCESS', ['delete_backups' => $deleteBackups]);
         Response::success(null, $res['message'] ?? 'Tarea eliminada.');
     }
 
@@ -80,14 +86,20 @@ class BackupController
             return;
         }
 
-        $res = $this->backup->runTaskNow($id);
+        $cleanId = strtolower(trim((string) $id));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $cleanId)) {
+            Response::error('Identificador de tarea inválido.');
+            return;
+        }
+
+        $res = $this->backup->runTaskNow($cleanId);
         if (!$res['success']) {
-            AuditService::log('backup_run_manual', $id, 'FAILED', ['error' => $res['error'] ?? '']);
+            AuditService::log('backup_run_manual', $cleanId, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al lanzar respaldo.');
             return;
         }
 
-        AuditService::log('backup_run_manual', $id, 'SUCCESS');
+        AuditService::log('backup_run_manual', $cleanId, 'SUCCESS');
         Response::success(null, $res['message'] ?? 'Respaldo iniciado.');
     }
 
@@ -99,9 +111,15 @@ class BackupController
             return;
         }
 
-        $lines = (int) $request->getQuery('lines', 100);
-        $logs = $this->backup->getTaskLogs($id, $lines);
+        $cleanId = strtolower(trim((string) $id));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $cleanId)) {
+            Response::error('Identificador de tarea inválido.');
+            return;
+        }
 
-        Response::success(['id' => $id, 'logs' => $logs]);
+        $lines = (int) $request->getQuery('lines', 100);
+        $logs = $this->backup->getTaskLogs($cleanId, $lines);
+
+        Response::success(['id' => $cleanId, 'logs' => $logs]);
     }
 }
