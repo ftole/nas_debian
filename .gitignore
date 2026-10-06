@@ -12,3 +12,10 @@ web/data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Entorno de pruebas y credenciales locales
+.env
+.env.*
+!.env.example
+.nas_known_hosts
+
