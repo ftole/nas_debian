@@ -614,11 +614,21 @@ code, kbd, pre, samp {
   padding: 6px 12px;
   font-size: var(--font-size-xs);
 }
-.btn:disabled,
-.btn.is-loading {
+.btn:disabled {
   opacity: 0.65;
   cursor: not-allowed !important;
   pointer-events: none;
+}
+.btn.is-loading {
+  opacity: 0.7;
+  cursor: not-allowed !important;
+  pointer-events: none;
+  animation: btnLoadingPulse 1.2s infinite ease-in-out;
+}
+@keyframes btnLoadingPulse {
+  0% { opacity: 0.7; }
+  50% { opacity: 0.38; }
+  100% { opacity: 0.7; }
 }
 .btn:active:not(:disabled) {
   transform: translateY(1px);
@@ -935,6 +945,8 @@ code, kbd, pre, samp {
 }
 .nas-table tbody tr.file-table-row.selected {
   background-color: var(--bg-selected) !important;
+}
+.nas-table tbody tr.file-table-row.selected td:first-child {
   border-left: 3px solid var(--accent-primary);
 }
 
@@ -950,7 +962,16 @@ code, kbd, pre, samp {
 }
 .nas-table tbody tr.trash-table-row.selected {
   background-color: rgba(245, 158, 11, 0.14) !important;
+}
+.nas-table tbody tr.trash-table-row.selected td:first-child {
   border-left: 3px solid var(--accent-warning);
+}
+
+.file-card:focus-visible,
+.nas-table tbody tr.file-table-row:focus-visible,
+.nas-table tbody tr.trash-table-row:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -1px;
 }
 
 .file-row-name {
