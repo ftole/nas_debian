@@ -33,45 +33,97 @@ class AuthMiddleware
 
             @session_start();
         }
+
+        if (empty($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+    }
+
+    /**
+     * Obtiene el token CSRF actual de la sesión, generándolo si aún no existiera.
+     */
+    public static function getCsrfToken(): string
+    {
+        self::initSession();
+        if (empty($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+        return (string) $_SESSION['csrf_token'];
+    }
+
+    /**
+     * Valida de manera segura en tiempo constante un token CSRF provisto.
+     */
+    public static function verifyCsrfToken(?string $token): bool
+    {
+        self::initSession();
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        if (empty($sessionToken) || empty($token)) {
+            return false;
+        }
+        return hash_equals($sessionToken, $token);
     }
 
     /**
      * Valida si la petición actual está autorizada para continuar.
      *
      * @param Request $request
-     * @return bool True si la petición procede, o detiene la ejecución emitiendo 401 o redirección.
+     * @return bool True si la petición procede, o detiene la ejecución emitiendo 401/403 o redirección.
      */
     public static function check(Request $request): bool
     {
         self::initSession();
 
         $path = $request->getPath();
+        $method = $request->getMethod();
 
         // Rutas públicas exentas de autenticación
         $publicPaths = [
             '/login',
             '/api/auth/login',
-            '/logout',
-            '/api/auth/logout',
         ];
 
-        if (in_array($path, $publicPaths, true)) {
-            return true;
+        $isPublic = in_array($path, $publicPaths, true);
+
+        // Si no es ruta pública, requerir sesión de usuario activa
+        if (!$isPublic) {
+            if (empty($_SESSION['nas_user']) || !is_array($_SESSION['nas_user'])) {
+                if ($request->isJson()) {
+                    Response::error('Acceso no autorizado. Inicia sesión en el panel para continuar.', 401);
+                } else {
+                    if (!headers_sent()) {
+                        header('Location: /login');
+                    }
+                    if (getenv('APP_ENV') !== 'testing') {
+                        exit;
+                    }
+                }
+                return false;
+            }
         }
 
-        // Verificar existencia de usuario autenticado en la sesión
-        if (!empty($_SESSION['nas_user']) && is_array($_SESSION['nas_user'])) {
-            return true;
+        // Validación estricta de CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
+        if (in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
+            // Permitir formulario y API pública de login sin token CSRF previo
+            if ($path !== '/login' && $path !== '/api/auth/login') {
+                $token = $request->getCsrfToken();
+                if (!self::verifyCsrfToken($token)) {
+                    if ($request->isJson()) {
+                        Response::error('Token CSRF inválido o ausente.', 403);
+                    } else {
+                        if (!headers_sent()) {
+                            http_response_code(403);
+                        }
+                        echo '<h1>403 - Solicitud rechazada (Token CSRF inválido)</h1>';
+                        if (getenv('APP_ENV') !== 'testing') {
+                            exit;
+                        }
+                    }
+                    return false;
+                }
+            }
         }
 
-        // Petición no autenticada: Responder JSON 401 o redireccionar a /login
-        if ($request->isJson()) {
-            Response::error('Acceso no autorizado. Inicia sesión en el panel para continuar.', 401);
-        } else {
-            header('Location: /login');
-            exit;
-        }
-
-        return false;
+        return true;
     }
 }
