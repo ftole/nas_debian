@@ -109,8 +109,10 @@ fi
 # un wrapper (mediante dpkg-divert) que delega en el binario original únicamente
 # cuando el equipo está unido a un dominio Active Directory.
 if [ -x /usr/sbin/sss_cache ] && [ ! -e /usr/sbin/sss_cache.distrib ]; then
-    if dpkg-divert --local --rename --add /usr/sbin/sss_cache >/dev/null 2>&1; then
-        cat << 'SSS_CACHE_EOF' > /usr/sbin/sss_cache
+    dpkg-divert --local --rename --add /usr/sbin/sss_cache >/dev/null 2>&1 || true
+fi
+if [ -x /usr/sbin/sss_cache.distrib ]; then
+    cat << 'SSS_CACHE_EOF' > /usr/sbin/sss_cache
 #!/bin/bash
 # Wrapper NAS: solo invalida la caché de SSSD si el equipo está unido a un dominio.
 if [ -f /etc/sssd/sssd.conf ]; then
@@ -118,8 +120,7 @@ if [ -f /etc/sssd/sssd.conf ]; then
 fi
 exit 0
 SSS_CACHE_EOF
-        chmod 0755 /usr/sbin/sss_cache
-    fi
+    chmod 0755 /usr/sbin/sss_cache
 fi
 
 auto_tune_hardware() {
