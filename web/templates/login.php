@@ -203,6 +203,7 @@ $safeServerIp = htmlspecialchars((string) ($serverIp ?? '10.10.1.2'), ENT_QUOTES
         </div>
 
         <form id="login-form" method="POST" action="/login">
+          <input type="hidden" name="csrf_token" id="csrf_token" value="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
           <div class="form-group" style="margin-bottom:16px;">
             <label for="username">Usuario del sistema:</label>
             <div class="input-with-icon">
@@ -265,7 +266,8 @@ $safeServerIp = htmlspecialchars((string) ($serverIp ?? '10.10.1.2'), ENT_QUOTES
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'X-CSRF-Token': document.getElementById('csrf_token') ? document.getElementById('csrf_token').value : ''
           },
           body: JSON.stringify({ username: user, password: pass })
         });
