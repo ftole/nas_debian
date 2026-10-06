@@ -284,3 +284,27 @@ def test_test_backups_dedup_success() -> None:
         ]
         result = test_remote.test_backups_action(manager)
         assert result is True
+
+
+def test_connection_reintenta_sudo_con_contrasena_del_usuario() -> None:
+    config = {
+        "NAS_TEST_IP": "10.10.1.2",
+        "NAS_TEST_PORT": 22,
+        "NAS_TEST_USER": "sistemas",
+        "NAS_TEST_PASSWORD": "clave_usuario",
+        "NAS_ROOT_PASSWORD": "clave_root_incorrecta",
+    }
+    manager = test_remote.SSHManager(config)
+
+    with mock.patch.object(manager, "connect"):
+        with mock.patch.object(manager, "run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "sistemas\n", ""),
+                (1, "", "sudo: 1 incorrect password attempt"),
+                (0, "0\n", ""),
+            ]
+            ok, msg = manager.test_connection()
+
+    assert ok is True
+    assert manager.root_password == "clave_usuario"
+    assert "contraseña del usuario SSH" in msg
