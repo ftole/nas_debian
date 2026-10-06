@@ -358,7 +358,15 @@ class SSHManager:
                 code_sudo, out_sudo, err_sudo = self.run_command("id -u", sudo=True, timeout=10)
 
             if code_sudo != 0 or out_sudo.strip() != "0":
-                return (False, f"Autenticación sudo falló con contraseña provista: {err_sudo.strip()}")
+                # sudo valida la contraseña del propio usuario SSH, no la de root.
+                if self.user != "root" and self.password and self.root_password != self.password:
+                    self.root_password = self.password
+                    code_sudo, out_sudo, err_sudo = self.run_command("id -u", sudo=True, timeout=10)
+                    if code_sudo == 0 and out_sudo.strip() == "0":
+                        return (True, f"Conexión exitosa como '{remote_user}'. sudo aceptó la contraseña del usuario SSH "
+                                      "(la contraseña de root indicada no es necesaria para sudo).")
+                return (False, f"Autenticación sudo falló: {err_sudo.strip()}\n"
+                               f"    Nota: sudo pide la contraseña de '{self.user}', no la de root.")
 
             return (True, f"Conexión exitosa como '{remote_user}' con privilegios sudo totales.")
         except Exception as e:
@@ -528,8 +536,13 @@ def interactive_configure(current: Optional[Dict[str, Any]] = None, env_path: Op
     user_pass = getpass.getpass(pass_prompt)
     if not user_pass and curr.get("NAS_TEST_PASSWORD"):
         user_pass = curr["NAS_TEST_PASSWORD"]
+    while not user_pass:
+        log_warn("La contraseña SSH no puede estar vacía (si pegaste con el portapapeles, prueba escribirla).")
+        user_pass = getpass.getpass(" [?] Contraseña SSH: ")
+    print(f" [•] Contraseña SSH recibida ({len(user_pass)} caracteres).")
 
-    root_prompt = " [?] Contraseña de root / sudo [Enter si es la misma del usuario]: "
+    root_prompt = (" [?] Contraseña para sudo [Enter = la misma del usuario SSH; "
+                   "sudo valida la del usuario, no la de root]: ")
     root_pass = getpass.getpass(root_prompt)
     if not root_pass:
         root_pass = user_pass
@@ -545,6 +558,7 @@ def interactive_configure(current: Optional[Dict[str, Any]] = None, env_path: Op
     log_info("Comprobando conectividad SSH y permisos de root en el servidor remoto...")
     manager = SSHManager(candidate)
     ok, msg = manager.test_connection()
+    candidate["NAS_ROOT_PASSWORD"] = manager.root_password
 
     if ok:
         log_success(msg)
