@@ -46,13 +46,11 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
 | `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
-| `FAILURE_MODES.md` | Markdown | Modos de fallo y su verificación (FMEA). |
+| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, problemas/soluciones y diagramas SVG. |
+| `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
 | `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP (con `php-sqlite3 php-zip`). |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
-| `README.md` | Markdown | **Guía de Puesta a Punto Paso a Paso** para preparación y hardening de Debian 13. |
-| `SMB_DEBIAN.md` | Markdown | **Manual Técnico y Guía de Replicación** para usuarios y administradores. |
-| `SECURITY.md` | Markdown | **Modelo de seguridad**, rollback de actualizaciones, identidades SSH, credenciales y privilegios web. |
-| `DESIGN.md` | Markdown | **Sistema de Diseño Slate UI** (tokens, colores, tipografía nativa, 0% dependencias). |
+| `README.md` | Markdown | **Guía de Puesta a Punto y Resumen Ejecutivo** del servidor NAS y Central de Respaldos. |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
 
 ### 2.1 Cuadro Maestro de Tecnologías, Subsistemas y Librerías
