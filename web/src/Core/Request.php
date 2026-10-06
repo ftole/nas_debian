@@ -96,18 +96,71 @@ class Request
         return str_contains($accept, 'application/json') || str_starts_with($this->path, '/api');
     }
 
-    public function getClientIp(): string
+    public static array $trustedProxies = ['127.0.0.1', '::1'];
+
+    public function getHeader(string $name): ?string
     {
-        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-            $candidate = trim($ips[0]);
-            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
-                return $candidate;
+        $key = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+        if (isset($_SERVER[$key])) {
+            return (string) $_SERVER[$key];
+        }
+        $directKey = strtoupper(str_replace('-', '_', $name));
+        if (isset($_SERVER[$directKey])) {
+            return (string) $_SERVER[$directKey];
+        }
+        if (function_exists('getallheaders')) {
+            $headers = getallheaders();
+            if (is_array($headers)) {
+                foreach ($headers as $k => $v) {
+                    if (strcasecmp((string) $k, $name) === 0) {
+                        return (string) $v;
+                    }
+                }
             }
         }
-        if (!empty($_SERVER['HTTP_CLIENT_IP']) && filter_var($_SERVER['HTTP_CLIENT_IP'], FILTER_VALIDATE_IP)) {
-            return $_SERVER['HTTP_CLIENT_IP'];
+        return null;
+    }
+
+    public function getCsrfToken(): ?string
+    {
+        $headerToken = $this->getHeader('X-CSRF-Token') ?? $this->getHeader('X-XSRF-Token');
+        if (!empty($headerToken)) {
+            return $headerToken;
         }
-        return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $body = $this->getBody();
+        if (!empty($body['csrf_token']) && is_string($body['csrf_token'])) {
+            return $body['csrf_token'];
+        }
+        if (!empty($_POST['csrf_token']) && is_string($_POST['csrf_token'])) {
+            return $_POST['csrf_token'];
+        }
+        return null;
+    }
+
+    /**
+     * Resuelve la dirección IP del cliente basándose estrictamente en REMOTE_ADDR,
+     * examinando cabeceras de proxy únicamente cuando la conexión procede de un proxy de confianza.
+     */
+    public function getClientIp(): string
+    {
+        $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+
+        if (in_array($remoteAddr, self::$trustedProxies, true)) {
+            if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+                $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+                $candidate = trim($ips[0]);
+                if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                    return $candidate;
+                }
+            }
+            if (!empty($_SERVER['HTTP_X_REAL_IP']) && filter_var($_SERVER['HTTP_X_REAL_IP'], FILTER_VALIDATE_IP)) {
+                return $_SERVER['HTTP_X_REAL_IP'];
+            }
+            if (!empty($_SERVER['HTTP_CLIENT_IP']) && filter_var($_SERVER['HTTP_CLIENT_IP'], FILTER_VALIDATE_IP)) {
+                return $_SERVER['HTTP_CLIENT_IP'];
+            }
+        }
+
+        return filter_var($remoteAddr, FILTER_VALIDATE_IP) ? $remoteAddr : '127.0.0.1';
     }
 }
