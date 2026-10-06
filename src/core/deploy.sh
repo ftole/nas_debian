@@ -554,6 +554,7 @@ Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload 
     /bin/systemctl restart nmbd, /usr/bin/systemctl restart nmbd, \\
     /bin/systemctl restart wsdd2, /usr/bin/systemctl restart wsdd2, \\
     /bin/systemctl restart nginx, /usr/bin/systemctl restart nginx, \\
+    /bin/systemctl reload nginx, /usr/bin/systemctl reload nginx, \\
     /bin/systemctl start smbd, /usr/bin/systemctl start smbd, \\
     /bin/systemctl start nmbd, /usr/bin/systemctl start nmbd, \\
     /bin/systemctl start wsdd2, /usr/bin/systemctl start wsdd2, \\
@@ -580,10 +581,10 @@ Cmnd_Alias NAS_SERVICES_AD = /bin/systemctl restart sssd, /usr/bin/systemctl res
     /bin/systemctl status sssd, /usr/bin/systemctl status sssd, \\
     /bin/systemctl stop sssd, /usr/bin/systemctl stop sssd, \\
     /bin/systemctl start sssd, /usr/bin/systemctl start sssd
-Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm list, /usr/sbin/realm join [a-zA-Z0-9_.-]*, /usr/sbin/realm leave, /usr/sbin/realm leave [a-zA-Z0-9_.-]*, \\
-    /usr/bin/realm list, /usr/bin/realm join [a-zA-Z0-9_.-]*, /usr/bin/realm leave, /usr/bin/realm leave [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/adcli info [a-zA-Z0-9_.-]*, /usr/bin/adcli info [a-zA-Z0-9_.-]*, \\
-    /usr/bin/kinit [a-zA-Z0-9_.-]*, /usr/bin/klist
+Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm list, /usr/sbin/realm join *, /usr/sbin/realm leave, /usr/sbin/realm leave *, \\
+    /usr/bin/realm list, /usr/bin/realm join *, /usr/bin/realm leave, /usr/bin/realm leave *, \\
+    /usr/sbin/adcli info *, /usr/bin/adcli info *, \\
+    /usr/bin/kinit *, /usr/bin/klist
 Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstatus, /usr/bin/pdbedit -L -s, \\
     /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
