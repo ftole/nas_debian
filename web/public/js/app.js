@@ -75,12 +75,18 @@ function closeModal(modalId) {
       const vidEl = document.getElementById('preview-video-element');
       if (vidEl) {
         vidEl.pause();
-        vidEl.src = '';
+        vidEl.removeAttribute('src');
+        vidEl.load();
       }
       const audEl = document.getElementById('preview-audio-element');
       if (audEl) {
         audEl.pause();
-        audEl.src = '';
+        audEl.removeAttribute('src');
+        audEl.load();
+      }
+      const imgEl = document.getElementById('preview-img-element');
+      if (imgEl) {
+        imgEl.removeAttribute('src');
       }
       const pdfFrame = document.getElementById('preview-pdf-frame');
       if (pdfFrame) {
@@ -417,6 +423,12 @@ async function submitNewShare(event) {
   const selectedGroups = Array.from(document.querySelectorAll('input[name="share_group"]:checked'))
     .map(cb => cb.value);
 
+  const btn = document.getElementById('btn-submit-new-share') || event.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/shares', {
       method: 'POST',
@@ -436,6 +448,11 @@ async function submitNewShare(event) {
     loadShares();
   } catch (e) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -527,6 +544,12 @@ async function submitNewBackup(event) {
   const cron = document.getElementById('bkp-cron').value;
   const retention = parseInt(document.getElementById('bkp-retention').value, 10);
 
+  const btn = document.getElementById('btn-submit-new-backup') || event.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/backups', {
       method: 'POST',
@@ -549,6 +572,11 @@ async function submitNewBackup(event) {
     loadBackups();
   } catch (e) {
     // Ya mostrado
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -723,6 +751,12 @@ async function submitNewUser(event) {
   const selectedGroups = Array.from(document.querySelectorAll('input[name="user_group"]:checked'))
     .map(cb => cb.value);
 
+  const btn = document.getElementById('btn-submit-new-user') || event.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/users', {
       method: 'POST',
@@ -740,6 +774,11 @@ async function submitNewUser(event) {
     loadUsersAndGroups();
   } catch (e) {
     // Ya mostrado
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -765,6 +804,12 @@ async function submitNewGroup(event) {
   event.preventDefault();
   const groupName = document.getElementById('group-name').value;
 
+  const btn = document.getElementById('btn-submit-new-group') || event.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/groups', {
       method: 'POST',
@@ -777,6 +822,11 @@ async function submitNewGroup(event) {
     loadUsersAndGroups();
   } catch (e) {
     // Ya mostrado
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -1093,6 +1143,8 @@ function runQuickCommand(cmd) {
   const input = document.getElementById('terminal-input');
   if (input) {
     input.focus();
+    AppState.terminal.history.push(cmd);
+    AppState.terminal.historyIndex = AppState.terminal.history.length;
     executeTerminalCommand(cmd);
   }
 }
@@ -1130,12 +1182,23 @@ async function loadUpdates() {
 }
 
 async function confirmRebootServer() {
+  const btn = document.getElementById('btn-confirm-reboot');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch('/api/system/reboot', { method: 'POST' });
     closeModal('modal-reboot-server');
     showToast('Reinicio del servidor ordenado. La conexión se reanudará en 1-2 minutos.', 'warning');
   } catch (e) {
     // Ya mostrado
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -1284,6 +1347,10 @@ async function loadFiles(subpath = null) {
   if (subpath === null) {
     subpath = AppState.files.currentPath || '';
   }
+  if (AppState.files.isLoading && AppState.files.currentPath === subpath) {
+    return;
+  }
+  AppState.files.isLoading = true;
   AppState.files.currentPath = subpath;
 
   const gridContainer = document.getElementById('files-grid-container');
@@ -1316,6 +1383,8 @@ async function loadFiles(subpath = null) {
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar archivos: ${escapeHtml(e.message)}</td></tr>`;
     }
+  } finally {
+    AppState.files.isLoading = false;
   }
 }
 
@@ -1369,11 +1438,13 @@ function renderFileGrid(items) {
 
     return `
       <div class="file-card ${isDir ? 'is-folder' : ''} ${isSelected ? 'selected' : ''}"
+           tabindex="0"
            data-path="${escapeHtml(relPath)}"
            data-name="${escapeHtml(item.name)}"
            data-is-dir="${isDir ? 'true' : 'false'}"
            onclick="handleCardClick(this)"
            ondblclick="handleCardDblClick(this)"
+           onkeydown="handleCardKeyDown(event, this)"
            title="${escapeHtml(item.name)} (${sizeStr})">
         
         <div class="file-card-actions">
@@ -1407,6 +1478,16 @@ function handleCardDblClick(cardEl) {
   const name = cardEl.getAttribute('data-name') || '';
   const isDir = cardEl.getAttribute('data-is-dir') === 'true';
   handleItemDblClick(relPath, name, isDir);
+}
+
+function handleCardKeyDown(e, cardEl) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleCardDblClick(cardEl);
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    handleCardClick(cardEl);
+  }
 }
 
 function handleCardAction(e, btn, action) {
@@ -1468,11 +1549,13 @@ function renderFileTable(items) {
 
     return `
       <tr class="file-table-row ${isSelected ? 'selected' : ''}"
+          tabindex="0"
           data-path="${escapeHtml(relPath)}"
           data-name="${escapeHtml(item.name)}"
           data-is-dir="${isDir ? 'true' : 'false'}"
           onclick="handleTableRowSelect(this)"
-          ondblclick="handleTableRowDblClick(this)">
+          ondblclick="handleTableRowDblClick(this)"
+          onkeydown="handleTableRowKeyDown(event, this)">
         <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
         <td>
           <div class="${nameClass}" onclick="handleTableRowNameClick(event, this)">
@@ -1509,6 +1592,16 @@ function handleTableRowDblClick(tr) {
   const name = tr.getAttribute('data-name') || '';
   const isDir = tr.getAttribute('data-is-dir') === 'true';
   handleItemDblClick(relPath, name, isDir);
+}
+
+function handleTableRowKeyDown(e, tr) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleTableRowDblClick(tr);
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    handleTableRowSelect(tr);
+  }
 }
 
 function handleTableRowNameClick(e, nameEl) {
@@ -1617,32 +1710,6 @@ function handleFileSelect(e) {
     uploadFiles(files);
   }
   e.target.value = '';
-}
-
-function handleDragOver(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const dz = document.getElementById('file-dropzone-container');
-  if (dz) dz.classList.add('drag-active');
-}
-
-function handleDragLeave(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const dz = document.getElementById('file-dropzone-container');
-  if (dz) dz.classList.remove('drag-active');
-}
-
-function handleFileDrop(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const dz = document.getElementById('file-dropzone-container');
-  if (dz) dz.classList.remove('drag-active');
-
-  const files = e.dataTransfer ? e.dataTransfer.files : null;
-  if (files && files.length > 0) {
-    uploadFiles(files);
-  }
 }
 
 async function uploadFiles(files) {
@@ -2095,6 +2162,9 @@ async function confirmEmptyTrash() {
 // Previsualizador de Archivos (Previewer 100% Offline con Editor Integrado)
 // ==============================================================================
 async function previewFile(relPath, fileName) {
+  if (AppState.files.currentPreviewFile?.relPath === relPath && document.getElementById('modal-file-preview')?.classList.contains('active')) {
+    return;
+  }
   AppState.files.currentPreviewFile = { relPath, fileName };
   AppState.files.currentPreviewText = '';
   AppState.files.isEditingPreview = false;
@@ -2302,7 +2372,10 @@ async function saveCurrentPreviewFile() {
   const root = AppState.files.root || 'nas';
   const saveBtn = document.getElementById('btn-preview-save');
 
-  if (saveBtn) saveBtn.disabled = true;
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.classList.add('is-loading');
+  }
 
   try {
     const res = await apiFetch('/api/files/save', {
@@ -2332,7 +2405,10 @@ async function saveCurrentPreviewFile() {
   } catch (err) {
     // Ya mostrado por apiFetch
   } finally {
-    if (saveBtn) saveBtn.disabled = false;
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -2642,12 +2718,20 @@ function initApp() {
     });
   });
 
+  function isFilesDragEvent(e) {
+    if (!e.dataTransfer || !e.dataTransfer.types) return false;
+    const types = e.dataTransfer.types;
+    return types.includes ? types.includes('Files') : Array.from(types).includes('Files');
+  }
+
   // Cerrar modal y previsualizador de forma inmediata al presionar Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open').forEach(modal => {
         closeModal(modal.id);
       });
+      const dz = document.getElementById('file-dropzone-container');
+      if (dz) dz.classList.remove('drag-active');
     }
   });
 
@@ -2660,6 +2744,7 @@ function initApp() {
   if (dropzone) {
     let dragCounter = 0;
     dropzone.addEventListener('dragenter', (e) => {
+      if (!isFilesDragEvent(e)) return;
       e.preventDefault();
       e.stopPropagation();
       dragCounter++;
@@ -2668,6 +2753,7 @@ function initApp() {
     }, false);
 
     dropzone.addEventListener('dragover', (e) => {
+      if (!isFilesDragEvent(e)) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -2677,6 +2763,7 @@ function initApp() {
     }, false);
 
     dropzone.addEventListener('dragleave', (e) => {
+      if (!isFilesDragEvent(e)) return;
       e.preventDefault();
       e.stopPropagation();
       dragCounter--;
@@ -2687,6 +2774,7 @@ function initApp() {
     }, false);
 
     dropzone.addEventListener('drop', (e) => {
+      if (!isFilesDragEvent(e)) return;
       e.preventDefault();
       e.stopPropagation();
       dragCounter = 0;
@@ -2697,6 +2785,17 @@ function initApp() {
         uploadFiles(files);
       }
     }, false);
+  }
+
+  // Deseleccionar al hacer clic en fondo libre de la cuadricula
+  const gridContainer = document.getElementById('files-grid-container');
+  if (gridContainer) {
+    gridContainer.addEventListener('click', (e) => {
+      if (e.target === gridContainer) {
+        document.querySelectorAll('.file-card.selected').forEach(c => c.classList.remove('selected'));
+        AppState.files.selectedItemPath = null;
+      }
+    });
   }
 
   // Prevenir navegación accidental del navegador al arrastrar fuera de la dropzone
