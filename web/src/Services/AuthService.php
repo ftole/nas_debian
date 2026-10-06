@@ -46,8 +46,8 @@ class AuthService
             ];
         }
 
-        // Modo desarrollo o suite de pruebas unitarias
-        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+        // Modo suite de pruebas unitarias o desarrollo explícito
+        if ($this->dryRun || getenv('APP_ENV') === 'testing') {
             if (isset(self::$mockUsers[$cleanUsername])) {
                 $expected = self::$mockUsers[$cleanUsername];
                 if ($password === $expected || ($cleanUsername === 'administrador' && in_array($password, ['Admin123#', 'admin123', 'Ead2026#'], true))) {
@@ -83,21 +83,6 @@ class AuthService
 
         $allOutput = $res['stdout'] . ' ' . $res['stderr'];
         if ($res['code'] !== 0 || str_contains($allOutput, 'NT_STATUS_LOGON_FAILURE')) {
-            // Comprobación de respaldo para cuentas maestras del sistema en caso de contingencia con Samba
-            if (isset(self::$mockUsers[$cleanUsername])) {
-                $expected = self::$mockUsers[$cleanUsername];
-                if ($password === $expected || ($cleanUsername === 'administrador' && in_array($password, ['Admin123#', 'admin123', 'Ead2026#'], true))) {
-                    return [
-                        'success' => true,
-                        'user' => [
-                            'username' => $cleanUsername,
-                            'is_admin' => true,
-                            'role' => 'Administrador de Sistemas',
-                        ],
-                    ];
-                }
-            }
-
             return [
                 'success' => false,
                 'error' => 'Usuario o contraseña incorrectos.',
@@ -161,6 +146,57 @@ class AuthService
 
         if (session_status() === PHP_SESSION_ACTIVE) {
             @session_destroy();
+        }
+    }
+
+    public const MAX_FAILED_ATTEMPTS = 5;
+    public const LOCKOUT_MINUTES = 5;
+
+    /**
+     * Verifica si una dirección IP se encuentra temporalmente bloqueada por superar el límite de intentos.
+     */
+    public function isRateLimited(string $ip): bool
+    {
+        try {
+            $rows = DatabaseService::query(
+                "SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = :ip AND attempted_at >= datetime('now', '-" . self::LOCKOUT_MINUTES . " minutes')",
+                ['ip' => $ip]
+            );
+            $count = (int) ($rows[0]['cnt'] ?? 0);
+            return $count >= self::MAX_FAILED_ATTEMPTS;
+        } catch (\Throwable $e) {
+            error_log('Error comprobando rate limit: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Registra un intento de inicio de sesión fallido en SQLite.
+     */
+    public function recordFailedAttempt(string $ip, string $username): void
+    {
+        try {
+            DatabaseService::insert('login_attempts', [
+                'ip' => $ip,
+                'username' => $username,
+            ]);
+        } catch (\Throwable $e) {
+            error_log('Error registrando intento fallido: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Limpia los intentos fallidos registrados para una IP tras un inicio de sesión exitoso.
+     */
+    public function clearFailedAttempts(string $ip): void
+    {
+        try {
+            DatabaseService::execute(
+                'DELETE FROM login_attempts WHERE ip = :ip',
+                ['ip' => $ip]
+            );
+        } catch (\Throwable $e) {
+            error_log('Error limpiando intentos fallidos: ' . $e->getMessage());
         }
     }
 }
