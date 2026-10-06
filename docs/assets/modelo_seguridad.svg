@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <linearGradient id="sec-red" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#f87171"/>
+    </linearGradient>
+    <linearGradient id="sec-green" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Header -->
+  <rect x="30" y="24" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="54" r="14" fill="#ef4444"/>
+  <path d="M65 46 L73 50 L73 56 C73 61 65 64 65 64 C65 64 57 61 57 56 L57 50 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <text x="92" y="48" fill="#f8fafc" font-size="18" font-weight="700">Modelo de Seguridad en Profundidad</text>
+  <text x="92" y="68" fill="#94a3b8" font-size="12">Blindaje multicapa del sistema operativo, servicios de red, panel web y almacenamiento</text>
+
+  <!-- 4 Cajas Horizontales Apiladas con Niveles de Protección -->
+
+  <!-- Nivel 1: Red y Perímetro -->
+  <g transform="translate(30, 105)">
+    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="88" rx="2" fill="#ef4444"/>
+    <text x="24" y="26" fill="#f87171" font-size="11" font-weight="700" letter-spacing="1">NIVEL 1 • RED Y PERÍMETRO</text>
+    
+    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Cortafuegos UFW Restrictivo</text>
+    <text x="36" y="69" fill="#94a3b8" font-size="10">deny incoming • solo puertos estrictos</text>
+
+    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">SSH Blindado (PermitRootLogin no)</text>
+    <text x="317" y="69" fill="#94a3b8" font-size="10">known_hosts_backup dedicado (accept-new)</text>
+
+    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Protección Activa de Red</text>
+    <text x="607" y="69" fill="#94a3b8" font-size="10">fail2ban activo • unattended-upgrades</text>
+  </g>
+
+  <!-- Nivel 2: Servicios y Panel Web -->
+  <g transform="translate(30, 208)">
+    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="88" rx="2" fill="#f59e0b"/>
+    <text x="24" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">NIVEL 2 • AISLAMIENTO WEB Y CONTROL DE PROCESOS</text>
+
+    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Usuario www-data y ondemand</text>
+    <text x="36" y="69" fill="#94a3b8" font-size="10">PHP-FPM se apaga en reposo (~0MB)</text>
+
+    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Sudoers Estrictamente Acotado</text>
+    <text x="317" y="69" fill="#94a3b8" font-size="10">/etc/sudoers.d/nas-web verificado visudo</text>
+
+    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Cero Inyección de Comandos</text>
+    <text x="607" y="69" fill="#94a3b8" font-size="10">proc_open con arrays • 100% Offline (sin CDNs)</text>
+  </g>
+
+  <!-- Nivel 3: Datos y Permisos de Almacenamiento -->
+  <g transform="translate(30, 311)">
+    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="88" rx="2" fill="#3b82f6"/>
+    <text x="24" y="26" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">NIVEL 3 • CONTROL DE ACCESO Y CREDENCIALES</text>
+
+    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">ACLs POSIX y Herencia por Defecto</text>
+    <text x="36" y="69" fill="#94a3b8" font-size="10">Permisos 2770 • default ACL subcarpetas</text>
+
+    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Secretos 0600 root:root</text>
+    <text x="317" y="69" fill="#94a3b8" font-size="10">Desglose de dominio AD • jamás en ps</text>
+
+    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Samba VFS &amp; SMB2_02 mínimo</text>
+    <text x="607" y="69" fill="#94a3b8" font-size="10">map to guest = Bad User • cifrado negociado</text>
+  </g>
+
+  <!-- Nivel 4: Resiliencia Física y del Sistema -->
+  <g transform="translate(30, 414)">
+    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="88" rx="2" fill="#10b981"/>
+    <text x="24" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">NIVEL 4 • RESILIENCIA ANTE APAGONES Y CORRUPCIÓN</text>
+
+    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Staging Atómico (.inprogress_*)</text>
+    <text x="36" y="69" fill="#94a3b8" font-size="10">trap cleanup purga fallos • mv atómico</text>
+
+    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Anti-Apagón &amp; Bit Rot</text>
+    <text x="317" y="69" fill="#94a3b8" font-size="10">ext4 commit=2 • Btrfs scrub programado</text>
+
+    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Protección del Disco SO</text>
+    <text x="607" y="69" fill="#94a3b8" font-size="10">UDISKS_IGNORE=1 • bloqueo LVM/RAID</text>
+  </g>
+</svg>
