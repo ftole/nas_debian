@@ -34,49 +34,43 @@ Para mantener este repositorio organizado y este documento directo al grano, el 
 
 ## 🎯 Dos Roles Especializados
 
-Durante el despliegue puedes elegir entre dos roles mutuamente excluyentes, optimizados según su función:
+Durante el despliegue puedes configurar tu máquina para una de dos misiones fundamentales:
 
-| Característica | Rol `ARCHIVOS` (NAS Departamental) | Rol `BACKUP` (Central de Respaldos) |
-| :--- | :--- | :--- |
-| **Uso principal** | Compartición diaria de documentos | Repositorio histórico e inmutable de copias |
-| **Visibilidad en red** | Carpetas visibles en el Explorador | Carpetas ocultas (con sufijo `$`) |
-| **Filesystem en HDD** | `ext4` con `commit=2` (vaciado en 2s anti-apagón) | `Btrfs` con compresión `zstd:3` + scrub mensual |
-| **Filesystem en SSD** | `ext4` con `commit=5` + `fstrim.timer` | `Btrfs` con compresión `zstd:3` + `discard=async` |
-| **Acceso permitido** | Usuarios departamentales según permisos | Solo administradores (`grp_sistemas`) |
-| **Reutilización de datos** | Soporte `--keep-data` (montar sin formatear) | Soporte `--keep-data` (montar sin formatear) |
+- **Rol ARCHIVOS (NAS Departamental):** Diseñado para compartir carpetas en red a toda la oficina. Utiliza **ext4 optimizado** (`commit=2` en HDD para soportar cortes de energía), expone recursos visibles en el explorador de Windows y soporta más de 100 puestos simultáneos trabajando en hojas de cálculo de Excel sin bloqueos temporales (`~$`).
+- **Rol BACKUP (Central de Respaldos):** Diseñado como caja fuerte para recibir copias de servidores Windows, Linux y locales. Utiliza **Btrfs con compresión Zstandard** (`zstd:3`), deduplicación por enlaces duros (`rsync --link-dest` con >85% de ahorro), recursos ocultos terminados en `$` y revisiones mensuales automáticas contra corrupción silenciosa (*Bit Rot*).
+
+Ambos roles admiten el modo **`--keep-data`**, permitiéndote reutilizar discos con terabytes de información previa sin formatear.
+
+![Matriz de Roles y Selección de Almacenamiento](docs/assets/roles_almacenamiento.svg)
+
+*(Conoce todos los detalles en la [Guía de Características](docs/caracteristicas.md)).*
 
 ---
 
 ## 💻 Resumen del Stack Tecnológico
 
-Una síntesis clara de los componentes centrales que hacen funcionar el sistema:
+El sistema aprovecha al máximo el rendimiento nativo del kernel de Debian 13 en lugar de envolver todo en contenedores lentos:
 
-| Subsistema | Tecnología Principal | Beneficio Clave |
-| :--- | :--- | :--- |
-| **Base del Sistema** | Debian 13 (Trixie) x86_64 | Máxima estabilidad y compatibilidad directa con hardware moderno. |
-| **Almacenamiento** | `ext4` / `Btrfs` condicional | Resistencia a apagones en NAS y deduplicación con compresión en Backups. |
-| **Servicio de Red** | Samba 4 + VFS `acl_xattr` & `streams_xattr` | Permite más de 100 usuarios simultáneos en Microsoft Office/Excel sin bloqueos `~$`. |
-| **Descubrimiento** | WSDD2 con systemd override | Detección inmediata en Windows 10/11 sin protocolos inseguros como NetBIOS broadcast. |
-| **Motor de Backups** | `rsync` con Hardlinks + Staging atómico | Ahorro superior al 85% de espacio en disco y protección total ante copias incompletas. |
-| **Panel Administrativo** | Nginx-light + PHP 8 MVC (`pm = ondemand`) | Consumo nulo en reposo (~0 MB de RAM) y cero dependencias de internet (100% offline). |
-| **Base de Datos** | SQLite 3 en modo WAL (PDO) | Cero memoria en reposo, concurrencia sin bloqueos y respaldos con copia simple. |
-| **Interfaz Consola** | `nas` CLI + `whiptail` Bash 5 | Menús guiados de 9 módulos para administración completa sin interfaz gráfica. |
+- **Almacenamiento Inteligente:** `ext4` transaccional anti-apagón para NAS y `Btrfs` con compresión `zstd:3` + scrub mensual para respaldos.
+- **Samba 4 con VFS Avanzado:** Módulos `acl_xattr`, `streams_xattr` y `full_audit` para emular ADS de Windows, permitir concurrencia masiva en Office y registrar operaciones.
+- **Descubrimiento Moderno WSDD2:** Los clientes Windows 10/11 ven el NAS al instante en el Explorador de Red sin protocolos antiguos inseguros.
+- **Panel Web MVC 100% Offline:** Nginx-light con PHP-FPM en modo `pm = ondemand` (~0 MB de RAM en reposo) y base de datos SQLite WAL (`/var/lib/nas/nas.sqlite`).
 
-*(Para consultar el cuadro técnico exhaustivo componente por componente, revisa [Tecnologías Usadas](docs/tecnologias.md)).*
+*(Consulta el inventario componente por componente en [Tecnologías Usadas](docs/tecnologias.md)).*
 
 ---
 
-## 🚀 Instalación Rápida
+## 🚀 Instalación y Puesta en Marcha
 
 ### Requisitos Previos
 - Servidor o equipo con **Debian 13 (Trixie)** x86_64 recién instalado.
 - Acceso con privilegios de `root` o usuario en el grupo `sudo`.
 - Conexión a Internet durante la descarga inicial de paquetes.
-- Disco secundario opcional para `/srv/nas` (se puede formatear desde cero o reutilizar con sus datos intactos usando `--keep-data`).
+- Disco secundario opcional para `/srv/nas` (puedes formatearlo o reutilizarlo con sus datos intactos usando `--keep-data`).
 
 ### Opción A: Instalador Remoto Oficial (Recomendado)
 
-Ejecuta el siguiente comando en la consola de tu servidor:
+En la consola de tu servidor ejecuta:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
@@ -85,99 +79,11 @@ curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | 
 *(Si utilizas `wget`: `wget -qO- https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`)*
 
 > [!TIP]
-> El instalador descarga el código en `/opt/nas_debian`, registra el comando global `nas` y presenta el asistente visual. **No toca tus discos ni particiones hasta que lo autorices expresamente.**
-
----
+> El instalador descarga los archivos en `/opt/nas_debian`, registra el comando global `nas` y abre el asistente visual en consola. **No tocará tus discos ni particiones hasta que lo confirmes expresamente.**
 
 ### Opción B: Preparación Manual Paso a Paso
 
-Si prefieres auditar y preparar el servidor manualmente antes de iniciar el asistente, sigue estos pasos en orden:
-
-#### 1. Bootstrap como `root` (Pasos 1 al 7)
-
-Accede a la sesión de `root`:
-```bash
-su -
-```
-
-Configura los repositorios APT en formato deb822 (`/etc/apt/sources.list.d/debian.sources`) y actualiza el sistema:
-```bash
-cat << 'SOURCES' > /etc/apt/sources.list.d/debian.sources
-Types: deb deb-src
-URIs: http://deb.debian.org/debian
-Suites: trixie trixie-updates
-Components: main contrib non-free non-free-firmware
-
-Types: deb deb-src
-URIs: http://security.debian.org/debian-security
-Suites: trixie-security
-Components: main contrib non-free non-free-firmware
-SOURCES
-
-: > /etc/apt/sources.list
-apt update && apt upgrade -y
-```
-
-Instala las herramientas base y cortafuegos:
-```bash
-apt install -y curl wget ca-certificates htop ufw sudo fail2ban unattended-upgrades
-```
-
-Configura tu usuario administrador con acceso a `sudo`:
-```bash
-ADMIN_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1; exit}' /etc/passwd)"
-ADMIN_USER="${ADMIN_USER:-nas}"
-id "$ADMIN_USER" &>/dev/null || adduser --disabled-password --gecos "" "$ADMIN_USER"
-usermod -aG sudo "$ADMIN_USER"
-echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-admin"
-chmod 0440 "/etc/sudoers.d/90-admin"
-echo "Administrador listo: $ADMIN_USER"
-```
-
-Sal de la sesión de `root`:
-```bash
-exit
-```
-
-#### 2. Endurecimiento como Administrador con `sudo` (Pasos 8 al 13)
-
-Desactiva el acceso directo de `root` por SSH:
-```bash
-sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
-sudo systemctl restart ssh || sudo systemctl restart sshd
-```
-
-Configura las reglas del cortafuegos UFW:
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp comment 'SSH'
-sudo ufw allow 80/tcp comment 'Panel Web HTTP'
-sudo ufw allow 443/tcp comment 'Panel Web HTTPS'
-sudo ufw allow 137,138/udp comment 'Samba NetBIOS'
-sudo ufw allow 139,445/tcp comment 'Samba SMB'
-sudo ufw allow 3702/udp comment 'WSDD2 Discovery UDP'
-sudo ufw allow 3702/tcp comment 'WSDD2 Discovery TCP'
-sudo ufw allow 5355/udp comment 'WSDD2 LLMNR UDP'
-sudo ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP'
-sudo ufw allow 5357/tcp comment 'WSDD2 HTTP'
-sudo ufw --force enable
-```
-
-Evita que el servidor se suspenda o hiberne:
-```bash
-sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-sudo mkdir -p /etc/systemd/logind.conf.d
-printf '[Login]\nHandleSuspendKey=ignore\nHandleHibernateKey=ignore\nHandleLidSwitch=ignore\n' | sudo tee /etc/systemd/logind.conf.d/99-nas.conf >/dev/null
-sudo systemctl restart systemd-logind
-```
-
-Inicia fail2ban:
-```bash
-sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-sudo systemctl enable --now fail2ban
-```
+Si por políticas corporativas de auditoría prefieres auditar y ejecutar cada paso manualmente (actualización de repositorios, cortafuegos UFW, endurecimiento SSH, fail2ban y despliegue), consulta nuestra [Guía de Preparación Manual Paso a Paso](docs/operacion_mantenimiento.md#7-preparación-y-despliegue-manual-paso-a-paso).
 
 ---
 
