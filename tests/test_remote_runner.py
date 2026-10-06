@@ -240,13 +240,16 @@ def test_test_install_action_success() -> None:
 
     with mock.patch.object(manager, "sync_project_files", return_value=(True, "OK")):
         with mock.patch.object(manager, "run_command") as mock_run:
-            # deploy.sh (0), smbd (active), wsdd2 (active), nginx (active), php-fpm (active), sqlite (0), srv/nas (0)
+            # cli nas (0), deploy.sh (0), smbd, wsdd2, nginx, php-fpm (active),
+            # sqlite (0), srv/nas (0), binario nas (0)
             mock_run.side_effect = [
+                (0, "", ""),
                 (0, "Despliegue finalizado\n", ""),
                 (0, "active\n", ""),
                 (0, "active\n", ""),
                 (0, "active\n", ""),
                 (0, "active\n", ""),
+                (0, "", ""),
                 (0, "", ""),
                 (0, "", ""),
             ]
@@ -269,12 +272,14 @@ def test_test_backups_dedup_success() -> None:
         # 2. rsync snap1 (0)
         # 3. rsync snap2 (0)
         # 4. stat inodos: inodo 100, 100, 201, 202
-        # 5. cleanup (0)
+        # 5. snapshot 3 + rotación (0)
+        # 6. cleanup (0)
         mock_run.side_effect = [
             (0, "", ""),
             (0, "", ""),
             (0, "", ""),
             (0, "1001\n1001\n2001\n2002\n", ""),
+            (0, "", ""),
             (0, "", ""),
         ]
         result = test_remote.test_backups_action(manager)
