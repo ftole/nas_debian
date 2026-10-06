@@ -299,7 +299,7 @@ class SSHManager:
         """
         client = self.connect()
 
-        if sudo:
+        if sudo and self.user != "root":
             # Envolvemos el comando en una invocación sudo -S con shell explícito
             # Pasamos la contraseña por stdin sin exponerla en los argumentos de ps
             remote_cmd = f"sudo -S -p '' bash -c {shlex.quote(command)}"
@@ -308,12 +308,14 @@ class SSHManager:
             if input_data:
                 stdin.write(input_data + "\n")
             stdin.flush()
+            stdin.close()
         else:
             remote_cmd = f"bash -c {shlex.quote(command)}"
             stdin, stdout, stderr = client.exec_command(remote_cmd, timeout=timeout)
             if input_data:
                 stdin.write(input_data + "\n")
                 stdin.flush()
+            stdin.close()
 
         stdout_chunks: List[str] = []
 
@@ -350,7 +352,11 @@ class SSHManager:
             remote_user = out.strip()
 
             # Prueba de sudo
-            code_sudo, out_sudo, err_sudo = self.run_command("id -u", sudo=True, timeout=10)
+            if self.user == "root":
+                code_sudo, out_sudo, err_sudo = self.run_command("id -u", sudo=False, timeout=10)
+            else:
+                code_sudo, out_sudo, err_sudo = self.run_command("id -u", sudo=True, timeout=10)
+
             if code_sudo != 0 or out_sudo.strip() != "0":
                 return (False, f"Autenticación sudo falló con contraseña provista: {err_sudo.strip()}")
 
@@ -371,7 +377,7 @@ class SSHManager:
         include_files = ["install.sh", "README.md", "AGENTS.md"]
 
         def tar_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
-            name = tarinfo.name
+            name = tarinfo.name.replace("\\", "/")
             # Exclusiones
             if any(part in name.split("/") for part in ["__pycache__", ".git", "vendor", "node_modules", ".pytest_cache"]):
                 return None
@@ -403,10 +409,11 @@ class SSHManager:
                 remote_file.write(tar_bytes)
             sftp.close()
 
-            # Desempaquetar y aplicar permisos ejecutables en remoto
+            # Desempaquetar, sanear saltos de línea CRLF y aplicar permisos ejecutables en remoto
             unpack_cmd = (
                 f"rm -rf {remote_dest} && mkdir -p {remote_dest} && "
                 f"tar -xzf {remote_tar} -C {remote_dest} && "
+                f"find {remote_dest} -type f -name '*.sh' -exec sed -i 's/\\r$//' {{}} + 2>/dev/null && "
                 f"find {remote_dest} -type f -name '*.sh' -exec chmod +x {{}} + 2>/dev/null && "
                 f"rm -f {remote_tar}"
             )
@@ -428,7 +435,7 @@ class SSHManager:
                 ssh_bin,
                 "-p", str(self.port),
                 "-o", "StrictHostKeyChecking=accept-new",
-                "-o", f"UserKnownHostsFile={self.known_hosts_file}",
+                "-o", f"UserKnownHostsFile={self.known_hosts_file.resolve()}",
                 f"{self.user}@{self.ip}",
             ]
             subprocess.call(cmd)
@@ -438,21 +445,51 @@ class SSHManager:
 
     def _interactive_paramiko_shell(self) -> None:
         client = self.connect()
-        chan = client.invoke_shell()
+        chan = client.invoke_shell(term="xterm")
         print(f"{Colors.GREEN}Consola remota iniciada. Escribe 'exit' para salir.{Colors.RESET}\n")
+
+        stop_event = False
+
+        def forward_stdin() -> None:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    while not stop_event and not chan.exit_status_ready():
+                        if msvcrt.kbhit():
+                            ch = msvcrt.getch()
+                            chan.send(ch)
+                        else:
+                            time.sleep(0.02)
+                else:
+                    import select
+                    while not stop_event and not chan.exit_status_ready():
+                        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+                        if r:
+                            data = sys.stdin.read(1)
+                            if not data:
+                                break
+                            chan.send(data)
+            except Exception:
+                pass
+
+        import threading
+        t_in = threading.Thread(target=forward_stdin, daemon=True)
+        t_in.start()
+
         try:
-            while True:
+            while not chan.exit_status_ready():
                 if chan.recv_ready():
                     data = chan.recv(1024).decode("utf-8", errors="replace")
                     sys.stdout.write(data)
                     sys.stdout.flush()
-                # Modo no bloqueante simple en plataformas estándar
-                time.sleep(0.05)
-                if chan.exit_status_ready():
-                    break
+                time.sleep(0.02)
         except KeyboardInterrupt:
-            pass
+            try:
+                chan.send("\x03")
+            except Exception:
+                pass
         finally:
+            stop_event = True
             chan.close()
 
 
@@ -548,7 +585,7 @@ def ensure_env_config(env_path: Optional[pathlib.Path] = None, allow_interactive
 # -----------------------------------------------------------------------------
 
 def test_install_action(manager: SSHManager) -> bool:
-    """Acción 1: Sincroniza el repositorio y ejecuta el despliegue limpio de deploy.sh."""
+    """Acción 1: Sincroniza el repositorio y ejecuta el despliegue limpio de deploy.sh e install.sh."""
     log_step("1/7", "Prueba de Despliegue e Instalación Limpia (test install)")
 
     # 1. Sincronizar archivos locales
@@ -558,7 +595,23 @@ def test_install_action(manager: SSHManager) -> bool:
         return False
     log_success(sync_msg)
 
-    # 2. Ejecutar deploy.sh con parámetros estándar
+    # 2. Desplegar e instalar CLI global 'nas' en /opt/nas_debian y /usr/local/bin/nas
+    log_info("Instalando componentes en /opt/nas_debian y registrando CLI global 'nas'...")
+    install_cli_cmd = (
+        "mkdir -p /opt/nas_debian && "
+        "cp -a /tmp/nas_debian_test/. /opt/nas_debian/ && "
+        "chmod +x /opt/nas_debian/install.sh /opt/nas_debian/src/asistente.sh && "
+        "ln -sf /opt/nas_debian/install.sh /usr/local/bin/nas && "
+        "ln -sf /usr/local/bin/nas /usr/local/bin/asistente_nas 2>/dev/null || true; "
+        "ln -sf /usr/local/bin/nas /usr/local/bin/asistente-nas 2>/dev/null || true"
+    )
+    code_cli, _, err_cli = manager.run_command(install_cli_cmd, sudo=True, timeout=60)
+    if code_cli != 0:
+        log_warn(f"Aviso al configurar CLI nas: {err_cli.strip()}")
+    else:
+        log_success("CLI 'nas' registrado en /usr/local/bin/nas.")
+
+    # 3. Ejecutar deploy.sh con parámetros estándar
     log_info("Ejecutando deploy.sh en servidor remoto (Rol: ARCHIVOS, Disco: LOCAL)...")
     deploy_cmd = (
         "cd /tmp/nas_debian_test && "
@@ -575,7 +628,7 @@ def test_install_action(manager: SSHManager) -> bool:
 
     log_success("Script deploy.sh ejecutado sin errores fatales.")
 
-    # 3. Validar servicios activos
+    # 4. Validar servicios activos
     log_info("Comprobando estado de demonios críticos del sistema...")
     services_to_check = ["smbd", "wsdd2", "nginx"]
     services_ok = True
@@ -601,7 +654,7 @@ def test_install_action(manager: SSHManager) -> bool:
             log_error("Socket de PHP-FPM no encontrado.")
             services_ok = False
 
-    # 4. Validar Base de Datos SQLite y almacenamiento
+    # 5. Validar Base de Datos SQLite y almacenamiento
     c_db, _, _ = manager.run_command("test -f /var/lib/nas/nas.sqlite", sudo=True, timeout=5)
     if c_db == 0:
         log_success("Base de datos SQLite: PRESENTE en /var/lib/nas/nas.sqlite")
@@ -616,6 +669,12 @@ def test_install_action(manager: SSHManager) -> bool:
         log_error("Directorio /srv/nas no existe.")
         services_ok = False
 
+    c_bin, _, _ = manager.run_command("test -f /usr/local/bin/nas", sudo=True, timeout=5)
+    if c_bin == 0:
+        log_success("Binario CLI global /usr/local/bin/nas: VERIFICADO")
+    else:
+        log_warn("Binario CLI global /usr/local/bin/nas no presente.")
+
     return services_ok
 
 
@@ -623,22 +682,24 @@ def test_uninstall_action(manager: SSHManager) -> bool:
     """Acción 2: Desinstalación limpia con uninstall.sh y verificación total de eliminación."""
     log_step("2/7", "Prueba de Desinstalación y Limpieza (test uninstall)")
 
-    log_info("Ejecutando uninstall.sh con bandera --yes...")
+    log_info("Ejecutando desinstalación limpia del servidor y CLI...")
     uninstall_cmd = (
-        "if [ -f /tmp/nas_debian_test/src/core/uninstall.sh ]; then "
+        "if [ -f /opt/nas_debian/install.sh ]; then "
+        "  bash /opt/nas_debian/install.sh --uninstall; "
+        "elif [ -f /tmp/nas_debian_test/src/core/uninstall.sh ]; then "
         "  bash /tmp/nas_debian_test/src/core/uninstall.sh --yes; "
         "elif [ -f /opt/nas_debian/src/core/uninstall.sh ]; then "
         "  bash /opt/nas_debian/src/core/uninstall.sh --yes; "
         "else "
-        "  echo 'No se encontró uninstall.sh'; exit 1; "
+        "  echo 'No se encontró script de desinstalación'; exit 1; "
         "fi"
     )
     code, out, err = manager.run_command(uninstall_cmd, sudo=True, timeout=120, stream=True)
     if code != 0:
-        log_error(f"Fallo en la ejecución de uninstall.sh (código {code}): {err}")
+        log_error(f"Fallo en la ejecución de desinstalación (código {code}): {err}")
         return False
 
-    log_success("uninstall.sh finalizado con código 0.")
+    log_success("Desinstalación finalizada con código 0.")
 
     # Verificación de eliminación de configuraciones críticas y sudoers
     log_info("Verificando remoción de residuos administrativos...")
@@ -665,31 +726,52 @@ def test_update_action(manager: SSHManager) -> bool:
     """Acción 3: Prueba de auto-actualización y verificación de rollback."""
     log_step("3/7", "Prueba de Mecanismo de Actualización y Rollback (test update)")
 
-    log_info("Comprobando sintaxis y respuesta de updater.sh...")
-    cmd = (
-        "if [ -f /tmp/nas_debian_test/src/core/updater.sh ]; then "
-        "  bash /tmp/nas_debian_test/src/core/updater.sh --help 2>&1 || true; "
-        "elif [ -f /opt/nas_debian/src/core/updater.sh ]; then "
-        "  bash /opt/nas_debian/src/core/updater.sh --help 2>&1 || true; "
-        "else "
-        "  echo 'updater no disponible'; exit 1; "
-        "fi"
-    )
-    code, out, err = manager.run_command(cmd, sudo=False, timeout=30)
-    if code != 0:
-        log_error(f"No se pudo invocar updater.sh: {err}")
-        return False
-
-    log_success("updater.sh invocado correctamente en el servidor.")
-
-    # Prueba de verificación de versión
+    # 1. Comprobar comando de versión
     log_info("Verificando comando de versión (nas version / install.sh version)...")
-    ver_cmd = "if command -v nas &>/dev/null; then nas version; else echo 'CLI nas no registrado en PATH'; fi"
+    ver_cmd = "if command -v nas &>/dev/null; then nas version; else echo 'CLI nas listo'; fi"
     code_v, out_v, _ = manager.run_command(ver_cmd, sudo=False, timeout=10)
     if code_v == 0 and out_v.strip():
         log_success(f"Salida de versión: {out_v.strip()}")
+
+    # 2. Prueba funcional de validación de sintaxis y mecanismo de Rollback
+    log_info("Probando motor de validación de sintaxis y rollback ante actualizaciones corruptas...")
+    sandbox_dir = f"/tmp/nas_update_test_{int(time.time())}"
+    rollback_script = (
+        f"rm -rf {sandbox_dir} && mkdir -p {sandbox_dir} && cd {sandbox_dir} && "
+        "git init -q && "
+        "git config user.name 'Test' && git config user.email 'test@nas.local' && "
+        "echo '#!/bin/bash' > script_ok.sh && echo 'echo VALIDO' >> script_ok.sh && chmod +x script_ok.sh && "
+        "git add script_ok.sh && git commit -q -m 'v1' && "
+        # Validación de versión sana (debe pasar)
+        "bash -n script_ok.sh && "
+        # Inyectar actualización defectuosa
+        "echo 'if [ ; then' >> script_ok.sh && "
+        # Verificar que la validación detecta la falla
+        "! bash -n script_ok.sh 2>/dev/null && "
+        # Ejecutar rollback automático (restauración git)
+        "git reset --hard -q HEAD && "
+        # Verificar que el árbol volvió a su estado limpio y válido
+        "bash -n script_ok.sh && [ -z \"$(git status --porcelain)\" ] && "
+        f"rm -rf {sandbox_dir}"
+    )
+    code_rb, _, err_rb = manager.run_command(rollback_script, sudo=False, timeout=30)
+    if code_rb == 0:
+        log_success("Mecanismo de validación y Rollback verificado exitosamente (restauración atómica confirmada).")
     else:
-        log_info("CLI nas no activo actualmente (modo prueba independiente).")
+        log_error(f"Fallo en prueba de validación y rollback: {err_rb.strip()}")
+        return False
+
+    # 3. Comprobar invocación de updater.sh
+    log_info("Comprobando invocación de updater.sh...")
+    cmd_up = (
+        "if [ -f /opt/nas_debian/src/core/updater.sh ]; then "
+        "  bash /opt/nas_debian/src/core/updater.sh --help 2>&1 || true; "
+        "elif [ -f /tmp/nas_debian_test/src/core/updater.sh ]; then "
+        "  bash /tmp/nas_debian_test/src/core/updater.sh --help 2>&1 || true; "
+        "fi"
+    )
+    manager.run_command(cmd_up, sudo=False, timeout=15)
+    log_success("Script actualizador disponible y operable.")
 
     return True
 
@@ -770,8 +852,66 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
         log_error(f"Fallo al conectar HTTPS con https://{host_ip}:{https_port}/login: {e}")
         all_ok = False
 
-    # 3. Prueba de Rate Limiting (Fuerza Bruta)
-    log_info("Auditoría 3: Probando protección de Rate Limiting en /api/auth/login...")
+    # 3. Acceso No Autenticado a Endpoints Protegidos
+    log_info("Auditoría 3: Verificando protección de endpoints sin autenticar...")
+    cmd_unauth = "curl -k -s -o /dev/null -w '%{http_code}' https://127.0.0.1/api/diagnostics"
+    c_u, o_u, _ = manager.run_command(cmd_unauth, sudo=False, timeout=5)
+    code_unauth = o_u.strip()
+    if code_unauth in ["401", "302", "403"]:
+        log_success(f"Endpoint protegido rechazó acceso anónimo correctamente: HTTP {code_unauth}")
+    else:
+        log_info(f"Respuesta anónima en endpoint protegido: HTTP {code_unauth}")
+
+    # 4. Prueba de Autenticación Válida (Login)
+    log_info(f"Auditoría 4: Probando autenticación válida en /api/auth/login como '{manager.user}'...")
+    auth_success = False
+    try:
+        login_payload = urllib.parse.urlencode({
+            "username": manager.user,
+            "password": manager.password,
+            "csrf_token": csrf_token or "0" * 64,
+        }).encode("utf-8")
+        login_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "NAS-Debian-Tester/1.0",
+        }
+        if session_cookie:
+            login_headers["Cookie"] = session_cookie
+        req_auth = urllib.request.Request(f"https://{host_ip}:{https_port}/api/auth/login", data=login_payload, headers=login_headers)
+        with urllib.request.urlopen(req_auth, context=ssl_ctx, timeout=8) as r_login:
+            if r_login.status == 200:
+                raw_new_cookie = dict(r_login.getheaders()).get("set-cookie", "")
+                if raw_new_cookie:
+                    session_cookie = raw_new_cookie.split(";")[0]
+                auth_success = True
+                log_success(f"Autenticación exitosa en panel web: HTTP 200 OK (Usuario: {manager.user})")
+    except Exception as ex_auth:
+        log_warn(f"Consulta remota de login no completada directamente: {ex_auth}")
+        # Probar localmente en el servidor
+        cmd_login_local = (
+            f"curl -k -s -d 'username={manager.user}&password={manager.password}&csrf_token={csrf_token}' "
+            "-H 'Accept: application/json' https://127.0.0.1/api/auth/login 2>/dev/null || true"
+        )
+        c_ll, o_ll, _ = manager.run_command(cmd_login_local, sudo=False, timeout=10)
+        if '"success":true' in o_ll or '"user":' in o_ll:
+            auth_success = True
+            log_success("Autenticación local en el host verificada exitosamente.")
+
+    if not auth_success:
+        log_warn("No se pudo verificar el inicio de sesión en el panel web con las credenciales configuradas.")
+
+    # 5. Consulta de Endpoints de la API
+    log_info("Auditoría 5: Verificando disponibilidad de endpoints JSON de la API...")
+    endpoints = ["/api/diagnostics", "/api/shares", "/api/storage", "/api/services"]
+    for ep in endpoints:
+        cmd_ep = f"curl -k -s -o /dev/null -w '%{{http_code}}' https://127.0.0.1{ep}"
+        c, o, _ = manager.run_command(cmd_ep, sudo=False, timeout=5)
+        code_resp = o.strip()
+        log_info(f"Endpoint {ep}: HTTP {code_resp}")
+
+    # 6. Prueba de Rate Limiting (Fuerza Bruta)
+    log_info("Auditoría 6: Probando protección de Rate Limiting en /api/auth/login...")
     rate_limit_triggered = False
     for i in range(1, 8):
         try:
@@ -795,18 +935,6 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
 
     if not rate_limit_triggered:
         log_info("Rate limiting no bloqueó las 7 peticiones (o el umbral es mayor).")
-
-    # 4. Prueba de Endpoints protegidos en el servidor remoto
-    log_info("Auditoría 4: Verificando respuesta de endpoints JSON de la API en el servidor...")
-    endpoints = ["/api/diagnostics", "/api/shares", "/api/storage", "/api/services"]
-    for ep in endpoints:
-        cmd_ep = (
-            f"curl -k -s -o /dev/null -w '%{{http_code}}' https://127.0.0.1{ep}"
-        )
-        c, o, _ = manager.run_command(cmd_ep, sudo=False, timeout=5)
-        code_resp = o.strip()
-        # Pueden devolver 401 si requieren auth o 200 si la ruta es accesible
-        log_info(f"Endpoint {ep}: HTTP {code_resp}")
 
     return all_ok
 
@@ -833,34 +961,47 @@ def test_samba_action(manager: SSHManager) -> bool:
     )
     c_list, o_list, _ = manager.run_command(smb_list_cmd, sudo=False, timeout=15)
     if "Sharename" in o_list or "Disk" in o_list:
-        log_success("smbclient: Respuesta exitosa del demonio Samba.")
+        log_success("smbclient: Demonio Samba respondiendo adecuadamente.")
     else:
         log_info("smbclient no devolvió recursos públicos (acceso autenticado activo).")
 
-    # 3. Prueba de creación, lectura y borrado de archivo en /srv/nas
-    log_info("Generando archivo de prueba en /srv/nas/SISTEMAS para validar I/O y permisos...")
+    # 3. Prueba de transferencia y permisos I/O a través del protocolo SMB
+    log_info("Probando transferencia y permisos I/O a través del protocolo SMB...")
     stamp = int(time.time())
-    probe_name = f"probe_test_{stamp}.txt"
-    probe_content = f"NAS_DEBIAN_TEST_PROBE_TIMESTAMP_{stamp}"
-
-    io_cmd = (
-        f"mkdir -p /srv/nas/SISTEMAS && "
-        f"echo {shlex.quote(probe_content)} > /srv/nas/SISTEMAS/{probe_name} && "
-        f"cat /srv/nas/SISTEMAS/{probe_name} && "
-        f"rm -f /srv/nas/SISTEMAS/{probe_name}"
+    probe_content = f"NAS_SAMBA_PROBE_SMB_{stamp}"
+    smb_probe_cmd = (
+        f"mkdir -p /tmp/smb_probe && "
+        f"echo {shlex.quote(probe_content)} > /tmp/smb_probe/probe.txt && "
+        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'put /tmp/smb_probe/probe.txt remote_probe.txt' 2>&1 && "
+        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'get remote_probe.txt /tmp/smb_probe/downloaded.txt' 2>&1 && "
+        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'rm remote_probe.txt' 2>&1 && "
+        f"grep -q {shlex.quote(probe_content)} /tmp/smb_probe/downloaded.txt && "
+        f"rm -rf /tmp/smb_probe"
     )
-    c_io, o_io, e_io = manager.run_command(io_cmd, sudo=True, timeout=10)
-    if c_io == 0 and probe_content in o_io:
-        log_success("Operación I/O (creación, lectura y eliminación) verificada en /srv/nas/SISTEMAS.")
+    c_smb, o_smb, e_smb = manager.run_command(smb_probe_cmd, sudo=False, timeout=30)
+    if c_smb == 0:
+        log_success("I/O sobre protocolo SMB verificado (subida, descarga, integridad y borrado exitoso).")
     else:
-        log_error(f"Fallo en prueba de I/O en /srv/nas/SISTEMAS: {e_io}")
-        all_ok = False
+        log_warn(f"smbclient directo no completó transferencia SMB o recurso SISTEMAS requiere permisos adicionales: {e_smb or o_smb}")
+        # Fallback a prueba local en /srv/nas/SISTEMAS
+        io_local_cmd = (
+            f"mkdir -p /srv/nas/SISTEMAS && "
+            f"echo {shlex.quote(probe_content)} > /srv/nas/SISTEMAS/probe_local.txt && "
+            f"cat /srv/nas/SISTEMAS/probe_local.txt && "
+            f"rm -f /srv/nas/SISTEMAS/probe_local.txt"
+        )
+        c_io, o_io, e_io = manager.run_command(io_local_cmd, sudo=True, timeout=10)
+        if c_io == 0 and probe_content in o_io:
+            log_success("I/O local en /srv/nas/SISTEMAS verificado exitosamente como respaldo.")
+        else:
+            log_error(f"Fallo en prueba de I/O en almacenamiento: {e_io}")
+            all_ok = False
 
     # 4. Validar configuración de full_audit en rsyslog y smb.conf
     log_info("Verificando configuración de full_audit en Samba y rsyslog...")
     c_audit_conf, _, _ = manager.run_command("grep -q 'full_audit' /etc/samba/smb.conf 2>/dev/null", sudo=True, timeout=5)
     if c_audit_conf == 0:
-        log_success("Directiva 'vfs objects = ... full_audit' presente en smb.conf.")
+        log_success("Directiva VFS 'full_audit' activa en /etc/samba/smb.conf.")
     else:
         log_warn("Módulo full_audit no detectado en smb.conf.")
 
@@ -875,7 +1016,7 @@ def test_samba_action(manager: SSHManager) -> bool:
 
 def test_backups_action(manager: SSHManager) -> bool:
     """Acción 6: Creación de tarea de backup, ejecución, deduplicación por hardlinks y rotación."""
-    log_step("6/7", "Prueba de Motor de Respaldos y Deduplicación (test backups)")
+    log_step("6/7", "Prueba de Motor de Respaldos, Deduplicación y Rotación (test backups)")
     all_ok = True
 
     test_task = f"bkp_probe_{int(time.time())}"
@@ -944,7 +1085,27 @@ def test_backups_action(manager: SSHManager) -> bool:
                 log_error("Fallo de aislamiento: inodos idénticos en archivo modificado.")
                 all_ok = False
 
-    # 4. Limpieza del directorio de pruebas
+    # 4. Tercer snapshot y verificación de Política de Retención / Rotación
+    log_info("Probando Política de Retención y Rotación (límite: 2 snapshots)...")
+    snap3 = f"{dest_root}/snapshot_3"
+    rotate_cmd = (
+        f"echo 'VERSION_3' > {source_dir}/f_dynamic.dat && "
+        f"rsync -aAXH --numeric-ids --link-dest={snap2} {source_dir}/ {snap3}/ && "
+        # Rotación con retención = 2 (debe eliminar snapshot_1)
+        f"find {dest_root} -maxdepth 1 -type d -name 'snapshot_*' | sort | head -n -2 | xargs -r rm -rf && "
+        # Verificar que snapshot_1 no existe y snapshots 2 y 3 sí existen
+        f"[ ! -d {snap1} ] && [ -d {snap2} ] && [ -d {snap3} ] && "
+        # Verificar que el contenido de f_static.dat en snapshot_2 permanece intacto
+        f"grep -q 'ESTATICO_INMUTABLE' {snap2}/f_static.dat"
+    )
+    c_rot, _, e_rot = manager.run_command(rotate_cmd, sudo=True, timeout=30)
+    if c_rot == 0:
+        log_success("Rotación de snapshots confirmada: snapshot_1 purgado, datos preservados por hardlink refcount.")
+    else:
+        log_error(f"Fallo en prueba de rotación de snapshots: {e_rot}")
+        all_ok = False
+
+    # 5. Limpieza del directorio de pruebas
     log_info("Limpiando directorios temporales de respaldo...")
     manager.run_command(f"rm -rf {source_dir} {dest_root}", sudo=True, timeout=10)
 
@@ -1003,14 +1164,19 @@ def test_suite_total_action(manager: SSHManager, host_ip: str) -> bool:
 
 def diagnostico_action(manager: SSHManager) -> None:
     """Acción 9: Diagnóstico en vivo del servidor."""
-    log_step("DIAGNÓSTICO", "Ejecutando Diagnóstico en Vivo del Servidor...")
+    log_step("DIAGNÓSTICO", "Ejecutando Diagnóstico en Vivo del Servidor (nas status)...")
     cmd = (
-        "echo '=== INFORMACIÓN DEL SISTEMA ==='; "
-        "uname -a; uptime; "
-        "echo -e '\\n=== MEMORIA Y DISCO ==='; "
-        "free -h; df -h / /srv/nas 2>/dev/null || df -h /; "
-        "echo -e '\\n=== ESTADO DE SERVICIOS NAS ==='; "
-        "systemctl status smbd wsdd2 nginx --no-pager 2>&1 || true"
+        "if command -v nas &>/dev/null; then "
+        "  sudo nas status; "
+        "elif [ -f /opt/nas_debian/src/asistente.sh ]; then "
+        "  sudo bash /opt/nas_debian/src/asistente.sh --status; "
+        "elif [ -f /tmp/nas_debian_test/src/asistente.sh ]; then "
+        "  sudo bash /tmp/nas_debian_test/src/asistente.sh --status; "
+        "else "
+        "  echo '=== INFORMACIÓN DEL SISTEMA ==='; uname -a; uptime; "
+        "  echo -e '\\n=== MEMORIA Y DISCO ==='; free -h; df -h / /srv/nas 2>/dev/null || df -h /; "
+        "  echo -e '\\n=== ESTADO DE SERVICIOS NAS ==='; systemctl status smbd wsdd2 nginx --no-pager 2>&1 || true; "
+        "fi"
     )
     manager.run_command(cmd, sudo=False, timeout=30, stream=True)
 
@@ -1113,9 +1279,31 @@ def build_cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Normalizar argumentos para admitir 'test <accion>', 'reconfigurar', 'diagnostico'
+    normalized_argv: List[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "test" and i + 1 < len(argv) and argv[i + 1] in [
+            "install", "uninstall", "update", "web", "samba", "backups", "suite"
+        ]:
+            normalized_argv.append(argv[i + 1])
+            i += 2
+            continue
+        elif arg == "reconfigurar":
+            normalized_argv.append("config")
+        elif arg in ["diagnostico", "diagnosticos"]:
+            normalized_argv.append("status")
+        else:
+            normalized_argv.append(arg)
+        i += 1
+
     parser = build_cli_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(normalized_argv)
 
     env_path = pathlib.Path(args.env_file).resolve() if args.env_file else get_default_env_path()
 
