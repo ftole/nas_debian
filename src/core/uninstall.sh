@@ -122,10 +122,12 @@ else
     rm -f /etc/sudoers.d/nas-web
     rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
     rm -f /usr/bin/lastb
-    rm -f /usr/sbin/sss_cache
     if command -v dpkg-divert &>/dev/null; then
         dpkg-divert --remove --rename /usr/bin/lastb 2>/dev/null || true
-        dpkg-divert --remove --rename /usr/sbin/sss_cache 2>/dev/null || true
+        if [ -n "$(dpkg-divert --list /usr/sbin/sss_cache 2>/dev/null)" ]; then
+            rm -f /usr/sbin/sss_cache
+            dpkg-divert --remove --rename /usr/sbin/sss_cache 2>/dev/null || true
+        fi
     fi
     rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
     rm -f /etc/udev/rules.d/60-nas-readahead.rules
