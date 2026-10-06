@@ -446,9 +446,10 @@ elif [ -d "$(dirname "${BASH_SOURCE[0]}")/../web" ]; then
 fi
 
 # 1. Configurar Pool de PHP-FPM bajo demanda (pm = ondemand, ~0 MB RAM en reposo)
+# PHP_VER se define siempre (lo consume también el archivo sudoers de la web).
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
 PHP_POOL_DIR=$(find /etc/php -maxdepth 3 -type d -name "pool.d" 2>/dev/null | tail -1)
 if [ -z "$PHP_POOL_DIR" ]; then
-    PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
     PHP_POOL_DIR="/etc/php/$PHP_VER/fpm/pool.d"
 fi
 mkdir -p "$PHP_POOL_DIR" /run/php
@@ -502,7 +503,9 @@ VERSION_EOF
 
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
-usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || true
+
+# La pertenencia de www-data al grupo grp_sistemas se aplica en el paso [4/9],
+# una vez creado el grupo (hacerlo aquí antes de groupadd no tendría efecto).
 
 # 3.1 Inicializar la base de datos SQLite nativa (evita la creación perezosa en la primera petición)
 if command -v php >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 && [ -f /var/www/nas-web/src/Services/DatabaseService.php ]; then
@@ -616,7 +619,7 @@ Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstat
     /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/sbin/userdel -r [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/usermod -aG [a-zA-Z0-9_,.-]* [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
     /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
     /usr/bin/btrfs scrub status /srv/nas*, /bin/btrfs scrub status /srv/nas*, \\
@@ -638,7 +641,7 @@ Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
 Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \\
     /bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, \\
-    /bin/chown root:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chown root\:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root\:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, \\
     /usr/bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
@@ -647,9 +650,13 @@ Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /t
 
 www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
 SUDOERS_EOF
-chmod 0440 /etc/sudoers.d/nas-web
 if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
+    # Un fragmento inválido rompería sudo de forma global: se descarta y se avisa.
+    VISUDO_ERR=$(visudo -c -f /etc/sudoers.d/nas-web 2>&1 | tr '\n' ' ')
     rm -f /etc/sudoers.d/nas-web
+    advertir "El sudoers de la web no superó visudo y fue descartado; la gestión web quedará sin permisos sudo. Detalle: $VISUDO_ERR"
+else
+    chmod 0440 /etc/sudoers.d/nas-web
 fi
 
 # 6. Ocultar disco del sistema operativo de la interfaz de Almacenamiento (UDisks2)
@@ -676,6 +683,8 @@ WSDDOVERRIDE
 
 echo " [4/9] Creando grupo maestro Sistemas y configurando administradores ($ADMIN_USER)..."
 groupadd -f grp_sistemas
+# El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_sistemas).
+usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_sistemas."
 
 # 1. Crear las cuentas administrativas base del sistema SIN contraseña por defecto.
 #    Estas cuentas quedan bloqueadas hasta que el operador les asigne una clave.
@@ -748,6 +757,11 @@ else
     find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type d ! -type l -exec chmod 2770 {} +
     find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type f ! -type l -exec chmod 660 {} +
 fi
+
+# Red de seguridad del panel web: ACL explícita para www-data sobre la raíz de datos.
+# Se concede rwx (coincide con el grupo) y NO se propaga con -d, para no anular los
+# esquemas de solo lectura definidos por recurso compartido.
+setfacl -m u:www-data:rwx /srv/nas 2>/dev/null || true
 
 # Bitácora maestra de respaldos y archivos de log de auditoría
 touch /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
