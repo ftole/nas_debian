@@ -61,9 +61,23 @@ class AuthController
 
         $username = (string) $request->get('username', '');
         $password = (string) $request->get('password', '');
+        $clientIp = $request->getClientIp();
+
+        if ($this->auth->isRateLimited($clientIp)) {
+            $err = 'Demasiados intentos fallidos. Por favor espera 5 minutos antes de volver a intentar.';
+            AuditService::log('login_rate_limited', $username ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
+            if ($request->isJson()) {
+                Response::error($err, 429);
+                return;
+            }
+            $_SESSION['login_error'] = $err;
+            header('Location: /login');
+            exit;
+        }
 
         if (trim($username) === '' || trim($password) === '') {
             $err = 'Por favor ingresa tu usuario y contraseña.';
+            $this->auth->recordFailedAttempt($clientIp, $username ?: 'desconocido');
             AuditService::log('login_failure', $username ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos']);
             if ($request->isJson()) {
                 Response::error($err, 400);
@@ -78,6 +92,7 @@ class AuthController
 
         if (!$res['success']) {
             $err = $res['error'] ?? 'Usuario o contraseña incorrectos.';
+            $this->auth->recordFailedAttempt($clientIp, $username);
             AuditService::log('login_failure', $username, 'FAILED', ['error' => $err]);
             if ($request->isJson()) {
                 Response::error($err, 401);
@@ -87,6 +102,8 @@ class AuthController
             header('Location: /login');
             exit;
         }
+
+        $this->auth->clearFailedAttempts($clientIp);
 
         // Proteger contra Session Fixation
         session_regenerate_id(true);
