@@ -855,7 +855,7 @@ class FileExplorerService
         $contentType = $mimes[$ext] ?? 'application/octet-stream';
         $size = filesize($target);
 
-        if (ob_get_level()) {
+        if (getenv('APP_ENV') !== 'testing' && ob_get_level()) {
             ob_end_clean();
         }
 
@@ -866,26 +866,30 @@ class FileExplorerService
             $end = $matches[2] !== '' ? (int) $matches[2] : $size - 1;
 
             if ($start > $end || $start >= $size) {
-                http_response_code(416);
-                header("Content-Range: bytes */{$size}");
+                if (!headers_sent()) {
+                    http_response_code(416);
+                    header("Content-Range: bytes */{$size}");
+                }
                 return;
             }
 
             $end = min($end, $size - 1);
             $length = $end - $start + 1;
 
-            http_response_code(206);
-            header('Content-Type: ' . $contentType);
-            if ($ext === 'svg') {
-                header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
-                header("Content-Security-Policy: default-src 'none'; sandbox");
-            } else {
-                header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+            if (!headers_sent()) {
+                http_response_code(206);
+                header('Content-Type: ' . $contentType);
+                if ($ext === 'svg') {
+                    header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
+                    header("Content-Security-Policy: default-src 'none'; sandbox");
+                } else {
+                    header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+                }
+                header('Accept-Ranges: bytes');
+                header("Content-Range: bytes {$start}-{$end}/{$size}");
+                header('Content-Length: ' . $length);
+                header('Cache-Control: private, max-age=3600');
             }
-            header('Accept-Ranges: bytes');
-            header("Content-Range: bytes {$start}-{$end}/{$size}");
-            header('Content-Length: ' . $length);
-            header('Cache-Control: private, max-age=3600');
 
             $handle = @fopen($target, 'rb');
             if ($handle !== false) {
@@ -903,20 +907,25 @@ class FileExplorerService
                 }
                 fclose($handle);
             }
-            exit;
+            if (getenv('APP_ENV') !== 'testing') {
+                exit;
+            }
+            return;
         }
 
-        header('Content-Type: ' . $contentType);
-        if ($ext === 'svg') {
-            header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
-            header("Content-Security-Policy: default-src 'none'; sandbox");
-        } else {
-            header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
-        }
-        header('Accept-Ranges: bytes');
-        header('Cache-Control: private, max-age=3600');
-        if ($size !== false) {
-            header('Content-Length: ' . $size);
+        if (!headers_sent()) {
+            header('Content-Type: ' . $contentType);
+            if ($ext === 'svg') {
+                header('Content-Disposition: attachment; filename="' . rawurlencode(basename($target)) . '"');
+                header("Content-Security-Policy: default-src 'none'; sandbox");
+            } else {
+                header('Content-Disposition: inline; filename="' . rawurlencode(basename($target)) . '"');
+            }
+            header('Accept-Ranges: bytes');
+            header('Cache-Control: private, max-age=3600');
+            if ($size !== false) {
+                header('Content-Length: ' . $size);
+            }
         }
 
         $handle = @fopen($target, 'rb');
@@ -927,7 +936,9 @@ class FileExplorerService
             }
             fclose($handle);
         }
-        exit;
+        if (getenv('APP_ENV') !== 'testing') {
+            exit;
+        }
     }
 
     /**
@@ -981,12 +992,17 @@ class FileExplorerService
                     continue;
                 }
 
+                // Excluir elementos de la papelera de reciclaje (.trash)
+                if (str_contains($filePath, DIRECTORY_SEPARATOR . '.trash' . DIRECTORY_SEPARATOR) || str_ends_with($filePath, DIRECTORY_SEPARATOR . '.trash')) {
+                    continue;
+                }
+
                 // Verificar canónicamente que el archivo resida dentro de $realTargetDir (bloquear symlinks externos)
                 if (!str_starts_with($filePath, $realTargetDir . DIRECTORY_SEPARATOR) && !str_starts_with($filePath, $realTargetDir . '/')) {
                     continue;
                 }
 
-                $relativePath = substr($filePath, strlen($realTargetDir) + 1);
+                $relativePath = str_replace('\\', '/', substr($filePath, strlen($realTargetDir) + 1));
                 $totalSize += $file->getSize();
 
                 if ($totalSize > $maxZipSize) {
@@ -1040,18 +1056,20 @@ class FileExplorerService
     private function streamFileDownload(string $filePath, string $downloadName, bool $unlinkAfter): void
     {
         $size = filesize($filePath);
-        if (ob_get_level()) {
+        if (getenv('APP_ENV') !== 'testing' && ob_get_level()) {
             ob_end_clean();
         }
 
-        header('Content-Description: File Transfer');
-        header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="' . rawurlencode($downloadName) . '"');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate');
-        header('Pragma: public');
-        if ($size !== false) {
-            header('Content-Length: ' . $size);
+        if (!headers_sent()) {
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="' . rawurlencode($downloadName) . '"');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate');
+            header('Pragma: public');
+            if ($size !== false) {
+                header('Content-Length: ' . $size);
+            }
         }
 
         $handle = @fopen($filePath, 'rb');
@@ -1066,7 +1084,9 @@ class FileExplorerService
         if ($unlinkAfter) {
             @unlink($filePath);
         }
-        exit;
+        if (getenv('APP_ENV') !== 'testing') {
+            exit;
+        }
     }
 
     private function deleteDirectoryRecursive(string $dir): bool
