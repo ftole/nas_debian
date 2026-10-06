@@ -46,7 +46,7 @@ En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermed
 | Tecnología / Subsistema | Componente | ¿Para qué sirve? | Beneficio técnico directo |
 | :--- | :--- | :--- | :--- |
 | **Samba 4 (`smbd` / `nmbd`)** | Servicio de Red SMB/CIFS | Compartición de archivos para Windows, Linux y macOS. | Protocolo estándar nativo, cifrado negociado (`desired`), protocolo mínimo seguro SMB2_02 y aislamiento de usuarios. |
-| **Módulos VFS Samba** | `vfs objects = acl_xattr streams_xattr` | Compatibilidad con ADS de NTFS y ACLs en atributos extendidos. | **Previene cuellos de botella con +100 equipos en Excel/Office**: edición simultánea sin bloqueos de temporales `~$` y soporte de marcas Windows (`Zone.Identifier`). |
+| **Módulos VFS Samba** | `vfs objects = acl_xattr streams_xattr full_audit` | Compatibilidad con ADS de NTFS, ACLs en xattr y auditoría forense de operaciones. | **Previene cuellos de botella con +100 equipos en Excel/Office**: edición concurrente sin bloqueos de temporales `~$`, soporte de marcas Windows y registro forense de operaciones (`openat`, `renameat`, etc.). |
 | **Directivas Samba de Rendimiento** | Configuración `smb.conf` | `store dos attributes`, `strict sync`, `use sendfile`, `aio read/write size = 16384`, `max open files = 65535`. | Transferencia directa kernel-red sin saltos a memoria de usuario; latencia ultrabaja en libros contables masivos y eliminación de límites de descriptores. |
 | **WSDD2** | Descubrimiento de Red | Implementación ligera de Web Services Discovery y LLMNR. | Visibilidad instantánea en el Explorador de Windows 10/11 sin activar protocolos inseguros como NetBIOS broadcast o SMBv1. |
 | **Active Directory Nativo** | `realmd`, `sssd`, `adcli`, Kerberos | Integración corporativa con dominio Windows. | Autentica usuarios de dominio directamente en el NAS y Samba, con soporte para sintaxis `DOMINIO\usuario`. |
@@ -74,7 +74,7 @@ En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermed
 | **Nginx-light** | Servidor Web HTTP/HTTPS | Servidor web ultraligero y seguro. | Mínimo consumo de recursos, terminación SSL/TLS y proxy rápido hacia PHP-FPM. |
 | **PHP 8 + PHP-FPM ondemand** | Backend de Aplicación | Arquitectura MVC pura servida con `pm = ondemand`. | Consumo nulo en reposo (~0 MB de RAM cuando no se navega); apagado automático de procesos ociosos. |
 | **Invocación Segura `proc_open`** | Backend PHP | Ejecución de comandos del sistema pasando arrays de argumentos. | **Elimina por diseño la inyección de comandos**: los argumentos no son evaluados por `/bin/sh`, garantizando ejecución estricta. |
-| **SQLite en modo WAL** | Base de Datos Estructurada | Archivo `/var/lib/nas/nas.sqlite` con PDO. | 0 MB de consumo en memoria en reposo; indexación ultrarrápida de auditoría, tareas, configuraciones e historial sin requerir demonios pesados (MySQL/PostgreSQL). |
+| **SQLite en modo WAL** | Base de Datos Estructurada | Archivo `/var/lib/nas/nas.sqlite` con PDO. | 0 MB de consumo en memoria en reposo; indexación ultrarrápida de auditoría (`audit_logs`), historial de terminal (`terminal_history`), configuración y papelera (`trash_items`). |
 | **Slate UI 100% Offline** | Frontend Web | CSS unificado con variables de tema (Claro/Oscuro) y JS nativo en ES6+. | Cero CDNs y cero fuentes remotas; 36 iconos SVG nativos; carga instantánea y funcionamiento autónomo sin Internet. |
 
 ---
