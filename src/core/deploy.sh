@@ -697,11 +697,14 @@ if [ "$KEEP_DATA" = true ]; then
     chmod 2771 /srv/nas
     chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
 else
-    chown -h -R --preserve-root root:grp_sistemas /srv/nas
+    chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
     chmod 2771 /srv/nas
     chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    find -P /srv/nas -mindepth 1 -type d ! -type l -exec chmod 2770 {} +
-    find -P /srv/nas -type f ! -type l -exec chmod 660 {} +
+    # Los snapshots de BACKUPS_HISTORICOS son inmutables (chattr +i) y conservan sus
+    # propietarios originales: se excluyen de la normalización recursiva de permisos.
+    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -exec chown -h root:grp_sistemas {} +
+    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type d ! -type l -exec chmod 2770 {} +
+    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type f ! -type l -exec chmod 660 {} +
 fi
 
 # Bitácora maestra de respaldos y archivos de log de auditoría
