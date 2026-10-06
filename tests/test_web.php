@@ -261,7 +261,7 @@ assertTrue(empty($_SESSION['nas_user']), 'AuthService::logout limpia variables d
 $emptyCifs = (new BackupService())->createTask(['id' => 'tarea_vacia', 'proto' => 'cifs']);
 assertTrue(!$emptyCifs['success'], 'BackupService::createTask rechaza CIFS sin IP o recurso compartido');
 
-// 14. Pruebas de Request::getClientIp
+// 14. Pruebas de Request::getClientIp y trusted proxies
 $_SERVER['REMOTE_ADDR'] = '192.168.1.150';
 unset($_SERVER['HTTP_X_FORWARDED_FOR'], $_SERVER['HTTP_CLIENT_IP']);
 $ipReq1 = new Request();
@@ -269,12 +269,17 @@ assertTrue($ipReq1->getClientIp() === '192.168.1.150', 'Request::getClientIp res
 
 $_SERVER['HTTP_X_FORWARDED_FOR'] = '10.20.30.40, 192.168.1.150';
 $ipReq2 = new Request();
-assertTrue($ipReq2->getClientIp() === '10.20.30.40', 'Request::getClientIp prioriza primera IP de HTTP_X_FORWARDED_FOR');
+assertTrue($ipReq2->getClientIp() === '192.168.1.150', 'Request::getClientIp ignora HTTP_X_FORWARDED_FOR de cliente no confiable');
+
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1'; // Proxy local de confianza
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '10.20.30.40, 192.168.1.150';
+$ipReq3 = new Request();
+assertTrue($ipReq3->getClientIp() === '10.20.30.40', 'Request::getClientIp prioriza primera IP de HTTP_X_FORWARDED_FOR desde proxy de confianza');
 
 unset($_SERVER['HTTP_X_FORWARDED_FOR']);
 $_SERVER['HTTP_CLIENT_IP'] = '172.16.5.99';
-$ipReq3 = new Request();
-assertTrue($ipReq3->getClientIp() === '172.16.5.99', 'Request::getClientIp resuelve HTTP_CLIENT_IP');
+$ipReq4 = new Request();
+assertTrue($ipReq4->getClientIp() === '172.16.5.99', 'Request::getClientIp resuelve HTTP_CLIENT_IP desde proxy de confianza');
 
 // 15. Pruebas de AuditService::log
 $_SESSION['nas_user'] = ['username' => 'test_admin', 'is_admin' => true];
@@ -642,6 +647,90 @@ assertTrue(isset($domainStatus['workgroup']), 'DomainService::getStatus retorna 
 
 $invalidDisc = $domain->discover('!!dominio_invalido!!');
 assertTrue(!$invalidDisc['success'], 'DomainService::discover rechaza nombres de dominio con formato inválido');
+
+// 24. Pruebas de Certificación Fase 1 y 2
+
+// 24.1 AuthService: Suprimir contraseñas mock en producción
+putenv('APP_ENV=production');
+$authProd = new AuthService();
+$authProd->dryRun = false;
+$prodRes = $authProd->authenticate('administrador', 'Admin123#');
+assertTrue(!$prodRes['success'], 'AuthService suprime contraseñas mock en producción');
+putenv('APP_ENV=testing');
+
+// 24.2 AuthService: Rate limiting con SQLite tras 5 intentos fallidos
+$rateAuth = new AuthService();
+$testRateIp = '198.51.100.42';
+$rateAuth->clearFailedAttempts($testRateIp);
+assertTrue(!$rateAuth->isRateLimited($testRateIp), 'AuthService: IP sin intentos no está bloqueada');
+for ($i = 0; $i < 5; $i++) {
+    $rateAuth->recordFailedAttempt($testRateIp, 'admin_prueba');
+}
+assertTrue($rateAuth->isRateLimited($testRateIp), 'AuthService bloquea IP tras 5 intentos fallidos');
+$rateAuth->clearFailedAttempts($testRateIp);
+assertTrue(!$rateAuth->isRateLimited($testRateIp), 'AuthService desbloquea IP tras limpieza de intentos');
+
+// 24.3 AuthMiddleware: Generación y Verificación de Token CSRF
+$csrfToken = AuthMiddleware::getCsrfToken();
+assertTrue(is_string($csrfToken) && strlen($csrfToken) === 64, 'AuthMiddleware genera token CSRF de 64 caracteres hex');
+assertTrue(AuthMiddleware::verifyCsrfToken($csrfToken), 'AuthMiddleware valida token CSRF idéntico');
+assertTrue(!AuthMiddleware::verifyCsrfToken('invalido_token_123'), 'AuthMiddleware rechaza token CSRF inválido');
+
+// 24.4 AuthMiddleware: Bloqueo de peticiones mutantes sin CSRF y admisión con CSRF
+$_SESSION['nas_user'] = ['username' => 'sistemas', 'is_admin' => true];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['REQUEST_URI'] = '/api/shares';
+unset($_SERVER['HTTP_X_CSRF_TOKEN'], $_SERVER['HTTP_X_XSRF_TOKEN']);
+$_POST = [];
+$mutantNoCsrf = new Request();
+ob_start();
+$resNoCsrf = AuthMiddleware::check($mutantNoCsrf);
+ob_end_clean();
+assertTrue(!$resNoCsrf, 'AuthMiddleware bloquea petición mutante POST sin token CSRF');
+
+$_SERVER['HTTP_X_CSRF_TOKEN'] = $csrfToken;
+$mutantWithCsrf = new Request();
+assertTrue(AuthMiddleware::check($mutantWithCsrf), 'AuthMiddleware autoriza petición mutante POST con token CSRF en cabecera');
+unset($_SERVER['HTTP_X_CSRF_TOKEN']);
+
+// 24.5 BackupService & BackupController: Blindaje contra Path Traversal
+$bkpService = new BackupService();
+$ptDelete = $bkpService->deleteTask('../../etc/cron.d/malicioso');
+assertTrue(!$ptDelete['success'], 'BackupService::deleteTask rechaza identificador con Path Traversal');
+$ptDeleteOk = $bkpService->deleteTask('tarea_valida_99');
+assertTrue($ptDeleteOk['success'], 'BackupService::deleteTask acepta identificador alfanumérico válido');
+
+$bkpCtrl = new \App\Controllers\BackupController();
+$ptReq = new Request();
+ob_start();
+$bkpCtrl->delete($ptReq, ['id' => '../../../etc/shadow']);
+$bkpDelOut = ob_get_clean();
+assertTrue(str_contains($bkpDelOut, 'Identificador de tarea inválido'), 'BackupController::delete valida formato y rechaza traversal');
+
+// 24.6 UserService: Prohibir eliminación de cuentas protegidas y auto-eliminación
+$uServ = new UserService();
+$delSistemas = $uServ->deleteUser('sistemas');
+assertTrue(!$delSistemas['success'], 'UserService rechaza eliminar cuenta de sistema protegida sistemas');
+$delWwwData = $uServ->deleteUser('www-data');
+assertTrue(!$delWwwData['success'], 'UserService rechaza eliminar cuenta de sistema protegida www-data');
+
+$_SESSION['nas_user'] = ['username' => 'operador_demo', 'is_admin' => true];
+$delSelf = $uServ->deleteUser('operador_demo');
+assertTrue(!$delSelf['success'], 'UserService rechaza auto-eliminación de la cuenta de usuario activa');
+unset($_SESSION['nas_user']);
+
+// 24.7 FileExplorerService: Mitigación de Stored XSS en SVG
+$fService = new FileExplorerService();
+$tmpSvg = tempnam(sys_get_temp_dir(), 'nas_xss_') . '.svg';
+file_put_contents($tmpSvg, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+// Inspeccionar tipo detectado
+assertTrue($fService->detectFileType('vector.svg', false) === 'image', 'FileExplorerService detecta archivos SVG como imagen');
+@unlink($tmpSvg);
+
+// 24.8 SystemService: Consulta de versión e información de commit
+$sysServ = new SystemService();
+$updStatus = $sysServ->checkUpdates();
+assertTrue(isset($updStatus['version']) && isset($updStatus['installed_commit']), 'SystemService::checkUpdates reporta campos de versión y commit');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
