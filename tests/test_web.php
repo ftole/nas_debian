@@ -36,6 +36,7 @@ require_once __DIR__ . '/../web/src/Controllers/DomainController.php';
 
 use App\Core\AuthMiddleware;
 use App\Core\Request;
+use App\Core\Router;
 use App\Services\AuditService;
 use App\Services\AuthService;
 use App\Services\BackupService;
@@ -47,6 +48,7 @@ use App\Services\StorageService;
 use App\Services\SystemService;
 use App\Services\TerminalService;
 use App\Services\UserService;
+use App\Controllers\AuthController;
 
 $passed = 0;
 $failed = 0;
@@ -719,15 +721,75 @@ $delSelf = $uServ->deleteUser('operador_demo');
 assertTrue(!$delSelf['success'], 'UserService rechaza auto-eliminación de la cuenta de usuario activa');
 unset($_SESSION['nas_user']);
 
-// 24.7 FileExplorerService: Mitigación de Stored XSS en SVG
+// 24.7 FileExplorerService: Mitigación de Stored XSS en SVG y transmisión segura
 $fService = new FileExplorerService();
-$tmpSvg = tempnam(sys_get_temp_dir(), 'nas_xss_') . '.svg';
-file_put_contents($tmpSvg, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
-// Inspeccionar tipo detectado
+$tempSvgDir = sys_get_temp_dir() . '/nas_svg_test_' . uniqid();
+@mkdir($tempSvgDir, 0777, true);
+file_put_contents($tempSvgDir . '/vector.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+FileExplorerService::setRootDir($tempSvgDir);
 assertTrue($fService->detectFileType('vector.svg', false) === 'image', 'FileExplorerService detecta archivos SVG como imagen');
-@unlink($tmpSvg);
 
-// 24.8 SystemService: Consulta de versión e información de commit
+ob_start();
+$fService->streamRawFile('vector.svg');
+$rawSvgOut = ob_get_clean();
+assertTrue(str_contains($rawSvgOut, '<svg'), 'FileExplorerService::streamRawFile transmite contenido SVG sin abortar proceso en testing');
+
+// 24.8 FileExplorerService: Confinamiento canónico en descarga ZIP (exclusión de symlinks externos)
+$zipSubDir = $tempSvgDir . '/carpeta_export';
+@mkdir($zipSubDir, 0777, true);
+file_put_contents($zipSubDir . '/seguro.txt', 'datos_seguros_123');
+$outsideSecret = sys_get_temp_dir() . '/outside_leak_' . uniqid() . '.txt';
+file_put_contents($outsideSecret, 'secreto_fuera_de_raiz');
+@symlink($outsideSecret, $zipSubDir . '/symlink_leak.txt');
+
+ob_start();
+$fService->downloadDirectoryZip('carpeta_export');
+$zipStreamOut = ob_get_clean();
+assertTrue(!str_contains($zipStreamOut, 'secreto_fuera_de_raiz'), 'FileExplorerService::downloadDirectoryZip confina archivos y excluye symlinks externos');
+
+@unlink($zipSubDir . '/symlink_leak.txt');
+@unlink($zipSubDir . '/seguro.txt');
+@rmdir($zipSubDir);
+@unlink($tempSvgDir . '/vector.svg');
+@rmdir($tempSvgDir);
+@unlink($outsideSecret);
+FileExplorerService::setRootDir(null);
+
+// 24.9 AuthController: Rate limiting con HTTP 429 tras 5 intentos fallidos
+$authCtrl = new AuthController();
+$rateIp = '198.51.100.88';
+$rateAuth = new AuthService();
+$rateAuth->clearFailedAttempts($rateIp);
+for ($i = 0; $i < 5; $i++) {
+    $rateAuth->recordFailedAttempt($rateIp, 'intruso');
+}
+$_SERVER['REMOTE_ADDR'] = $rateIp;
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['CONTENT_TYPE'] = 'application/json';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$_POST = [];
+$rateReq = new Request();
+ob_start();
+$authCtrl->login($rateReq);
+$rateRespOut = ob_get_clean();
+$rateRespJson = json_decode($rateRespOut, true);
+assertTrue(isset($rateRespJson['success']) && $rateRespJson['success'] === false && str_contains($rateRespJson['error'] ?? '', 'Demasiados intentos'), 'AuthController::login responde 429 por rate limiting tras 5 intentos');
+$rateAuth->clearFailedAttempts($rateIp);
+
+// 24.10 Router & Logout: Requiere estrictamente POST y rechaza GET con 404
+$routerTest = new Router();
+$routerTest->post('/logout', [AuthController::class, 'logout']);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['REQUEST_URI'] = '/logout';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$getLogoutReq = new Request();
+ob_start();
+$routerTest->dispatch($getLogoutReq);
+$getLogoutOut = ob_get_clean();
+$getLogoutJson = json_decode($getLogoutOut, true);
+assertTrue(isset($getLogoutJson['success']) && $getLogoutJson['success'] === false && str_contains($getLogoutJson['error'] ?? '', 'Ruta no encontrada'), 'Router rechaza método GET para /logout (HTTP 404)');
+
+// 24.11 SystemService: Consulta de versión e información de commit
 $sysServ = new SystemService();
 $updStatus = $sysServ->checkUpdates();
 assertTrue(isset($updStatus['version']) && isset($updStatus['installed_commit']), 'SystemService::checkUpdates reporta campos de versión y commit');
