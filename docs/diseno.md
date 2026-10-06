@@ -40,12 +40,12 @@ La interfaz cuenta con soporte nativo para **Tema Oscuro** (predeterminado) y **
 
 | Token CSS | Tema Oscuro (Dark) | Tema Claro (Light) | Propósito / Ámbito |
 | :--- | :--- | :--- | :--- |
-| `--bg-body` | `#0f172a` (Slate 900) | `#f8fafc` (Slate 50) | Fondo principal de la ventana |
-| `--bg-card` | `#1e293b` (Slate 800) | `#ffffff` (Blanco) | Superficie de paneles y tarjetas |
-| `--bg-card-header` | `#172033` (Slate 850) | `#f1f5f9` (Slate 100) | Cabecera de tablas y bloques |
-| `--bg-surface` | `#334155` (Slate 700) | `#f1f5f9` (Slate 100) | Fondos de controles secundarios y chips |
-| `--bg-input` | `#0f172a` (Slate 900) | `#ffffff` (Blanco) | Cajas de texto y menús desplegables |
-| `--border-color` | `#334155` (Slate 700) | `#e2e8f0` (Slate 200) | Líneas divisorias y bordes estándar |
+| `--bg-body` | `#070b14` (Slate Profundo) | `#f8fafc` (Slate 50) | Fondo principal de la ventana |
+| `--bg-card` | `#0f172a` (Slate 900) | `#ffffff` (Blanco) | Superficie de paneles y tarjetas |
+| `--bg-card-header` | `#131d35` (Slate 850) | `#f8fafc` (Slate 50) | Cabecera de tablas y bloques |
+| `--bg-surface` | `#1e293b` (Slate 800) | `#f1f5f9` (Slate 100) | Fondos de controles secundarios y chips |
+| `--bg-input` | `#0b1120` (Slate 950) | `#ffffff` (Blanco) | Cajas de texto y menús desplegables |
+| `--border-color` | `rgba(255,255,255,0.08)` | `#e2e8f0` (Slate 200) | Líneas divisorias y bordes estándar |
 | `--text-main` | `#f8fafc` (Slate 50) | `#0f172a` (Slate 900) | Texto principal de alto contraste |
 | `--text-secondary` | `#cbd5e1` (Slate 300) | `#475569` (Slate 600) | Subtítulos y descripciones |
 | `--text-muted` | `#94a3b8` (Slate 400) | `#64748b` (Slate 500) | Metadatos y textos informativos |
