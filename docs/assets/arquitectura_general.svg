@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accent-blue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+    <linearGradient id="accent-green" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="accent-purple" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="accent-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Header -->
+  <rect x="30" y="24" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="54" r="14" fill="#3b82f6"/>
+  <path d="M59 54 L63 58 L71 50" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="92" y="48" fill="#f8fafc" font-size="18" font-weight="700">Arquitectura General del Sistema • NAS &amp; Central de Respaldos</text>
+  <text x="92" y="68" fill="#94a3b8" font-size="12">Plataforma Debian 13 Trixie x86_64 con Arquitectura Modular Híbrida (CLI + Web MVC)</text>
+
+  <!-- Capa 1: Clientes y Acceso -->
+  <g transform="translate(30, 104)">
+    <rect width="900" height="85" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-blue)"/>
+    <text x="24" y="28" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">CAPA 1: CLIENTES Y ACCESO DE RED</text>
+
+    <!-- Caja 1.1 -->
+    <rect x="20" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="34" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Equipos Windows (SMB 3.1.1)</text>
+    <text x="235" y="60" fill="#94a3b8" font-size="10">+100 puestos</text>
+
+    <!-- Caja 1.2 -->
+    <rect x="315" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="329" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Servidores Linux (SSH / rsync)</text>
+    <text x="525" y="60" fill="#94a3b8" font-size="10">Llaves/TOFU</text>
+
+    <!-- Caja 1.3 -->
+    <rect x="610" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="624" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
+    <text x="825" y="60" fill="#94a3b8" font-size="10">HTTPS / CLI</text>
+  </g>
+
+  <!-- Capa 2: Interfaces de Gestión -->
+  <g transform="translate(30, 209)">
+    <rect width="900" height="95" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-purple)"/>
+    <text x="24" y="26" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1">CAPA 2: INTERFACES DE ADMINISTRACIÓN Y CONTROL</text>
+
+    <!-- Interfaz CLI -->
+    <rect x="20" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="600">CLI Global 'nas' &amp; Asistente</text>
+    <text x="32" y="71" fill="#94a3b8" font-size="10.5">Bash 5 + whiptail (9 módulos interactivos)</text>
+
+    <!-- Web Backend MVC -->
+    <rect x="315" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="600">Panel Web MVC (PHP 8 + Nginx)</text>
+    <text x="327" y="71" fill="#94a3b8" font-size="10.5">Nginx-light + PHP-FPM ondemand (~0MB)</text>
+
+    <!-- Web Frontend Slate UI -->
+    <rect x="610" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="622" y="55" fill="#f8fafc" font-size="12" font-weight="600">Slate UI 100% Offline</text>
+    <text x="622" y="71" fill="#94a3b8" font-size="10.5">0% dependencias • 36 SVG • Drag&amp;Drop</text>
+  </g>
+
+  <!-- Capa 3: Servicios y Lógica de Negocio -->
+  <g transform="translate(30, 324)">
+    <rect width="900" height="115" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-green)"/>
+    <text x="24" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">CAPA 3: SERVICIOS Y SUBSISTEMAS DE DEBIAN 13</text>
+
+    <!-- Samba + VFS -->
+    <rect x="20" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="30" y="54" fill="#f8fafc" font-size="12" font-weight="600">Samba 4 + VFS</text>
+    <text x="30" y="70" fill="#94a3b8" font-size="10">acl_xattr / streams_xattr</text>
+    <text x="30" y="85" fill="#10b981" font-size="9.5">+100 puestos Excel sin lock</text>
+
+    <!-- Motor de Backups -->
+    <rect x="245" y="36" width="215" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="255" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
+    <text x="255" y="70" fill="#94a3b8" font-size="10">rsync --link-dest (Hardlinks)</text>
+    <text x="255" y="85" fill="#38bdf8" font-size="9.5">Staging atómico .inprogress</text>
+
+    <!-- Active Directory & Red -->
+    <rect x="480" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="490" y="54" fill="#f8fafc" font-size="12" font-weight="600">AD &amp; Descubrimiento</text>
+    <text x="490" y="70" fill="#94a3b8" font-size="10">realmd / sssd / adcli</text>
+    <text x="490" y="85" fill="#f59e0b" font-size="9.5">WSDD2 con override systemd</text>
+
+    <!-- SQLite WAL & Seguridad -->
+    <rect x="705" y="36" width="175" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="715" y="54" fill="#f8fafc" font-size="12" font-weight="600">SQLite WAL &amp; Aud</text>
+    <text x="715" y="70" fill="#94a3b8" font-size="10">nas.sqlite (0MB en reposo)</text>
+    <text x="715" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + proc_open</text>
+  </g>
+
+  <!-- Capa 4: Kernel y Almacenamiento -->
+  <g transform="translate(30, 459)">
+    <rect width="900" height="135" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-amber)"/>
+    <text x="24" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">CAPA 4: ALMACENAMIENTO, FILESYSTEMS Y KERNEL TUNING</text>
+
+    <!-- Rol ARCHIVOS -->
+    <rect x="20" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="700">Rol ARCHIVOS (NAS)</text>
+    <text x="32" y="72" fill="#94a3b8" font-size="10.5">• HDD: ext4 (commit=2 anti-apagón)</text>
+    <text x="32" y="88" fill="#94a3b8" font-size="10.5">• SSD: ext4 (commit=5 + fstrim)</text>
+    <text x="32" y="104" fill="#10b981" font-size="10">tune2fs -m 1 • readahead 4096KB</text>
+
+    <!-- Rol BACKUP -->
+    <rect x="315" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="700">Rol BACKUP (Central)</text>
+    <text x="327" y="72" fill="#94a3b8" font-size="10.5">• Btrfs con compress=zstd:3</text>
+    <text x="327" y="88" fill="#94a3b8" font-size="10.5">• Btrfs Scrub mensual (anti Bit Rot)</text>
+    <text x="327" y="104" fill="#38bdf8" font-size="10">space_cache=v2 • autodefrag / discard</text>
+
+    <!-- Kernel Tuning & Protección -->
+    <rect x="610" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="622" y="55" fill="#f8fafc" font-size="12" font-weight="700">Tuning &amp; Protección de Disco</text>
+    <text x="622" y="72" fill="#94a3b8" font-size="10.5">• sysctl: vm.dirty_bytes=256MB</text>
+    <text x="622" y="88" fill="#94a3b8" font-size="10.5">• udev: UDISKS_IGNORE=1 (disco SO)</text>
+    <text x="622" y="104" fill="#f59e0b" font-size="10">Soporte --keep-data (sin formateo)</text>
+  </g>
+</svg>
