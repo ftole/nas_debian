@@ -44,6 +44,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       } catch (e) {}
     })();
   </script>
+  <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
 </head>
 <body>
@@ -147,10 +148,10 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
         <span class="status-dot status-ok"></span>
         <span class="user-name"><?= $sessionUser ?></span>
       </div>
-      <a href="/logout" class="btn btn-secondary btn-sm" id="btn-logout" title="Cerrar sesión segura">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-logout" onclick="logoutSession()" title="Cerrar sesión segura">
         <svg class="icon"><use href="#icon-power"></use></svg>
         <span class="btn-text-responsive">Cerrar sesión</span>
-      </a>
+      </button>
     </div>
   </header>
 
@@ -349,19 +350,19 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           </div>
 
           <!-- Tarjeta 3: Red y Samba -->
-          <div class="kpi-card">
+          <div class="kpi-card" id="kpi-card-network">
             <div class="kpi-header">
               <span>Servicios de Red</span>
               <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-server"></use></svg></div>
             </div>
-            <div class="kpi-val" style="color:var(--accent-success-text);">Samba 4 & Nginx</div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+            <div class="kpi-val" id="kpi-network-val" style="color:var(--accent-success-text);">Samba 4 & Nginx</div>
+            <div id="kpi-network-badges" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
               <span class="badge badge-ok">smbd OK</span>
               <span class="badge badge-ok">wsdd2 OK</span>
               <span class="badge badge-ok">nginx OK</span>
               <span class="badge badge-ok">php-fpm ondemand</span>
             </div>
-            <div class="kpi-sub">
+            <div class="kpi-sub" id="kpi-network-sub">
               <span>Optimización Office VFS activa</span>
             </div>
           </div>
@@ -547,7 +548,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           <div class="panel-card-body" style="display:flex; flex-direction:column; gap:16px;">
             <div class="info-row">
               <span class="info-label">NetBIOS Name:</span>
-              <strong class="info-val"><?= $hostname ?></strong>
+              <strong class="info-val" id="net-info-hostname"><?= $hostname ?></strong>
             </div>
             <div class="info-row">
               <span class="info-label">Workgroup:</span>
@@ -563,7 +564,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             </div>
             <div class="info-row">
               <span class="info-label">Ruta de Red Windows:</span>
-              <strong class="info-val"><code>\\<?= $hostname ?></code> o <code>\\<?= htmlspecialchars($_SERVER['SERVER_ADDR'] ?? '10.10.1.2', ENT_QUOTES, 'UTF-8') ?></code></strong>
+              <strong class="info-val" id="net-info-path"><code>\\<?= $hostname ?></code> o <code>\\<?= htmlspecialchars($_SERVER['SERVER_ADDR'] ?? '10.10.1.2', ENT_QUOTES, 'UTF-8') ?></code></strong>
             </div>
           </div>
         </div>
