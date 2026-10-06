@@ -143,3 +143,108 @@ Para asegurar una operación ininterrumpida, se recomienda seguir este calendari
   ```bash
   sudo nas update
   ```
+
+---
+
+## 7. Preparación y Despliegue Manual Paso a Paso
+
+Si por políticas corporativas de auditoría o entornos aislados prefieres preparar el servidor manualmente en lugar de usar el instalador remoto one-liner, sigue esta guía:
+
+### Fase 1: Bootstrap como `root` (Pasos 1 al 7)
+
+1. Inicia sesión como superusuario:
+   ```bash
+   su -
+   ```
+
+2. Configura los repositorios oficiales de Debian 13 en formato deb822 (`/etc/apt/sources.list.d/debian.sources`) y actualiza:
+   ```bash
+   cat << 'SOURCES' > /etc/apt/sources.list.d/debian.sources
+   Types: deb deb-src
+   URIs: http://deb.debian.org/debian
+   Suites: trixie trixie-updates
+   Components: main contrib non-free non-free-firmware
+
+   Types: deb deb-src
+   URIs: http://security.debian.org/debian-security
+   Suites: trixie-security
+   Components: main contrib non-free non-free-firmware
+   SOURCES
+
+   : > /etc/apt/sources.list
+   apt update && apt upgrade -y
+   ```
+
+3. Instala los paquetes base de administración y seguridad:
+   ```bash
+   apt install -y curl wget ca-certificates htop ufw sudo fail2ban unattended-upgrades git whiptail
+   ```
+
+4. Asegura la cuenta de administración y concede privilegios `sudo`:
+   ```bash
+   ADMIN_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1; exit}' /etc/passwd)"
+   ADMIN_USER="${ADMIN_USER:-nas}"
+   id "$ADMIN_USER" &>/dev/null || adduser --disabled-password --gecos "" "$ADMIN_USER"
+   usermod -aG sudo "$ADMIN_USER"
+   echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-admin"
+   chmod 0440 "/etc/sudoers.d/90-admin"
+   echo "Administrador listo: $ADMIN_USER"
+   ```
+
+5. Cierra la sesión de `root`:
+   ```bash
+   exit
+   ```
+
+### Fase 2: Endurecimiento como Administrador con `sudo` (Pasos 8 al 13)
+
+1. Desactiva el acceso directo de `root` por SSH:
+   ```bash
+   sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+   grep -rl "PermitRootLogin" /etc/ssh/sshd_config.d/ 2>/dev/null | xargs -r sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'
+   sudo systemctl restart ssh || sudo systemctl restart sshd
+   ```
+
+2. Configura el cortafuegos UFW con política restrictiva:
+   ```bash
+   sudo ufw default deny incoming
+   sudo ufw default allow outgoing
+   sudo ufw allow 22/tcp comment 'SSH'
+   sudo ufw allow 80/tcp comment 'Panel Web HTTP'
+   sudo ufw allow 443/tcp comment 'Panel Web HTTPS'
+   sudo ufw allow 137,138/udp comment 'Samba NetBIOS'
+   sudo ufw allow 139,445/tcp comment 'Samba SMB'
+   sudo ufw allow 3702/udp comment 'WSDD2 Discovery UDP'
+   sudo ufw allow 3702/tcp comment 'WSDD2 Discovery TCP'
+   sudo ufw allow 5355/udp comment 'WSDD2 LLMNR UDP'
+   sudo ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP'
+   sudo ufw allow 5357/tcp comment 'WSDD2 HTTP'
+   sudo ufw --force enable
+   ```
+
+3. Bloquea suspensión e hibernación para garantizar operación 24/7:
+   ```bash
+   sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+   sudo mkdir -p /etc/systemd/logind.conf.d
+   printf '[Login]\nHandleSuspendKey=ignore\nHandleHibernateKey=ignore\nHandleLidSwitch=ignore\n' | sudo tee /etc/systemd/logind.conf.d/99-nas.conf >/dev/null
+   sudo systemctl restart systemd-logind
+   ```
+
+4. Habilita fail2ban:
+   ```bash
+   sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+   sudo systemctl enable --now fail2ban
+   ```
+
+### Fase 3: Despliegue del Software NAS
+
+Una vez preparado el servidor, clona el repositorio e inicia el asistente o el despliegue CLI:
+```bash
+sudo git clone https://github.com/ftole/nas_debian.git /opt/nas_debian
+sudo ln -sf /opt/nas_debian/install.sh /usr/local/bin/nas
+sudo chmod +x /usr/local/bin/nas
+
+# Iniciar asistente interactivo:
+sudo nas
+```
+
