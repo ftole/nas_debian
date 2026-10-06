@@ -1165,7 +1165,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-share')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Crear recurso</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-share">Crear recurso</button>
           </div>
         </form>
       </div>
@@ -1226,7 +1226,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-backup')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Programar respaldo</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-backup">Programar respaldo</button>
           </div>
         </form>
       </div>
@@ -1264,7 +1264,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-user')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Crear usuario</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-user">Crear usuario</button>
           </div>
         </form>
       </div>
@@ -1287,7 +1287,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Crear grupo</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-group">Crear grupo</button>
           </div>
         </form>
       </div>
@@ -1481,7 +1481,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-reboot-server')">Cancelar</button>
-        <button type="button" class="btn btn-danger" onclick="confirmRebootServer()">Reiniciar ahora</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-reboot" onclick="confirmRebootServer()">Reiniciar ahora</button>
       </div>
     </div>
   </div>
