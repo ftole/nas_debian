@@ -464,16 +464,17 @@ async function populateShareGroupOptions() {
   try {
     const res = await apiFetch('/api/groups');
     AppState.groupsCache = res.data || [];
+    const selectable = AppState.groupsCache.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web');
 
-    container.innerHTML = AppState.groupsCache.map(g => `
+    container.innerHTML = selectable.map(g => `
       <label style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
+        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}">
         <span>${escapeHtml(g.name)}</span>
       </label>
     `).join('');
 
     if (writeSelect) {
-      writeSelect.innerHTML = AppState.groupsCache.map(g => `
+      writeSelect.innerHTML = selectable.map(g => `
         <option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}</option>
       `).join('');
     }
@@ -489,7 +490,7 @@ async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup)
 
   try {
     const res = await apiFetch('/api/groups');
-    const groups = res.data || [];
+    const groups = (res.data || []).filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web');
     const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
     container.innerHTML = groups.map(g => `
       <label style="display:flex; align-items:center; gap:8px;">
@@ -866,20 +867,23 @@ async function loadUsersAndGroups() {
     }
 
     if (groupsTbody) {
-      groupsTbody.innerHTML = _groupsData.map(g => `
+      groupsTbody.innerHTML = _groupsData.map(g => {
+        const isSpecial = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+        return `
         <tr>
           <td><strong>${escapeHtml(g.name)}</strong></td>
           <td>${g.gid}</td>
           <td>${(g.members || []).map(m => `<span class="tag-pill">${escapeHtml(m)}</span>`).join(' ') || '<em>Sin miembros</em>'}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${g.name === 'grp_sistemas' ? '<span class="badge badge-gray">Maestro</span>' : `
+            ${isSpecial ? '<span class="badge badge-gray">Especial</span>' : `
               <button class="btn btn-secondary btn-sm" title="Miembros" onclick="openGroupMembers('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-users"></use></svg></button>
               <button class="btn btn-secondary btn-sm" title="Renombrar" onclick="openRenameGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
               <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
             `}
           </td>
         </tr>
-      `).join('') || '<tr><td colspan="4" style="text-align:center;">Sin grupos creados.</td></tr>';
+      `;
+      }).join('') || '<tr><td colspan="4" style="text-align:center;">Sin grupos creados.</td></tr>';
     }
 
     populateUserGroupOptions(_groupsData);
@@ -892,7 +896,7 @@ function populateUserGroupOptions(groups) {
   const container = document.getElementById('user-groups-list');
   if (!container) return;
 
-  container.innerHTML = groups.filter(g => g.name !== 'grp_sistemas').map(g => `
+  container.innerHTML = groups.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web').map(g => `
     <label style="display:flex; align-items:center; gap:8px;">
       <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}">
       <span>${escapeHtml(g.name)}</span>
@@ -927,7 +931,7 @@ function openEditUser(username) {
   document.getElementById('edit-user-fullname').value = u.full_name || '';
   document.getElementById('edit-user-pass').value = '';
   document.getElementById('edit-user-is-admin').checked = !!u.is_admin;
-  document.getElementById('edit-user-can-web').checked = !!u.can_web;
+  document.getElementById('edit-user-can-web').checked = !!(u.can_web || u.is_admin);
   document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
 
   const checked = (u.groups || []).filter(g => g.startsWith('grp_') && g !== 'grp_sistemas' && g !== 'grp_web');
