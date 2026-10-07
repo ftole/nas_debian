@@ -130,6 +130,9 @@ class SambaController
 
         $groupMatrix = [];
         foreach ($groups as $g) {
+            if (!empty($g['is_special'])) {
+                continue;
+            }
             $gname = $g['name'];
             $row = ['name' => $gname];
             foreach ($shares as $share) {
