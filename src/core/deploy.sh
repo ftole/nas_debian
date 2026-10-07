@@ -616,13 +616,16 @@ Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm list, /usr/sbin/realm join *, /usr/sbin/
     /usr/sbin/adcli info *, /usr/bin/adcli info *, \\
     /usr/bin/kinit *, /usr/bin/klist
 Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstatus, /usr/bin/pdbedit -L -s, \\
+    /usr/bin/pdbedit -L -v, /usr/bin/pdbedit -v -u [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/sbin/userdel -r [a-zA-Z0-9_.-]*, \\
     /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/usermod -L [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/usermod -U [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
-    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
-    /usr/sbin/chpasswd, /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -U [a-zA-Z0-9_.-]*, /usr/sbin/usermod -s /bin/bash [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -s /usr/sbin/nologin [a-zA-Z0-9_.-]*, /usr/sbin/usermod -c * [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd, \\
+    /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* adm, \\
     /usr/bin/smbpasswd -d -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -e -s [a-zA-Z0-9_.-]*
