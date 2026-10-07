@@ -27,6 +27,7 @@ $diskPct = (float) ($storage['usage_percent'] ?? 0);
 $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), ENT_QUOTES, 'UTF-8');
 $activeView = htmlspecialchars((string) ($activeView ?? 'dashboard'), ENT_QUOTES, 'UTF-8');
 $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? 'sistemas'), ENT_QUOTES, 'UTF-8');
+$isAdmin = !empty($_SESSION['nas_user']['is_admin']);
 ?>
 <!DOCTYPE html>
 <html lang="es" data-theme="dark">
@@ -45,6 +46,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
     })();
   </script>
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
+  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>;</script>
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
 </head>
 <body>
@@ -130,6 +132,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
       <div class="header-meta-pill">
         <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
       </div>
+<?php if ($isAdmin): ?>
       <button class="btn btn-secondary btn-sm" onclick="switchView('terminal')" title="Abrir Consola Web Interactiva">
         <svg class="icon"><use href="#icon-terminal"></use></svg>
         <span class="btn-text-responsive">Terminal</span>
@@ -138,6 +141,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
         <svg class="icon" style="color:var(--accent-danger);"><use href="#icon-power"></use></svg>
         <span class="btn-text-responsive">Reiniciar</span>
       </button>
+<?php endif; ?>
       <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" onclick="refreshDashboardMetrics()" title="Refrescar métricas del servidor">
         <svg class="icon" id="icon-refresh-metrics"><use href="#icon-refresh"></use></svg>
       </button>
@@ -164,7 +168,15 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
     <aside class="sidebar">
       <nav class="sidebar-nav">
 
-        <div class="nav-section-title">ALMACENAMIENTO Y RECURSOS</div>
+        <div class="nav-section-title">GENERAL</div>
+
+        <div class="nav-item <?= $activeView === 'dashboard' ? 'active' : '' ?>" data-view="dashboard">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-dashboard"></use></svg>
+            <span>Vista general</span>
+          </div>
+          <span class="nav-badge">OK</span>
+        </div>
 
         <div class="nav-item <?= $activeView === 'files' ? 'active' : '' ?>" data-view="files">
           <div class="nav-item-left">
@@ -173,6 +185,17 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           </div>
           <span class="nav-badge" id="badge-files">Root</span>
         </div>
+
+        <div class="nav-item <?= $activeView === 'logs' ? 'active' : '' ?>" data-view="logs">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-file"></use></svg>
+            <span>Registros (Logs)</span>
+          </div>
+          <span class="nav-badge" id="badge-logs">Live</span>
+        </div>
+
+<?php if ($isAdmin): ?>
+        <div class="nav-section-title">ALMACENAMIENTO Y RECURSOS</div>
 
         <div class="nav-item <?= $activeView === 'shares' ? 'active' : '' ?>" data-view="shares">
           <div class="nav-item-left">
@@ -200,14 +223,6 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
 
         <div class="nav-section-title">ADMINISTRACIÓN Y SISTEMA</div>
 
-        <div class="nav-item <?= $activeView === 'dashboard' ? 'active' : '' ?>" data-view="dashboard">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-dashboard"></use></svg>
-            <span>Vista general</span>
-          </div>
-          <span class="nav-badge">OK</span>
-        </div>
-
         <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
@@ -224,6 +239,14 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           <span class="nav-badge" id="badge-users">...</span>
         </div>
 
+        <div class="nav-item <?= $activeView === 'permissions' ? 'active' : '' ?>" data-view="permissions">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-shield"></use></svg>
+            <span>Permisos de acceso</span>
+          </div>
+          <span class="nav-badge">ACL</span>
+        </div>
+
         <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-domain"></use></svg>
@@ -238,14 +261,6 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             <span>Servicios</span>
           </div>
           <span class="nav-badge" id="badge-services">OK</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'logs' ? 'active' : '' ?>" data-view="logs">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-file"></use></svg>
-            <span>Registros (Logs)</span>
-          </div>
-          <span class="nav-badge" id="badge-logs">Live</span>
         </div>
 
         <div class="nav-item <?= $activeView === 'diagnostics' ? 'active' : '' ?>" data-view="diagnostics">
@@ -279,6 +294,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
           </div>
           <span class="nav-badge">Nativo</span>
         </div>
+<?php endif; ?>
 
       </nav>
 
@@ -309,7 +325,7 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
             <p>Servidor NAS departamental & Central de copias de seguridad de alta resiliencia</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-primary" onclick="switchView('shares'); openModal('modal-new-share');">
+            <button class="btn btn-primary" onclick="switchView('shares'); openNewShare();">
               <svg class="icon"><use href="#icon-plus"></use></svg> Nueva red compartida
             </button>
             <button class="btn btn-secondary" onclick="switchView('backups'); openModal('modal-new-backup');">
@@ -400,11 +416,11 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
               <h3><svg class="icon"><use href="#icon-wrench"></use></svg> Operaciones frecuentes</h3>
             </div>
             <div class="panel-card-body" style="display:flex; flex-direction:column; gap:10px;">
-              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('shares'); openModal('modal-new-share');">
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('shares'); openNewShare();">
                 <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg>
                 <span>Crear nueva carpeta compartida en Samba con ACLs granulares</span>
               </button>
-              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('users'); openModal('modal-new-user');">
+              <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('users'); openNewUser();">
                 <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg>
                 <span>Dar de alta un usuario y sincronizar credenciales smbpasswd</span>
               </button>
@@ -799,7 +815,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <p>Recursos visibles y ocultos ($) con 4 esquemas de permisos y aceleración Office</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-primary" onclick="openModal('modal-new-share')">
+            <button class="btn btn-primary" onclick="openNewShare()">
               <svg class="icon"><use href="#icon-plus"></use></svg> Crear recurso compartido
             </button>
           </div>
@@ -870,7 +886,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <p>Gestión de cuentas Linux/Samba: crear, editar, bloquear, resetear contraseña y administrar miembros grp_*</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-primary" onclick="openModal('modal-new-user')">
+            <button class="btn btn-primary" onclick="openNewUser()">
               <svg class="icon"><use href="#icon-plus"></use></svg> Crear usuario
             </button>
             <button class="btn btn-secondary" onclick="openModal('modal-new-group')">
@@ -937,6 +953,34 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9.1 PERMISOS DE ACCESO A RECURSOS (PERMISSIONS) -->
+      <section id="view-permissions" class="view-section <?= $activeView === 'permissions' ? 'active' : '' ?>">
+        <div class="page-head">
+          <div>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Permisos de acceso a recursos</h2>
+            <p>Acceso por grupo y por usuario a las redes compartidas (smb.conf). Clic en una celda para alternar: Sin acceso → Lectura → Escritura.</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadAccessMatrix()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+            </button>
+          </div>
+        </div>
+
+        <div class="filter-toolbar">
+          <div class="filter-chips" id="perm-filter-chips">
+            <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
+            <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="table-responsive" id="perm-matrix-container">
+            <p style="padding:18px; color:var(--text-muted);">Cargando matriz de permisos...</p>
           </div>
         </div>
       </section>
@@ -1187,6 +1231,57 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Modal: Editar Recurso Compartido -->
+  <div class="modal-backdrop" id="modal-edit-share">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Editar recurso compartido</h3>
+        <button class="modal-close" onclick="closeModal('modal-edit-share')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-edit-share" onsubmit="submitEditShare(event)">
+          <div class="form-group">
+            <label for="edit-share-name">Recurso:</label>
+            <input type="text" id="edit-share-name" readonly style="font-weight:600; background:var(--bg-surface);">
+          </div>
+          <div class="form-group">
+            <label for="edit-share-comment">Descripción / Comentario:</label>
+            <input type="text" id="edit-share-comment">
+          </div>
+          <div class="form-group">
+            <label for="edit-share-scheme">Esquema de permisos granular:</label>
+            <select id="edit-share-scheme" onchange="toggleEditSchemeFields()">
+              <option value="1">1. Lectura y Escritura por Grupo</option>
+              <option value="2">2. Solo Lectura General + Escritura Exclusiva</option>
+              <option value="3">3. Solo Lectura Estricta (Histórico)</option>
+              <option value="4">4. Acceso Público / Invitados (guest ok)</option>
+            </select>
+          </div>
+          <div class="form-group" id="edit-group-share-groups">
+            <label>Grupos autorizados:</label>
+            <div id="edit-share-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
+              <!-- Llenado dinámicamente -->
+            </div>
+          </div>
+          <div class="form-group" id="edit-group-share-write-group" style="display:none;">
+            <label for="edit-share-write-group">Grupo con permiso exclusivo de escritura:</label>
+            <select id="edit-share-write-group"></select>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="edit-share-hidden">
+              <span>Recurso oculto (agrega sufijo <code>$</code>)</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-share')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-edit-share">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Nueva Tarea de Backup -->
   <div class="modal-backdrop" id="modal-new-backup">
     <div class="modal-dialog">
@@ -1262,19 +1357,35 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="user-uname" required placeholder="ej. operador1" pattern="[a-z0-9_-]+">
           </div>
           <div class="form-group">
-            <label for="user-pass">Contraseña:</label>
+            <label for="user-fullname">Nombre real / cargo:</label>
+            <input type="text" id="user-fullname" placeholder="ej. Juan Pérez - Contabilidad">
+          </div>
+          <div class="form-group">
+            <label for="user-pass">Contraseña (red Samba / web):</label>
             <input type="password" id="user-pass" required minlength="6">
           </div>
           <div class="form-group">
-            <label>Grupos a asignar:</label>
+            <label>Grupos departamentales (acceso a recursos):</label>
             <div id="user-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
               <!-- Llenado dinámicamente -->
             </div>
           </div>
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="user-can-web">
+              <span>Acceso al panel web (rol usuario: Vista general, Archivos y Logs)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="user-is-admin">
-              <span>Privilegios administrativos (acceso sudo y grp_sistemas)</span>
+              <span>Administrador (root/sudo + panel completo + SSH)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="user-samba-enabled" checked>
+              <span>Acceso a la red Samba (carpetas compartidas)</span>
             </label>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
@@ -1323,19 +1434,35 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="edit-user-uname" readonly style="font-weight:600; background:var(--bg-surface);">
           </div>
           <div class="form-group">
+            <label for="edit-user-fullname">Nombre real / cargo:</label>
+            <input type="text" id="edit-user-fullname" placeholder="ej. Juan Pérez - Contabilidad">
+          </div>
+          <div class="form-group">
             <label for="edit-user-pass">Nueva contraseña <small>(déjalo vacío para conservar la actual)</small>:</label>
             <input type="password" id="edit-user-pass" placeholder="Contraseña nueva (mín. 6)" minlength="6">
           </div>
           <div class="form-group">
-            <label>Grupos departamentales:</label>
+            <label>Grupos departamentales (acceso a recursos):</label>
             <div id="edit-user-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
               <!-- Llenado dinámicamente -->
             </div>
           </div>
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="edit-user-can-web">
+              <span>Acceso al panel web (rol usuario: Vista general, Archivos y Logs)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="edit-user-is-admin">
-              <span>Privilegios administrativos (acceso sudo, adm y grp_sistemas)</span>
+              <span>Administrador (root/sudo + panel completo + SSH)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="edit-user-samba-enabled">
+              <span>Acceso a la red Samba (carpetas compartidas)</span>
             </label>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
