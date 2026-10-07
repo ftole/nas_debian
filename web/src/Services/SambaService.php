@@ -381,4 +381,214 @@ class SambaService
             }
         }
     }
+
+    /**
+     * Edita un recurso existente (esquema, grupos autorizados, grupo de escritura,
+     * visibilidad y comentario) preservando las concesiones explícitas por usuario.
+     */
+    public function updateShare(string $name, array $data): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return ['success' => true, 'message' => "Recurso [$name] actualizado (modo dev)."];
+        }
+
+        $sections = $this->parseSmbConf();
+        if (!isset($sections[$name])) {
+            return ['success' => false, 'error' => "El recurso [$name] no existe en smb.conf."];
+        }
+
+        $props = $sections[$name];
+        $scheme = (int) ($data['scheme'] ?? 0);
+        $comment = trim((string) ($data['comment'] ?? ''));
+        $groups = $this->cleanGroupTokens((array) ($data['groups'] ?? []));
+        $writeGroup = ltrim(trim((string) ($data['write_group'] ?? '')), '@');
+        $writeEntry = $writeGroup !== '' ? '@' . $writeGroup : '';
+        $isHidden = !empty($data['hidden']);
+
+        // Separar tokens de grupo (@grupo) de los usuarios explícitos (suelto)
+        $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+        $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+        $validUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@')));
+        $writeUsers = array_values(array_filter($write, fn($t) => !str_starts_with($t, '@')));
+
+        if ($comment !== '') {
+            $props['comment'] = $comment;
+        }
+        $props['browseable'] = $isHidden ? 'no' : 'yes';
+
+        if ($scheme === 4) {
+            $props['read only'] = 'no';
+            $props['guest ok'] = 'yes';
+            $props['public'] = 'yes';
+            $props['guest only'] = 'yes';
+            $props['create mask'] = '0777';
+            $props['directory mask'] = '0777';
+            unset($props['valid users'], $props['write list']);
+        } elseif ($scheme === 3) {
+            $props['read only'] = 'yes';
+            $props['guest ok'] = 'no';
+            unset($props['public'], $props['guest only']);
+            $props['valid users'] = $this->joinTokens(array_merge($groups, $validUsers));
+            unset($props['write list']);
+        } elseif ($scheme === 2) {
+            $props['read only'] = 'no';
+            $props['guest ok'] = 'no';
+            unset($props['public'], $props['guest only']);
+            $groupsWithWriter = $groups;
+            if ($writeEntry !== '') {
+                $groupsWithWriter[] = $writeEntry;
+            }
+            $props['valid users'] = $this->joinTokens(array_merge($groupsWithWriter, $validUsers));
+            $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers));
+        } else {
+            $props['read only'] = 'no';
+            $props['guest ok'] = 'no';
+            unset($props['public'], $props['guest only']);
+            $props['valid users'] = $this->joinTokens(array_merge($groups, $validUsers));
+            $props['write list'] = $this->joinTokens(array_merge($groups, $writeUsers));
+        }
+
+        foreach (['valid users', 'write list'] as $k) {
+            if (isset($props[$k]) && $props[$k] === '') {
+                unset($props[$k]);
+            }
+        }
+
+        $sections[$name] = $props;
+        $res = $this->saveSectionsToConf($sections);
+        if (!$res['success']) {
+            return $res;
+        }
+        SystemService::sudo(['systemctl', 'reload', 'smbd']);
+
+        return ['success' => true, 'message' => "Recurso [$name] actualizado correctamente."];
+    }
+
+    /**
+     * Concede, cambia o revoca el acceso de un grupo o usuario a un recurso.
+     *
+     * @param string $share  Nombre del recurso.
+     * @param string $kind   'group' | 'user'.
+     * @param string $target Nombre del grupo (grp_*) o usuario.
+     * @param string $level  'none' | 'read' | 'write'.
+     */
+    public function setAccess(string $share, string $kind, string $target, string $level): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return ['success' => true, 'message' => "Acceso actualizado en [$share] (modo dev)."];
+        }
+        if (!in_array($level, ['none', 'read', 'write'], true)) {
+            return ['success' => false, 'error' => 'Nivel de acceso inválido.'];
+        }
+
+        $sections = $this->parseSmbConf();
+        if (!isset($sections[$share])) {
+            return ['success' => false, 'error' => "El recurso [$share] no existe en smb.conf."];
+        }
+
+        $target = trim($target);
+        if ($kind === 'group') {
+            $target = ltrim($target, '@');
+            if (!preg_match('/^[a-z0-9_-]+$/i', $target)) {
+                return ['success' => false, 'error' => 'Nombre de grupo inválido.'];
+            }
+            $token = '@' . $target;
+        } elseif ($kind === 'user') {
+            if (!preg_match('/^[a-z0-9_-]{2,32}$/i', $target)) {
+                return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+            }
+            $token = $target;
+        } else {
+            return ['success' => false, 'error' => 'Tipo de destino inválido (group|user).'];
+        }
+
+        $props = $sections[$share];
+        $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+        $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+        $valid = array_values(array_filter($valid, fn($t) => $t !== $token));
+        $write = array_values(array_filter($write, fn($t) => $t !== $token));
+
+        if ($level === 'read') {
+            $valid[] = $token;
+        } elseif ($level === 'write') {
+            $valid[] = $token;
+            $write[] = $token;
+        }
+
+        $props['valid users'] = $this->joinTokens($valid);
+        $props['write list'] = $this->joinTokens($write);
+        foreach (['valid users', 'write list'] as $k) {
+            if ($props[$k] === '') {
+                unset($props[$k]);
+            }
+        }
+
+        $sections[$share] = $props;
+        $res = $this->saveSectionsToConf($sections);
+        if (!$res['success']) {
+            return $res;
+        }
+        SystemService::sudo(['systemctl', 'reload', 'smbd']);
+
+        return ['success' => true, 'message' => "Acceso de [$target] en [$share] fijado a '$level'."];
+    }
+
+    /**
+     * Devuelve el mapa de acceso por recurso: grupos/usuarios de lectura y escritura.
+     *
+     * @return array<string,array{read_groups:array,write_groups:array,read_users:array,write_users:array}>
+     */
+    public function getAccessMap(): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [];
+        }
+
+        $sections = $this->parseSmbConf();
+        $map = [];
+        foreach ($sections as $name => $props) {
+            if (in_array(strtolower($name), ['global', 'printers', 'print$'], true)) {
+                continue;
+            }
+            $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+            $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+
+            $writeGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($write, fn($t) => str_starts_with($t, '@'))));
+            $writeUsers = array_values(array_filter($write, fn($t) => !str_starts_with($t, '@')));
+            $readGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($valid, fn($t) => str_starts_with($t, '@') && !in_array($t, $write, true))));
+            $readUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@') && !in_array($t, $write, true)));
+
+            $map[$name] = [
+                'read_groups' => $readGroups,
+                'write_groups' => $writeGroups,
+                'read_users' => $readUsers,
+                'write_users' => $writeUsers,
+                'guest_ok' => (strtolower((string) ($props['guest ok'] ?? 'no')) === 'yes'),
+            ];
+        }
+        return $map;
+    }
+
+    private function splitTokens(string $value): array
+    {
+        $value = trim($value);
+        return $value === '' ? [] : preg_split('/\s+/', $value);
+    }
+
+    private function joinTokens(array $tokens): string
+    {
+        return implode(' ', array_values(array_unique(array_filter($tokens, fn($t) => $t !== ''))));
+    }
+
+    private function cleanGroupTokens(array $groups): array
+    {
+        $out = [];
+        foreach ($groups as $g) {
+            $g = ltrim(trim((string) $g), '@');
+            if (preg_match('/^[a-z0-9_-]+$/i', $g)) {
+                $out[] = '@' . $g;
+            }
+        }
+        return array_values(array_unique($out));
+    }
 }
