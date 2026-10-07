@@ -56,6 +56,7 @@ class AuthService
                         'user' => [
                             'username' => $cleanUsername,
                             'is_admin' => true,
+                            'can_web' => true,
                             'role' => 'Administrador de Sistemas',
                         ],
                     ];
@@ -89,24 +90,22 @@ class AuthService
             ];
         }
 
-        // Validar si la cuenta pertenece a un grupo administrativo (sudo, grp_sistemas) o es administrador/sistemas
-        $isAuthorized = false;
-        if (in_array($cleanUsername, ['administrador', 'sistemas'], true)) {
-            $isAuthorized = true;
-        } else {
-            $grpRes = SystemService::runCommand(['id', '-Gn', $cleanUsername]);
-            if ($grpRes['code'] === 0) {
-                $groups = preg_split('/\s+/', trim($grpRes['stdout']));
-                if (in_array('grp_sistemas', $groups, true) || in_array('sudo', $groups, true)) {
-                    $isAuthorized = true;
-                }
-            }
+        // Determinar capacidades: administrador (root/sudo) y acceso al panel web (grp_web)
+        $groups = [];
+        $grpRes = SystemService::runCommand(['id', '-Gn', $cleanUsername]);
+        if ($grpRes['code'] === 0) {
+            $groups = preg_split('/\s+/', trim($grpRes['stdout']));
         }
 
-        if (!$isAuthorized) {
+        $isAdmin = in_array($cleanUsername, ['administrador', 'sistemas'], true)
+            || in_array('grp_sistemas', $groups, true)
+            || in_array('sudo', $groups, true);
+        $canWeb = $isAdmin || in_array('grp_web', $groups, true);
+
+        if (!$canWeb) {
             return [
                 'success' => false,
-                'error' => 'Acceso denegado: La cuenta no cuenta con permisos administrativos en el panel.',
+                'error' => 'Acceso denegado: La cuenta no tiene permisos de acceso al panel web.',
             ];
         }
 
@@ -114,8 +113,9 @@ class AuthService
             'success' => true,
             'user' => [
                 'username' => $cleanUsername,
-                'is_admin' => true,
-                'role' => 'Administrador de Sistemas',
+                'is_admin' => $isAdmin,
+                'can_web' => $canWeb,
+                'role' => $isAdmin ? 'Administrador de Sistemas' : 'Usuario Web',
             ],
         ];
     }
