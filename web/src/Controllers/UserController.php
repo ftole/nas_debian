@@ -38,22 +38,25 @@ class UserController
         $data = $request->getBody();
         $username = trim($data['username'] ?? '');
         $password = $data['password'] ?? '';
+        $fullName = trim((string) ($data['full_name'] ?? ''));
         $groups = $data['groups'] ?? [];
         $isAdmin = (bool) ($data['is_admin'] ?? false);
+        $canWeb = (bool) ($data['can_web'] ?? false);
+        $sambaEnabled = (bool) ($data['samba_enabled'] ?? true);
 
         if (empty($username) || empty($password)) {
             Response::error('El usuario y la contraseña son obligatorios.');
             return;
         }
 
-        $res = $this->user->createUser($username, $password, (array) $groups, $isAdmin);
+        $res = $this->user->createUser($username, $password, $fullName, (array) $groups, $isAdmin, $canWeb, $sambaEnabled);
         if (!$res['success']) {
             AuditService::log('user_create', $username, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al crear usuario.');
             return;
         }
 
-        AuditService::log('user_create', $username, 'SUCCESS', ['groups' => (array) $groups, 'is_admin' => $isAdmin]);
+        AuditService::log('user_create', $username, 'SUCCESS', ['groups' => (array) $groups, 'is_admin' => $isAdmin, 'can_web' => $canWeb]);
         Response::success(null, $res['message'] ?? 'Usuario creado.');
     }
 
@@ -121,22 +124,25 @@ class UserController
         $data = $request->getBody();
         $username = trim($data['username'] ?? '');
         $password = isset($data['password']) ? (string) $data['password'] : '';
+        $fullName = trim((string) ($data['full_name'] ?? ''));
         $groups = $data['groups'] ?? [];
         $isAdmin = (bool) ($data['is_admin'] ?? false);
+        $canWeb = (bool) ($data['can_web'] ?? false);
+        $sambaEnabled = (bool) ($data['samba_enabled'] ?? true);
 
         if (empty($username)) {
             Response::error('El nombre de usuario es obligatorio.');
             return;
         }
 
-        $res = $this->user->updateUser($username, $password !== '' ? $password : null, (array) $groups, $isAdmin);
+        $res = $this->user->updateUser($username, $password !== '' ? $password : null, $fullName, (array) $groups, $isAdmin, $canWeb, $sambaEnabled);
         if (!$res['success']) {
             AuditService::log('user_update', $username, 'FAILED', ['error' => $res['error'] ?? '']);
             Response::error($res['error'] ?? 'Error al actualizar usuario.');
             return;
         }
 
-        AuditService::log('user_update', $username, 'SUCCESS', ['groups' => (array) $groups, 'is_admin' => $isAdmin]);
+        AuditService::log('user_update', $username, 'SUCCESS', ['groups' => (array) $groups, 'is_admin' => $isAdmin, 'can_web' => $canWeb]);
         Response::success(null, $res['message'] ?? 'Usuario actualizado.');
     }
 
