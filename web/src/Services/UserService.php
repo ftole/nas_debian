@@ -141,9 +141,10 @@ class UserService
 
         if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return [
-                ['name' => 'grp_sistemas', 'gid' => 1050, 'members' => ['administrador', 'sistemas'], 'is_master' => true],
-                ['name' => 'grp_campana1', 'gid' => 1051, 'members' => ['operador_c1'], 'is_master' => false],
-                ['name' => 'grp_contabilidad', 'gid' => 1052, 'members' => [], 'is_master' => false],
+                ['name' => 'grp_sistemas', 'gid' => 1050, 'members' => ['administrador', 'sistemas'], 'is_master' => true, 'is_special' => true],
+                ['name' => 'grp_web', 'gid' => 1053, 'members' => [], 'is_master' => false, 'is_special' => true],
+                ['name' => 'grp_campana1', 'gid' => 1051, 'members' => ['operador_c1'], 'is_master' => false, 'is_special' => false],
+                ['name' => 'grp_contabilidad', 'gid' => 1052, 'members' => [], 'is_master' => false, 'is_special' => false],
             ];
         }
 
@@ -162,6 +163,7 @@ class UserService
                             'gid' => $gid,
                             'members' => $members,
                             'is_master' => ($gname === 'grp_sistemas'),
+                            'is_special' => in_array($gname, ['grp_sistemas', 'grp_web'], true),
                         ];
                     }
                 }
@@ -354,8 +356,8 @@ class UserService
     public function deleteGroup(string $groupName): array
     {
         $groupName = strtolower(trim($groupName));
-        if ($groupName === 'grp_sistemas') {
-            return ['success' => false, 'error' => 'El grupo maestro grp_sistemas está protegido y no puede ser eliminado.'];
+        if (in_array($groupName, ['grp_sistemas', 'grp_web'], true)) {
+            return ['success' => false, 'error' => "El grupo especial '$groupName' está protegido y no puede ser eliminado."];
         }
 
         if (!str_starts_with($groupName, 'grp_')) {
@@ -562,8 +564,8 @@ class UserService
         $old = strtolower(trim($old));
         $new = strtolower(trim($new));
 
-        if ($old === 'grp_sistemas') {
-            return ['success' => false, 'error' => 'El grupo maestro grp_sistemas no puede ser renombrado.'];
+        if (in_array($old, ['grp_sistemas', 'grp_web'], true)) {
+            return ['success' => false, 'error' => "El grupo especial '$old' no puede ser renombrado."];
         }
         if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $old) || !preg_match('/^grp_[a-z0-9_-]{2,30}$/', $new)) {
             return ['success' => false, 'error' => 'Solo se pueden renombrar grupos grp_* (2-30 caracteres).'];
