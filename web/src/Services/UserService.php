@@ -24,8 +24,11 @@ class UserService
                 [
                     'username' => 'administrador',
                     'uid' => 1000,
+                    'full_name' => 'Administrador General',
                     'is_admin' => true,
+                    'can_web' => true,
                     'is_samba' => true,
+                    'samba_enabled' => true,
                     'enabled' => true,
                     'shell' => '/bin/bash',
                     'home' => '/home/administrador',
@@ -34,8 +37,11 @@ class UserService
                 [
                     'username' => 'sistemas',
                     'uid' => 1001,
+                    'full_name' => 'Área de Sistemas',
                     'is_admin' => true,
+                    'can_web' => true,
                     'is_samba' => true,
+                    'samba_enabled' => true,
                     'enabled' => true,
                     'shell' => '/bin/bash',
                     'home' => '/home/sistemas',
@@ -44,29 +50,21 @@ class UserService
                 [
                     'username' => 'operador_c1',
                     'uid' => 1002,
+                    'full_name' => 'Operador Campaña 1',
                     'is_admin' => false,
+                    'can_web' => false,
                     'is_samba' => true,
+                    'samba_enabled' => true,
                     'enabled' => true,
-                    'shell' => '/bin/bash',
+                    'shell' => '/usr/sbin/nologin',
                     'home' => '/home/operador_c1',
                     'groups' => ['grp_campana1'],
                 ],
             ];
         }
 
-        // Obtener lista de usuarios de Samba con pdbedit
-        $sambaUsers = [];
-        $pdbRes = SystemService::sudo(['pdbedit', '-L', '-s']);
-        if ($pdbRes['code'] === 0) {
-            foreach (explode("\n", $pdbRes['stdout']) as $line) {
-                if (preg_match('/^([^:]+):/', trim($line), $m)) {
-                    $sambaUsers[$m[1]] = true;
-                }
-            }
-        }
-
-        // Estado de contraseñas (P = activo, L = bloqueado) en una sola llamada
-        $passStates = $this->getPasswordStates();
+        // Estado de las cuentas Samba (activo/suspendido) en una sola llamada
+        $sambaStates = $this->getSambaStates();
 
         // Leer /etc/passwd para cuentas humanas (UID >= 1000 y < 65534)
         if (file_exists('/etc/passwd')) {
@@ -77,7 +75,6 @@ class UserService
                     $uname = $cols[0];
                     $uid = (int) $cols[2];
                     if ($uid >= 1000 && $uid < 65534 && $uname !== 'nobody') {
-                        // Grupos del usuario
                         $userGroups = [];
                         $grpRes = SystemService::runCommand(['id', '-Gn', $uname]);
                         if ($grpRes['code'] === 0) {
@@ -85,13 +82,18 @@ class UserService
                         }
 
                         $isAdmin = in_array('sudo', $userGroups, true) || in_array('grp_sistemas', $userGroups, true);
+                        $canWeb = $isAdmin || in_array('grp_web', $userGroups, true);
+                        $sambaEnabled = $sambaStates[strtolower($uname)] ?? false;
 
                         $users[] = [
                             'username' => $uname,
                             'uid' => $uid,
+                            'full_name' => trim(explode(',', $cols[4] ?? '')[0]),
                             'is_admin' => $isAdmin,
-                            'is_samba' => isset($sambaUsers[$uname]),
-                            'enabled' => ($passStates[$uname] ?? '') === 'P',
+                            'can_web' => $canWeb,
+                            'is_samba' => array_key_exists(strtolower($uname), $sambaStates),
+                            'samba_enabled' => $sambaEnabled,
+                            'enabled' => $sambaEnabled,
                             'shell' => $cols[6] ?? '/bin/bash',
                             'home' => $cols[5] ?? '/home/' . $uname,
                             'groups' => $userGroups,
@@ -105,21 +107,26 @@ class UserService
     }
 
     /**
-     * Estado de contraseñas de todas las cuentas (P=activa, L=bloqueada, NP=sin clave).
+     * Estado de las cuentas Samba (pdbedit) → true si está habilitada (sin flag D).
      *
-     * @return array<string,string>
+     * @return array<string,bool>
      */
-    private function getPasswordStates(): array
+    private function getSambaStates(): array
     {
         $states = [];
-        $res = SystemService::sudo(['passwd', '-S', '-a']);
+        $res = SystemService::sudo(['pdbedit', '-L', '-v']);
         if ($res['code'] !== 0) {
             return $states;
         }
+        $current = null;
         foreach (preg_split('/\R/', $res['stdout'] ?? '') as $line) {
-            $parts = preg_split('/\s+/', trim($line));
-            if (count($parts) >= 2 && preg_match('/^[a-z_][a-z0-9_-]*$/i', $parts[0])) {
-                $states[strtolower($parts[0])] = $parts[1];
+            $line = trim($line);
+            if (str_starts_with($line, 'Unix username:')) {
+                $current = strtolower(trim(substr($line, strlen('Unix username:'))));
+            } elseif ($current !== null && str_starts_with($line, 'Account Flags:')) {
+                $flags = trim(substr($line, strlen('Account Flags:')));
+                $states[$current] = !str_contains($flags, 'D');
+                $current = null;
             }
         }
         return $states;
@@ -167,7 +174,7 @@ class UserService
     /**
      * Crea un nuevo usuario en el sistema Linux y lo sincroniza con la base de credenciales de Samba.
      */
-    public function createUser(string $username, string $password, array $groups = [], bool $isAdmin = false): array
+    public function createUser(string $username, string $password, string $fullName = '', array $groups = [], bool $isAdmin = false, bool $canWeb = false, bool $sambaEnabled = true): array
     {
         $username = strtolower(trim($username));
         if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
@@ -178,7 +185,9 @@ class UserService
             return ['success' => false, 'error' => 'La contraseña debe tener al menos 6 caracteres.'];
         }
 
-        if ($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+        $fullName = $this->sanitizeFullName($fullName);
+
+        if ($this->isTesting()) {
             return ['success' => true, 'message' => "Usuario $username creado exitosamente (modo dev)."];
         }
 
@@ -194,41 +203,65 @@ class UserService
             return ['success' => false, 'error' => 'Error al crear usuario en Linux: ' . ($res['stderr'] ?: $res['stdout'])];
         }
 
-        // 2. Asignar contraseña Linux con chpasswd
-        $chRes = SystemService::sudo(['chpasswd'], "$username:$password\n");
-        if ($chRes['code'] !== 0) {
-            SystemService::sudo(['userdel', '-r', $username]);
-            return ['success' => false, 'error' => 'Error al asignar contraseña en Linux.'];
+        // 2. Nombre real / cargo (gecos)
+        if ($fullName !== '') {
+            SystemService::sudo(['usermod', '-c', $fullName, $username]);
         }
 
-        // 3. Sincronizar en base de contraseñas de Samba (smbpasswd -a -s)
-        $smbInput = "$password\n$password\n";
-        $smbRes = SystemService::sudo(['smbpasswd', '-a', '-s', $username], $smbInput);
+        // 3. Contraseña Linux solo para administradores (los usuarios de red/us web usan Samba)
+        if ($isAdmin) {
+            $chRes = SystemService::sudo(['chpasswd'], "$username:$password\n");
+            if ($chRes['code'] !== 0) {
+                SystemService::sudo(['userdel', '-r', $username]);
+                return ['success' => false, 'error' => 'Error al asignar contraseña en Linux.'];
+            }
+        }
+
+        // 4. Sincronizar en la base de credenciales de Samba
+        $smbRes = SystemService::sudo(['smbpasswd', '-a', '-s', $username], "$password\n$password\n");
         if ($smbRes['code'] !== 0) {
-            // No revertimos, advertimos
             error_log("Aviso: no se pudo registrar $username en smbpasswd: " . $smbRes['stderr']);
         }
 
-        // 4. Asignar grupos seleccionados
+        // 5. Grupos según rol y selección
         $validGroups = [];
         if ($isAdmin) {
             $validGroups[] = 'sudo';
             $validGroups[] = 'adm';
             $validGroups[] = 'grp_sistemas';
+        } elseif ($canWeb) {
+            $validGroups[] = 'grp_web';
         }
-
         foreach ($groups as $grp) {
             if (is_string($grp) && str_starts_with($grp, 'grp_') && preg_match('/^grp_[a-z0-9_-]+$/', $grp)) {
                 $validGroups[] = $grp;
             }
         }
-
         if (!empty($validGroups)) {
-            $uniqueGroups = array_unique($validGroups);
-            SystemService::sudo(['usermod', '-aG', implode(',', $uniqueGroups), $username]);
+            SystemService::sudo(['usermod', '-aG', implode(',', array_unique($validGroups)), $username]);
+        }
+
+        // 6. Política de shell: bash para admin, nologin para el resto
+        if (!$isAdmin) {
+            SystemService::sudo(['usermod', '-s', '/usr/sbin/nologin', $username]);
+        }
+
+        // 7. Acceso a red Samba (se mantiene si tiene acceso web, pues autentica por Samba)
+        if (!$sambaEnabled && !$canWeb && !$isAdmin) {
+            SystemService::sudo(['smbpasswd', '-d', '-s', $username]);
         }
 
         return ['success' => true, 'message' => "Usuario $username configurado y sincronizado con Samba."];
+    }
+
+    /**
+     * Sanea el nombre real/cargo (gecos) para uso seguro en el comando.
+     */
+    private function sanitizeFullName(string $fullName): string
+    {
+        $fullName = preg_replace('/[\r\n:]+/', ' ', $fullName) ?? '';
+        $fullName = preg_replace('/[^\p{L}\p{N} .,_-]/u', ' ', $fullName) ?? '';
+        return trim(preg_replace('/\s+/', ' ', $fullName) ?? '');
     }
 
     /**
@@ -409,7 +442,7 @@ class UserService
     /**
      * Edita un usuario: contraseña opcional, grupos departamentales y rol administrador.
      */
-    public function updateUser(string $username, ?string $password, array $groups, bool $isAdmin): array
+    public function updateUser(string $username, ?string $password = null, string $fullName = '', array $groups = [], bool $isAdmin = false, bool $canWeb = false, bool $sambaEnabled = true): array
     {
         $username = strtolower(trim($username));
         if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
@@ -433,6 +466,8 @@ class UserService
             }
         }
 
+        $fullName = $this->sanitizeFullName($fullName);
+
         $targetGroups = [];
         foreach ($groups as $g) {
             $g = strtolower(trim((string) $g));
@@ -446,29 +481,56 @@ class UserService
             return ['success' => true, 'message' => "Usuario $username actualizado (modo dev)."];
         }
 
+        if ($fullName !== '') {
+            SystemService::sudo(['usermod', '-c', $fullName, $username]);
+        }
+
         $currentGroups = [];
         $grpRes = SystemService::runCommand(['id', '-Gn', $username]);
         if ($grpRes['code'] === 0) {
             $currentGroups = preg_split('/\s+/', trim($grpRes['stdout']));
         }
 
+        // Grupos departamentales (grp_web y grp_sistemas se gestionan por flags)
         foreach ($targetGroups as $g) {
-            if (!in_array($g, $currentGroups, true)) {
+            if ($g !== 'grp_web' && $g !== 'grp_sistemas' && !in_array($g, $currentGroups, true)) {
                 SystemService::sudo(['gpasswd', '-a', $username, $g]);
             }
         }
         foreach ($currentGroups as $g) {
-            if (str_starts_with($g, 'grp_') && !in_array($g, $targetGroups, true)) {
+            if (str_starts_with($g, 'grp_') && $g !== 'grp_web' && $g !== 'grp_sistemas' && !in_array($g, $targetGroups, true)) {
                 SystemService::sudo(['gpasswd', '-d', $username, $g]);
             }
         }
 
-        if ($isAdmin && !in_array('sudo', $currentGroups, true)) {
-            SystemService::sudo(['usermod', '-aG', 'sudo,adm,grp_sistemas', $username]);
-        } elseif (!$isAdmin && in_array('sudo', $currentGroups, true)) {
-            SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
-            SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
-            SystemService::sudo(['gpasswd', '-d', $username, 'grp_sistemas']);
+        // Acceso al panel web (grp_web) — no aplica a administradores
+        $hasWeb = in_array('grp_web', $currentGroups, true);
+        if ($canWeb && !$isAdmin && !$hasWeb) {
+            SystemService::sudo(['gpasswd', '-a', $username, 'grp_web']);
+        } elseif ((!$canWeb || $isAdmin) && $hasWeb) {
+            SystemService::sudo(['gpasswd', '-d', $username, 'grp_web']);
+        }
+
+        // Rol administrador (root/sudo) y política de shell
+        if ($isAdmin) {
+            if (!in_array('sudo', $currentGroups, true)) {
+                SystemService::sudo(['usermod', '-aG', 'sudo,adm,grp_sistemas', $username]);
+            }
+            SystemService::sudo(['usermod', '-s', '/bin/bash', $username]);
+        } else {
+            if (in_array('sudo', $currentGroups, true)) {
+                SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
+                SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
+                SystemService::sudo(['gpasswd', '-d', $username, 'grp_sistemas']);
+            }
+            SystemService::sudo(['usermod', '-s', '/usr/sbin/nologin', $username]);
+        }
+
+        // Acceso a red Samba
+        if (!$sambaEnabled && !$canWeb && !$isAdmin) {
+            SystemService::sudo(['smbpasswd', '-d', '-s', $username]);
+        } elseif ($sambaEnabled) {
+            SystemService::sudo(['smbpasswd', '-e', '-s', $username]);
         }
 
         return ['success' => true, 'message' => "Usuario $username actualizado correctamente."];
