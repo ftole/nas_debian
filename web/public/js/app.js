@@ -131,11 +131,19 @@ function escapeHtml(str) {
 // ==============================================================================
 const VALID_VIEWS = [
   'dashboard', 'files', 'logs', 'storage', 'networking', 'services', 'terminal',
-  'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
+  'shares', 'backups', 'users', 'permissions', 'diagnostics', 'updates', 'applications', 'domain'
 ];
+
+// Módulos permitidos a un usuario web (no administrador)
+const WEB_USER_VIEWS = ['dashboard', 'files', 'logs'];
 
 function switchView(viewName, updateHash = true) {
   if (!VALID_VIEWS.includes(viewName)) {
+    viewName = 'dashboard';
+  }
+
+  // Los usuarios web solo pueden ver Dashboard, Archivos y Logs
+  if (window.NAS_IS_ADMIN === false && !WEB_USER_VIEWS.includes(viewName)) {
     viewName = 'dashboard';
   }
 
@@ -191,6 +199,9 @@ function switchView(viewName, updateHash = true) {
       break;
     case 'users':
       loadUsersAndGroups();
+      break;
+    case 'permissions':
+      loadAccessMatrix();
       break;
     case 'services':
       loadServices();
@@ -383,29 +394,34 @@ async function loadDashboardActivity() {
 // ==============================================================================
 // 5. Módulo: Recursos Compartidos (Samba)
 // ==============================================================================
+let _sharesData = [];
+
 async function loadShares() {
   const tbody = document.getElementById('shares-table-body');
   if (!tbody) return;
 
   try {
     const res = await apiFetch('/api/shares');
-    const shares = res.data || [];
+    _sharesData = res.data || [];
 
-    if (shares.length === 0) {
+    if (_sharesData.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay recursos compartidos creados actualmente.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = shares.map(s => `
+    tbody.innerHTML = _sharesData.map(s => `
       <tr>
         <td><strong>[${escapeHtml(s.name)}]</strong></td>
         <td><code>${escapeHtml(s.path)}</code></td>
         <td><span class="tag-pill">${escapeHtml(s.scheme_name)}</span></td>
         <td>${s.hidden ? '<span class="badge badge-gray">Oculto ($)</span>' : '<span class="badge badge-ok">Visible</span>'}</td>
         <td>${(s.valid_users || []).map(u => `<span class="tag-pill">${escapeHtml(u)}</span>`).join(' ') || (s.guest_ok ? '<em>Invitados</em>' : '<em>Sistemas</em>')}</td>
-        <td style="text-align:right;">
+        <td style="text-align:right; white-space:nowrap;">
+          <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditShare('${escapeHtml(s.name)}')">
+            <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
+          </button>
           ${s.name === 'SISTEMAS' ? '' : `
-            <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="deleteShare('${escapeHtml(s.name)}')">
+            <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteShare('${escapeHtml(s.name)}')">
               <svg class="icon icon-sm"><use href="#icon-trash"></use></svg>
             </button>
           `}
@@ -415,6 +431,12 @@ async function loadShares() {
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--accent-danger);">Error al cargar recursos compartidos: ${escapeHtml(e.message)}</td></tr>`;
   }
+}
+
+async function openNewShare() {
+  await populateShareGroupOptions();
+  toggleSchemeFields();
+  openModal('modal-new-share');
 }
 
 function toggleSchemeFields() {
@@ -457,6 +479,80 @@ async function populateShareGroupOptions() {
     }
   } catch (e) {
     console.error('Error cargando grupos para selector:', e);
+  }
+}
+
+async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup) {
+  const container = document.getElementById('edit-share-groups-list');
+  const writeSelect = document.getElementById('edit-share-write-group');
+  if (!container) return;
+
+  try {
+    const res = await apiFetch('/api/groups');
+    const groups = res.data || [];
+    const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
+    container.innerHTML = groups.map(g => `
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="edit_share_group" value="${escapeHtml(g.name)}" ${sel.includes(g.name) ? 'checked' : ''}>
+        <span>${escapeHtml(g.name)}</span>
+      </label>
+    `).join('');
+
+    if (writeSelect) {
+      writeSelect.innerHTML = groups.map(g => `
+        <option value="${escapeHtml(g.name)}" ${g.name === selectedWriteGroup ? 'selected' : ''}>${escapeHtml(g.name)}</option>
+      `).join('');
+    }
+  } catch (e) {
+    console.error('Error cargando grupos para edición:', e);
+  }
+}
+
+async function openEditShare(name) {
+  const s = _sharesData.find(x => x.name === name);
+  if (!s) return;
+  document.getElementById('edit-share-name').value = name;
+  document.getElementById('edit-share-comment').value = s.comment || '';
+  document.getElementById('edit-share-scheme').value = String(s.scheme || 1);
+  document.getElementById('edit-share-hidden').checked = !!s.hidden;
+
+  const groupTokens = (s.valid_users || []).filter(t => t.startsWith('@'));
+  const writeToken = (s.write_list || [])[0] || '';
+  await populateEditShareGroupOptions(groupTokens, String(writeToken).replace('@', ''));
+  toggleEditSchemeFields();
+  openModal('modal-edit-share');
+}
+
+function toggleEditSchemeFields() {
+  const scheme = document.getElementById('edit-share-scheme').value;
+  document.getElementById('edit-group-share-groups').style.display = (scheme === '4') ? 'none' : 'block';
+  document.getElementById('edit-group-share-write-group').style.display = (scheme === '2') ? 'block' : 'none';
+}
+
+async function submitEditShare(event) {
+  event.preventDefault();
+  const name = document.getElementById('edit-share-name').value;
+  const comment = document.getElementById('edit-share-comment').value;
+  const scheme = parseInt(document.getElementById('edit-share-scheme').value, 10);
+  const hidden = document.getElementById('edit-share-hidden').checked;
+  const writeGroup = document.getElementById('edit-share-write-group').value;
+  const groups = Array.from(document.querySelectorAll('input[name="edit_share_group"]:checked')).map(cb => cb.value);
+
+  const btn = document.getElementById('btn-submit-edit-share') || event.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
+  try {
+    await apiFetch('/api/shares/update', {
+      method: 'POST',
+      body: JSON.stringify({ name, comment, scheme, hidden, groups, write_group: writeGroup }),
+    });
+    showToast(`Recurso [${name}] actualizado.`, 'success');
+    closeModal('modal-edit-share');
+    loadShares();
+  } catch (e) {
+    // Ya mostrado
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
@@ -746,17 +842,21 @@ async function loadUsersAndGroups() {
     if (usersTbody) {
       usersTbody.innerHTML = _usersData.map(u => {
         const isProtected = PROTECTED_USERS.includes(u.username);
+        const rol = u.is_admin
+          ? '<span class="badge badge-warn">Admin</span>'
+          : (u.can_web ? '<span class="badge badge-blue">Web</span>' : '<span class="badge badge-gray">Estándar</span>');
+        const netEnabled = !!(u.samba_enabled ?? u.enabled);
         return `
-        <tr data-username="${escapeHtml(u.username)}" data-admin="${u.is_admin ? '1' : '0'}" data-enabled="${u.enabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
-          <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.home || '')}</div></td>
+        <tr data-username="${escapeHtml(u.username)}" data-admin="${u.is_admin ? '1' : '0'}" data-enabled="${netEnabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
+          <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.full_name || '')}</div></td>
           <td>${u.uid}</td>
-          <td>${u.is_admin ? '<span class="badge badge-warn">Admin</span>' : '<span class="badge badge-gray">Estándar</span>'}</td>
-          <td>${u.enabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Bloqueado</span>'}</td>
-          <td>${u.is_samba ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-err">Inactivo</span>'}</td>
+          <td>${rol}</td>
+          <td>${netEnabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Suspendido</span>'}</td>
+          <td>${u.is_samba ? '<span class="badge badge-ok">Sync</span>' : '<span class="badge badge-err">Sin SMB</span>'}</td>
           <td style="text-align:right; white-space:nowrap;">
             ${isProtected ? '<span class="badge badge-gray">Protegida</span>' : `
               <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
-              <button class="btn btn-secondary btn-sm" title="${u.enabled ? 'Bloquear' : 'Desbloquear'}" onclick="toggleUser('${escapeHtml(u.username)}', ${u.enabled ? 'false' : 'true'})"><svg class="icon icon-sm"><use href="#icon-${u.enabled ? 'lock' : 'unlock'}"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" title="${netEnabled ? 'Suspender acceso a red' : 'Reactivar acceso a red'}" onclick="toggleUser('${escapeHtml(u.username)}', ${netEnabled ? 'false' : 'true'})"><svg class="icon icon-sm"><use href="#icon-${netEnabled ? 'lock' : 'unlock'}"></use></svg></button>
               <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
             `}
           </td>
@@ -824,12 +924,15 @@ function openEditUser(username) {
   const u = _usersData.find(x => x.username === username);
   if (!u) return;
   document.getElementById('edit-user-uname').value = username;
+  document.getElementById('edit-user-fullname').value = u.full_name || '';
   document.getElementById('edit-user-pass').value = '';
   document.getElementById('edit-user-is-admin').checked = !!u.is_admin;
+  document.getElementById('edit-user-can-web').checked = !!u.can_web;
+  document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
 
-  const checked = (u.groups || []).filter(g => g.startsWith('grp_') && g !== 'grp_sistemas');
+  const checked = (u.groups || []).filter(g => g.startsWith('grp_') && g !== 'grp_sistemas' && g !== 'grp_web');
   const container = document.getElementById('edit-user-groups-list');
-  container.innerHTML = _groupsData.filter(g => g.name !== 'grp_sistemas').map(g => {
+  container.innerHTML = _groupsData.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web').map(g => {
     const sel = checked.includes(g.name) ? 'checked' : '';
     return `<label style="display:flex; align-items:center; gap:8px;">
       <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel}>
@@ -842,8 +945,11 @@ function openEditUser(username) {
 async function submitUpdateUser(event) {
   event.preventDefault();
   const username = document.getElementById('edit-user-uname').value;
+  const full_name = document.getElementById('edit-user-fullname').value;
   const password = document.getElementById('edit-user-pass').value;
   const isAdmin = document.getElementById('edit-user-is-admin').checked;
+  const canWeb = document.getElementById('edit-user-can-web').checked;
+  const sambaEnabled = document.getElementById('edit-user-samba-enabled').checked;
   const groups = Array.from(document.querySelectorAll('input[name="edit_user_group"]:checked')).map(cb => cb.value);
 
   const btn = document.getElementById('btn-submit-edit-user') || event.target.querySelector('button[type="submit"]');
@@ -852,7 +958,7 @@ async function submitUpdateUser(event) {
   try {
     await apiFetch('/api/users/update', {
       method: 'POST',
-      body: JSON.stringify({ username, password, groups, is_admin: isAdmin }),
+      body: JSON.stringify({ username, full_name, password, groups, is_admin: isAdmin, can_web: canWeb, samba_enabled: sambaEnabled }),
     });
     showToast(`Usuario [${username}] actualizado.`, 'success');
     closeModal('modal-edit-user');
@@ -965,11 +1071,104 @@ async function submitRenameGroup(event) {
   }
 }
 
+async function openNewUser() {
+  if (!_groupsData.length) {
+    try {
+      const res = await apiFetch('/api/groups');
+      _groupsData = res.data || [];
+    } catch (e) {
+      // Sin grupos disponibles
+    }
+  }
+  populateUserGroupOptions(_groupsData);
+  openModal('modal-new-user');
+}
+
+// ==============================================================================
+// Matriz de permisos de acceso (grupos × recursos y usuarios × recursos)
+// ==============================================================================
+let _permData = { shares: [], groups: [], users: [] };
+let _permTab = 'groups';
+
+function setPermTab(tab) {
+  _permTab = tab;
+  document.querySelectorAll('#perm-filter-chips .chip-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.perm === tab);
+  });
+  renderPermMatrix();
+}
+
+async function loadAccessMatrix() {
+  const container = document.getElementById('perm-matrix-container');
+  if (!container) return;
+  try {
+    const res = await apiFetch('/api/shares/access');
+    _permData = res.data || { shares: [], groups: [], users: [] };
+    renderPermMatrix();
+  } catch (e) {
+    container.innerHTML = `<p style="padding:18px; color:var(--accent-danger);">Error al cargar la matriz de permisos: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function permBadge(level) {
+  if (level === 'write') return '<span class="badge badge-ok">Escritura</span>';
+  if (level === 'read') return '<span class="badge badge-blue">Lectura</span>';
+  return '<span class="badge badge-gray">Sin acceso</span>';
+}
+
+function renderPermMatrix() {
+  const container = document.getElementById('perm-matrix-container');
+  if (!container) return;
+
+  const shares = _permData.shares || [];
+  const rows = _permTab === 'groups' ? (_permData.groups || []) : (_permData.users || []);
+  if (!shares.length || !rows.length) {
+    container.innerHTML = '<p style="padding:18px; color:var(--text-muted);">No hay recursos o entidades para mostrar.</p>';
+    return;
+  }
+
+  const kind = _permTab === 'groups' ? 'group' : 'user';
+  let html = '<table class="nas-table"><thead><tr><th>Entidad</th>';
+  shares.forEach(s => { html += `<th>${escapeHtml(s)}</th>`; });
+  html += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += `<tr><td><strong>${escapeHtml(r.name)}</strong>${r.is_admin ? ' <span class="badge badge-warn">Admin</span>' : ''}</td>`;
+    shares.forEach(s => {
+      const level = r[s] || 'none';
+      html += `<td><button type="button" class="chip-btn" style="width:100%;" onclick="cyclePerm('${kind}','${escapeHtml(r.name)}','${escapeHtml(s)}')">${permBadge(level)}</button></td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function cyclePerm(kind, name, share) {
+  const order = ['none', 'read', 'write'];
+  const row = (_permTab === 'groups' ? _permData.groups : _permData.users).find(r => r.name === name);
+  const current = row ? (row[share] || 'none') : 'none';
+  const next = order[(order.indexOf(current) + 1) % order.length];
+
+  try {
+    await apiFetch('/api/shares/access', {
+      method: 'POST',
+      body: JSON.stringify({ share, kind, name, level: next }),
+    });
+    showToast(`Permiso de ${name} en ${share}: ${next}.`, 'success');
+    loadAccessMatrix();
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
 async function submitNewUser(event) {
   event.preventDefault();
   const username = document.getElementById('user-uname').value;
+  const full_name = document.getElementById('user-fullname').value;
   const password = document.getElementById('user-pass').value;
   const isAdmin = document.getElementById('user-is-admin').checked;
+  const canWeb = document.getElementById('user-can-web').checked;
+  const sambaEnabled = document.getElementById('user-samba-enabled').checked;
 
   const selectedGroups = Array.from(document.querySelectorAll('input[name="user_group"]:checked'))
     .map(cb => cb.value);
@@ -985,9 +1184,12 @@ async function submitNewUser(event) {
       method: 'POST',
       body: JSON.stringify({
         username,
+        full_name,
         password,
         groups: selectedGroups,
         is_admin: isAdmin,
+        can_web: canWeb,
+        samba_enabled: sambaEnabled,
       }),
     });
 
