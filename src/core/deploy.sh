@@ -619,8 +619,13 @@ Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstat
     /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/sbin/userdel -r [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
-    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd
+    /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/usermod -L [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -U [a-zA-Z0-9_.-]*, /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/chpasswd, /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
+    /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
+    /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* adm, \\
+    /usr/bin/smbpasswd -d -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -e -s [a-zA-Z0-9_.-]*
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
     /usr/bin/btrfs scrub status /srv/nas*, /bin/btrfs scrub status /srv/nas*, \\
     /sbin/fstrim -v /srv/nas*, /usr/sbin/fstrim -v /srv/nas*
