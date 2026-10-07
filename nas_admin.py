@@ -143,6 +143,20 @@ def write_env_non_secret(env_path: pathlib.Path, cfg) -> None:
         tr.log_error(f"No se pudo guardar {env_path}: {e}")
 
 
+def persist_credentials(env_path: pathlib.Path, candidate) -> None:
+    """Persiste el perfil: con keyring las claves van al Credential Manager y
+    `.env` queda sin secretos; sin keyring se conservan en `.env` con aviso."""
+    if keyring is not None:
+        write_env_non_secret(env_path, candidate)
+        set_secret(KEYRING_PASSWORD_KEY, candidate["NAS_TEST_PASSWORD"])
+        set_secret(KEYRING_ROOT_KEY, candidate["NAS_ROOT_PASSWORD"])
+        tr.log_success("Perfil guardado (host en .env, claves en Credential Manager).")
+    else:
+        tr.save_env_file(env_path, {k: str(v) for k, v in candidate.items()})
+        tr.log_warn("keyring no está instalado: las contraseñas se guardaron en .env.")
+        tr.log_info("Para usar el Credential Manager de Windows: pip install -r requirements-assistant.txt")
+
+
 # -----------------------------------------------------------------------------
 # Funciones puras (parseo y construcción de comandos) - testeables
 # -----------------------------------------------------------------------------
@@ -349,16 +363,11 @@ def config_wizard(env_path: pathlib.Path, cfg=None):
     if ok:
         candidate["NAS_ROOT_PASSWORD"] = manager.root_password
         tr.log_success(msg)
-        write_env_non_secret(env_path, candidate)
-        set_secret(KEYRING_PASSWORD_KEY, candidate["NAS_TEST_PASSWORD"])
-        set_secret(KEYRING_ROOT_KEY, candidate["NAS_ROOT_PASSWORD"])
-        tr.log_success("Perfil guardado (host en .env, claves en Credential Manager).")
+        persist_credentials(env_path, candidate)
     else:
         tr.log_warn(f"Validación de conexión falló: {msg}")
         if ask_yes_no("¿Deseas guardar estos datos de todas formas?"):
-            write_env_non_secret(env_path, candidate)
-            set_secret(KEYRING_PASSWORD_KEY, candidate["NAS_TEST_PASSWORD"])
-            set_secret(KEYRING_ROOT_KEY, candidate["NAS_ROOT_PASSWORD"])
+            persist_credentials(env_path, candidate)
     return candidate
 
 
@@ -415,8 +424,16 @@ def deploy_wizard(manager, config):
         or detect_workgroup_default(manager)
     netbios = input(f" {Colors.CYAN}[?] Nombre NetBIOS [{detect_netbios_default(manager)}]: {Colors.RESET}").strip().upper() \
         or detect_netbios_default(manager)
-    admin_user = input(f" {Colors.CYAN}[?] Usuario administrador [{config.get('NAS_TEST_USER', 'sistemas')}]: {Colors.RESET}").strip() \
-        or config.get("NAS_TEST_USER", "sistemas")
+    ssh_user = config.get("NAS_TEST_USER", "sistemas")
+    admin_user = input(f" {Colors.CYAN}[?] Usuario administrador [{ssh_user}]: {Colors.RESET}").strip() \
+        or ssh_user
+    if admin_user != ssh_user:
+        tr.log_warn(f"El usuario SSH actual '{ssh_user}' quedará BLOQUEADO tras el despliegue.")
+        tr.log_warn(f"Continúa administrando con la cuenta '{admin_user}' (misma contraseña) "
+                    f"o reanúbalo en consola con: sudo usermod -U {ssh_user}")
+        if not ask_yes_no("¿Continuar de todas formas?", default=False):
+            tr.log_warn("Despliegue cancelado.")
+            return
     keep_data = ask_yes_no("¿Reutilizar datos preexistentes (--keep-data)?")
 
     print(f"\n{Colors.WHITE}Resumen del despliegue:{Colors.RESET}")
@@ -435,10 +452,23 @@ def deploy_wizard(manager, config):
         return
 
     cmd = build_deploy_command(disk, workgroup, netbios, admin_user, role, keep_data)
-    if run_deploy(manager, cmd, config["NAS_TEST_PASSWORD"]):
-        verify_deployment(manager)
-    else:
+    if not run_deploy(manager, cmd, config["NAS_TEST_PASSWORD"]):
         tr.log_error("El despliegue no finalizó correctamente. Revisa el log o la consola.")
+        return
+
+    # Verificar con la cuenta administrador del despliegue para evitar falsos
+    # negativos causados por el bloqueo de las cuentas base no designadas.
+    verify_cfg = dict(config)
+    verify_cfg["NAS_TEST_USER"] = admin_user
+    verify_cfg["NAS_TEST_PASSWORD"] = config["NAS_TEST_PASSWORD"]
+    verify_cfg["NAS_ROOT_PASSWORD"] = config["NAS_TEST_PASSWORD"]
+    verify_manager = tr.SSHManager(verify_cfg)
+    verify_deployment(verify_manager)
+    verify_manager.close()
+
+    if admin_user != ssh_user:
+        tr.log_warn(f"Para seguir administrando usa la cuenta '{admin_user}' "
+                    f"(o reactiva '{ssh_user}' en consola con: sudo usermod -U {ssh_user}).")
 
 
 def services_menu(manager) -> None:
