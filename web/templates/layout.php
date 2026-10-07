@@ -867,7 +867,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Usuarios y grupos departamentales</h2>
-            <p>Sincronización estricta con smbpasswd y prefijo corporativo mandatorio 'grp_*'</p>
+            <p>Gestión de cuentas Linux/Samba: crear, editar, bloquear, resetear contraseña y administrar miembros grp_*</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-primary" onclick="openModal('modal-new-user')">
@@ -876,6 +876,19 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <button class="btn btn-secondary" onclick="openModal('modal-new-group')">
               <svg class="icon"><use href="#icon-plus"></use></svg> Crear grupo
             </button>
+          </div>
+        </div>
+
+        <div class="filter-toolbar">
+          <div class="filter-chips" id="users-filter-chips">
+            <button type="button" class="chip-btn active" data-filter="all" onclick="setUsersFilter('all')">Todos</button>
+            <button type="button" class="chip-btn" data-filter="admin" onclick="setUsersFilter('admin')">Admin</button>
+            <button type="button" class="chip-btn" data-filter="blocked" onclick="setUsersFilter('blocked')">Bloqueados</button>
+            <button type="button" class="chip-btn" data-filter="samba" onclick="setUsersFilter('samba')">Sincronizados</button>
+          </div>
+          <div class="search-box">
+            <svg class="icon"><use href="#icon-search"></use></svg>
+            <input type="text" id="users-search" placeholder="Buscar usuario..." oninput="applyUsersFilters()">
           </div>
         </div>
 
@@ -892,12 +905,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                     <th>Usuario</th>
                     <th>UID</th>
                     <th>Rol</th>
+                    <th>Estado</th>
                     <th>Samba</th>
-                    <th style="width:80px; text-align:right;">Acción</th>
+                    <th style="width:196px; text-align:right;">Acción</th>
                   </tr>
                 </thead>
                 <tbody id="users-table-body">
-                  <tr><td colspan="5" style="text-align:center;">Cargando usuarios...</td></tr>
+                  <tr><td colspan="6" style="text-align:center;">Cargando usuarios...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -915,7 +929,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                     <th>Grupo</th>
                     <th>GID</th>
                     <th>Miembros</th>
-                    <th style="width:80px; text-align:right;">Acción</th>
+                    <th style="width:210px; text-align:right;">Acción</th>
                   </tr>
                 </thead>
                 <tbody id="groups-table-body">
@@ -1289,6 +1303,98 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btn-submit-new-group">Crear grupo</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Editar Usuario -->
+  <div class="modal-backdrop" id="modal-edit-user">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Editar usuario</h3>
+        <button class="modal-close" onclick="closeModal('modal-edit-user')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-edit-user" onsubmit="submitUpdateUser(event)">
+          <div class="form-group">
+            <label for="edit-user-uname">Usuario:</label>
+            <input type="text" id="edit-user-uname" readonly style="font-weight:600; background:var(--bg-surface);">
+          </div>
+          <div class="form-group">
+            <label for="edit-user-pass">Nueva contraseña <small>(déjalo vacío para conservar la actual)</small>:</label>
+            <input type="password" id="edit-user-pass" placeholder="Contraseña nueva (mín. 6)" minlength="6">
+          </div>
+          <div class="form-group">
+            <label>Grupos departamentales:</label>
+            <div id="edit-user-groups-list" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
+              <!-- Llenado dinámicamente -->
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="edit-user-is-admin">
+              <span>Privilegios administrativos (acceso sudo, adm y grp_sistemas)</span>
+            </label>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-user')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-edit-user">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Miembros de Grupo -->
+  <div class="modal-backdrop" id="modal-group-members">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modal-group-members-title">Miembros del grupo</h3>
+        <button class="modal-close" onclick="closeModal('modal-group-members')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Miembros actuales:</label>
+          <div id="group-members-list" style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
+            <!-- Llenado dinámicamente -->
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="group-member-user">Añadir usuario:</label>
+          <div style="display:flex; gap:8px;">
+            <select id="group-member-user" style="flex:1;"></select>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addGroupMember()">Añadir</button>
+          </div>
+        </div>
+        <div class="modal-footer" style="padding:0; margin-top:20px;">
+          <button type="button" class="btn btn-primary" onclick="closeModal('modal-group-members')">Listo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Renombrar Grupo -->
+  <div class="modal-backdrop" id="modal-rename-group">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Renombrar grupo</h3>
+        <button class="modal-close" onclick="closeModal('modal-rename-group')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-rename-group" onsubmit="submitRenameGroup(event)">
+          <div class="form-group">
+            <label for="rename-group-old">Grupo actual:</label>
+            <input type="text" id="rename-group-old" readonly style="font-weight:600; background:var(--bg-surface);">
+          </div>
+          <div class="form-group">
+            <label for="rename-group-new">Nuevo nombre (prefijo <code>grp_</code>):</label>
+            <input type="text" id="rename-group-new" required placeholder="ej. grp_finanzas2027" pattern="grp_[a-z0-9_-]+">
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-group')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-rename-group">Renombrar</button>
           </div>
         </form>
       </div>
