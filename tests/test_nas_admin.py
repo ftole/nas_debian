@@ -96,3 +96,33 @@ def test_load_config_completa_contraseñas_desde_keyring() -> None:
     assert cfg["NAS_TEST_USER"] == "sistemas"
     assert cfg["NAS_TEST_PASSWORD"] == "pass-ssh"
     assert cfg["NAS_ROOT_PASSWORD"] == "pass-root"
+
+
+def test_persist_credentials_sin_keyring_guarda_en_env() -> None:
+    candidate = {"NAS_TEST_IP": "10.0.0.5", "NAS_TEST_PASSWORD": "p", "NAS_ROOT_PASSWORD": "r",
+                 "NAS_TEST_USER": "sistemas", "NAS_TEST_PORT": 22}
+    fake_env = mock.MagicMock()
+    with mock.patch.object(nas_admin, "keyring", None):
+        with mock.patch.object(nas_admin.tr, "save_env_file", return_value=True) as save:
+            with mock.patch.object(nas_admin, "write_env_non_secret") as wns:
+                nas_admin.persist_credentials(fake_env, candidate)
+    save.assert_called_once()
+    wns.assert_not_called()
+
+
+def test_persist_credentials_con_keyring_no_escribe_env_con_claves() -> None:
+    candidate = {"NAS_TEST_IP": "10.0.0.5", "NAS_TEST_PASSWORD": "p", "NAS_ROOT_PASSWORD": "r",
+                 "NAS_TEST_USER": "sistemas", "NAS_TEST_PORT": 22}
+    fake_env = mock.MagicMock()
+
+    class FakeKeyring:  # noqa: D204
+        pass
+
+    with mock.patch.object(nas_admin, "keyring", FakeKeyring):
+        with mock.patch.object(nas_admin, "write_env_non_secret") as wns:
+            with mock.patch.object(nas_admin, "set_secret", return_value=True) as ss:
+                with mock.patch.object(nas_admin.tr, "save_env_file") as save:
+                    nas_admin.persist_credentials(fake_env, candidate)
+    wns.assert_called_once()
+    assert ss.call_count == 2
+    save.assert_not_called()
