@@ -118,11 +118,16 @@ $router->post('/api/storage/trim', [StorageController::class, 'trim']);
 $router->get('/api/users', [UserController::class, 'users']);
 $router->get('/api/users/list', [UserController::class, 'users']);
 $router->post('/api/users', [UserController::class, 'createUser']);
+$router->post('/api/users/update', [UserController::class, 'updateUser']);
+$router->post('/api/users/password', [UserController::class, 'setPassword']);
+$router->post('/api/users/toggle', [UserController::class, 'toggleUser']);
+$router->post('/api/users/groups', [UserController::class, 'userGroups']);
 $router->post('/api/users/delete', [UserController::class, 'deleteUser']);
 $router->delete('/api/users/{username}', [UserController::class, 'deleteUser']);
 $router->get('/api/groups', [UserController::class, 'groups']);
 $router->get('/api/groups/list', [UserController::class, 'groups']);
 $router->post('/api/groups', [UserController::class, 'createGroup']);
+$router->post('/api/groups/rename', [UserController::class, 'rename']);
 $router->post('/api/groups/delete', [UserController::class, 'deleteGroup']);
 $router->delete('/api/groups/{name}', [UserController::class, 'deleteGroup']);
 
