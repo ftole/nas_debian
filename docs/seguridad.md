@@ -125,3 +125,26 @@ sudo nas version
 # Revertir manualmente si fuera necesario
 cd /opt/nas_debian && sudo git reset --hard <commit>
 ```
+
+---
+
+## 7. Gestión de Usuarios, Roles y Acceso Web
+
+El panel incorpora un gestor de identidades nativo (Linux + Samba) con control granular:
+
+- **Roles por grupo:**
+  - **`grp_sistemas` (Especial):** administrador del servidor (root/sudo + panel completo + SSH).
+  - **`grp_web` (Especial):** acceso al panel en rol **usuario** (solo Vista general, Archivos y Logs).
+  - **`grp_*` departamentales:** determinan el acceso a las redes compartidas.
+- **Permisos por usuario:** contraseña, nombre real/cargo, **Acceso web**, **Administrador (root/sudo)** y **Acceso a red (Samba)**.
+- **Política de shell:** los administradores usan `/bin/bash`; el resto `/usr/sbin/nologin` (sin consola ni SSH).
+- **Grupos especiales** (`grp_sistemas`, `grp_web`): no se crean/borran/renombran desde el panel y solo se controlan mediante las casillas de rol del usuario.
+
+### Acceso a recursos compartidos
+- El acceso efectivo de un usuario a una carpeta es la **unión** del acceso **por grupo** (`valid users`/`write list`) y de las **concesiones explícitas por usuario**.
+- Los recursos de solo lectura (`read only = yes`, esquema 3) nunca reportan escritura.
+- **`grp_sistemas` se incluye siempre** en `valid users` para que los administradores conserven acceso, aunque los grupos especiales no aparezcan en los selectores.
+
+> [!IMPORTANT]
+> **Acoplamiento Web↔Samba:** el panel autentica las sesiones contra Samba (`smbclient`). Por tanto, **“Acceso web” requiere que la cuenta Samba esté activa**: desactivar “Acceso a red (Samba)” a un usuario web le retira también el acceso al panel.
+
