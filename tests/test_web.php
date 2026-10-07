@@ -111,6 +111,19 @@ assertTrue(!$delAdmin['success'], 'UserService rechaza eliminar cuenta protegida
 $delMasterGrp = $user->deleteGroup('grp_sistemas');
 assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestro protegido grp_sistemas');
 
+$delWebGrp = $user->deleteGroup('grp_web');
+assertTrue(!$delWebGrp['success'], 'UserService rechaza eliminar el grupo especial grp_web');
+$renWebGrp = $user->renameGroup('grp_web', 'grp_x');
+assertTrue(!$renWebGrp['success'], 'UserService rechaza renombrar el grupo especial grp_web');
+$grpListAll = $user->listGroups();
+$webEntry = null;
+foreach ($grpListAll as $gl) {
+    if (($gl['name'] ?? '') === 'grp_web') {
+        $webEntry = $gl;
+    }
+}
+assertTrue($webEntry !== null && ($webEntry['is_special'] ?? false) === true, 'UserService::listGroups marca grp_web como especial');
+
 // 3.1 Gestor real de usuarios (edición, estado, contraseña, miembros y renombrado)
 $firstUser = $users[0] ?? [];
 assertTrue(isset($firstUser['enabled'], $firstUser['shell'], $firstUser['home']),
