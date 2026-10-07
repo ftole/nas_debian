@@ -560,6 +560,30 @@ def action_update(manager) -> None:
         tr.log_success("Actualización finalizada.")
     else:
         tr.log_warn("La actualización no encontró cambios o el servidor no está desplegado.")
+    sync_web_panel(manager)
+
+
+def sync_web_panel(manager) -> None:
+    """Propaga el código `web/` del repo actualizado a /var/www/nas-web.
+
+    updater.sh actualiza /opt/nas_debian pero no despliega la interfaz; este paso
+    copia solo la web (excluyendo `data/`) y recarga Nginx/PHP-FPM.
+    """
+    tr.log_info("Sincronizando el panel web con el código actualizado...")
+    cmd = (
+        "if [ -d /opt/nas_debian/web ] && [ -d /var/www/nas-web ]; then "
+        "  rsync -a --delete --exclude='data/' /opt/nas_debian/web/ /var/www/nas-web/ && "
+        "  chown -R www-data:www-data /var/www/nas-web && "
+        "  chmod -R 755 /var/www/nas-web; "
+        "  systemctl reload nginx 2>/dev/null || true; "
+        "  systemctl reload php*-fpm 2>/dev/null || true; "
+        "else echo 'Sincronización de web omitida (código o panel ausente)'; fi"
+    )
+    code, out, err = manager.run_command(cmd, sudo=True, timeout=120, stream=True)
+    if code == 0:
+        tr.log_success("Panel web sincronizado. Recarga la página con Ctrl+F5.")
+    else:
+        tr.log_warn(f"No se pudo sincronizar el panel web: {err or out}")
 
 
 def action_uninstall(manager) -> None:
