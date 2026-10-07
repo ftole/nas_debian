@@ -623,8 +623,8 @@ Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/s
     /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/usermod -L [a-zA-Z0-9_.-]*, \\
     /usr/sbin/usermod -U [a-zA-Z0-9_.-]*, /usr/sbin/usermod -s /bin/bash [a-zA-Z0-9_.-]*, \\
     /usr/sbin/usermod -s /usr/sbin/nologin [a-zA-Z0-9_.-]*, /usr/sbin/usermod -c * [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, \\
-    /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd, \\
+    /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupadd -f grp_[a-zA-Z0-9_.-]*, \\
+    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd, \\
     /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* adm, \\
@@ -691,6 +691,8 @@ WSDDOVERRIDE
 
 echo " [4/9] Creando grupo maestro Sistemas y configurando administradores ($ADMIN_USER)..."
 groupadd -f grp_sistemas
+# Grupo de acceso al panel web en rol no-administrador
+groupadd -f grp_web
 # El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_sistemas).
 usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_sistemas."
 
