@@ -115,6 +115,8 @@ assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestr
 $firstUser = $users[0] ?? [];
 assertTrue(isset($firstUser['enabled'], $firstUser['shell'], $firstUser['home']),
     'UserService::listUsers expone estado (enabled), shell y home');
+assertTrue(isset($firstUser['full_name'], $firstUser['can_web'], $firstUser['samba_enabled']),
+    'UserService::listUsers expone full_name, can_web y samba_enabled');
 assertTrue(isset($users[0]['is_admin']) && isset($users[0]['is_samba']),
     'UserService::listUsers mantiene campos is_admin e is_samba');
 
@@ -134,12 +136,14 @@ assertTrue($enableBack['success'], 'UserService::setEnabled desbloquea cuenta (m
 $enableRoot = $user->setEnabled('root', false);
 assertTrue(!$enableRoot['success'], 'UserService::setEnabled rechaza bloquear cuenta protegida');
 
-$updOk = $user->updateUser('usuario_test', 'claveNueva123', ['grp_marketing'], true);
+$updOk = $user->updateUser('usuario_test', 'claveNueva123', 'Operador de Prueba', ['grp_marketing'], true, false, true);
 assertTrue($updOk['success'], 'UserService::updateUser actualiza contraseña/grupos/admin (modo test)');
-$updBadUser = $user->updateUser('u', 'claveNueva123', [], false);
+$updBadUser = $user->updateUser('u', 'claveNueva123', '', [], false, false, true);
 assertTrue(!$updBadUser['success'], 'UserService::updateUser rechaza usuario inválido');
-$updProtected = $user->updateUser('sistemas', null, [], false);
+$updProtected = $user->updateUser('sistemas', null, '', [], false, false, true);
 assertTrue(!$updProtected['success'], 'UserService::updateUser rechaza cuenta protegida sistemas');
+$updWeb = $user->updateUser('usuario_test', null, '', ['grp_marketing'], false, true, true);
+assertTrue($updWeb['success'], 'UserService::updateUser admite acceso web (can_web) en modo test');
 
 $addMember = $user->addUserToGroup('usuario_test', 'grp_marketing');
 assertTrue($addMember['success'], 'UserService::addUserToGroup añade miembro a grp_* (modo test)');
@@ -172,6 +176,17 @@ assertTrue(!$delGlobal['success'], 'SambaService rechaza eliminar sección prote
 
 $delPrinters = $samba->deleteShare('printers');
 assertTrue(!$delPrinters['success'], 'SambaService rechaza eliminar sección protegida [printers]');
+
+// 4.1 Edición de recursos y matriz de acceso (SambaService)
+$badLevel = $samba->setAccess('X', 'group', 'grp_x', 'invalid');
+assertTrue(!$badLevel['success'], 'SambaService::setAccess rechaza nivel inválido');
+$badKind = $samba->setAccess('X', 'otro', 'grp_x', 'read');
+assertTrue(!$badKind['success'], 'SambaService::setAccess rechaza tipo inválido (group|user)');
+$badGroup = $samba->setAccess('X', 'group', '!!bad!!', 'read');
+assertTrue(!$badGroup['success'], 'SambaService::setAccess rechaza nombre de grupo inválido');
+$updMissing = $samba->updateShare('NO_EXISTE', ['scheme' => 1]);
+assertTrue(!$updMissing['success'], 'SambaService::updateShare rechaza recurso inexistente');
+assertTrue(is_array($samba->getAccessMap()), 'SambaService::getAccessMap devuelve array');
 
 // 5. Pruebas de BackupService
 $backup = new BackupService();
@@ -242,6 +257,7 @@ $auth = new AuthService();
 $loginSistemas = $auth->authenticate('sistemas', 'Ead2026#');
 assertTrue($loginSistemas['success'] && $loginSistemas['user']['username'] === 'sistemas', 'AuthService autentica satisfactoriamente al usuario sistemas con contraseña válida');
 assertTrue($loginSistemas['user']['is_admin'] === true, 'AuthService otorga privilegios de administrador a sistemas');
+assertTrue(($loginSistemas['user']['can_web'] ?? false) === true, 'AuthService expone la capacidad can_web en la sesión');
 
 $loginAdmin = $auth->authenticate('administrador', 'admin123');
 assertTrue($loginAdmin['success'] && $loginAdmin['user']['username'] === 'administrador', 'AuthService autentica satisfactoriamente al usuario administrador');
