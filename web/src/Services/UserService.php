@@ -230,6 +230,7 @@ class UserService
             $validGroups[] = 'adm';
             $validGroups[] = 'grp_sistemas';
         } elseif ($canWeb) {
+            SystemService::sudo(['groupadd', '-f', 'grp_web']);
             $validGroups[] = 'grp_web';
         }
         foreach ($groups as $grp) {
@@ -506,6 +507,7 @@ class UserService
         // Acceso al panel web (grp_web) — no aplica a administradores
         $hasWeb = in_array('grp_web', $currentGroups, true);
         if ($canWeb && !$isAdmin && !$hasWeb) {
+            SystemService::sudo(['groupadd', '-f', 'grp_web']);
             SystemService::sudo(['gpasswd', '-a', $username, 'grp_web']);
         } elseif ((!$canWeb || $isAdmin) && $hasWeb) {
             SystemService::sudo(['gpasswd', '-d', $username, 'grp_web']);
