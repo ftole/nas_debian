@@ -102,6 +102,29 @@ class AuthMiddleware
             }
         }
 
+        // Autorización por rol: los usuarios web (no-admin) solo acceden a
+        // Dashboard, Archivos y Logs; el resto de módulos es exclusivo de admin.
+        if (!$isPublic) {
+            $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
+            if (!$isAdmin && !self::isWebUserAllowed($path)) {
+                if (getenv('APP_ENV') !== 'testing') {
+                    \App\Services\AuditService::log('access_denied', $path, 'FAILED', ['role' => 'web', 'method' => $method]);
+                }
+                if ($request->isJson()) {
+                    Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+                } else {
+                    if (!headers_sent()) {
+                        http_response_code(403);
+                    }
+                    echo '<h1>403 - Acceso restringido a administradores</h1>';
+                    if (getenv('APP_ENV') !== 'testing') {
+                        exit;
+                    }
+                }
+                return false;
+            }
+        }
+
         // Validación estricta de CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
         if (in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
             // Permitir formulario y API pública de login sin token CSRF previo
@@ -125,5 +148,19 @@ class AuthMiddleware
         }
 
         return true;
+    }
+
+    /**
+     * Rutas permitidas a un usuario web (no administrador): Dashboard, Archivos y Logs.
+     */
+    private static function isWebUserAllowed(string $path): bool
+    {
+        if (in_array($path, ['/', '/dashboard', '/files', '/logs'], true)) {
+            return true;
+        }
+        if (in_array($path, ['/api/metrics', '/api/logs', '/api/auth/me'], true)) {
+            return true;
+        }
+        return str_starts_with($path, '/api/files');
     }
 }
