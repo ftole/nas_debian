@@ -111,6 +111,54 @@ assertTrue(!$delAdmin['success'], 'UserService rechaza eliminar cuenta protegida
 $delMasterGrp = $user->deleteGroup('grp_sistemas');
 assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestro protegido grp_sistemas');
 
+// 3.1 Gestor real de usuarios (edición, estado, contraseña, miembros y renombrado)
+$firstUser = $users[0] ?? [];
+assertTrue(isset($firstUser['enabled'], $firstUser['shell'], $firstUser['home']),
+    'UserService::listUsers expone estado (enabled), shell y home');
+assertTrue(isset($users[0]['is_admin']) && isset($users[0]['is_samba']),
+    'UserService::listUsers mantiene campos is_admin e is_samba');
+
+$setPwdOk = $user->setPassword('usuario_test', 'claveNueva123');
+assertTrue($setPwdOk['success'], 'UserService::setPassword actualiza contraseña (modo test)');
+$setPwdShort = $user->setPassword('usuario_test', '123');
+assertTrue(!$setPwdShort['success'], 'UserService::setPassword rechaza contraseñas cortas');
+$setPwdRoot = $user->setPassword('root', 'claveNueva123');
+assertTrue(!$setPwdRoot['success'], 'UserService::setPassword rechaza cuenta protegida root');
+$setPwdAdmin = $user->setPassword('administrador', 'claveNueva123');
+assertTrue(!$setPwdAdmin['success'], 'UserService::setPassword rechaza cuenta protegida administrador');
+
+$enableOk = $user->setEnabled('usuario_test', false);
+assertTrue($enableOk['success'], 'UserService::setEnabled bloquea cuenta (modo test)');
+$enableBack = $user->setEnabled('usuario_test', true);
+assertTrue($enableBack['success'], 'UserService::setEnabled desbloquea cuenta (modo test)');
+$enableRoot = $user->setEnabled('root', false);
+assertTrue(!$enableRoot['success'], 'UserService::setEnabled rechaza bloquear cuenta protegida');
+
+$updOk = $user->updateUser('usuario_test', 'claveNueva123', ['grp_marketing'], true);
+assertTrue($updOk['success'], 'UserService::updateUser actualiza contraseña/grupos/admin (modo test)');
+$updBadUser = $user->updateUser('u', 'claveNueva123', [], false);
+assertTrue(!$updBadUser['success'], 'UserService::updateUser rechaza usuario inválido');
+$updProtected = $user->updateUser('sistemas', null, [], false);
+assertTrue(!$updProtected['success'], 'UserService::updateUser rechaza cuenta protegida sistemas');
+
+$addMember = $user->addUserToGroup('usuario_test', 'grp_marketing');
+assertTrue($addMember['success'], 'UserService::addUserToGroup añade miembro a grp_* (modo test)');
+$addBadGroup = $user->addUserToGroup('usuario_test', 'marketing');
+assertTrue(!$addBadGroup['success'], 'UserService::addUserToGroup rechaza grupos sin prefijo grp_');
+$rmMember = $user->removeUserFromGroup('usuario_test', 'grp_marketing');
+assertTrue($rmMember['success'], 'UserService::removeUserFromGroup quita miembro de grp_* (modo test)');
+$rmProtected = $user->removeUserFromGroup('root', 'grp_marketing');
+assertTrue(!$rmProtected['success'], 'UserService::removeUserFromGroup rechaza cuentas protegidas');
+
+$renameOk = $user->renameGroup('grp_marketing', 'grp_finanzas');
+assertTrue($renameOk['success'], 'UserService::renameGroup renombra grupo grp_* (modo test)');
+$renameMaster = $user->renameGroup('grp_sistemas', 'grp_x');
+assertTrue(!$renameMaster['success'], 'UserService::renameGroup protege grp_sistemas');
+$renameSame = $user->renameGroup('grp_finanzas', 'grp_finanzas');
+assertTrue(!$renameSame['success'], 'UserService::renameGroup rechaza renombrar con el mismo nombre');
+$renameInvalid = $user->renameGroup('grp_finanzas', 'finanzas');
+assertTrue(!$renameInvalid['success'], 'UserService::renameGroup exige prefijo grp_* en el nuevo nombre');
+
 // 4. Pruebas de SambaService
 $samba = new SambaService('/nonexistent/smb.conf');
 $shares = $samba->listShares();
