@@ -26,6 +26,9 @@ class UserService
                     'uid' => 1000,
                     'is_admin' => true,
                     'is_samba' => true,
+                    'enabled' => true,
+                    'shell' => '/bin/bash',
+                    'home' => '/home/administrador',
                     'groups' => ['sudo', 'adm', 'grp_sistemas'],
                 ],
                 [
@@ -33,6 +36,9 @@ class UserService
                     'uid' => 1001,
                     'is_admin' => true,
                     'is_samba' => true,
+                    'enabled' => true,
+                    'shell' => '/bin/bash',
+                    'home' => '/home/sistemas',
                     'groups' => ['grp_sistemas'],
                 ],
                 [
@@ -40,6 +46,9 @@ class UserService
                     'uid' => 1002,
                     'is_admin' => false,
                     'is_samba' => true,
+                    'enabled' => true,
+                    'shell' => '/bin/bash',
+                    'home' => '/home/operador_c1',
                     'groups' => ['grp_campana1'],
                 ],
             ];
@@ -55,6 +64,9 @@ class UserService
                 }
             }
         }
+
+        // Estado de contraseñas (P = activo, L = bloqueado) en una sola llamada
+        $passStates = $this->getPasswordStates();
 
         // Leer /etc/passwd para cuentas humanas (UID >= 1000 y < 65534)
         if (file_exists('/etc/passwd')) {
@@ -79,6 +91,9 @@ class UserService
                             'uid' => $uid,
                             'is_admin' => $isAdmin,
                             'is_samba' => isset($sambaUsers[$uname]),
+                            'enabled' => ($passStates[$uname] ?? '') === 'P',
+                            'shell' => $cols[6] ?? '/bin/bash',
+                            'home' => $cols[5] ?? '/home/' . $uname,
                             'groups' => $userGroups,
                         ];
                     }
@@ -87,6 +102,27 @@ class UserService
         }
 
         return $users;
+    }
+
+    /**
+     * Estado de contraseñas de todas las cuentas (P=activa, L=bloqueada, NP=sin clave).
+     *
+     * @return array<string,string>
+     */
+    private function getPasswordStates(): array
+    {
+        $states = [];
+        $res = SystemService::sudo(['passwd', '-S', '-a']);
+        if ($res['code'] !== 0) {
+            return $states;
+        }
+        foreach (preg_split('/\R/', $res['stdout'] ?? '') as $line) {
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) >= 2 && preg_match('/^[a-z_][a-z0-9_-]*$/i', $parts[0])) {
+                $states[strtolower($parts[0])] = $parts[1];
+            }
+        }
+        return $states;
     }
 
     /**
@@ -302,5 +338,255 @@ class UserService
         }
 
         return ['success' => true, 'message' => "Grupo $groupName eliminado con éxito."];
+    }
+
+    /**
+     * Cambia la contraseña Linux de un usuario y la resincroniza en Samba.
+     */
+    public function setPassword(string $username, string $password): array
+    {
+        $username = strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
+            return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+        }
+        if (strlen($password) < 6) {
+            return ['success' => false, 'error' => 'La contraseña debe tener al menos 6 caracteres.'];
+        }
+
+        $protected = $this->protectedError($username);
+        if ($protected !== null) {
+            return $protected;
+        }
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => "Contraseña de $username actualizada (modo dev)."];
+        }
+
+        $ch = SystemService::sudo(['chpasswd'], "$username:$password\n");
+        if ($ch['code'] !== 0) {
+            return ['success' => false, 'error' => 'No se pudo asignar la contraseña Linux: ' . ($ch['stderr'] ?: $ch['stdout'])];
+        }
+        $smb = SystemService::sudo(['smbpasswd', '-a', '-s', $username], "$password\n$password\n");
+        if ($smb['code'] !== 0) {
+            error_log("Aviso: no se pudo sincronizar $username en smbpasswd: " . $smb['stderr']);
+        }
+
+        return ['success' => true, 'message' => "Contraseña de $username actualizada y sincronizada en Samba."];
+    }
+
+    /**
+     * Bloquea (L) o desbloquea (U) una cuenta Linux y sincroniza el estado en Samba.
+     */
+    public function setEnabled(string $username, bool $enabled): array
+    {
+        $username = strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
+            return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+        }
+
+        $protected = $this->protectedError($username);
+        if ($protected !== null) {
+            return $protected;
+        }
+        $self = $this->selfBlockError($username);
+        if ($self !== null) {
+            return $self;
+        }
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => ($enabled ? 'Activada' : 'Bloqueada') . " la cuenta $username (modo dev)."];
+        }
+
+        $res = SystemService::sudo(['usermod', $enabled ? '-U' : '-L', $username]);
+        if ($res['code'] !== 0) {
+            return ['success' => false, 'error' => 'Error al ' . ($enabled ? 'activar' : 'bloquear') . " la cuenta: " . ($res['stderr'] ?: $res['stdout'])];
+        }
+        SystemService::sudo(['smbpasswd', $enabled ? '-e' : '-d', '-s', $username]);
+
+        return ['success' => true, 'message' => "Cuenta $username " . ($enabled ? 'activada' : 'bloqueada') . ' correctamente (Linux y Samba).'];
+    }
+
+    /**
+     * Edita un usuario: contraseña opcional, grupos departamentales y rol administrador.
+     */
+    public function updateUser(string $username, ?string $password, array $groups, bool $isAdmin): array
+    {
+        $username = strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
+            return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+        }
+
+        $protected = $this->protectedError($username);
+        if ($protected !== null) {
+            return $protected;
+        }
+
+        // No permitir que un administrador se quite sus propios privilegios.
+        if (!$isAdmin && $this->currentSessionUser() === $username) {
+            return ['success' => false, 'error' => 'No puedes quitar los privilegios de administrador a tu propia cuenta.'];
+        }
+
+        if ($password !== null && $password !== '') {
+            $pwd = $this->setPassword($username, $password);
+            if (!$pwd['success']) {
+                return $pwd;
+            }
+        }
+
+        $targetGroups = [];
+        foreach ($groups as $g) {
+            $g = strtolower(trim((string) $g));
+            if (preg_match('/^grp_[a-z0-9_-]+$/', $g)) {
+                $targetGroups[] = $g;
+            }
+        }
+        $targetGroups = array_values(array_unique($targetGroups));
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => "Usuario $username actualizado (modo dev)."];
+        }
+
+        $currentGroups = [];
+        $grpRes = SystemService::runCommand(['id', '-Gn', $username]);
+        if ($grpRes['code'] === 0) {
+            $currentGroups = preg_split('/\s+/', trim($grpRes['stdout']));
+        }
+
+        foreach ($targetGroups as $g) {
+            if (!in_array($g, $currentGroups, true)) {
+                SystemService::sudo(['gpasswd', '-a', $username, $g]);
+            }
+        }
+        foreach ($currentGroups as $g) {
+            if (str_starts_with($g, 'grp_') && !in_array($g, $targetGroups, true)) {
+                SystemService::sudo(['gpasswd', '-d', $username, $g]);
+            }
+        }
+
+        if ($isAdmin && !in_array('sudo', $currentGroups, true)) {
+            SystemService::sudo(['usermod', '-aG', 'sudo,adm,grp_sistemas', $username]);
+        } elseif (!$isAdmin && in_array('sudo', $currentGroups, true)) {
+            SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
+            SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
+            SystemService::sudo(['gpasswd', '-d', $username, 'grp_sistemas']);
+        }
+
+        return ['success' => true, 'message' => "Usuario $username actualizado correctamente."];
+    }
+
+    /**
+     * Añade un usuario a un grupo departamental grp_*.
+     */
+    public function addUserToGroup(string $username, string $group): array
+    {
+        return $this->modifyGroupMembership($username, $group, true);
+    }
+
+    /**
+     * Quita un usuario de un grupo departamental grp_*.
+     */
+    public function removeUserFromGroup(string $username, string $group): array
+    {
+        return $this->modifyGroupMembership($username, $group, false);
+    }
+
+    /**
+     * Renombra un grupo departamental grp_* (protege grp_sistemas).
+     */
+    public function renameGroup(string $old, string $new): array
+    {
+        $old = strtolower(trim($old));
+        $new = strtolower(trim($new));
+
+        if ($old === 'grp_sistemas') {
+            return ['success' => false, 'error' => 'El grupo maestro grp_sistemas no puede ser renombrado.'];
+        }
+        if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $old) || !preg_match('/^grp_[a-z0-9_-]{2,30}$/', $new)) {
+            return ['success' => false, 'error' => 'Solo se pueden renombrar grupos grp_* (2-30 caracteres).'];
+        }
+        if (strtolower($old) === strtolower($new)) {
+            return ['success' => false, 'error' => 'El nuevo nombre es igual al actual.'];
+        }
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => "Grupo $old renombrado a $new (modo dev)."];
+        }
+
+        $res = SystemService::sudo(['groupmod', '-n', $new, $old]);
+        if ($res['code'] !== 0) {
+            return ['success' => false, 'error' => 'Error al renombrar grupo: ' . ($res['stderr'] ?: $res['stdout'])];
+        }
+
+        return ['success' => true, 'message' => "Grupo $old renombrado a $new correctamente."];
+    }
+
+    private function modifyGroupMembership(string $username, string $group, bool $add): array
+    {
+        $username = strtolower(trim($username));
+        $group = strtolower(trim($group));
+
+        if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
+            return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+        }
+        if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $group)) {
+            return ['success' => false, 'error' => 'Grupo inválido. Solo se admiten grupos departamentales grp_*.'];
+        }
+
+        $protected = $this->protectedError($username);
+        if ($protected !== null) {
+            return $protected;
+        }
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => ($add ? 'Añadido' : 'Quitado') . " $username de $group (modo dev)."];
+        }
+
+        $res = SystemService::sudo(['gpasswd', $add ? '-a' : '-d', $username, $group]);
+        if ($res['code'] !== 0) {
+            return ['success' => false, 'error' => 'Error al modificar la membresía: ' . ($res['stderr'] ?: $res['stdout'])];
+        }
+
+        return ['success' => true, 'message' => ($add ? 'Miembro añadido' : 'Miembro quitado') . " en $group."];
+    }
+
+    private function isTesting(): bool
+    {
+        return $this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing';
+    }
+
+    private function currentSessionUser(): ?string
+    {
+        if (session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) {
+            $u = $_SESSION['nas_user']['username'] ?? null;
+            return $u !== null ? strtolower((string) $u) : null;
+        }
+        return null;
+    }
+
+    private function protectedError(string $username): ?array
+    {
+        $protected = [
+            'root', 'administrador', 'sistemas', 'www-data', 'nobody', 'daemon',
+            'bin', 'sys', 'sync', 'games', 'man', 'lp', 'mail', 'news', 'uucp',
+            'proxy', 'backup', 'list', 'irc', 'gnats', 'systemd-network', 'systemd-resolve',
+        ];
+        if (in_array($username, $protected, true)) {
+            return ['success' => false, 'error' => "La cuenta protegida '$username' no admite esta operación."];
+        }
+        if (DIRECTORY_SEPARATOR !== '\\' && function_exists('posix_getpwnam')) {
+            $pw = @posix_getpwnam($username);
+            if (is_array($pw) && isset($pw['uid']) && (int) $pw['uid'] > 0 && (int) $pw['uid'] < 1000) {
+                return ['success' => false, 'error' => "No es posible operar sobre cuentas del sistema con UID menor a 1000 (UID: {$pw['uid']})."];
+            }
+        }
+        return null;
+    }
+
+    private function selfBlockError(string $username): ?array
+    {
+        if ($this->currentSessionUser() === $username) {
+            return ['success' => false, 'error' => 'No puedes realizar esta operación sobre tu propia cuenta de sesión.'];
+        }
+        return null;
     }
 }
