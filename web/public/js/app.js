@@ -724,6 +724,12 @@ async function runStorageTrim() {
 // ==============================================================================
 // 8. Módulo: Usuarios & Grupos
 // ==============================================================================
+const PROTECTED_USERS = ['root', 'administrador', 'sistemas'];
+let _usersData = [];
+let _groupsData = [];
+let _usersFilter = 'all';
+let _activeGroup = '';
+
 async function loadUsersAndGroups() {
   const usersTbody = document.getElementById('users-table-body');
   const groupsTbody = document.getElementById('groups-table-body');
@@ -734,45 +740,49 @@ async function loadUsersAndGroups() {
       apiFetch('/api/groups'),
     ]);
 
-    const users = uRes.data || [];
-    const groups = gRes.data || [];
+    _usersData = uRes.data || [];
+    _groupsData = gRes.data || [];
 
     if (usersTbody) {
-      usersTbody.innerHTML = users.map(u => `
-        <tr>
-          <td><strong>${escapeHtml(u.username)}</strong></td>
+      usersTbody.innerHTML = _usersData.map(u => {
+        const isProtected = PROTECTED_USERS.includes(u.username);
+        return `
+        <tr data-username="${escapeHtml(u.username)}" data-admin="${u.is_admin ? '1' : '0'}" data-enabled="${u.enabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
+          <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.home || '')}</div></td>
           <td>${u.uid}</td>
-          <td>${u.is_admin ? '<span class="badge badge-warning">Admin</span>' : '<span class="badge badge-gray">Estándar</span>'}</td>
-          <td>${u.is_samba ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-danger">Inactivo</span>'}</td>
-          <td style="text-align:right;">
-            ${['root', 'administrador'].includes(u.username) ? '' : `
-              <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="deleteUser('${escapeHtml(u.username)}')">
-                <svg class="icon icon-sm"><use href="#icon-trash"></use></svg>
-              </button>
+          <td>${u.is_admin ? '<span class="badge badge-warn">Admin</span>' : '<span class="badge badge-gray">Estándar</span>'}</td>
+          <td>${u.enabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Bloqueado</span>'}</td>
+          <td>${u.is_samba ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-err">Inactivo</span>'}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            ${isProtected ? '<span class="badge badge-gray">Protegida</span>' : `
+              <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" title="${u.enabled ? 'Bloquear' : 'Desbloquear'}" onclick="toggleUser('${escapeHtml(u.username)}', ${u.enabled ? 'false' : 'true'})"><svg class="icon icon-sm"><use href="#icon-${u.enabled ? 'lock' : 'unlock'}"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
             `}
           </td>
-        </tr>
-      `).join('');
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
+      applyUsersFilters();
     }
 
     if (groupsTbody) {
-      groupsTbody.innerHTML = groups.map(g => `
+      groupsTbody.innerHTML = _groupsData.map(g => `
         <tr>
           <td><strong>${escapeHtml(g.name)}</strong></td>
           <td>${g.gid}</td>
           <td>${(g.members || []).map(m => `<span class="tag-pill">${escapeHtml(m)}</span>`).join(' ') || '<em>Sin miembros</em>'}</td>
-          <td style="text-align:right;">
+          <td style="text-align:right; white-space:nowrap;">
             ${g.name === 'grp_sistemas' ? '<span class="badge badge-gray">Maestro</span>' : `
-              <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="deleteGroup('${escapeHtml(g.name)}')">
-                <svg class="icon icon-sm"><use href="#icon-trash"></use></svg>
-              </button>
+              <button class="btn btn-secondary btn-sm" title="Miembros" onclick="openGroupMembers('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-users"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" title="Renombrar" onclick="openRenameGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
             `}
           </td>
         </tr>
-      `).join('');
+      `).join('') || '<tr><td colspan="4" style="text-align:center;">Sin grupos creados.</td></tr>';
     }
 
-    populateUserGroupOptions(groups);
+    populateUserGroupOptions(_groupsData);
   } catch (e) {
     console.error('Error cargando usuarios y grupos:', e);
   }
@@ -782,12 +792,177 @@ function populateUserGroupOptions(groups) {
   const container = document.getElementById('user-groups-list');
   if (!container) return;
 
-  container.innerHTML = groups.map(g => `
+  container.innerHTML = groups.filter(g => g.name !== 'grp_sistemas').map(g => `
     <label style="display:flex; align-items:center; gap:8px;">
       <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}">
       <span>${escapeHtml(g.name)}</span>
     </label>
   `).join('');
+}
+
+function setUsersFilter(filter) {
+  _usersFilter = filter;
+  document.querySelectorAll('#users-filter-chips .chip-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === filter);
+  });
+  applyUsersFilters();
+}
+
+function applyUsersFilters() {
+  const q = (document.getElementById('users-search')?.value || '').toLowerCase().trim();
+  document.querySelectorAll('#users-table-body tr[data-username]').forEach(tr => {
+    let ok = true;
+    if (_usersFilter === 'admin') ok = tr.dataset.admin === '1';
+    else if (_usersFilter === 'blocked') ok = tr.dataset.enabled !== '1';
+    else if (_usersFilter === 'samba') ok = tr.dataset.samba === '1';
+    if (ok && q) ok = tr.dataset.username.includes(q);
+    tr.style.display = ok ? '' : 'none';
+  });
+}
+
+function openEditUser(username) {
+  const u = _usersData.find(x => x.username === username);
+  if (!u) return;
+  document.getElementById('edit-user-uname').value = username;
+  document.getElementById('edit-user-pass').value = '';
+  document.getElementById('edit-user-is-admin').checked = !!u.is_admin;
+
+  const checked = (u.groups || []).filter(g => g.startsWith('grp_') && g !== 'grp_sistemas');
+  const container = document.getElementById('edit-user-groups-list');
+  container.innerHTML = _groupsData.filter(g => g.name !== 'grp_sistemas').map(g => {
+    const sel = checked.includes(g.name) ? 'checked' : '';
+    return `<label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel}>
+      <span>${escapeHtml(g.name)}</span>
+    </label>`;
+  }).join('');
+  openModal('modal-edit-user');
+}
+
+async function submitUpdateUser(event) {
+  event.preventDefault();
+  const username = document.getElementById('edit-user-uname').value;
+  const password = document.getElementById('edit-user-pass').value;
+  const isAdmin = document.getElementById('edit-user-is-admin').checked;
+  const groups = Array.from(document.querySelectorAll('input[name="edit_user_group"]:checked')).map(cb => cb.value);
+
+  const btn = document.getElementById('btn-submit-edit-user') || event.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
+  try {
+    await apiFetch('/api/users/update', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, groups, is_admin: isAdmin }),
+    });
+    showToast(`Usuario [${username}] actualizado.`, 'success');
+    closeModal('modal-edit-user');
+    loadUsersAndGroups();
+  } catch (e) {
+    // Ya mostrado
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
+}
+
+async function toggleUser(username, enabled) {
+  const verb = enabled ? 'Desbloquear' : 'Bloquear';
+  if (!confirm(`¿${verb} la cuenta [${username}]?`)) return;
+
+  try {
+    await apiFetch('/api/users/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ username, enabled }),
+    });
+    showToast(`Cuenta [${username}] ${enabled ? 'desbloqueada' : 'bloqueada'}.`, 'success');
+    loadUsersAndGroups();
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
+function openGroupMembers(group) {
+  _activeGroup = group;
+  document.getElementById('modal-group-members-title').textContent = 'Miembros del grupo ' + group;
+
+  const g = _groupsData.find(x => x.name === group);
+  const members = g ? (g.members || []) : [];
+  const list = document.getElementById('group-members-list');
+  list.innerHTML = members.length
+    ? members.map(m => `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px; background:var(--bg-surface); border-radius:6px;">
+          <span>${escapeHtml(m)}</span>
+          <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="removeGroupMember('${escapeHtml(m)}')">Quitar</button>
+        </div>`).join('')
+    : '<em style="color:var(--text-muted);">Sin miembros</em>';
+
+  const sel = document.getElementById('group-member-user');
+  const available = _usersData.filter(u => !members.includes(u.username) && !PROTECTED_USERS.includes(u.username));
+  sel.innerHTML = available.length
+    ? available.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.username)}</option>`).join('')
+    : '<option value="">(sin usuarios disponibles)</option>';
+
+  openModal('modal-group-members');
+}
+
+async function addGroupMember() {
+  const sel = document.getElementById('group-member-user');
+  const username = sel.value;
+  if (!username) return;
+  try {
+    await apiFetch('/api/users/groups', {
+      method: 'POST',
+      body: JSON.stringify({ username, group: _activeGroup, action: 'add' }),
+    });
+    showToast(`${username} añadido a ${_activeGroup}.`, 'success');
+    loadUsersAndGroups();
+    openGroupMembers(_activeGroup);
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
+async function removeGroupMember(username) {
+  if (!confirm(`¿Quitar a [${username}] del grupo ${_activeGroup}?`)) return;
+  try {
+    await apiFetch('/api/users/groups', {
+      method: 'POST',
+      body: JSON.stringify({ username, group: _activeGroup, action: 'remove' }),
+    });
+    showToast(`${username} quitado de ${_activeGroup}.`, 'success');
+    loadUsersAndGroups();
+    openGroupMembers(_activeGroup);
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
+function openRenameGroup(name) {
+  document.getElementById('rename-group-old').value = name;
+  document.getElementById('rename-group-new').value = '';
+  openModal('modal-rename-group');
+}
+
+async function submitRenameGroup(event) {
+  event.preventDefault();
+  const oldName = document.getElementById('rename-group-old').value;
+  const newName = document.getElementById('rename-group-new').value;
+
+  const btn = document.getElementById('btn-submit-rename-group') || event.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
+  try {
+    await apiFetch('/api/groups/rename', {
+      method: 'POST',
+      body: JSON.stringify({ old: oldName, new: newName }),
+    });
+    showToast(`Grupo renombrado a ${newName}.`, 'success');
+    closeModal('modal-rename-group');
+    loadUsersAndGroups();
+  } catch (e) {
+    // Ya mostrado
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
 }
 
 async function submitNewUser(event) {
