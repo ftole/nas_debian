@@ -171,6 +171,10 @@ class SambaService
                 $cleanGroups[] = '@' . $gClean;
             }
         }
+        // Los administradores (grp_sistemas) conservan acceso a todos los recursos
+        if (!in_array('@grp_sistemas', $cleanGroups, true)) {
+            $cleanGroups[] = '@grp_sistemas';
+        }
 
         switch ($scheme) {
             case 1: // Lectura y Escritura por Grupo
@@ -189,7 +193,7 @@ class SambaService
                 $wEntry = '@' . $wgClean;
                 $allUsers = array_unique(array_merge($cleanGroups, [$wEntry]));
                 $shareProps['valid users'] = implode(' ', $allUsers);
-                $shareProps['write list'] = $wEntry;
+                $shareProps['write list'] = trim($wEntry . ' @grp_sistemas');
 
                 // Configurar ACLs POSIX para que los nuevos archivos hereden lectura al resto
                 if (!empty($wgClean)) {
@@ -401,6 +405,10 @@ class SambaService
         $scheme = (int) ($data['scheme'] ?? 0);
         $comment = trim((string) ($data['comment'] ?? ''));
         $groups = $this->cleanGroupTokens((array) ($data['groups'] ?? []));
+        // Los administradores (grp_sistemas) conservan acceso a todos los recursos
+        if (!in_array('@grp_sistemas', $groups, true)) {
+            $groups[] = '@grp_sistemas';
+        }
         $writeGroup = ltrim(trim((string) ($data['write_group'] ?? '')), '@');
         $writeEntry = $writeGroup !== '' ? '@' . $writeGroup : '';
         $isHidden = !empty($data['hidden']);
@@ -439,7 +447,7 @@ class SambaService
                 $groupsWithWriter[] = $writeEntry;
             }
             $props['valid users'] = $this->joinTokens(array_merge($groupsWithWriter, $validUsers));
-            $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers));
+            $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers, ['@grp_sistemas']));
         } else {
             $props['read only'] = 'no';
             $props['guest ok'] = 'no';
@@ -557,6 +565,15 @@ class SambaService
             $writeUsers = array_values(array_filter($write, fn($t) => !str_starts_with($t, '@')));
             $readGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($valid, fn($t) => str_starts_with($t, '@') && !in_array($t, $write, true))));
             $readUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@') && !in_array($t, $write, true)));
+
+            // Si el recurso es de solo lectura (esquema 3), no debe reportar escritura
+            $readOnly = strtolower((string) ($props['read only'] ?? 'yes')) === 'yes';
+            if ($readOnly) {
+                $readGroups = array_values(array_unique(array_merge($readGroups, $writeGroups)));
+                $readUsers = array_values(array_unique(array_merge($readUsers, $writeUsers)));
+                $writeGroups = [];
+                $writeUsers = [];
+            }
 
             $map[$name] = [
                 'read_groups' => $readGroups,
