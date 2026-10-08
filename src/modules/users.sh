@@ -75,7 +75,7 @@ crear_usuario_guiado() {
     done
 
     # Política de aislamiento: Admin (Web+SSH) vs Empleado (Solo red)
-    if echo "$GRUPO_FINAL" | grep -qw "grp_sistemas"; then
+    if echo "$GRUPO_FINAL" | grep -qw "grp_samba"; then
         SHELL_TYPE="/bin/bash"
         PERM_TXT="Administrador del Servidor (Acceso Panel Web + Consola SSH + Red)"
     else
@@ -228,7 +228,7 @@ for u, data in users.items():
     is_disabled = "D" in data["flags"]
     status = "○ SUSPENDIDO" if is_disabled else "● ACTIVO"
     
-    if "grp_sistemas" in all_grps or "sudo" in all_grps:
+    if "grp_samba" in all_grps or "sudo" in all_grps:
         role = "Admin (Web+SSH)"
     else:
         role = "Solo Red SMB"
@@ -303,8 +303,8 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                             done
                             usermod -aG "$NUEVOS_GRPS_CSV" "$TARGET_USER"
                             
-                            # Ajustar shell y home según pertenezca a grp_sistemas
-                            if echo "$NUEVOS_GRPS_CSV" | grep -qw "grp_sistemas"; then
+                            # Ajustar shell y home según pertenezca a grp_samba
+                            if echo "$NUEVOS_GRPS_CSV" | grep -qw "grp_samba"; then
                                 usermod -s /bin/bash -aG sudo,adm "$TARGET_USER"
                                 if [ ! -d "/home/$TARGET_USER" ]; then
                                     mkdir -p "/home/$TARGET_USER"
@@ -347,7 +347,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     RET=$?
                     if [ $RET -eq 0 ] && [ -n "$NUEVA_CLAVE" ]; then
                         printf '%s\n%s\n' "$NUEVA_CLAVE" "$NUEVA_CLAVE" | smbpasswd -s "$USER_PW_SEL"
-                        if id -Gn "$USER_PW_SEL" 2>/dev/null | grep -qw "grp_sistemas"; then
+                        if id -Gn "$USER_PW_SEL" 2>/dev/null | grep -qw "grp_samba"; then
                             echo "${USER_PW_SEL}:${NUEVA_CLAVE}" | chpasswd 2>/dev/null || true
                         fi
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
