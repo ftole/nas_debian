@@ -75,7 +75,9 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **Desglose de Dominios Active Directory** | Autenticación de Red | Parser en el asistente y en la API que detecta sintaxis `DOMINIO\usuario` y `DOMINIO/usuario`. | Permite conectar a carpetas compartidas corporativas protegidas por Directorio Activo sin exponer contraseñas en memoria de procesos (`ps`) mediante archivos de credenciales `0600 root:root`. |
 | **Active Directory Nativo (`realmd`, `sssd`, `adcli`)** | Integración Corporativa AD | Pila completa de unión a dominio con Kerberos y demonio SSSD. | Autenticación corporativa de usuarios de dominio Windows directamente en el NAS y Samba, con control granular desde la web. |
 | **OpenSSH / sshpass (`StrictHostKeyChecking=accept-new`)** | Conector Linux | Replicación remota cifrada por SSH con almacenamiento de firmas en `/root/.ssh/known_hosts_backup`. | Previene ataques de intermediario (*Man-in-the-Middle*) al registrar hosts nuevos automáticamente sin intervención manual y sin deshabilitar la comprobación de claves. |
-| **Tuning de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel | Configuración de límites del VFS, monitoreo inotify y reciclaje de memoria sucia. | `fs.inotify` masivo (524,288 watches); `tcp_keepalive` (120s/15s/4) limpia sesiones SMB inactivas en 3 minutos en lugar de 2 horas; `vm.dirty_bytes=256MB` fuerza ráfagas breves de escritura a disco, previniendo congelamientos de I/O por saturación de RAM. |
+| **Tuning y Hardening de Kernel sysctl (`99-nas-tuning.conf`)** | Parámetros del Kernel | Configuración de límites del VFS, monitoreo inotify, reciclaje de memoria sucia y mitigaciones de ciberseguridad. | `fs.inotify` masivo (524,288 watches); `tcp_keepalive` (120s/15s/4) limpia sesiones SMB inactivas en 3 minutos; `vm.dirty_bytes=256MB` fuerza ráfagas breves de escritura a disco; `rp_filter=1` (anti-spoofing RFC 3704); `tcp_syncookies=1` (mitigación SYN flood); `kptr_restrict=2` y `dmesg_restrict=1` (ocultamiento de memoria de kernel y buffer log); `yama.ptrace_scope=2` (bloqueo ptrace no privilegiado). |
+| **Auditoría del Kernel en Tiempo Real (`auditd`)** | Ciberseguridad y Monitoreo | Detección y registro en tiempo real de eventos críticos del kernel en `/etc/audit/rules.d/nas.rules`. | Vigilancia inmediata de alteraciones en `/etc/sudoers*`, cambios en `/etc/samba/smb.conf`, accesos a `/etc/backup-credentials/` e invocaciones a `/usr/local/sbin/nas-terminal`. |
+| **Integridad de Archivos Offline (AIDE - FIM)** | Integridad Criptográfica | Monitoreo de integridad de archivos (*File Integrity Monitoring*) con base criptográfica (`aide.db`). | Línea base SHA-256/SHA-512 de binarios y configuraciones esenciales para auditar y detectar rootkits o modificaciones no autorizadas offline. |
 | **Readahead Tuning udev (`60-nas-readahead.rules`)** | Subsistema de Bloques | Reglas udev persistentes para precarga de disco (`1024 KB` en SSD / `4096 KB` en HDD). | Aumenta el rendimiento sostenido en lecturas secuenciales pesadas a través de la red y agiliza las comparaciones diferenciales de `rsync`. |
 | **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
@@ -191,15 +193,19 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
    * *Arquitectura:* Aplicación MVC en PHP 8 (`/var/www/nas-web`) servida por Nginx-light y pool PHP-FPM en modo `pm = ondemand`. Base de datos SQLite integrada en `/var/lib/nas/nas.sqlite` con WAL mode (0 MB en reposo).
    * *Estilos:* 100% Offline con diseño moderno y sereno Slate UI, tipografía nativa del sistema (`system-ui`), espaciado no saturado y 36 iconos SVG incrustados; cero llamadas a CDNs y desacoplamiento total de Cockpit.
    * *Seguridad:* Invocación estricta de utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`) mediante `proc_open` con listas de argumentos y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
-3. **Optimización del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
+3. **Optimización y Hardening del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
    * Ampliación de descriptores inotify (`max_user_watches = 524288`), keepalive TCP SMB (`tcp_keepalive_time = 120`), retención de caché VFS (`vfs_cache_pressure = 30`) y control estricto de memoria sucia (`vm.dirty_bytes = 268435456`, `dirty_background_bytes = 67108864`).
-4. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
+   * Ciberseguridad de red y memoria: anti-spoofing RFC 3704 (`rp_filter = 1`), mitigación SYN flood (`tcp_syncookies = 1`), ocultamiento de memoria del kernel (`kptr_restrict = 2`), restricción de buffer de logs (`dmesg_restrict = 1`) y bloqueo de ptrace no privilegiado (`yama.ptrace_scope = 2`).
+4. **Auditoría del Kernel en Tiempo Real (auditd) e Integridad Offline (AIDE):**
+   * Reglas de auditoría en `/etc/audit/rules.d/nas.rules` vigilando `/etc/sudoers*`, `/etc/samba/smb.conf`, `/etc/backup-credentials/` y `/usr/local/sbin/nas-terminal`.
+   * Inicialización no bloqueante de base de datos criptográfica AIDE (`/var/lib/aide/aide.db`) para detección de modificaciones no autorizadas y rootkits.
+5. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
    * Reglas udev persistentes que asignan `1024 KB` en unidades SSD y `4096 KB` en discos mecánicos HDD.
-5. **Protección udev del Disco del SO (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):**
+6. **Protección udev del Disco del SO (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):**
    * Inyección de `UDISKS_IGNORE="1"` para proteger la unidad del sistema operativo y aislarla de formateos involuntarios en UDisks2.
-6. **Prevención de Corrupción Silenciosa (*Bit Rot*):**
+7. **Prevención de Corrupción Silenciosa (*Bit Rot*):**
    * Tarea cron mensual en `/etc/cron.d/nas-btrfs-scrub` (`0 2 1 * *`) para auditar la integridad criptográfica de los datos en Btrfs.
-7. **Mantenimiento SSD y Rotación de Logs:**
+8. **Mantenimiento SSD y Rotación de Logs:**
    * Habilitación de `fstrim.timer` para optimización de bloques flash y rotación programada con compresión mediante `logrotate` en `/etc/logrotate.d/nas-backups` y `nas-deploy`.
 
 > [!NOTE]
