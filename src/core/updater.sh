@@ -112,6 +112,90 @@ seleccionar_tag_firmada() {
     return 1
 }
 
+# Ejecuta tareas de post-actualización no destructivas:
+# 1. Instala paquetes base faltantes (tmux, lvm2).
+# 2. Re-despliega o actualiza /usr/local/sbin/nas-terminal (0755 root:root).
+# 3. Sincroniza /etc/sudoers.d/nas-web si la plantilla cambió, validando con visudo.
+_hook_post_actualizacion() {
+    local paquetes_faltantes=()
+    if ! command -v tmux >/dev/null 2>&1; then
+        paquetes_faltantes+=("tmux")
+    fi
+    if ! command -v lvs >/dev/null 2>&1 && ! dpkg -s lvm2 >/dev/null 2>&1; then
+        paquetes_faltantes+=("lvm2")
+    fi
+
+    if [ ${#paquetes_faltantes[@]} -gt 0 ]; then
+        if [ "${EUID:-$(id -u)}" -eq 0 ] && command -v apt-get >/dev/null 2>&1; then
+            echo -e " [•] Instalando paquetes base requeridos (${paquetes_faltantes[*]})..."
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${paquetes_faltantes[@]}" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    local term_src=""
+    local candidate
+    for candidate in "$PROJECT_ROOT/src/core/nas-terminal" "$PROJECT_ROOT/src/bin/nas-terminal" "$PROJECT_ROOT/src/nas-terminal"; do
+        if [ -f "$candidate" ]; then
+            term_src="$candidate"
+            break
+        fi
+    done
+
+    local term_dest="/usr/local/sbin/nas-terminal"
+    if [ -n "$term_src" ]; then
+        if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
+            cp -f "$term_src" "$term_dest" 2>/dev/null || true
+            chmod 0755 "$term_dest" 2>/dev/null || true
+            chown root:root "$term_dest" 2>/dev/null || true
+        fi
+    elif [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_TERM_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local tmp_term
+        tmp_term="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal.$$")"
+        if awk '
+            /^cat << '\''NAS_TERM_EOF'\'' > \/usr\/local\/sbin\/nas-terminal$/ { capture=1; next }
+            capture && /^NAS_TERM_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_term" 2>/dev/null && [ -s "$tmp_term" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
+                cp -f "$tmp_term" "$term_dest" 2>/dev/null || true
+                chmod 0755 "$term_dest" 2>/dev/null || true
+                chown root:root "$term_dest" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$tmp_term" 2>/dev/null || true
+    fi
+
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d /etc/sudoers.d ]; then
+        local php_ver tmp_sudoers
+        php_ver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+        tmp_sudoers="$(mktemp 2>/dev/null || echo "/tmp/nas_sudoers.$$")"
+        if awk '
+            /^cat << SUDOERS_EOF > \/etc\/sudoers\.d\/nas-web$/ { capture=1; next }
+            capture && /^SUDOERS_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_sudoers" 2>/dev/null && [ -s "$tmp_sudoers" ]; then
+            sed -i -e "s/\${PHP_VER}/$php_ver/g" -e 's/\\\\/\\/g' "$tmp_sudoers" 2>/dev/null || true
+            local valido=1
+            if command -v visudo >/dev/null 2>&1; then
+                if ! visudo -c -f "$tmp_sudoers" >/dev/null 2>&1; then
+                    valido=0
+                fi
+            fi
+            if [ "$valido" -eq 1 ]; then
+                if [ ! -f /etc/sudoers.d/nas-web ] || ! cmp -s "$tmp_sudoers" /etc/sudoers.d/nas-web 2>/dev/null; then
+                    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/sudoers.d ]; then
+                        cp -f "$tmp_sudoers" /etc/sudoers.d/nas-web 2>/dev/null || true
+                        chmod 0440 /etc/sudoers.d/nas-web 2>/dev/null || true
+                        chown root:root /etc/sudoers.d/nas-web 2>/dev/null || true
+                    fi
+                fi
+            fi
+        fi
+        rm -f "$tmp_sudoers" 2>/dev/null || true
+    fi
+}
+
 actualizar_desde_git() {
     local FORCE_FLAG RAMA_ACTUAL REMOTO_ACTUAL REMOTO_NORM
     local CAMBIOS_LOCALES CURRENT_REV REMOTE_REV changelog BACKUP_DIR fallos
@@ -290,6 +374,10 @@ actualizar_desde_git() {
         _aviso "La actualización falló la validación y se restauró la versión anterior.\n\nRollback manual: git reset --hard $CURRENT_REV\nCopia de seguridad: $BACKUP_DIR"
         return 1
     fi
+
+    # 8. Rutina de post-actualización no destructiva.
+    echo -e " [•] Ejecutando sincronizaciones posteriores a la actualización..."
+    _hook_post_actualizacion
 
     if [ -t 0 ] && command -v whiptail &>/dev/null; then
         if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
