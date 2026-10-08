@@ -97,7 +97,7 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
     nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 rsyslog \
     realmd sssd sssd-tools adcli libpam-sss libnss-sss krb5-user packagekit \
-    cifs-utils rsync sshpass cron parted lvm2 ufw btrfs-progs >/dev/null 2>&1; then
+    cifs-utils rsync sshpass cron parted lvm2 tmux ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
     exit 1
@@ -577,6 +577,76 @@ NGINX_EOF
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 
+# 4b. Helper de terminal web: ejecuta tmux como el usuario autenticado (patrón Cockpit)
+cat << 'NAS_TERM_EOF' > /usr/local/sbin/nas-terminal
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -lt 2 ]; then
+    echo "uso: nas-terminal <usuario> <accion> [args...]" >&2
+    exit 2
+fi
+
+TARGET_USER="$1"; shift
+ACTION="$1"; shift || true
+SESSION="nas-web-term-${TARGET_USER}"
+
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+    echo "usuario invalido" >&2
+    exit 1
+fi
+
+if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_web|grp_sistemas'; then
+    echo "el usuario no tiene acceso web" >&2
+    exit 1
+fi
+
+run_as() {
+    runuser -u "$TARGET_USER" -- "$@"
+}
+
+case "$ACTION" in
+    start)
+        COLS="${1:-200}"
+        ROWS="${2:-50}"
+        if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
+            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS"
+        fi
+        ;;
+    keys)
+        DATA="$1"
+        case "$DATA" in
+            CTRL_C) run_as tmux send-keys -t "$SESSION" C-c ;;
+            CTRL_D) run_as tmux send-keys -t "$SESSION" C-d ;;
+            ENTER) run_as tmux send-keys -t "$SESSION" Enter ;;
+            TAB) run_as tmux send-keys -t "$SESSION" Tab ;;
+            *)
+                run_as tmux send-keys -t "$SESSION" -l -- "$DATA"
+                run_as tmux send-keys -t "$SESSION" Enter
+                ;;
+        esac
+        ;;
+    raw)
+        run_as tmux send-keys -t "$SESSION" -l -- "$1"
+        ;;
+    capture)
+        run_as tmux capture-pane -t "$SESSION" -p
+        ;;
+    resize)
+        run_as tmux resize-window -t "$SESSION" -x "${1:-200}" -y "${2:-50}" 2>/dev/null || true
+        ;;
+    kill)
+        run_as tmux kill-session -t "$SESSION" 2>/dev/null || true
+        ;;
+    *)
+        echo "accion desconocida: $ACTION" >&2
+        exit 2
+        ;;
+esac
+NAS_TERM_EOF
+chmod 0755 /usr/local/sbin/nas-terminal
+chown root:root /usr/local/sbin/nas-terminal
+
 # 5. Configurar sudoers para www-data con permisos acotados y seguros
 cat << SUDOERS_EOF > /etc/sudoers.d/nas-web
 Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \\
@@ -668,8 +738,9 @@ Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /t
     /usr/bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
     /usr/bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*
+Cmnd_Alias NAS_TERMINAL = /usr/local/sbin/nas-terminal *
 
-www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
+www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN, NAS_TERMINAL
 SUDOERS_EOF
 if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
     # Un fragmento inválido rompería sudo de forma global: se descarta y se avisa.
