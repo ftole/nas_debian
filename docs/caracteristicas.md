@@ -20,7 +20,7 @@ Para garantizar la máxima seguridad, el sistema opera bajo dos roles mutuamente
 | **Visibilidad de carpetas** | Recursos visibles en el explorador de red | Recursos ocultos (terminados en `$`) |
 | **Filesystem en HDD** | `ext4` con `commit=2` (vaciado en 2s anti-apagón) | `Btrfs` con compresión `zstd:3` + scrub mensual |
 | **Filesystem en SSD** | `ext4` con `commit=5` + `fstrim.timer` | `Btrfs` con `zstd:3` + `discard=async` |
-| **Acceso a usuarios** | Usuarios departamentales según permisos | Exclusivo para administradores (`grp_sistemas`) |
+| **Acceso a usuarios** | Usuarios departamentales según permisos | Exclusivo para administradores (`grp_samba`) |
 | **Reutilización de datos** | Soporte `--keep-data` (montar sin formatear) | Soporte `--keep-data` (montar sin formatear) |
 
 ---
@@ -36,6 +36,8 @@ Uno de los problemas más frecuentes en servidores NAS basados en Linux es el bl
   2. *Solo Lectura General + Escritura Exclusiva:* Los grupos departamentales consultan el archivo y solo el grupo responsable puede modificarlo. Aplica `default ACL` para que toda subcarpeta o archivo creado herede automáticamente esta regla.
   3. *Solo Lectura Estricta:* Ideal para normativas, manuales y repositorios históricos (`read only = yes`).
   4. *Acceso Público / Invitados:* Acceso directo para intercambio rápido sin requerir usuario ni contraseña.
+- **Matriz de permisos integrada en Usuarios y sincronización de ACL POSIX:**  
+  La pestaña **Usuarios y grupos** incluye la matriz *grupo/usuario × recurso* (Sin acceso → Solo lectura → Lectura y escritura). Cada cambio recalcula automáticamente las ACL POSIX del directorio (`setfacl`, con herencia por defecto) para que Samba y el sistema de archivos coincidan. El botón **Reparar ACL** corrige desajustes que provocaban accesos denegados pese a estar autorizado en Samba.
 - **Descubrimiento instantáneo en Windows 10/11 (WSDD2):**  
   Implementa el demonio ligero `wsdd2` con override de systemd. Los equipos clientes detectan el servidor al instante en su sección "Red" del Explorador de Windows, sin activar protocolos obsoletos ni inseguros como NetBIOS broadcast o SMBv1.
 
