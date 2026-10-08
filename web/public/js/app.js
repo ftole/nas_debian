@@ -1936,6 +1936,36 @@ function getFileTypeMeta(item) {
     };
   }
 
+  if (['xlsx', 'xls', 'ods', 'csv', 'tsv'].includes(ext)) {
+    return {
+      icon: '#icon-table',
+      color: '#10b981',
+      typeLabel: `Hoja de cálculo (${ext.toUpperCase()})`,
+      previewable: true,
+      mediaType: 'excel',
+    };
+  }
+
+  if (['docx', 'doc'].includes(ext)) {
+    return {
+      icon: '#icon-file-text',
+      color: '#3b82f6',
+      typeLabel: `Documento Word (${ext.toUpperCase()})`,
+      previewable: true,
+      mediaType: 'word',
+    };
+  }
+
+  if (['pptx', 'ppt'].includes(ext)) {
+    return {
+      icon: '#icon-presentation',
+      color: '#f97316',
+      typeLabel: `Presentación (${ext.toUpperCase()})`,
+      previewable: true,
+      mediaType: 'presentation',
+    };
+  }
+
   if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) {
     return {
       icon: '#icon-video',
@@ -1965,7 +1995,7 @@ function getFileTypeMeta(item) {
     };
   }
 
-  if (['txt', 'log', 'conf', 'sh', 'php', 'js', 'json', 'yml', 'yaml', 'ini', 'xml', 'sql', 'md', 'env', 'csv', 'py', 'css', 'html', 'bat', 'cmd'].includes(ext)) {
+  if (['txt', 'log', 'conf', 'sh', 'php', 'js', 'json', 'yml', 'yaml', 'ini', 'xml', 'sql', 'md', 'env', 'py', 'css', 'html', 'bat', 'cmd'].includes(ext)) {
     return {
       icon: '#icon-file-text',
       color: '#10b981',
@@ -2819,6 +2849,29 @@ async function confirmEmptyTrash() {
   }
 }
 
+function loadScriptLazy(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === 'true') {
+        return resolve();
+      }
+      existing.addEventListener('load', () => resolve());
+      existing.addEventListener('error', () => reject(new Error(`Error al cargar librería local: ${src}`)));
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = () => {
+      s.dataset.loaded = 'true';
+      resolve();
+    };
+    s.onerror = () => reject(new Error(`Error al cargar librería local: ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
 // ==============================================================================
 // Previsualizador de Archivos (Previewer 100% Offline con Editor Integrado)
 // ==============================================================================
@@ -2841,6 +2894,7 @@ async function previewFile(relPath, fileName) {
   const saveBtn = document.getElementById('btn-preview-save');
   const editLabel = document.getElementById('btn-preview-edit-label');
   const loading = document.getElementById('preview-loading');
+  const loadingText = document.getElementById('preview-loading-text');
   const codeContainer = document.getElementById('preview-code-container');
   const contentEl = document.getElementById('preview-code-content');
   const editorEl = document.getElementById('preview-code-editor');
@@ -2848,9 +2902,13 @@ async function previewFile(relPath, fileName) {
   const pdfContainer = document.getElementById('preview-pdf-container');
   const mediaContainer = document.getElementById('preview-media-container');
   const binaryContainer = document.getElementById('preview-binary-container');
+  const spreadsheetContainer = document.getElementById('preview-spreadsheet-container');
+  const docxContainer = document.getElementById('preview-docx-container');
+  const pptxContainer = document.getElementById('preview-pptx-container');
 
   if (titleEl) titleEl.textContent = fileName;
   if (metaEl) metaEl.textContent = 'Cargando información...';
+  if (loadingText) loadingText.textContent = 'Cargando previsualización...';
   if (copyBtn) copyBtn.style.display = 'none';
   if (editBtn) editBtn.style.display = 'none';
   if (saveBtn) saveBtn.style.display = 'none';
@@ -2866,7 +2924,7 @@ async function previewFile(relPath, fileName) {
   }
 
   // Ocultar todos los contenedores y mostrar cargando
-  [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer].forEach(c => {
+  [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer, spreadsheetContainer, docxContainer, pptxContainer].forEach(c => {
     if (c) c.style.display = 'none';
   });
   if (loading) loading.style.display = 'flex';
@@ -2935,7 +2993,211 @@ async function previewFile(relPath, fileName) {
     return;
   }
 
-  // 4. Archivos de Texto / Código / Configuración
+  // 4. Hojas de Cálculo (Excel: .xlsx, .xls, .ods, .csv, .tsv) — Opción 3 SheetJS Local
+  if (['xlsx', 'xls', 'ods', 'csv', 'tsv'].includes(ext)) {
+    try {
+      if (typeof XLSX === 'undefined') {
+        if (loadingText) loadingText.textContent = 'Cargando motor local de hojas de cálculo...';
+        await loadScriptLazy('/js/vendor/xlsx.full.min.js');
+      }
+
+      if (loadingText) loadingText.textContent = 'Descargando y procesando hoja de cálculo...';
+
+      const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
+      const response = await fetch(rawUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status} al descargar archivo.`);
+
+      const arrayBuffer = await response.arrayBuffer();
+      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellDates: true });
+
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        throw new Error('El libro no contiene hojas de cálculo legibles.');
+      }
+
+      AppState.files.currentWorkbook = workbook;
+      AppState.files.currentSheetName = workbook.SheetNames[0];
+
+      renderSpreadsheetWorkbook(workbook, fileName);
+
+      if (loading) loading.style.display = 'none';
+      if (spreadsheetContainer) spreadsheetContainer.style.display = 'flex';
+      if (metaEl) {
+        metaEl.textContent = `Hoja de cálculo (${ext.toUpperCase()}) • ${workbook.SheetNames.length} hoja(s)`;
+      }
+      return;
+    } catch (err) {
+      console.error('Error al procesar hoja de cálculo:', err);
+      if (loading) loading.style.display = 'none';
+      if (binaryContainer) {
+        binaryContainer.style.display = 'block';
+        const bName = document.getElementById('preview-binary-name');
+        const bDet = document.getElementById('preview-binary-details');
+        if (bName) bName.textContent = fileName;
+        if (bDet) bDet.textContent = `No se pudo previsualizar la hoja de cálculo: ${err.message || 'error de procesamiento'}`;
+      }
+      if (metaEl) metaEl.textContent = 'Hoja de cálculo';
+      return;
+    }
+  }
+
+  // 5. Documentos Word (.docx) — Opción 3 docx-preview Local
+  if (ext === 'docx') {
+    try {
+      if (typeof JSZip === 'undefined') {
+        if (loadingText) loadingText.textContent = 'Cargando motor de descompresión...';
+        await loadScriptLazy('/js/vendor/jszip.min.js');
+      }
+      if (typeof docx === 'undefined') {
+        if (loadingText) loadingText.textContent = 'Cargando motor de documentos Word...';
+        await loadScriptLazy('/js/vendor/docx-preview.min.js');
+      }
+
+      if (loadingText) loadingText.textContent = 'Renderizando documento Word...';
+
+      const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
+      const response = await fetch(rawUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status} al descargar documento.`);
+
+      const arrayBuffer = await response.arrayBuffer();
+      const docxContentEl = document.getElementById('preview-docx-content');
+      if (docxContentEl) {
+        docxContentEl.innerHTML = '';
+        await docx.renderAsync(arrayBuffer, docxContentEl, null, {
+          className: 'docx-document-rendered',
+          inWrapper: false,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          breakPages: true,
+          renderHeaders: true,
+          renderFooters: true,
+          useBase64URL: true,
+        });
+      }
+
+      if (loading) loading.style.display = 'none';
+      if (docxContainer) docxContainer.style.display = 'flex';
+      if (metaEl) {
+        metaEl.textContent = 'Documento Word (.DOCX) • Renderizado local seguro';
+      }
+      return;
+    } catch (err) {
+      console.error('Error al renderizar documento Word:', err);
+      if (loading) loading.style.display = 'none';
+      if (binaryContainer) {
+        binaryContainer.style.display = 'block';
+        const bName = document.getElementById('preview-binary-name');
+        const bDet = document.getElementById('preview-binary-details');
+        if (bName) bName.textContent = fileName;
+        if (bDet) bDet.textContent = `No se pudo previsualizar el documento Word: ${err.message || 'error de renderizado'}`;
+      }
+      if (metaEl) metaEl.textContent = 'Documento Word';
+      return;
+    }
+  }
+
+  // 6. Presentaciones PowerPoint (.pptx) — Opción 3 Inspector de Diapositivas Local
+  if (ext === 'pptx') {
+    try {
+      if (typeof JSZip === 'undefined') {
+        if (loadingText) loadingText.textContent = 'Cargando motor de descompresión...';
+        await loadScriptLazy('/js/vendor/jszip.min.js');
+      }
+
+      if (loadingText) loadingText.textContent = 'Extrayendo diapositivas...';
+
+      const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
+      const response = await fetch(rawUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status} al descargar presentación.`);
+
+      const arrayBuffer = await response.arrayBuffer();
+      const zip = await JSZip.loadAsync(arrayBuffer);
+
+      const slideEntries = [];
+      zip.forEach((entryPath, file) => {
+        const match = entryPath.match(/^ppt\/slides\/slide(\d+)\.xml$/i);
+        if (match) {
+          slideEntries.push({ num: parseInt(match[1], 10), file });
+        }
+      });
+
+      slideEntries.sort((a, b) => a.num - b.num);
+
+      if (slideEntries.length === 0) {
+        throw new Error('La presentación no contiene diapositivas legibles.');
+      }
+
+      const parser = new DOMParser();
+      const parsedSlides = [];
+
+      for (const entry of slideEntries) {
+        const xmlText = await entry.file.async('text');
+        const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+        const paragraphs = [];
+        const pElements = xmlDoc.getElementsByTagNameNS('*', 'p');
+        for (let i = 0; i < pElements.length; i++) {
+          const tElements = pElements[i].getElementsByTagNameNS('*', 't');
+          let text = '';
+          for (let j = 0; j < tElements.length; j++) {
+            text += tElements[j].textContent || '';
+          }
+          text = text.trim();
+          if (text) paragraphs.push(text);
+        }
+
+        const title = paragraphs.length > 0 ? paragraphs[0] : `Diapositiva ${entry.num}`;
+        const bodyParagraphs = paragraphs.length > 1 ? paragraphs.slice(1) : [];
+
+        parsedSlides.push({
+          num: entry.num,
+          title,
+          paragraphs: bodyParagraphs,
+        });
+      }
+
+      AppState.files.pptxSlides = parsedSlides;
+      AppState.files.pptxCurrentIndex = 0;
+
+      renderPptxPresentation(parsedSlides);
+
+      if (loading) loading.style.display = 'none';
+      if (pptxContainer) pptxContainer.style.display = 'flex';
+      if (metaEl) {
+        metaEl.textContent = `Presentación PowerPoint (.PPTX) • ${parsedSlides.length} diapositiva(s)`;
+      }
+      return;
+    } catch (err) {
+      console.error('Error al extraer diapositivas PowerPoint:', err);
+      if (loading) loading.style.display = 'none';
+      if (binaryContainer) {
+        binaryContainer.style.display = 'block';
+        const bName = document.getElementById('preview-binary-name');
+        const bDet = document.getElementById('preview-binary-details');
+        if (bName) bName.textContent = fileName;
+        if (bDet) bDet.textContent = `No se pudieron extraer diapositivas: ${err.message || 'formato no legible'}`;
+      }
+      if (metaEl) metaEl.textContent = 'Presentación PowerPoint';
+      return;
+    }
+  }
+
+  // 7. Formatos heredados binarios de Office (.doc, .ppt)
+  if (['doc', 'ppt'].includes(ext)) {
+    if (loading) loading.style.display = 'none';
+    if (binaryContainer) {
+      binaryContainer.style.display = 'block';
+      const bName = document.getElementById('preview-binary-name');
+      const bDet = document.getElementById('preview-binary-details');
+      if (bName) bName.textContent = fileName;
+      if (bDet) {
+        bDet.textContent = `Formato binario heredado de Microsoft Office (${ext.toUpperCase()}). Para previsualización interactiva en el navegador, guarde el archivo en formato moderno (.${ext}x) o descárguelo directamente.`;
+      }
+    }
+    if (metaEl) metaEl.textContent = `Documento ${ext.toUpperCase()} (Heredado)`;
+    return;
+  }
+
+  // 8. Archivos de Texto / Código / Configuración
   try {
     const res = await apiFetch(`/api/files/content?root=${root}&path=${encodedPath}`);
     const d = res.data || res;
@@ -2982,6 +3244,116 @@ async function previewFile(relPath, fileName) {
       if (bDet) bDet.textContent = err.message || 'Archivo no legible como texto plano.';
     }
     if (metaEl) metaEl.textContent = 'Archivo binario';
+  }
+}
+
+function renderSpreadsheetWorkbook(workbook, fileName) {
+  const tabsEl = document.getElementById('preview-sheet-tabs');
+  const tableContainer = document.getElementById('preview-spreadsheet-table-container');
+  if (!tabsEl || !tableContainer) return;
+
+  tabsEl.innerHTML = '';
+  workbook.SheetNames.forEach(sheetName => {
+    const tabBtn = document.createElement('button');
+    tabBtn.type = 'button';
+    tabBtn.className = 'preview-sheet-tab' + (sheetName === AppState.files.currentSheetName ? ' active' : '');
+    tabBtn.textContent = sheetName;
+    tabBtn.onclick = () => {
+      AppState.files.currentSheetName = sheetName;
+      document.querySelectorAll('.preview-sheet-tab').forEach(b => b.classList.remove('active'));
+      tabBtn.classList.add('active');
+      renderActiveSheet(workbook, sheetName);
+    };
+    tabsEl.appendChild(tabBtn);
+  });
+
+  renderActiveSheet(workbook, AppState.files.currentSheetName);
+}
+
+function renderActiveSheet(workbook, sheetName) {
+  const tableContainer = document.getElementById('preview-spreadsheet-table-container');
+  const statsEl = document.getElementById('preview-spreadsheet-stats');
+  if (!tableContainer) return;
+
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    tableContainer.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted);">Hoja vacía</div>';
+    return;
+  }
+
+  const html = XLSX.utils.sheet_to_html(sheet, { id: 'preview-sheet-table', editable: false });
+  tableContainer.innerHTML = html;
+
+  const ref = sheet['!ref'] || '';
+  if (statsEl) {
+    statsEl.textContent = ref ? `Rango: ${ref}` : '';
+  }
+}
+
+function renderPptxPresentation(slides) {
+  const countEl = document.getElementById('preview-pptx-count');
+  const listEl = document.getElementById('preview-pptx-slides-list');
+  if (countEl) countEl.textContent = slides.length;
+  if (!listEl) return;
+
+  listEl.innerHTML = '';
+  slides.forEach((slide, idx) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'preview-pptx-slide-thumb' + (idx === 0 ? ' active' : '');
+    thumb.innerHTML = `<div style="font-weight:600; margin-bottom:2px;">#${slide.num}</div><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(slide.title)}</div>`;
+    thumb.onclick = () => {
+      AppState.files.pptxCurrentIndex = idx;
+      displayPptxSlide(idx);
+    };
+    listEl.appendChild(thumb);
+  });
+
+  displayPptxSlide(0);
+}
+
+function displayPptxSlide(index) {
+  const slides = AppState.files.pptxSlides || [];
+  if (!slides[index]) return;
+  const slide = slides[index];
+
+  const thumbs = document.querySelectorAll('.preview-pptx-slide-thumb');
+  thumbs.forEach((t, i) => {
+    if (i === index) t.classList.add('active');
+    else t.classList.remove('active');
+  });
+
+  const labelEl = document.getElementById('preview-pptx-current-label');
+  const titleEl = document.getElementById('preview-pptx-slide-title');
+  const bodyEl = document.getElementById('preview-pptx-slide-body');
+  const prevBtn = document.getElementById('btn-pptx-prev');
+  const nextBtn = document.getElementById('btn-pptx-next');
+
+  if (labelEl) labelEl.textContent = `Diapositiva ${index + 1} de ${slides.length}`;
+  if (titleEl) titleEl.textContent = slide.title || `Diapositiva ${slide.num}`;
+
+  if (bodyEl) {
+    if (slide.paragraphs && slide.paragraphs.length > 0) {
+      let html = '<ul style="padding-left:20px; margin:0;">';
+      slide.paragraphs.forEach(p => {
+        html += `<li style="margin-bottom:8px;">${escapeHtml(p)}</li>`;
+      });
+      html += '</ul>';
+      bodyEl.innerHTML = html;
+    } else {
+      bodyEl.innerHTML = '<p style="color:var(--text-muted); font-style:italic;">(Esta diapositiva no contiene texto en párrafos o solo contiene elementos visuales)</p>';
+    }
+  }
+
+  if (prevBtn) prevBtn.disabled = index <= 0;
+  if (nextBtn) nextBtn.disabled = index >= slides.length - 1;
+}
+
+function navigatePptxSlide(delta) {
+  const slides = AppState.files.pptxSlides || [];
+  const newIndex = (AppState.files.pptxCurrentIndex || 0) + delta;
+  if (newIndex >= 0 && newIndex < slides.length) {
+    AppState.files.pptxCurrentIndex = newIndex;
+    displayPptxSlide(newIndex);
   }
 }
 
