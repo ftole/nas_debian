@@ -104,10 +104,12 @@ $router->delete('/api/shares/{name}', [SambaController::class, 'delete']);
 $router->get('/api/backups', [BackupController::class, 'list']);
 $router->get('/api/backups/tasks', [BackupController::class, 'list']);
 $router->post('/api/backups', [BackupController::class, 'create']);
+$router->post('/api/backups/test', [BackupController::class, 'test']);
 $router->post('/api/backups/delete', [BackupController::class, 'delete']);
 $router->delete('/api/backups/{id}', [BackupController::class, 'delete']);
 $router->post('/api/backups/{id}/run', [BackupController::class, 'run']);
 $router->get('/api/backups/{id}/logs', [BackupController::class, 'logs']);
+$router->get('/api/backups/{id}/status', [BackupController::class, 'status']);
 
 // Rutas API: Almacenamiento y Discos
 $router->get('/api/storage', [StorageController::class, 'overview']);
