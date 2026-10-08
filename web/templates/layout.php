@@ -773,7 +773,7 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-terminal"></use></svg> Terminal interactiva del sistema</h2>
-            <p>Ejecución directa de comandos en bash con permisos controlados de administración</p>
+            <p>Terminal PTY real (tmux) operando como su usuario, con soporte de sudo y comandos interactivos</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-secondary" onclick="clearTerminal()">
@@ -789,6 +789,7 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
           </div>
           <div class="terminal-chips">
             <span style="font-size:11.5px; color:var(--text-muted); align-self:center; margin-right:4px;">Comandos rápidos:</span>
+            <button type="button" class="terminal-chip" onclick="sendTerminalKey('CTRL_C')" title="Enviar Ctrl+C (interrumpir)">Ctrl+C</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('uptime')">uptime</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('df -h /srv/nas')">df -h</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('free -m')">free -m</button>
