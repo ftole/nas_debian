@@ -7,7 +7,7 @@ namespace App\Services;
 /**
  * Servicio de autenticación y validación de credenciales del sistema (Linux / Samba).
  * Permite validar usuarios del sistema mediante SMB/PAM y restringir el acceso
- * al panel web exclusivamente a cuentas administrativas (administrador, sistemas, grp_sistemas, sudo).
+ * al panel web exclusivamente a cuentas administrativas (administrador, sistemas, grp_samba, sudo).
  */
 class AuthService
 {
@@ -51,13 +51,16 @@ class AuthService
             if (isset(self::$mockUsers[$cleanUsername])) {
                 $expected = self::$mockUsers[$cleanUsername];
                 if ($password === $expected || ($cleanUsername === 'administrador' && in_array($password, ['Admin123#', 'admin123', 'Ead2026#'], true))) {
+                    $isSuper = ($cleanUsername === 'administrador');
                     return [
                         'success' => true,
                         'user' => [
                             'username' => $cleanUsername,
+                            'is_superadmin' => $isSuper,
                             'is_admin' => true,
                             'can_web' => true,
-                            'role' => 'Administrador de Sistemas',
+                            'role' => $isSuper ? 'superadmin' : 'admin',
+                            'role_label' => $isSuper ? 'Superadministrador' : 'Administrador de Sistemas',
                         ],
                     ];
                 }
@@ -90,17 +93,22 @@ class AuthService
             ];
         }
 
-        // Determinar capacidades: administrador (root/sudo) y acceso al panel web (grp_web)
+        // Determinar rol: superadmin (grp_superadmin), admin (sudo/grp_samba) u operador (grp_web)
         $groups = [];
         $grpRes = SystemService::runCommand(['id', '-Gn', $cleanUsername]);
         if ($grpRes['code'] === 0) {
             $groups = preg_split('/\s+/', trim($grpRes['stdout']));
         }
 
-        $isAdmin = in_array($cleanUsername, ['administrador', 'sistemas'], true)
-            || in_array('grp_sistemas', $groups, true)
+        $configuredSuper = $this->getConfiguredSuperadmin();
+        $isSuper = in_array('grp_superadmin', $groups, true)
+            || ($configuredSuper !== '' && $cleanUsername === $configuredSuper);
+        $isAdmin = $isSuper
+            || in_array($cleanUsername, ['administrador', 'sistemas'], true)
+            || in_array('grp_samba', $groups, true)
             || in_array('sudo', $groups, true);
-        $canWeb = $isAdmin || in_array('grp_web', $groups, true);
+        $isOperator = in_array('grp_web', $groups, true);
+        $canWeb = $isAdmin || $isOperator;
 
         if (!$canWeb) {
             return [
@@ -109,15 +117,40 @@ class AuthService
             ];
         }
 
+        $role = $isSuper ? 'superadmin' : ($isAdmin ? 'admin' : 'operator');
+        $roleLabel = [
+            'superadmin' => 'Superadministrador',
+            'admin' => 'Administrador de Sistemas',
+            'operator' => 'Operador Web',
+        ][$role];
+
         return [
             'success' => true,
             'user' => [
                 'username' => $cleanUsername,
+                'is_superadmin' => $isSuper,
                 'is_admin' => $isAdmin,
                 'can_web' => $canWeb,
-                'role' => $isAdmin ? 'Administrador de Sistemas' : 'Usuario Web',
+                'role' => $role,
+                'role_label' => $roleLabel,
             ],
         ];
+    }
+
+    /**
+     * Lee el superadministrador canónico registrado por el despliegue (/etc/nas/superadmin).
+     */
+    public function getConfiguredSuperadmin(): string
+    {
+        foreach (['/etc/nas/superadmin'] as $file) {
+            if (is_readable($file)) {
+                $name = strtolower(trim((string) @file_get_contents($file)));
+                if ($name !== '' && preg_match('/^[a-z0-9_-]{2,32}$/', $name)) {
+                    return $name;
+                }
+            }
+        }
+        return '';
     }
 
     /**
