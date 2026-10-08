@@ -851,6 +851,16 @@ class FileExplorerService
             'txt' => 'text/plain; charset=utf-8',
             'json' => 'application/json',
             'md' => 'text/markdown; charset=utf-8',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xls' => 'application/vnd.ms-excel',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'doc' => 'application/msword',
+            'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'ppt' => 'application/vnd.ms-powerpoint',
+            'ods' => 'application/vnd.oasis.opendocument.spreadsheet',
+            'odt' => 'application/vnd.oasis.opendocument.text',
+            'csv' => 'text/csv; charset=utf-8',
+            'tsv' => 'text/tab-separated-values; charset=utf-8',
         ];
         $contentType = $mimes[$ext] ?? 'application/octet-stream';
         $size = filesize($target);
