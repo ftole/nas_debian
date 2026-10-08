@@ -33,6 +33,8 @@ const AppState = {
     history: [],
     historyIndex: -1,
     isExecuting: false,
+    ptyStarted: false,
+    ptyTimer: null,
   },
   domain: {
     status: null,
@@ -180,6 +182,9 @@ function switchView(viewName, updateHash = true) {
   }
 
   // Carga de datos según la vista
+  if (viewName !== 'terminal') {
+    stopTerminalPolling();
+  }
   switch (viewName) {
     case 'dashboard':
       refreshDashboardMetrics();
@@ -1619,14 +1624,16 @@ function initTerminal() {
 
   input.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter') {
-      const cmd = input.value.trim();
+      e.preventDefault();
+      const cmd = input.value;
       input.value = '';
-      if (!cmd) return;
-
+      if (cmd.trim() === '') {
+        await sendTerminalKey('ENTER');
+        return;
+      }
       AppState.terminal.history.push(cmd);
       AppState.terminal.historyIndex = AppState.terminal.history.length;
-
-      await executeTerminalCommand(cmd);
+      await sendTerminalLine(cmd);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (AppState.terminal.history.length > 0 && AppState.terminal.historyIndex > 0) {
@@ -1642,94 +1649,98 @@ function initTerminal() {
         AppState.terminal.historyIndex = AppState.terminal.history.length;
         input.value = '';
       }
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      await sendTerminalKey('TAB');
+    } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      await sendTerminalKey('CTRL_C');
     }
   });
+
+  output.addEventListener('click', () => input.focus());
 }
 
-async function executeTerminalCommand(cmd) {
-  const output = document.getElementById('terminal-output');
-  const input = document.getElementById('terminal-input');
-  const promptUser = document.getElementById('terminal-prompt-prefix');
-  const promptCwd = document.getElementById('term-prompt-cwd');
-  const barCwd = document.getElementById('term-bar-cwd');
-  if (!output) return;
-
-  if (AppState.terminal.isExecuting) return;
-  AppState.terminal.isExecuting = true;
-  if (input) input.disabled = true;
-
-  const currentCwd = AppState.terminal.cwd || '/srv/nas';
-  const promptPrefix = promptUser ? promptUser.textContent : `$`;
-  output.textContent += `${promptPrefix} ${cmd}\n`;
-
-  const lower = cmd.trim().toLowerCase();
-  if (lower === 'clear' || lower === 'cls') {
-    output.textContent = '';
-    AppState.terminal.isExecuting = false;
-    if (input) {
-      input.disabled = false;
-      input.focus();
-    }
+async function startTerminalSession() {
+  if (AppState.terminal.ptyStarted) {
+    startTerminalPolling();
     return;
   }
-
+  AppState.terminal.ptyStarted = true;
   try {
-    const res = await apiFetch('/api/terminal/exec', {
+    await apiFetch('/api/terminal/session', {
       method: 'POST',
-      body: JSON.stringify({
-        command: cmd,
-        cwd: currentCwd,
-      }),
+      body: JSON.stringify({ cols: 200, rows: 50 }),
       silentToast: true,
     });
+    startTerminalPolling();
+  } catch (e) {
+    AppState.terminal.ptyStarted = false;
+  }
+}
 
-    const isClear = res.clear ?? res.data?.clear ?? false;
-    if (isClear) {
-      output.textContent = '';
-    } else {
-      const termOutput = res.output ?? res.data?.output ?? '';
-      const exitCode = res.exit_code ?? res.data?.exit_code ?? 0;
-      if (termOutput) {
-        output.textContent += termOutput;
-        if (!termOutput.endsWith('\n')) {
-          output.textContent += '\n';
-        }
-      } else if (exitCode !== 0) {
-        output.textContent += `[Proceso finalizado con código ${exitCode}]\n`;
-      }
-    }
+function startTerminalPolling() {
+  if (AppState.terminal.ptyTimer) return;
+  AppState.terminal.ptyTimer = setInterval(refreshTerminalPane, 900);
+  refreshTerminalPane();
+}
 
-    const newCwd = res.cwd ?? res.data?.cwd;
-    if (newCwd) {
-      AppState.terminal.cwd = newCwd;
-      if (promptCwd) promptCwd.textContent = newCwd;
-      if (barCwd) barCwd.textContent = newCwd;
-    }
-  } catch (err) {
-    output.textContent += `[Error de ejecución]: ${err.message}\n`;
-  } finally {
-    AppState.terminal.isExecuting = false;
-    if (input) {
-      input.disabled = false;
-      input.focus();
-    }
+function stopTerminalPolling() {
+  if (AppState.terminal.ptyTimer) {
+    clearInterval(AppState.terminal.ptyTimer);
+    AppState.terminal.ptyTimer = null;
+  }
+}
+
+async function refreshTerminalPane() {
+  const output = document.getElementById('terminal-output');
+  if (!output) return;
+  try {
+    const res = await apiFetch('/api/terminal/capture', { silentToast: true });
+    const text = res.data?.output ?? res.output ?? '';
+    output.textContent = text.replace(/\s+$/, '\n');
     output.scrollTop = output.scrollHeight;
+  } catch (e) {
+    // Silencioso: la sesión puede estar reiniciándose
+  }
+}
+
+async function sendTerminalLine(cmd) {
+  try {
+    await apiFetch('/api/terminal/send', {
+      method: 'POST',
+      body: JSON.stringify({ data: cmd }),
+      silentToast: true,
+    });
+    setTimeout(refreshTerminalPane, 150);
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
+async function sendTerminalKey(token) {
+  try {
+    await apiFetch('/api/terminal/send', {
+      method: 'POST',
+      body: JSON.stringify({ data: token }),
+      silentToast: true,
+    });
+    setTimeout(refreshTerminalPane, 150);
+  } catch (e) {
+    // Ya mostrado
   }
 }
 
 function clearTerminal() {
-  const output = document.getElementById('terminal-output');
-  if (output) output.textContent = '';
+  sendTerminalLine('clear');
 }
 
 function runQuickCommand(cmd) {
   const input = document.getElementById('terminal-input');
-  if (input) {
-    input.focus();
-    AppState.terminal.history.push(cmd);
-    AppState.terminal.historyIndex = AppState.terminal.history.length;
-    executeTerminalCommand(cmd);
-  }
+  if (input) input.focus();
+  AppState.terminal.history.push(cmd);
+  AppState.terminal.historyIndex = AppState.terminal.history.length;
+  sendTerminalLine(cmd);
 }
 
 // ==============================================================================
@@ -1823,6 +1834,7 @@ async function loadNetworking() {
 
 function loadTerminal() {
   const input = document.getElementById('terminal-input');
+  startTerminalSession();
   if (input) {
     setTimeout(() => input.focus(), 80);
   }
