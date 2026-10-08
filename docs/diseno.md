@@ -76,7 +76,7 @@ La interfaz cuenta con soporte nativo para **Tema Oscuro** (predeterminado) y **
 
 ### 3.2 Terminal PTY Real (tmux)
 - **Pseudoterminal verdadero (PTY):** Cada sesión web abre su propia sesión `tmux` ejecutada *como el usuario autenticado*, no como `www-data`. Esto habilita programas interactivos de pantalla completa (`top`, `htop`, `nano`, `vi`, `less`, `man`) y el envío de señales como `Ctrl+C`.
-- **Soporte real de `sudo`:** Al escribir `sudo <comando>`, el sistema solicita la contraseña del usuario tal como en SSH; la entrada se canaliza hacia el PTY de forma segura (el helper root valida que el usuario pertenezca a `grp_sistemas`/`grp_web`).
+- **Soporte real de `sudo`:** Al escribir `sudo <comando>`, el sistema solicita la contraseña del usuario tal como en SSH; la entrada se canaliza hacia el PTY de forma segura (el helper root valida que el usuario pertenezca a `grp_samba`/`grp_web`).
 - **Aislamiento por usuario:** La sesión `tmux` vive en el servidor y persiste al cambiar de pestaña; arranca en el directorio de inicio del usuario y puede finalizarse con el botón de la barra o `exit`.
 - **Historial y comandos rápidos:** Flechas `Arriba`/`Abajo` para el historial, botones de acceso rápido (`df -h`, `free -m`, `uptime`, `smbstatus`, `realm list`) y un botón `Ctrl+C` para interrumpir procesos en curso.
 - **Helper de lista blanca:** La única operación privilegiada es `/usr/local/sbin/nas-terminal`, cuyo contrato se limita a `start`/`keys`/`capture`/`resize`/`kill` sobre la sesión del propio usuario.
