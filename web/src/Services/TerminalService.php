@@ -289,6 +289,133 @@ class TerminalService
         return $res;
     }
 
+    private const PTY_HELPER = '/usr/local/sbin/nas-terminal';
+
+    private function safeUser(string $user): ?string
+    {
+        $u = trim($user);
+        return preg_match('/^[a-zA-Z0-9_.-]{1,32}$/', $u) === 1 ? $u : null;
+    }
+
+    private function sessionUser(): string
+    {
+        return (string) ($_SESSION['nas_user']['username'] ?? 'sistemas');
+    }
+
+    /**
+     * Inicia (o reutiliza) una sesión tmux aislada para el usuario autenticado.
+     */
+    public function startSession(int $cols = 200, int $rows = 50): array
+    {
+        $user = $this->safeUser($this->sessionUser());
+        if ($user === null) {
+            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
+        }
+        return $this->runHelper([$user, 'start', (string) $cols, (string) $rows]);
+    }
+
+    /**
+     * Envía texto a la sesión PTY. Los tokens especiales (CTRL_C, CTRL_D, ENTER, TAB)
+     * se traducen a teclas; cualquier otro valor se escribe literalmente y se pulsa Enter.
+     */
+    public function send(string $data): array
+    {
+        $user = $this->safeUser($this->sessionUser());
+        if ($user === null) {
+            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
+        }
+
+        $special = ['CTRL_C', 'CTRL_D', 'ENTER', 'TAB'];
+        $isSpecial = in_array($data, $special, true);
+
+        $res = $this->runHelper([$user, 'keys', $data]);
+
+        if ($res['success'] && !$isSpecial && trim($data) !== '') {
+            try {
+                DatabaseService::insert('terminal_history', [
+                    'command' => $data,
+                    'username' => $user,
+                    'cwd' => self::DEFAULT_CWD,
+                    'exit_code' => 0,
+                ]);
+            } catch (Throwable) {
+                // Tolerante
+            }
+        }
+        return $res;
+    }
+
+    /**
+     * Captura el contenido visible de la ventana de la sesión PTY.
+     */
+    public function capture(): array
+    {
+        $user = $this->safeUser($this->sessionUser());
+        if ($user === null) {
+            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
+        }
+        return $this->runHelper([$user, 'capture']);
+    }
+
+    public function resizeSession(int $cols, int $rows): array
+    {
+        $user = $this->safeUser($this->sessionUser());
+        if ($user === null) {
+            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
+        }
+        return $this->runHelper([$user, 'resize', (string) $cols, (string) $rows]);
+    }
+
+    public function killSession(): array
+    {
+        $user = $this->safeUser($this->sessionUser());
+        if ($user === null) {
+            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
+        }
+        return $this->runHelper([$user, 'kill']);
+    }
+
+    private function runHelper(array $args): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [
+                'success' => true,
+                'output' => 'Simulación PTY: ' . implode(' ', $args) . "\n",
+                'exit_code' => 0,
+            ];
+        }
+
+        // La terminal solo es aplicable a usuarios locales (los de dominio no tienen shell local).
+        $cmd = array_merge(['/usr/bin/sudo', '-n', self::PTY_HELPER], $args);
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = @proc_open($cmd, $descriptors, $pipes);
+        if (!is_resource($process)) {
+            return ['success' => false, 'error' => 'No se pudo invocar el helper de terminal.', 'output' => ''];
+        }
+
+        fclose($pipes[0]);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0) {
+            return [
+                'success' => false,
+                'error' => trim($stderr) !== '' ? trim($stderr) : 'Fallo del helper de terminal.',
+                'output' => $stdout,
+                'exit_code' => $exitCode,
+            ];
+        }
+        return ['success' => true, 'output' => $stdout, 'exit_code' => 0];
+    }
+
     /**
      * Detecta comandos interactivos incompatibles con consolas web sin pseudo-terminal (PTY).
      */
