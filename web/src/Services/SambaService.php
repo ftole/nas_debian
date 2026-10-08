@@ -566,15 +566,6 @@ class SambaService
             $readGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($valid, fn($t) => str_starts_with($t, '@') && !in_array($t, $write, true))));
             $readUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@') && !in_array($t, $write, true)));
 
-            // Si el recurso es de solo lectura (esquema 3), no debe reportar escritura
-            $readOnly = strtolower((string) ($props['read only'] ?? 'yes')) === 'yes';
-            if ($readOnly) {
-                $readGroups = array_values(array_unique(array_merge($readGroups, $writeGroups)));
-                $readUsers = array_values(array_unique(array_merge($readUsers, $writeUsers)));
-                $writeGroups = [];
-                $writeUsers = [];
-            }
-
             $map[$name] = [
                 'read_groups' => $readGroups,
                 'write_groups' => $writeGroups,
