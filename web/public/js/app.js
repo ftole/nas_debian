@@ -1395,7 +1395,10 @@ async function loadLogs() {
       const targetText = l.target || l.task || l.unit || '-';
       const status = (l.status || 'OK').toUpperCase();
       const statusBadge = (status === 'SUCCESS' || status === 'OK') ? 'badge-ok' : (status === 'FAILED' || status === 'ERR' ? 'badge-err' : 'badge-warn');
-      const details = l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-');
+      const isSystem = l.source === 'system';
+      const details = (isSystem && l.human)
+        ? l.human
+        : (l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-'));
 
       return `
         <tr>
@@ -1405,7 +1408,7 @@ async function loadLogs() {
           <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span></td>
           <td class="table-logs-target"><code>${escapeHtml(targetText)}</code></td>
           <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
-          <td class="table-logs-details">${escapeHtml(details)}</td>
+          <td class="${isSystem ? 'table-logs-details log-system' : 'table-logs-details'}">${escapeHtml(details)}</td>
         </tr>
       `;
     }).join('');
