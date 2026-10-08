@@ -32,7 +32,7 @@ const AppState = {
       browseable: 'yes',
       scheme: '1',
       schemeName: 'Lectura y Escritura por Grupo',
-      groups: ['grp_sistemas'],
+      groups: ['grp_samba'],
       writeList: '',
       readOnly: 'no',
       path: '/srv/nas/SISTEMAS',
@@ -47,7 +47,7 @@ const AppState = {
       scheme: '2',
       schemeName: 'Solo Lectura General + Escritura Exclusiva',
       groups: ['grp_empleados'],
-      writeList: 'grp_sistemas',
+      writeList: 'grp_samba',
       readOnly: 'no',
       path: '/srv/nas/CAMPANA_UNO_OPERACIONES',
       status: 'Activo',
@@ -60,7 +60,7 @@ const AppState = {
       browseable: 'yes',
       scheme: '1',
       schemeName: 'Lectura y Escritura por Grupo',
-      groups: ['grp_sistemas', 'grp_finanzas'],
+      groups: ['grp_samba', 'grp_finanzas'],
       writeList: '',
       readOnly: 'no',
       path: '/srv/nas/CAMPANA_DOS_FINANZAS',
@@ -74,7 +74,7 @@ const AppState = {
       browseable: 'no',
       scheme: '3',
       schemeName: 'Solo Lectura Estricta',
-      groups: ['grp_sistemas'],
+      groups: ['grp_samba'],
       writeList: '',
       readOnly: 'yes',
       path: '/srv/nas/BACKUPS_HISTORICOS/windows',
@@ -88,7 +88,7 @@ const AppState = {
       browseable: 'no',
       scheme: '3',
       schemeName: 'Solo Lectura Estricta',
-      groups: ['grp_sistemas'],
+      groups: ['grp_samba'],
       writeList: '',
       readOnly: 'yes',
       path: '/srv/nas/BACKUPS_HISTORICOS/linux',
@@ -118,7 +118,7 @@ const AppState = {
     {
       uid: 'admin_nas',
       fullName: 'Administrador Maestro TI',
-      groups: ['sudo', 'adm', 'grp_sistemas'],
+      groups: ['sudo', 'adm', 'grp_samba'],
       sambaActive: true,
       shell: '/bin/bash',
       lastLogin: 'Hoy 10:14 (Consola Local)'
@@ -158,7 +158,7 @@ const AppState = {
     {
       uid: 'backup_svc',
       fullName: 'Servicio de Réplica Automatizado',
-      groups: ['grp_sistemas'],
+      groups: ['grp_samba'],
       sambaActive: true,
       shell: '/usr/sbin/nologin',
       lastLogin: 'Hoy 06:00 (Daemon)'
@@ -169,7 +169,7 @@ const AppState = {
   // 3. GRUPOS DE SEGURIDAD (grp_*)
   // ============================================================================
   groups: [
-    { name: 'grp_sistemas', level: 'Maestro (2770)', members: ['admin_nas', 'backup_svc'], shares: ['SISTEMAS', 'BACKUPS_WINDOWS$', 'BACKUPS_LINUX$', 'CAMPANA_DOS_FINANZAS'] },
+    { name: 'grp_samba', level: 'Maestro (2770)', members: ['admin_nas', 'backup_svc'], shares: ['SISTEMAS', 'BACKUPS_WINDOWS$', 'BACKUPS_LINUX$', 'CAMPANA_DOS_FINANZAS'] },
     { name: 'grp_empleados', level: 'General Empleados', members: ['carlos_m', 'laura_s', 'patricia_r'], shares: ['CAMPANA_UNO_OPERACIONES'] },
     { name: 'grp_c1_cobranzas', level: 'Departamental C1', members: ['carlos_m'], shares: ['CAMPANA_UNO_OPERACIONES'] },
     { name: 'grp_c2_ventas', level: 'Departamental C2', members: ['laura_s'], shares: ['CAMPANA_DOS_FINANZAS'] },
@@ -284,24 +284,24 @@ const AppState = {
     currentPath: '/srv/nas',
     fileTree: {
       '/srv': [
-        { name: 'nas', type: 'dir', size: '4.0 TB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' }
+        { name: 'nas', type: 'dir', size: '4.0 TB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' }
       ],
       '/srv/nas': [
-        { name: 'SISTEMAS', type: 'dir', size: '14.2 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' },
+        { name: 'SISTEMAS', type: 'dir', size: '14.2 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 10:14' },
         { name: 'CAMPANA_UNO_OPERACIONES', type: 'dir', size: '28.6 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 17:30' },
         { name: 'CAMPANA_DOS_FINANZAS', type: 'dir', size: '42.1 GB', owner: 'patricia_r', group: 'grp_finanzas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 08:45' },
-        { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '550.0 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' },
+        { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '550.0 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' },
         { name: 'PUBLICO', type: 'dir', size: '1.2 GB', owner: 'nobody', group: 'nogroup', perms: 'drwxrwxrwx', octal: '0777', mtime: '2026-09-28 14:00' },
-        { name: 'README_ALMACENAMIENTO.txt', type: 'file', size: '3.4 KB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-09-25 11:20' }
+        { name: 'README_ALMACENAMIENTO.txt', type: 'file', size: '3.4 KB', owner: 'admin_nas', group: 'grp_samba', perms: '-rw-rw-r--', octal: '0664', mtime: '2026-09-25 11:20' }
       ],
       '/srv/nas/SISTEMAS': [
-        { name: 'scripts_mantenimiento', type: 'dir', size: '45 MB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 12:00' },
-        { name: 'politicas_seguridad_2026.pdf', type: 'file', size: '1.8 MB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-20 09:15' },
-        { name: 'inventario_servidores_ead.xlsx', type: 'file', size: '540 KB', owner: 'admin_nas', group: 'grp_sistemas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 10:10' }
+        { name: 'scripts_mantenimiento', type: 'dir', size: '45 MB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 12:00' },
+        { name: 'politicas_seguridad_2026.pdf', type: 'file', size: '1.8 MB', owner: 'admin_nas', group: 'grp_samba', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-20 09:15' },
+        { name: 'inventario_servidores_ead.xlsx', type: 'file', size: '540 KB', owner: 'admin_nas', group: 'grp_samba', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-10-02 10:10' }
       ],
       '/srv/nas/SISTEMAS/scripts_mantenimiento': [
-        { name: 'btrfs_scrub_audit.sh', type: 'file', size: '2.1 KB', owner: 'root', group: 'grp_sistemas', perms: '-rwxr-x---', octal: '0750', mtime: '2026-10-01 11:30' },
-        { name: 'fstrim_maintenance.sh', type: 'file', size: '1.4 KB', owner: 'root', group: 'grp_sistemas', perms: '-rwxr-x---', octal: '0750', mtime: '2026-09-28 09:10' }
+        { name: 'btrfs_scrub_audit.sh', type: 'file', size: '2.1 KB', owner: 'root', group: 'grp_samba', perms: '-rwxr-x---', octal: '0750', mtime: '2026-10-01 11:30' },
+        { name: 'fstrim_maintenance.sh', type: 'file', size: '1.4 KB', owner: 'root', group: 'grp_samba', perms: '-rwxr-x---', octal: '0750', mtime: '2026-09-28 09:10' }
       ],
       '/srv/nas/CAMPANA_UNO_OPERACIONES': [
         { name: 'manuales_procedimientos', type: 'dir', size: '12.4 GB', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 16:20' },
@@ -315,20 +315,20 @@ const AppState = {
         { name: 'balance_general_q3.pdf', type: 'file', size: '3.2 MB', owner: 'patricia_r', group: 'grp_finanzas', perms: '-rw-rw-r--', octal: '0660', mtime: '2026-09-30 18:00' }
       ],
       '/srv/nas/BACKUPS_HISTORICOS': [
-        { name: 'windows', type: 'dir', size: '240 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
-        { name: 'linux', type: 'dir', size: '180 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
-        { name: 'facturacion', type: 'dir', size: '130 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
+        { name: 'windows', type: 'dir', size: '240 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
+        { name: 'linux', type: 'dir', size: '180 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
+        { name: 'facturacion', type: 'dir', size: '130 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
       ],
       '/srv/nas/BACKUPS_HISTORICOS/windows': [
-        { name: 'snapshot_2026-10-02_020000', type: 'dir', size: '18.4 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
-        { name: 'snapshot_2026-10-01_020000', type: 'dir', size: '18.3 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 02:00' }
+        { name: 'snapshot_2026-10-02_020000', type: 'dir', size: '18.4 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 02:00' },
+        { name: 'snapshot_2026-10-01_020000', type: 'dir', size: '18.3 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 02:00' }
       ],
       '/srv/nas/BACKUPS_HISTORICOS/linux': [
-        { name: 'snapshot_2026-10-02_033000', type: 'dir', size: '4.2 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
-        { name: 'snapshot_2026-10-01_033000', type: 'dir', size: '4.1 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 03:30' }
+        { name: 'snapshot_2026-10-02_033000', type: 'dir', size: '4.2 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 03:30' },
+        { name: 'snapshot_2026-10-01_033000', type: 'dir', size: '4.1 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-01 03:30' }
       ],
       '/srv/nas/BACKUPS_HISTORICOS/facturacion': [
-        { name: 'snapshot_2026-10-02_060000', type: 'dir', size: '32.1 GB', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
+        { name: 'snapshot_2026-10-02_060000', type: 'dir', size: '32.1 GB', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---', octal: '2770', mtime: '2026-10-02 06:00' }
       ],
       '/srv/nas/PUBLICO': [
         { name: 'formatos_vacaciones.docx', type: 'file', size: '120 KB', owner: 'nobody', group: 'nogroup', perms: '-rw-rw-rw-', octal: '0666', mtime: '2026-09-15 10:00' },
@@ -1075,7 +1075,7 @@ function executeTerminalCommand(cmd) {
   }
 
   if (lower === 'id') {
-    appendTerminalOutput('uid=0(root) gid=0(root) groups=0(root),1000(admin_nas),2000(grp_sistemas)', 'term-cmd');
+    appendTerminalOutput('uid=0(root) gid=0(root) groups=0(root),1000(admin_nas),2000(grp_samba)', 'term-cmd');
     return;
   }
 
@@ -1124,10 +1124,10 @@ function executeTerminalCommand(cmd) {
   if (lower === 'ls' || lower.startsWith('ls ') || lower === 'dir') {
     const curPath = AppState.terminal.currentDir;
     const items = AppState.fileBrowser.fileTree[curPath] || [
-      { name: 'SISTEMAS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---' },
+      { name: 'SISTEMAS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---' },
       { name: 'CAMPANA_UNO_OPERACIONES', type: 'dir', size: '4.0K', owner: 'carlos_m', group: 'grp_empleados', perms: 'drwxrwx---' },
       { name: 'CAMPANA_DOS_FINANZAS', type: 'dir', size: '4.0K', owner: 'patricia_r', group: 'grp_finanzas', perms: 'drwxrwx---' },
-      { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_sistemas', perms: 'drwxrwx---' },
+      { name: 'BACKUPS_HISTORICOS', type: 'dir', size: '4.0K', owner: 'root', group: 'grp_samba', perms: 'drwxrwx---' },
       { name: 'PUBLICO', type: 'dir', size: '4.0K', owner: 'nobody', group: 'nogroup', perms: 'drwxrwxrwx' }
     ];
 
@@ -1427,7 +1427,7 @@ function simulateFileUpload() {
       type: 'file',
       size: '1.4 MB',
       owner: 'admin_nas',
-      group: 'grp_sistemas',
+      group: 'grp_samba',
       perms: '-rw-rw-r--',
       octal: '0664',
       mtime: 'Hace un momento'
@@ -1587,8 +1587,8 @@ function updateNewSharePreview() {
     comment: (commentInput && commentInput.value) || 'Carpeta compartida',
     browseable: isHidden ? 'no' : 'yes',
     scheme: schemeVal,
-    groups: selectedGroups.length ? selectedGroups : ['grp_sistemas'],
-    writeList: document.getElementById('new-share-writelist-select')?.value || 'grp_sistemas'
+    groups: selectedGroups.length ? selectedGroups : ['grp_samba'],
+    writeList: document.getElementById('new-share-writelist-select')?.value || 'grp_samba'
   };
 
   const code = generateSmbConfSnippet(previewObj);
@@ -1605,14 +1605,14 @@ function generateSmbConfSnippet(s) {
 
   if (s.scheme === '1') {
     readOnlyStr = 'no';
-    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_samba';
   } else if (s.scheme === '2') {
     readOnlyStr = 'no';
-    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
-    writeListStr = `@${s.writeList || 'grp_sistemas'}`;
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_samba';
+    writeListStr = `@${s.writeList || 'grp_samba'}`;
   } else if (s.scheme === '3') {
     readOnlyStr = 'yes';
-    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_sistemas';
+    validUsersStr = s.groups && s.groups.length ? s.groups.map(g => `@${g}`).join(' ') : '@grp_samba';
   } else if (s.scheme === '4') {
     readOnlyStr = 'no';
     guestOkStr = 'yes';
@@ -1650,8 +1650,8 @@ function renderGroupCheckboxes() {
   if (shareGroupsList) {
     shareGroupsList.innerHTML = AppState.groups.map(g => `
       <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-        <input type="checkbox" class="new-share-grp-chk" value="${g.name}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
-        ${g.name} ${g.name === 'grp_sistemas' ? '(Admin)' : ''}
+        <input type="checkbox" class="new-share-grp-chk" value="${g.name}" ${g.name === 'grp_samba' ? 'checked' : ''}>
+        ${g.name} ${g.name === 'grp_samba' ? '(Admin)' : ''}
       </label>
     `).join('');
 
@@ -2001,7 +2001,7 @@ function openEditGroupModal(groupName) {
   if (nameDisplay) nameDisplay.innerText = groupName;
 
   if (btnDelete) {
-    btnDelete.style.display = groupName === 'grp_sistemas' ? 'none' : 'inline-flex';
+    btnDelete.style.display = groupName === 'grp_samba' ? 'none' : 'inline-flex';
   }
 
   if (membersList) {
@@ -2023,8 +2023,8 @@ function openEditGroupModal(groupName) {
 
 function deleteCurrentGroup() {
   const groupName = document.getElementById('edit-group-name')?.value;
-  if (!groupName || groupName === 'grp_sistemas') {
-    showToast('No se puede eliminar el grupo maestro grp_sistemas', 'danger');
+  if (!groupName || groupName === 'grp_samba') {
+    showToast('No se puede eliminar el grupo maestro grp_samba', 'danger');
     return;
   }
 
@@ -2286,7 +2286,7 @@ function setupForms() {
         ? ['Todos (Invitados)']
         : (Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value).length
             ? Array.from(document.querySelectorAll('.new-share-grp-chk:checked')).map(c => c.value)
-            : ['grp_sistemas']);
+            : ['grp_samba']);
 
       const newShare = {
         id: finalName,
@@ -2296,7 +2296,7 @@ function setupForms() {
         scheme: schemeVal,
         schemeName: schemeNames[schemeVal],
         groups: selectedGroups,
-        writeList: schemeVal === '2' ? (document.getElementById('new-share-writelist-select')?.value || 'grp_sistemas') : '',
+        writeList: schemeVal === '2' ? (document.getElementById('new-share-writelist-select')?.value || 'grp_samba') : '',
         readOnly: schemeVal === '3' ? 'yes' : 'no',
         path: document.getElementById('new-share-path').value || `/srv/nas/${finalName.replace(/\$$/, '')}`,
         status: 'Activo',
@@ -2417,7 +2417,7 @@ function setupForms() {
         type: 'dir',
         size: '4.0 KB',
         owner: 'root',
-        group: 'grp_sistemas',
+        group: 'grp_samba',
         perms: 'drwxrwx---',
         octal: '2770',
         mtime: 'Hace un momento'
