@@ -81,7 +81,7 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
 | **Nginx-light + PHP-FPM ondemand + Slate UI** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño espacioso Slate UI 100% offline (cero dependencias externas y cero Google Fonts). |
 | **Base de Datos SQLite Nativa (PDO)** | Almacenamiento Estructurado | SQLite en modo WAL (`/var/lib/nas/nas.sqlite`) sin demonios pesados residentes. | 0 MB de consumo de RAM en reposo; indexación ultrarrápida de auditoría, tareas, configuraciones e historial de comandos. |
-| **Explorador de Archivos Drag-and-Drop** | Gestión de Almacenamiento Web | Módulo para explorar `/srv/nas` con subida interactiva y descarga ZIP al vuelo. | Transferencia bidireccional ágil entre equipos clientes Windows y el NAS directamente en el navegador, con permisos `0660` y pertenencia a `grp_sistemas`. |
+| **Explorador de Archivos Drag-and-Drop** | Gestión de Almacenamiento Web | Módulo para explorar `/srv/nas` con subida interactiva y descarga ZIP al vuelo. | Transferencia bidireccional ágil entre equipos clientes Windows y el NAS directamente en el navegador, con permisos `0660` y pertenencia a `grp_samba`. |
 | **Terminal PTY Real (tmux + helper `nas-terminal`)** | Administración Web | Cada sesión web abre una sesión `tmux` propia ejecutada como el usuario autenticado mediante un helper root con lista blanca de acciones (`start`/`keys`/`capture`/`resize`/`kill`). | Terminal interactiva tipo Cockpit con soporte real de `sudo` (solicita contraseña), programas de pantalla completa y `Ctrl+C`, aislada por usuario y con directorio de inicio. |
 | **Gestión Avanzada de Discos (parted/LVM/Btrfs)** | Almacenamiento Web | Formateo y montaje en `/srv/nas`, creación de volúmenes LVM (PV/VG/LV) y subvolúmenes Btrfs desde el panel, con confirmación textual `SI-FORMATEAR`. | Aprovisionamiento de discos sin consola, con detección y protección estricta del disco del sistema operativo (`isOsDisk`). |
 | **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Servicios y controladores con ejecución estricta proc_open con array de argumentos. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
@@ -113,14 +113,15 @@ El sistema está diseñado para operar bajo dos roles mutuamente excluyentes:
       ┌──────────────┴──────────────┐               ┌──────────────┴──────────────┐
       ▼                             ▼               ▼                             ▼
 Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grupos:
-[SISTEMAS]                    grp_sistemas    [BACKUPS_WINDOWS$]            SOLO grp_sistemas
+[SISTEMAS]                    grp_samba    [BACKUPS_WINDOWS$]            SOLO grp_samba
 [CAMPANA_UNO_*]               grp_empleados   [BACKUPS_LINUX$]              SOLO grp_backups
 [CAMPANA_DOS_*]               grp_c1_*, c2_*  [BACKUPS_SERVIDORES$]         (Cero empleados)
 ```
 
 ### A. Despliegue Base Limpio (Servidor NAS o Central de Backup):
 * **0 Redes Compartidas Automáticas:** El archivo `smb.conf` se inicializa únicamente con la sección `[global]` optimizada, sin recursos de prueba ni carpetas innecesarias.
-* **Grupo Maestro:** Únicamente se crea `grp_sistemas` (con permisos totales `2770` sobre `/srv/nas`). El administrador del servidor queda asignado a `sudo,adm,grp_sistemas`.
+* **Grupos Especiales:** Se crean `grp_samba` (permisos totales `2770` sobre `/srv/nas`), `grp_web` (operador del panel) y `grp_superadmin` (control total e inmutable). El **superadministrador** designado en el despliegue (cuenta nueva o existente, registrada en `/etc/nas/superadmin`) queda asignado a `sudo,adm,grp_samba,grp_superadmin`.
+* **Roles del Panel:** `superadmin` (total, inmutable), `admin` (`grp_samba`/sudo, panel completo) y `operator` (`grp_web`: dashboard, archivos, logs, recursos, respaldos, usuarios, servicios, diagnóstico y red; sin almacenamiento, terminal, dominio ni reinicio).
 * **Gestión 100% Modular desde el Asistente:**
   * **Creación de Grupos (Menú [2]):** Grupos departamentales o técnicos según las necesidades del entorno.
   * **Creación de Recursos (Menú [3]):** Configuración guiada con elección de visibilidad (Oculto `$` por defecto o Visible) y 4 esquemas de permisos granulares:
