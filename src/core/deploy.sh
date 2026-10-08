@@ -97,7 +97,7 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
     nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 rsyslog \
     realmd sssd sssd-tools adcli libpam-sss libnss-sss krb5-user packagekit \
-    cifs-utils rsync sshpass cron parted ufw btrfs-progs >/dev/null 2>&1; then
+    cifs-utils rsync sshpass cron parted lvm2 ufw btrfs-progs >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
     exit 1
@@ -631,7 +631,20 @@ Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/s
     /usr/bin/smbpasswd -d -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -e -s [a-zA-Z0-9_.-]*
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
     /usr/bin/btrfs scrub status /srv/nas*, /bin/btrfs scrub status /srv/nas*, \\
-    /sbin/fstrim -v /srv/nas*, /usr/sbin/fstrim -v /srv/nas*
+    /sbin/fstrim -v /srv/nas*, /usr/sbin/fstrim -v /srv/nas*, \\
+    /usr/sbin/parted * /dev/[a-zA-Z0-9/]* *, /sbin/parted * /dev/[a-zA-Z0-9/]* *, \\
+    /usr/sbin/partprobe /dev/[a-zA-Z0-9/]*, /sbin/partprobe /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
+    /usr/bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/lvcreate *, /usr/sbin/pvs, /usr/sbin/vgs, /usr/sbin/lvs, /usr/sbin/blkid *, \\
+    /usr/bin/btrfs subvolume create /mnt/nas-btrfs-tmp/*, \\
+    /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \\
+    /bin/mkdir -p /srv/nas, /usr/bin/mkdir -p /srv/nas, \\
+    /bin/mount /dev/[a-zA-Z0-9/]* *, /usr/bin/mount /dev/[a-zA-Z0-9/]* *, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
+    /bin/umount /srv/nas, /usr/bin/umount /srv/nas, /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, \\
+    /bin/cp /tmp/nas_fstab_* /etc/fstab, /usr/bin/cp /tmp/nas_fstab_* /etc/fstab
 Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
     /bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
