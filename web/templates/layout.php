@@ -105,6 +105,8 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
       <symbol id="icon-video" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></symbol>
       <symbol id="icon-archive" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
       <symbol id="icon-restore" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
+      <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></symbol>
+      <symbol id="icon-presentation" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="6" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="14" y2="12"/></symbol>
     </defs>
   </svg>
 
@@ -1696,7 +1698,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 
   <!-- Modal: Previsualizador de Archivos 100% Offline -->
   <div class="modal-backdrop" id="modal-file-preview">
-    <div class="modal-dialog modal-dialog-preview" style="max-width:960px; width:95vw; max-height:90vh; display:flex; flex-direction:column;">
+    <div class="modal-dialog modal-dialog-preview" style="max-width:1040px; width:95vw; max-height:90vh; display:flex; flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
         <div style="display:flex; align-items:center; gap:10px; overflow:hidden;">
           <svg class="icon" id="preview-header-icon" style="flex-shrink:0; width:22px; height:22px; color:var(--accent-primary);"><use href="#icon-file-text"></use></svg>
@@ -1724,7 +1726,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-body" id="preview-modal-body" style="padding:0; flex:1; overflow-y:auto; display:flex; flex-direction:column; min-height:350px;">
         <div id="preview-loading" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:50px; color:var(--text-muted); gap:12px;">
           <svg class="icon spin" style="width:32px; height:32px; color:var(--accent-primary);"><use href="#icon-refresh"></use></svg>
-          <span>Cargando previsualización...</span>
+          <span id="preview-loading-text">Cargando previsualización...</span>
         </div>
         <div id="preview-code-container" class="preview-code-wrap" style="display:none;">
           <div class="preview-line-numbers" id="preview-line-numbers"></div>
@@ -1741,6 +1743,50 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <video id="preview-video-element" controls style="max-width:100%; max-height:480px; border-radius:var(--radius-sm); display:none;"></video>
           <audio id="preview-audio-element" controls style="width:100%; max-width:460px; display:none;"></audio>
         </div>
+
+        <!-- Visor Excel / Hojas de Cálculo (SheetJS Local) -->
+        <div id="preview-spreadsheet-container" class="preview-office-wrap preview-spreadsheet-wrap" style="display:none;">
+          <div class="preview-office-bar" id="preview-spreadsheet-bar">
+            <div class="preview-sheet-tabs" id="preview-sheet-tabs"></div>
+            <div class="preview-office-stats" id="preview-spreadsheet-stats"></div>
+          </div>
+          <div class="preview-spreadsheet-scroll" id="preview-spreadsheet-scroll">
+            <div id="preview-spreadsheet-table-container"></div>
+          </div>
+        </div>
+
+        <!-- Visor Word (.docx) (docx-preview Local) -->
+        <div id="preview-docx-container" class="preview-office-wrap preview-docx-wrap" style="display:none;">
+          <div class="preview-docx-scroll" id="preview-docx-scroll">
+            <div id="preview-docx-content" class="preview-docx-content"></div>
+          </div>
+        </div>
+
+        <!-- Visor PowerPoint (.pptx) (Inspector de Diapositivas Local) -->
+        <div id="preview-pptx-container" class="preview-office-wrap preview-pptx-wrap" style="display:none;">
+          <div class="preview-pptx-layout">
+            <div class="preview-pptx-sidebar" id="preview-pptx-sidebar">
+              <div class="preview-pptx-sidebar-header">Diapositivas (<span id="preview-pptx-count">0</span>)</div>
+              <div class="preview-pptx-slides-list" id="preview-pptx-slides-list"></div>
+            </div>
+            <div class="preview-pptx-main">
+              <div class="preview-pptx-toolbar">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-pptx-prev" onclick="navigatePptxSlide(-1)">
+                  &larr; Anterior
+                </button>
+                <span id="preview-pptx-current-label" style="font-size:12.5px; font-weight:500;">Diapositiva 1 de 1</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-pptx-next" onclick="navigatePptxSlide(1)">
+                  Siguiente &rarr;
+                </button>
+              </div>
+              <div class="preview-pptx-slide-canvas" id="preview-pptx-slide-canvas">
+                <div class="preview-pptx-slide-header" id="preview-pptx-slide-title">Título de la diapositiva</div>
+                <div class="preview-pptx-slide-body" id="preview-pptx-slide-body"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="preview-binary-container" class="preview-media-wrap" style="display:none; padding:40px; text-align:center;">
           <svg class="icon" style="width:64px; height:64px; color:var(--text-muted); margin-bottom:12px;"><use href="#icon-archive"></use></svg>
           <h4 id="preview-binary-name" style="margin-bottom:6px; font-size:16px;">archivo.bin</h4>
