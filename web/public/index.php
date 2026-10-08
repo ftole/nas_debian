@@ -97,6 +97,7 @@ $router->post('/api/shares', [SambaController::class, 'create']);
 $router->post('/api/shares/update', [SambaController::class, 'update']);
 $router->post('/api/shares/access', [SambaController::class, 'setAccess']);
 $router->get('/api/shares/access', [SambaController::class, 'accessMap']);
+$router->post('/api/shares/access/repair', [SambaController::class, 'repairAccess']);
 $router->post('/api/shares/delete', [SambaController::class, 'delete']);
 $router->delete('/api/shares/{name}', [SambaController::class, 'delete']);
 
