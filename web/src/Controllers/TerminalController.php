@@ -55,4 +55,54 @@ class TerminalController
             'data' => $history,
         ]);
     }
+
+    public function session(Request $request): void
+    {
+        $body = $request->getBody();
+        $cols = max(40, min((int) ($body['cols'] ?? 200), 400));
+        $rows = max(10, min((int) ($body['rows'] ?? 50), 200));
+        $res = $this->terminalService->startSession($cols, $rows);
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'No se pudo iniciar la sesión de terminal.');
+            return;
+        }
+        Response::success(['output' => $res['output'] ?? '']);
+    }
+
+    public function send(Request $request): void
+    {
+        $body = $request->getBody();
+        $data = (string) ($body['data'] ?? '');
+        $res = $this->terminalService->send($data);
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'No se pudo enviar la entrada a la terminal.');
+            return;
+        }
+        Response::success(['sent' => $data]);
+    }
+
+    public function capture(Request $request): void
+    {
+        $res = $this->terminalService->capture();
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'No se pudo capturar la terminal.');
+            return;
+        }
+        Response::success(['output' => $res['output'] ?? '']);
+    }
+
+    public function resize(Request $request): void
+    {
+        $body = $request->getBody();
+        $cols = max(40, min((int) ($body['cols'] ?? 200), 400));
+        $rows = max(10, min((int) ($body['rows'] ?? 50), 200));
+        $this->terminalService->resizeSession($cols, $rows);
+        Response::success(null);
+    }
+
+    public function kill(Request $request): void
+    {
+        $this->terminalService->killSession();
+        Response::success(null, 'Sesión de terminal finalizada.');
+    }
 }
