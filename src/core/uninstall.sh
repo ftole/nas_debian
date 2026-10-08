@@ -46,13 +46,14 @@ STAMP="$(date +%Y%m%d_%H%M%S)"
 
 echo "[0/7] Respaldando configuraciones antes de eliminar..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] respaldar fstab, samba, credenciales y cron en $BACKUP_DIR"
+    echo "  [dry-run] respaldar fstab, samba, credenciales, cron y auditoria en $BACKUP_DIR"
 else
     mkdir -p "$BACKUP_DIR"
     if [ -f /etc/fstab ]; then cp -a /etc/fstab "$BACKUP_DIR/fstab.$STAMP"; fi
     if [ -d /etc/samba ]; then cp -a /etc/samba "$BACKUP_DIR/samba.$STAMP" 2>/dev/null || true; fi
     if [ -d /etc/backup-credentials ]; then cp -a /etc/backup-credentials "$BACKUP_DIR/backup-credentials.$STAMP" 2>/dev/null || true; fi
     if [ -d /etc/cron.d ]; then cp -a /etc/cron.d "$BACKUP_DIR/cron.d.$STAMP" 2>/dev/null || true; fi
+    if [ -d /etc/audit ]; then cp -a /etc/audit "$BACKUP_DIR/audit.$STAMP" 2>/dev/null || true; fi
     echo "  Respaldos guardados en $BACKUP_DIR"
 fi
 
@@ -111,7 +112,7 @@ fi
 
 echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
 if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, servidor web, base de datos sqlite, certificados SSL, wrappers, parches, overrides, logrotate y udev"
+    echo "  [dry-run] eliminar /etc/samba, servidor web, base de datos sqlite, certificados SSL, wrappers, parches, overrides, logrotate, udev y reglas de auditoria"
 else
     rm -rf /etc/samba
     rm -rf /var/www/nas-web
@@ -133,11 +134,16 @@ else
     rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
     rm -f /etc/udev/rules.d/60-nas-readahead.rules
     rm -f /etc/sysctl.d/99-nas-tuning.conf
+    rm -f /etc/audit/rules.d/nas.rules
     rm -f /etc/logrotate.d/nas-backups /etc/logrotate.d/nas-deploy /etc/logrotate.d/nas-admin /etc/logrotate.d/samba-audit
     rm -f /etc/rsyslog.d/50-samba-audit.conf
     rm -f /var/log/nas-admin.log /var/log/samba/audit.log /srv/nas/LOGS_BACKUP/backups_master.log
     rm -f /etc/default/wsdd2
     rm -rf /etc/systemd/system/wsdd2.service.d
+    if command -v augenrules &>/dev/null; then
+        augenrules --load 2>/dev/null || true
+    fi
+    service auditd restart 2>/dev/null || systemctl restart auditd 2>/dev/null || true
     systemctl restart rsyslog 2>/dev/null || true
     udevadm control --reload-rules 2>/dev/null || true
     systemctl daemon-reload
