@@ -141,21 +141,42 @@ instalar_nas() {
     # PASO 4: ADMINISTRADOR DEL PANEL WEB Y SAMBA
     # --------------------------------------------------------------------------
     USUARIO_ACTUAL="$DEFAULT_USER"
-    OPCION_USER=$(whiptail --title "Paso 4 de 5: Administrador del Panel Web" \
+    OPCION_USER=$(whiptail --title "Paso 4 de 5: Superadministrador del Servidor" \
         --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-        --menu "Selecciona la cuenta que administrará el panel web y el servidor:" 14 70 2 \
+        --menu "Selecciona la cuenta con CONTROL TOTAL del panel y del servidor:" 14 72 3 \
         "1" "Usar usuario detectado: [$USUARIO_ACTUAL] (Recomendado)" \
-        "2" "Crear o especificar otro usuario administrador" 3>&1 1>&2 2>&3)
+        "2" "Designar un usuario existente como superadministrador" \
+        "3" "Crear un nuevo usuario superadministrador" 3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -ne 0 ] || [ -z "$OPCION_USER" ]; then return; fi
 
     ADMIN_USER="$USUARIO_ACTUAL"
-    if [ "$OPCION_USER" == "2" ]; then
-        ADMIN_USER=$(whiptail --title "Nuevo Administrador" \
-            --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-            --inputbox "Ingresa el nombre de usuario para el nuevo administrador:" 10 65 "admin_nas" 3>&1 1>&2 2>&3)
-        RET=$?
-        if [ $RET -ne 0 ] || [ -z "$ADMIN_USER" ]; then return; fi
+    if [ "$OPCION_USER" != "1" ]; then
+        if [ "$OPCION_USER" == "2" ]; then
+            # Listar cuentas humanas existentes (UID >= 1000) para designar una ya existente.
+            local _lista_usuarios
+            _lista_usuarios=$(getent passwd | awk -F: '$3>=1000 && $3<65534 {print $1}' | sort)
+            if [ -z "$_lista_usuarios" ]; then
+                _lista_usuarios="$USUARIO_ACTUAL"
+            fi
+            # Construir argumentos menu "nombre" "descripcion"
+            local _menu_args=()
+            while IFS= read -r _u; do
+                [ -n "$_u" ] && _menu_args+=("$_u" "Cuenta existente")
+            done <<< "$_lista_usuarios"
+            ADMIN_USER=$(whiptail --title "Designar Superadministrador" \
+                --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                --menu "Selecciona la cuenta existente que será superadministrador:" 18 72 10 \
+                "${_menu_args[@]}" 3>&1 1>&2 2>&3)
+            RET=$?
+            if [ $RET -ne 0 ] || [ -z "$ADMIN_USER" ]; then return; fi
+        else
+            ADMIN_USER=$(whiptail --title "Nuevo Superadministrador" \
+                --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                --inputbox "Ingresa el nombre de usuario para el nuevo superadministrador:" 10 65 "admin_nas" 3>&1 1>&2 2>&3)
+            RET=$?
+            if [ $RET -ne 0 ] || [ -z "$ADMIN_USER" ]; then return; fi
+        fi
     fi
 
     if ! [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
@@ -193,7 +214,7 @@ instalar_nas() {
 * Modo Almacenamiento  : $MODO_ALM
 * Nombre del Servidor  : $SMB_NETBIOS
 * Grupo / Dominio      : $SMB_WORKGROUP
-* Administrador Web    : $ADMIN_USER (Permisos sudo y Samba)
+* Superadministrador   : $ADMIN_USER (control total e inmutable)
 
 INCLUYE PARCHES AUTOMATICOS:
 - Servidor Web Nginx, PHP-FPM ondemand y difusion WSDD2 / LLMNR
@@ -234,7 +255,7 @@ ADVERTENCIA: se formateara el disco $DISCO_SELECCIONADO y se borraran TODOS sus 
         
         if [ $ret_exec -eq 0 ]; then
             whiptail --title "$APP_TITLE" --ok-button "< Finalizar >" \
-                --msgbox "✔ ¡Despliegue del Servidor ($ROL_SERVER) Completado con Éxito!\n\n• Panel Web:         https://${SERVER_IP} (o http://${SERVER_IP})\n• Administrador:     $ADMIN_USER (con permisos sudo y Samba)\n• Grupo Maestro:     grp_sistemas (Permisos totales sobre /srv/nas)\n• Redes Compartidas: 0 (Servidor base 100% limpio)\n\n💡 SIGUIENTE PASO:\nUtiliza las opciones [2] y [3] del menú para crear tus grupos y definir tus carpetas compartidas (visibles u ocultas $) a medida." 17 74
+                --msgbox "✔ ¡Despliegue del Servidor ($ROL_SERVER) Completado con Éxito!\n\n• Panel Web:         https://${SERVER_IP} (o http://${SERVER_IP})\n• Superadmin:        $ADMIN_USER (control total e inmutable)\n• Grupo Samba:       grp_samba (Permisos totales sobre /srv/nas)\n• Redes Compartidas: 0 (Servidor base 100% limpio)\n\n💡 SIGUIENTE PASO:\nUtiliza las opciones [2] y [3] del menú para crear tus grupos y definir tus carpetas compartidas (visibles u ocultas $) a medida." 17 74
         else
             whiptail --title "Error en el Despliegue" --ok-button "< Aceptar >" \
                 --msgbox "✖ Ocurrió un error durante la ejecución del script de despliegue (Código de salida: $ret_exec).\n\nRevisa los mensajes anteriores en la consola." 12 70
