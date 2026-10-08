@@ -74,7 +74,7 @@ desinstalar_guiado() {
 
 # Función para verificar si el servidor ya fue desplegado
 obtener_estado_despliegue() {
-    if [ -f /etc/samba/smb.conf ] && getent group grp_sistemas &>/dev/null && [ -d /srv/nas ]; then
+    if [ -f /etc/samba/smb.conf ] && getent group grp_samba &>/dev/null && [ -d /srv/nas ]; then
         local rol="ARCHIVOS"
         if grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
             rol="BACKUP"
