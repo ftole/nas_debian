@@ -70,7 +70,8 @@ class StorageController
         $res = $this->storage->formatAndMount(
             (string) ($data['device'] ?? ''),
             (string) ($data['fstype'] ?? 'ext4'),
-            (string) ($data['confirm'] ?? '')
+            (string) ($data['confirm'] ?? ''),
+            (bool) ($data['unmount'] ?? false)
         );
         if (!$res['success']) {
             AuditService::log('storage_format', (string) ($data['device'] ?? ''), 'FAILED', ['error' => $res['error'] ?? '']);
@@ -90,7 +91,8 @@ class StorageController
             (string) ($data['lv'] ?? ''),
             (string) ($data['size'] ?? '100%FREE'),
             (string) ($data['fstype'] ?? 'ext4'),
-            (string) ($data['confirm'] ?? '')
+            (string) ($data['confirm'] ?? ''),
+            (bool) ($data['unmount'] ?? false)
         );
         if (!$res['success']) {
             AuditService::log('storage_lvm', (string) ($data['vg'] ?? ''), 'FAILED', ['error' => $res['error'] ?? '']);
