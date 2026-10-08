@@ -915,6 +915,12 @@ $fmtBad = $storage->formatAndMount('/dev/sdz', 'ext4', 'NO');
 assertTrue(!$fmtBad['success'], 'StorageService::formatAndMount exige la confirmación SI-FORMATEAR');
 $unmountDev = $storage->unmountDevice('/dev/sdb');
 assertTrue($unmountDev === true, 'StorageService::unmountDevice ejecuta desmontaje pasando ruta de dispositivo');
+$unmountMount = $storage->unmountDevice('/mnt/secundario');
+assertTrue($unmountMount === true, 'StorageService::unmountDevice ejecuta desmontaje pasando ruta de punto de montaje');
+$unmountEmpty = $storage->unmountDevice('');
+assertTrue($unmountEmpty === false, 'StorageService::unmountDevice rechaza rutas vacías');
+$hasMountEmpty = $storage->deviceHasMount('');
+assertTrue($hasMountEmpty === false, 'StorageService::deviceHasMount retorna false para rutas vacías');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
