@@ -955,7 +955,7 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
                 "name": share_e2e,
                 "comment": "Recurso temporal de prueba E2E",
                 "scheme": 1,
-                "groups": ["grp_sistemas"],
+                "groups": ["grp_samba"],
                 "hidden": False,
             }).encode("utf-8")
             req_create = urllib.request.Request(
