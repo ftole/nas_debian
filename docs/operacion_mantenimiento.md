@@ -31,7 +31,15 @@ Todo el almacenamiento administrado por el sistema reside en `/srv/nas`:
 - **Si el disco es nuevo o puede sobrescribirse:** Utiliza el asistente interactivo (Opción [1]) y selecciona formatear. El sistema detecta automáticamente si es HDD o SSD y aplica el sistema de archivos óptimo (`ext4` para NAS o `Btrfs` para copias de seguridad).
 - **Si el disco ya tiene datos previos (Reutilización segura):** Selecciona la opción `Conservar datos existentes (--keep-data)` en el asistente o agrega `--keep-data` en la consola. El sistema detectará la partición válida, montará el volumen en `/srv/nas` y optimizará los parámetros de lectura y escritura sin alterar ningún archivo previo.
 
-### 2.3 Monitoreo de Capacidad
+### 2.3 Gestión de Discos desde el Panel Web
+La pestaña **Almacenamiento** lista los dispositivos de bloque con su estado (`SO · protegido`, `En uso` o `Disponible`) y ofrece el botón **Gestión de disco** para:
+- **Formatear y montar en `/srv/nas`** en `ext4` o `Btrfs` (con las optimizaciones según tipo de disco).
+- **Crear un volumen LVM** (PV → VG → LV) y montarlo en `/srv/nas`.
+- **Crear un subvolumen Btrfs**.
+
+Toda operación destructiva exige escribir textualmente `SI-FORMATEAR`. El disco del sistema operativo queda siempre protegido (`isOsDisk`) y nunca se lista como candidato; los discos en uso (montados, PV de LVM o miembros de RAID) también se excluyen.
+
+### 2.4 Monitoreo de Capacidad
 Para verificar el espacio en cualquier momento:
 ```bash
 df -h /srv/nas
