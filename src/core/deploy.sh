@@ -504,7 +504,7 @@ VERSION_EOF
 chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
 chmod -R 755 /var/www/nas-web 2>/dev/null || true
 
-# La pertenencia de www-data al grupo grp_sistemas se aplica en el paso [4/9],
+# La pertenencia de www-data al grupo grp_samba se aplica en el paso [4/9],
 # una vez creado el grupo (hacerlo aquí antes de groupadd no tendría efecto).
 
 # 3.1 Inicializar la base de datos SQLite nativa (evita la creación perezosa en la primera petición)
@@ -596,7 +596,7 @@ if ! id "$TARGET_USER" >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_web|grp_sistemas'; then
+if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_web|grp_samba'; then
     echo "el usuario no tiene acceso web" >&2
     exit 1
 fi
@@ -717,7 +717,8 @@ Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub 
     /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \\
     /bin/mkdir -p /srv/nas, /usr/bin/mkdir -p /srv/nas, \\
     /bin/mount /dev/[a-zA-Z0-9/]* *, /usr/bin/mount /dev/[a-zA-Z0-9/]* *, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
-    /bin/umount /srv/nas, /usr/bin/umount /srv/nas, /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, \\
+    /bin/umount /srv/nas*, /usr/bin/umount /srv/nas*, /bin/umount -l /srv/nas*, /usr/bin/umount -l /srv/nas*, \\
+    /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, /bin/umount -l /mnt/nas-btrfs-tmp, /usr/bin/umount -l /mnt/nas-btrfs-tmp, \\
     /bin/cp /tmp/nas_fstab_* /etc/fstab, /usr/bin/cp /tmp/nas_fstab_* /etc/fstab
 Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
@@ -736,11 +737,13 @@ Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
 Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \\
     /bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, \\
-    /bin/chown root\:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root\:grp_sistemas /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2777 /srv/nas/[a-zA-Z0-9_.-]*, \\
     /usr/bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
     /usr/bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -R -d -m * /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /usr/bin/setfacl -m u\:www-data\:rwx /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -m u\:www-data\:rwx /srv/nas/[a-zA-Z0-9_.-]*, \\
+    /bin/chmod o+x /srv/nas, /usr/bin/chmod o+x /srv/nas, \\
     /bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*
 Cmnd_Alias NAS_TERMINAL = /usr/local/sbin/nas-terminal *
 
@@ -777,12 +780,15 @@ ExecStart=
 ExecStart=/usr/sbin/wsdd2 \$WSDD2_OPTS
 WSDDOVERRIDE
 
-echo " [4/9] Creando grupo maestro Sistemas y configurando administradores ($ADMIN_USER)..."
-groupadd -f grp_sistemas
-# Grupo de acceso al panel web en rol no-administrador
+echo " [4/9] Creando grupos maestros y configurando al superadministrador ($ADMIN_USER)..."
+# Grupo Samba maestro: acceso total a todos los recursos compartidos.
+groupadd -f grp_samba
+# Grupo de acceso al panel web en rol operador (no-administrador).
 groupadd -f grp_web
-# El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_sistemas).
-usermod -aG systemd-journal,adm,grp_sistemas www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_sistemas."
+# Grupo de superadministradores: control total e inmutable del panel.
+groupadd -f grp_superadmin
+# El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_samba).
+usermod -aG systemd-journal,adm,grp_samba www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_samba."
 
 # 1. Crear las cuentas administrativas base del sistema SIN contraseña por defecto.
 #    Estas cuentas quedan bloqueadas hasta que el operador les asigne una clave.
@@ -790,19 +796,26 @@ for _cuenta in sistemas administrador; do
     if ! id "$_cuenta" &>/dev/null; then
         adduser --disabled-password --gecos "" "$_cuenta"
     fi
-    usermod -aG sudo,adm,grp_sistemas "$_cuenta"
+    usermod -aG sudo,adm,grp_samba "$_cuenta"
     echo "$_cuenta ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
     chmod 0440 "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
 done
 
-# 2. Configurar la cuenta administradora designada para este despliegue.
+# 2. Configurar la cuenta superadministradora designada para este despliegue.
+#    Es una cuenta existente o recién creada con control TOTAL e inmutable del panel.
 if ! id "$ADMIN_USER" &>/dev/null; then
     adduser --disabled-password --gecos "" "$ADMIN_USER"
 fi
-usermod -aG sudo,adm,grp_sistemas "$ADMIN_USER"
+usermod -aG sudo,adm,grp_samba,grp_superadmin "$ADMIN_USER"
 SUDOERS_FILE="/etc/sudoers.d/90-${ADMIN_USER//[^A-Za-z0-9_-]/_}"
 echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
 chmod 0440 "$SUDOERS_FILE"
+
+# Registrar el superadministrador canónico para el panel web y las herramientas.
+install -d -m 0750 -o root -g root /etc/nas
+printf '%s\n' "$ADMIN_USER" > /etc/nas/superadmin
+chmod 0640 /etc/nas/superadmin
+chown root:root /etc/nas/superadmin 2>/dev/null || true
 
 # 3. Asignar contraseña: la suministrada por el operador o una aleatoria fuerte generada aquí.
 CLAVE_GENERADA=false
@@ -837,21 +850,21 @@ else
     echo "  [OK] Contraseña de '$ADMIN_USER' establecida con la clave suministrada."
 fi
 
-echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Sistemas..."
+echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Samba..."
 mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
 chmod 0750 /etc/backup-credentials 2>/dev/null || true
 chown root:www-data /etc/backup-credentials 2>/dev/null || true
 if [ "$KEEP_DATA" = true ]; then
-    chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    chown root:grp_samba /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
     chmod 2771 /srv/nas
     chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
 else
-    chown root:grp_sistemas /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    chown root:grp_samba /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
     chmod 2771 /srv/nas
     chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
     # Los snapshots de BACKUPS_HISTORICOS son inmutables (chattr +i) y conservan sus
     # propietarios originales: se excluyen de la normalización recursiva de permisos.
-    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -exec chown -h root:grp_sistemas {} +
+    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -exec chown -h root:grp_samba {} +
     find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type d ! -type l -exec chmod 2770 {} +
     find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type f ! -type l -exec chmod 660 {} +
 fi
