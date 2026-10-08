@@ -132,18 +132,20 @@ cd /opt/nas_debian && sudo git reset --hard <commit>
 
 El panel incorpora un gestor de identidades nativo (Linux + Samba) con control granular:
 
-- **Roles por grupo:**
-  - **`grp_sistemas` (Especial):** administrador del servidor (root/sudo + panel completo + SSH).
-  - **`grp_web` (Especial):** acceso al panel en rol **usuario** (solo Vista general, Archivos y Logs).
+- **Roles por grupo (tres niveles):**
+  - **`grp_superadmin` (Especial):** cuenta **superadministradora** con control total e **inmutable** (no se puede eliminar, degradar ni suspender). Única con capacidad de otorgar `superadmin`. Se designa en el despliegue (cuenta nueva o existente) y queda registrada en `/etc/nas/superadmin`.
+  - **`grp_samba` (Especial):** administrador del servidor (root/sudo + panel completo + SSH).
+  - **`grp_web` (Especial):** **operador** del panel: Vista general, Archivos, Logs, Redes compartidas, Respaldos, Usuarios, Servicios, Diagnóstico y Red. Puede crear usuarios estándar, pero no administradores ni superadministradores.
   - **`grp_*` departamentales:** determinan el acceso a las redes compartidas.
-- **Permisos por usuario:** contraseña, nombre real/cargo, **Acceso web**, **Administrador (root/sudo)** y **Acceso a red (Samba)**.
-- **Política de shell:** los administradores usan `/bin/bash`; el resto `/usr/sbin/nologin` (sin consola ni SSH).
-- **Grupos especiales** (`grp_sistemas`, `grp_web`): no se crean/borran/renombran desde el panel y solo se controlan mediante las casillas de rol del usuario.
+- **Permisos por usuario:** contraseña, nombre real/cargo, **Acceso web (operador)**, **Administrador (root/sudo)**, **Superadministrador** (solo visible al superadmin) y **Acceso a red (Samba)**.
+- **Política de shell:** los administradores/superadmin usan `/bin/bash`; el resto `/usr/sbin/nologin` (sin consola ni SSH).
+- **Grupos especiales** (`grp_superadmin`, `grp_samba`, `grp_web`): no se crean/borran/renombran desde el panel y solo se controlan mediante las casillas de rol del usuario.
 
 ### Acceso a recursos compartidos
 - El acceso efectivo de un usuario a una carpeta es la **unión** del acceso **por grupo** (`valid users`/`write list`) y de las **concesiones explícitas por usuario**.
 - Los recursos de solo lectura (`read only = yes`, esquema 3) nunca reportan escritura.
-- **`grp_sistemas` se incluye siempre** en `valid users` para que los administradores conserven acceso, aunque los grupos especiales no aparezcan en los selectores.
+- **`grp_samba` se incluye siempre** en `valid users` para que los administradores conserven acceso, aunque los grupos especiales no aparezcan en los selectores.
+- **Sincronización ACL POSIX:** cada cambio de permisos recalcula las ACL de disco (`setfacl`, con herencia por defecto) para que coincidan con `valid users`/`write list`. La acción **Reparar ACL** (en Usuarios) corrige desajustes que provocaban rechazos de acceso pese a estar autorizado en Samba.
 
 > [!IMPORTANT]
 > **Acoplamiento Web↔Samba:** el panel autentica las sesiones contra Samba (`smbclient`). Por tanto, **“Acceso web” requiere que la cuenta Samba esté activa**: desactivar “Acceso a red (Samba)” a un usuario web le retira también el acceso al panel.
