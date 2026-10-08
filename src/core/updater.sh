@@ -142,9 +142,10 @@ _hook_post_actualizacion() {
         fi
     done
 
-    local term_dest="/usr/local/sbin/nas-terminal"
+    local term_dest="${NAS_TERMINAL_DEST:-/usr/local/sbin/nas-terminal}"
     if [ -n "$term_src" ]; then
         if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
+            mkdir -p "$(dirname "$term_dest")" 2>/dev/null || true
             cp -f "$term_src" "$term_dest" 2>/dev/null || true
             chmod 0755 "$term_dest" 2>/dev/null || true
             chown root:root "$term_dest" 2>/dev/null || true
@@ -158,6 +159,7 @@ _hook_post_actualizacion() {
             capture { print }
         ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_term" 2>/dev/null && [ -s "$tmp_term" ]; then
             if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
+                mkdir -p "$(dirname "$term_dest")" 2>/dev/null || true
                 cp -f "$tmp_term" "$term_dest" 2>/dev/null || true
                 chmod 0755 "$term_dest" 2>/dev/null || true
                 chown root:root "$term_dest" 2>/dev/null || true
@@ -166,7 +168,9 @@ _hook_post_actualizacion() {
         rm -f "$tmp_term" 2>/dev/null || true
     fi
 
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d /etc/sudoers.d ]; then
+    local sudoers_dir="${NAS_SUDOERS_DIR:-/etc/sudoers.d}"
+    local sudoers_dest="${NAS_SUDOERS_DEST:-$sudoers_dir/nas-web}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$sudoers_dir" ]; then
         local php_ver tmp_sudoers
         php_ver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
         tmp_sudoers="$(mktemp 2>/dev/null || echo "/tmp/nas_sudoers.$$")"
@@ -183,11 +187,12 @@ _hook_post_actualizacion() {
                 fi
             fi
             if [ "$valido" -eq 1 ]; then
-                if [ ! -f /etc/sudoers.d/nas-web ] || ! cmp -s "$tmp_sudoers" /etc/sudoers.d/nas-web 2>/dev/null; then
-                    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/sudoers.d ]; then
-                        cp -f "$tmp_sudoers" /etc/sudoers.d/nas-web 2>/dev/null || true
-                        chmod 0440 /etc/sudoers.d/nas-web 2>/dev/null || true
-                        chown root:root /etc/sudoers.d/nas-web 2>/dev/null || true
+                if [ ! -f "$sudoers_dest" ] || ! cmp -s "$tmp_sudoers" "$sudoers_dest" 2>/dev/null; then
+                    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$sudoers_dir" ]; then
+                        mkdir -p "$sudoers_dir" 2>/dev/null || true
+                        cp -f "$tmp_sudoers" "$sudoers_dest" 2>/dev/null || true
+                        chmod 0440 "$sudoers_dest" 2>/dev/null || true
+                        chown root:root "$sudoers_dest" 2>/dev/null || true
                     fi
                 fi
             fi
