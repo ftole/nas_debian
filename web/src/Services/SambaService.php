@@ -178,7 +178,7 @@ class SambaService
 
         switch ($scheme) {
             case 1: // Lectura y Escritura por Grupo
-                $shareProps['read only'] = 'no';
+                $shareProps['read only'] = 'yes';
                 $shareProps['guest ok'] = 'no';
                 if (!empty($cleanGroups)) {
                     $shareProps['valid users'] = implode(' ', $cleanGroups);
@@ -187,7 +187,7 @@ class SambaService
                 break;
 
             case 2: // Solo Lectura General + Escritura Exclusiva
-                $shareProps['read only'] = 'no';
+                $shareProps['read only'] = 'yes';
                 $shareProps['guest ok'] = 'no';
                 $wgClean = ltrim($writeGroup, '@');
                 $wEntry = '@' . $wgClean;
@@ -439,7 +439,7 @@ class SambaService
             $props['valid users'] = $this->joinTokens(array_merge($groups, $validUsers));
             unset($props['write list']);
         } elseif ($scheme === 2) {
-            $props['read only'] = 'no';
+            $props['read only'] = 'yes';
             $props['guest ok'] = 'no';
             unset($props['public'], $props['guest only']);
             $groupsWithWriter = $groups;
@@ -449,7 +449,7 @@ class SambaService
             $props['valid users'] = $this->joinTokens(array_merge($groupsWithWriter, $validUsers));
             $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers, ['@grp_sistemas']));
         } else {
-            $props['read only'] = 'no';
+            $props['read only'] = 'yes';
             $props['guest ok'] = 'no';
             unset($props['public'], $props['guest only']);
             $props['valid users'] = $this->joinTokens(array_merge($groups, $validUsers));
