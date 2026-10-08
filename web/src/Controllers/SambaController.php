@@ -118,6 +118,37 @@ class SambaController
     }
 
     /**
+     * Repara las ACL POSIX de uno o todos los recursos para alinearlas con smb.conf.
+     */
+    public function repairAccess(Request $request): void
+    {
+        $data = $request->getBody();
+        $name = trim((string) ($data['share'] ?? ''));
+
+        if ($name !== '') {
+            $res = $this->samba->syncShareAcls($name);
+            if (!$res['success']) {
+                AuditService::log('share_acl_repair', $name, 'FAILED', ['error' => $res['error'] ?? '']);
+                Response::error($res['error'] ?? 'No se pudieron reparar las ACL.');
+                return;
+            }
+            AuditService::log('share_acl_repair', $name, 'SUCCESS');
+            Response::success(null, $res['message'] ?? 'ACL reparadas.');
+            return;
+        }
+
+        $fixed = 0;
+        foreach ($this->samba->listShares() as $share) {
+            $res = $this->samba->syncShareAcls($share['name']);
+            if (!empty($res['success'])) {
+                $fixed++;
+            }
+        }
+        AuditService::log('share_acl_repair', '*', 'SUCCESS', ['shares' => $fixed]);
+        Response::success(['repaired' => $fixed], "ACL sincronizadas en $fixed recurso(s).");
+    }
+
+    /**
      * Matriz de acceso: recursos × grupos y recursos × usuarios (nivel efectivo).
      */
     public function accessMap(Request $request): void
