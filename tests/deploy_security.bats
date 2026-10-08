@@ -4,6 +4,12 @@
 # Pruebas Unitarias de Endurecimiento de Seguridad (Kernel sysctl, auditd, AIDE)
 # ==============================================================================
 
+teardown() {
+    if [ -n "$tmp" ] && [ -f "$tmp" ]; then
+        rm -f "$tmp"
+    fi
+}
+
 _extraer_bloque_sysctl() {
     awk '
         /cat << '\''SYSCTL_EOF'\'' > \/etc\/sysctl\.d\/99-nas-tuning\.conf$/ { capture=1; next }
@@ -137,3 +143,20 @@ _extraer_bloque_audit() {
     run grep -q 'if \[ -d /etc/audit \]; then cp -a /etc/audit' src/core/uninstall.sh
     [ "$status" -eq 0 ]
 }
+
+@test "uninstall.sh invoca augenrules para regenerar reglas de auditoria tras la eliminacion" {
+    run grep -q 'augenrules --load' src/core/uninstall.sh
+    [ "$status" -eq 0 ]
+}
+
+@test "deploy.sh verifica el estado activo de auditd y aplica configuracion sysctl" {
+    run grep -Eq 'for _svc in .*auditd' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run grep -q 'sysctl -p /etc/sysctl.d/99-nas-tuning.conf' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run grep -q 'systemctl enable auditd' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+}
+
