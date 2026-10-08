@@ -97,7 +97,8 @@ if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
     sudo acl samba samba-common-bin wsdd2 smbclient samba-vfs-modules openssl \
     nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 rsyslog \
     realmd sssd sssd-tools adcli libpam-sss libnss-sss krb5-user packagekit \
-    cifs-utils rsync sshpass cron parted lvm2 tmux ufw btrfs-progs >/dev/null 2>&1; then
+    cifs-utils rsync sshpass cron parted lvm2 tmux ufw btrfs-progs \
+    auditd aide >/dev/null 2>&1; then
     echo "[-] ERROR CRITICO: no se pudieron instalar los paquetes base."
     log "[ERROR] Fallo en la instalación de paquetes base."
     exit 1
@@ -165,6 +166,14 @@ vm.vfs_cache_pressure = 30
 vm.dirty_background_bytes = 67108864
 vm.dirty_bytes = 268435456
 vm.dirty_expire_centisecs = 300
+
+# Hardening y Ciberseguridad de Red / Kernel
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.tcp_syncookies = 1
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.yama.ptrace_scope = 2
 SYSCTL_EOF
     sysctl -p /etc/sysctl.d/99-nas-tuning.conf >/dev/null 2>&1 || true
 
@@ -1049,7 +1058,42 @@ if systemctl list-unit-files --type=service 'rsyslog.service' 2>/dev/null | grep
     systemctl restart rsyslog 2>/dev/null || true
 fi
 
-for _svc in smbd nmbd wsdd2 nginx cron rsyslog; do
+# Configuración de Auditoría del Kernel (auditd) e Integridad (AIDE)
+mkdir -p /etc/audit/rules.d
+cat << 'AUDIT_EOF' > /etc/audit/rules.d/nas.rules
+# ==============================================================================
+# Reglas de Auditoría del Kernel - NAS Debian (Debian 13)
+# ==============================================================================
+
+# Auditoría de modificaciones en permisos y configuración administrativa
+-w /etc/sudoers -p wa -k sudoers_changes
+-w /etc/sudoers.d/ -p wa -k sudoers_changes
+
+# Auditoría de modificaciones en la configuración de recursos Samba
+-w /etc/samba/smb.conf -p wa -k samba_changes
+
+# Auditoría de accesos a credenciales de respaldos corporativos
+-w /etc/backup-credentials/ -p rwa -k backup_credentials
+
+# Auditoría de ejecuciones de la terminal administrativa segura
+-w /usr/local/sbin/nas-terminal -p x -k nas_terminal
+AUDIT_EOF
+
+if command -v augenrules &>/dev/null; then
+    augenrules --load 2>/dev/null || true
+fi
+service auditd restart 2>/dev/null || systemctl restart auditd 2>/dev/null || true
+systemctl enable auditd 2>/dev/null || true
+
+# Inicialización no bloqueante de base de datos AIDE
+aideinit -y -f 2>/dev/null || aide --init 2>/dev/null || true
+if [ -f /var/lib/aide/aide.db.new ]; then
+    cp -f /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
+elif [ -f /var/lib/aide/aide.db.new.gz ]; then
+    cp -f /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz 2>/dev/null || true
+fi
+
+for _svc in smbd nmbd wsdd2 nginx cron rsyslog auditd; do
     if systemctl list-unit-files --type=service "${_svc}.service" &>/dev/null; then
         if systemctl is-active "$_svc" &>/dev/null; then
             echo "  [OK]  $_svc activo"
