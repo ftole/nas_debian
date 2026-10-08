@@ -108,8 +108,8 @@ assertTrue(!$delRoot['success'], 'UserService rechaza eliminar cuenta protegida 
 $delAdmin = $user->deleteUser('administrador');
 assertTrue(!$delAdmin['success'], 'UserService rechaza eliminar cuenta protegida administrador');
 
-$delMasterGrp = $user->deleteGroup('grp_sistemas');
-assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestro protegido grp_sistemas');
+$delMasterGrp = $user->deleteGroup('grp_samba');
+assertTrue(!$delMasterGrp['success'], 'UserService rechaza eliminar grupo maestro protegido grp_samba');
 
 $delWebGrp = $user->deleteGroup('grp_web');
 assertTrue(!$delWebGrp['success'], 'UserService rechaza eliminar el grupo especial grp_web');
@@ -169,8 +169,8 @@ assertTrue(!$rmProtected['success'], 'UserService::removeUserFromGroup rechaza c
 
 $renameOk = $user->renameGroup('grp_marketing', 'grp_finanzas');
 assertTrue($renameOk['success'], 'UserService::renameGroup renombra grupo grp_* (modo test)');
-$renameMaster = $user->renameGroup('grp_sistemas', 'grp_x');
-assertTrue(!$renameMaster['success'], 'UserService::renameGroup protege grp_sistemas');
+$renameMaster = $user->renameGroup('grp_samba', 'grp_x');
+assertTrue(!$renameMaster['success'], 'UserService::renameGroup protege grp_samba');
 $renameSame = $user->renameGroup('grp_finanzas', 'grp_finanzas');
 assertTrue(!$renameSame['success'], 'UserService::renameGroup rechaza renombrar con el mismo nombre');
 $renameInvalid = $user->renameGroup('grp_finanzas', 'finanzas');
@@ -870,6 +870,49 @@ assertTrue(isset($getLogoutJson['success']) && $getLogoutJson['success'] === fal
 $sysServ = new SystemService();
 $updStatus = $sysServ->checkUpdates();
 assertTrue(isset($updStatus['version']) && isset($updStatus['installed_commit']), 'SystemService::checkUpdates reporta campos de versión y commit');
+
+// 25. Roles, superadministrador, grupos reservados, ACL y clasificación de backups
+$authRoles = new AuthService();
+$loginAdminRole = $authRoles->authenticate('administrador', 'Admin123#');
+assertTrue(($loginAdminRole['user']['role'] ?? '') === 'superadmin' && !empty($loginAdminRole['user']['is_superadmin']),
+    'AuthService otorga rol superadmin a la cuenta administrador (modo test)');
+$loginSistRole = $authRoles->authenticate('sistemas', 'Ead2026#');
+assertTrue(($loginSistRole['user']['role'] ?? '') === 'admin' && empty($loginSistRole['user']['is_superadmin']),
+    'AuthService otorga rol admin a la cuenta sistemas (modo test)');
+
+$createSuper = $user->createUser('nuevo_super', 'clave12345', 'Nuevo Super', [], false, true, true, true);
+assertTrue($createSuper['success'], 'UserService::createUser acepta el flag is_superadmin (modo test)');
+
+$reservedGroup = $user->createGroup('grp_superadmin');
+assertTrue(!$reservedGroup['success'], 'UserService rechaza crear el grupo reservado grp_superadmin');
+$renameToReserved = $user->renameGroup('grp_marketing', 'grp_superadmin');
+assertTrue(!$renameToReserved['success'], 'UserService rechaza renombrar un grupo a grp_superadmin');
+$addToSuper = $user->addUserToGroup('usuario_test', 'grp_superadmin');
+assertTrue(!$addToSuper['success'], 'UserService rechaza añadir miembros al grupo especial grp_superadmin');
+$delSuperGroup = $user->deleteGroup('grp_superadmin');
+assertTrue(!$delSuperGroup['success'], 'UserService rechaza eliminar el grupo especial grp_superadmin');
+
+$sambaAcl = new SambaService(sys_get_temp_dir() . '/nas_smb_inexistente_' . bin2hex(random_bytes(3)) . '.conf');
+$syncMissing = $sambaAcl->syncShareAcls('NO_EXISTE');
+assertTrue(!$syncMissing['success'], 'SambaService::syncShareAcls rechaza recursos inexistentes');
+
+$bkClass = new BackupService();
+$logFalloPrevio = "[2026-10-08 07:00:00] [t] [MOUNT_FAILED] [err] error previo\n"
+    . "[2026-10-08 10:00:00] [t] [LOCK_ACQUIRED] [info] lock\n"
+    . "[2026-10-08 10:00:05] [t] [BACKUP_COMPLETED] [notice] ok\n";
+assertTrue($bkClass->classifyLatestRun($logFalloPrevio) === 'ok',
+    'BackupService::classifyLatestRun ignora fallos de ejecuciones anteriores');
+$logFalloFinal = "[2026-10-08 10:00:00] [t] [BACKUP_COMPLETED] [notice] ok\n"
+    . "[2026-10-08 11:00:00] [t] [LOCK_ACQUIRED] [info] lock\n"
+    . "[2026-10-08 11:00:05] [t] [RSYNC_FAILED] [err] fallo\n";
+assertTrue($bkClass->classifyLatestRun($logFalloFinal) === 'error',
+    'BackupService::classifyLatestRun reporta error solo si falla la última ejecución');
+
+$disksInfo = $storage->getDisks();
+$disksOk = is_array($disksInfo) && (empty($disksInfo) || (isset($disksInfo[0]['protected']) && isset($disksInfo[0]['in_use'])));
+assertTrue($disksOk, 'StorageService::getDisks expone los campos protected e in_use');
+$fmtBad = $storage->formatAndMount('/dev/sdz', 'ext4', 'NO');
+assertTrue(!$fmtBad['success'], 'StorageService::formatAndMount exige la confirmación SI-FORMATEAR');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
