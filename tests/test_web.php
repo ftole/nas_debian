@@ -832,6 +832,40 @@ assertTrue(!str_contains($zipStreamOut, 'secreto_fuera_de_raiz'), 'FileExplorerS
 @unlink($outsideSecret);
 FileExplorerService::setRootDir(null);
 
+// 24.8.1 FileExplorerService: Soporte y transmisión de documentos de ofimática (Opción 3)
+$tempOfficeDir = sys_get_temp_dir() . '/nas_office_test_' . uniqid();
+@mkdir($tempOfficeDir, 0777, true);
+file_put_contents($tempOfficeDir . '/balance.xlsx', "PK\x03\x04mock_excel_bytes");
+file_put_contents($tempOfficeDir . '/informe.docx', "PK\x03\x04mock_word_bytes");
+file_put_contents($tempOfficeDir . '/slides.pptx', "PK\x03\x04mock_pptx_bytes");
+FileExplorerService::setRootDir($tempOfficeDir);
+
+assertTrue($fService->detectFileType('balance.xlsx', false) === 'document', 'FileExplorerService detecta archivos XLSX como document');
+assertTrue($fService->detectFileType('informe.docx', false) === 'document', 'FileExplorerService detecta archivos DOCX como document');
+assertTrue($fService->detectFileType('slides.pptx', false) === 'document', 'FileExplorerService detecta archivos PPTX como document');
+
+ob_start();
+$fService->streamRawFile('balance.xlsx');
+$rawXlsxOut = ob_get_clean();
+assertTrue(str_contains($rawXlsxOut, 'mock_excel_bytes'), 'FileExplorerService::streamRawFile transmite contenido binario XLSX');
+
+ob_start();
+$fService->streamRawFile('informe.docx');
+$rawDocxOut = ob_get_clean();
+assertTrue(str_contains($rawDocxOut, 'mock_word_bytes'), 'FileExplorerService::streamRawFile transmite contenido binario DOCX');
+
+@unlink($tempOfficeDir . '/balance.xlsx');
+@unlink($tempOfficeDir . '/informe.docx');
+@unlink($tempOfficeDir . '/slides.pptx');
+@rmdir($tempOfficeDir);
+FileExplorerService::setRootDir(null);
+
+// 24.8.2 Verificación de librerías locales de ofimática 100% offline
+$vendorDir = __DIR__ . '/../web/public/js/vendor';
+assertTrue(file_exists($vendorDir . '/xlsx.full.min.js') && filesize($vendorDir . '/xlsx.full.min.js') > 100000, 'Librería local SheetJS xlsx.full.min.js disponible para visualización offline');
+assertTrue(file_exists($vendorDir . '/jszip.min.js') && filesize($vendorDir . '/jszip.min.js') > 50000, 'Librería local JSZip jszip.min.js disponible para visualización offline');
+assertTrue(file_exists($vendorDir . '/docx-preview.min.js') && filesize($vendorDir . '/docx-preview.min.js') > 40000, 'Librería local docx-preview docx-preview.min.js disponible para visualización offline');
+
 // 24.9 AuthController: Rate limiting con HTTP 429 tras 5 intentos fallidos
 $authCtrl = new AuthController();
 $rateIp = '198.51.100.88';
