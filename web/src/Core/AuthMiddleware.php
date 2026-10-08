@@ -102,13 +102,16 @@ class AuthMiddleware
             }
         }
 
-        // Autorización por rol: los usuarios web (no-admin) solo acceden a
-        // Dashboard, Archivos y Logs; el resto de módulos es exclusivo de admin.
+        // Autorización por rol:
+        // - superadmin/admin: acceso total al panel.
+        // - operator (grp_web): submódulos delegados (dashboard, archivos, logs, recursos,
+        //   backups, usuarios, servicios, diagnóstico y red) sin almacenamiento/terminal/dominio.
         if (!$isPublic) {
-            $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
-            if (!$isAdmin && !self::isWebUserAllowed($path)) {
+            $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+            $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
+            if (!$isAdmin && !self::isOperatorAllowed($path)) {
                 if (getenv('APP_ENV') !== 'testing') {
-                    \App\Services\AuditService::log('access_denied', $path, 'FAILED', ['role' => 'web', 'method' => $method]);
+                    \App\Services\AuditService::log('access_denied', $path, 'FAILED', ['role' => $role ?: 'operator', 'method' => $method]);
                 }
                 if ($request->isJson()) {
                     Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
@@ -151,16 +154,26 @@ class AuthMiddleware
     }
 
     /**
-     * Rutas permitidas a un usuario web (no administrador): Dashboard, Archivos y Logs.
+     * Rutas permitidas al rol operador (grp_web).
+     * No incluye almacenamiento, terminal, dominio, actualizaciones ni reinicio.
      */
-    private static function isWebUserAllowed(string $path): bool
+    private static function isOperatorAllowed(string $path): bool
     {
-        if (in_array($path, ['/', '/dashboard', '/files', '/logs'], true)) {
+        $views = ['/', '/dashboard', '/files', '/logs', '/shares', '/backups', '/users', '/permissions', '/services', '/diagnostics', '/networking'];
+        if (in_array($path, $views, true)) {
             return true;
         }
-        if (in_array($path, ['/api/metrics', '/api/logs', '/api/auth/me'], true)) {
+
+        if (in_array($path, ['/api/metrics', '/api/logs', '/api/auth/me', '/api/diagnostics', '/api/services', '/api/services/list'], true)) {
             return true;
         }
-        return str_starts_with($path, '/api/files');
+
+        foreach (['/api/files', '/api/shares', '/api/backups', '/api/users', '/api/groups', '/api/services/'] as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
