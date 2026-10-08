@@ -90,21 +90,27 @@ class StorageService
             return [
                 [
                     'name' => 'sda',
+                    'device' => '/dev/sda',
                     'size' => '4.0 TB',
                     'model' => 'WD Red Plus NAS',
                     'type' => 'disk',
                     'mount' => '/srv/nas',
                     'fstype' => 'btrfs',
                     'rotational' => true,
+                    'protected' => false,
+                    'in_use' => true,
                 ],
                 [
                     'name' => 'nvme0n1',
+                    'device' => '/dev/nvme0n1',
                     'size' => '256 GB',
                     'model' => 'Samsung SSD 980',
                     'type' => 'disk',
                     'mount' => '/',
                     'fstype' => 'ext4',
                     'rotational' => false,
+                    'protected' => true,
+                    'in_use' => true,
                 ],
             ];
         }
@@ -131,11 +137,70 @@ class StorageService
                 'fstype' => $dev['fstype'] ?? '',
                 'rotational' => ($dev['rota'] ?? true),
                 'protected' => ($dev['type'] ?? '') === 'disk' ? $this->isOsDisk($name) : false,
-                'in_use' => !empty($dev['mountpoint']),
+                'in_use' => $this->deviceHasMount('/dev/' . $name),
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Indica si un dispositivo o cualquiera de sus particiones hijas está montado.
+     */
+    private function deviceHasMount(string $device): bool
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return false;
+        }
+        $out = SystemService::runCommand(['lsblk', '-ln', '-o', 'MOUNTPOINT', $device])['stdout'] ?? '';
+        foreach (preg_split('/\r\n|\r|\n/', (string) $out) as $line) {
+            if (trim($line) !== '') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Devuelve los puntos de montaje activos de un dispositivo y sus particiones (más profundos primero).
+     *
+     * @return string[]
+     */
+    private function mountedPointsOf(string $device): array
+    {
+        $out = SystemService::runCommand(['lsblk', '-ln', '-o', 'MOUNTPOINT', $device])['stdout'] ?? '';
+        $points = [];
+        foreach (preg_split('/\r\n|\r|\n/', (string) $out) as $line) {
+            $mp = trim($line);
+            if ($mp !== '' && str_starts_with($mp, '/')) {
+                $points[] = $mp;
+            }
+        }
+        // Desmontar primero los puntos más profundos para evitar "target is busy".
+        usort($points, fn($a, $b) => substr_count($b, '/') <=> substr_count($a, '/'));
+        return array_values(array_unique($points));
+    }
+
+    /**
+     * Desmonta /srv/nas y todos los puntos de montaje del dispositivo indicado.
+     */
+    private function unmountDevice(string $device): bool
+    {
+        $points = $this->mountedPointsOf($device);
+        if (!in_array('/srv/nas', $points, true) && is_dir('/srv/nas')) {
+            $points[] = '/srv/nas';
+        }
+        $ok = true;
+        foreach ($points as $mp) {
+            $res = SystemService::sudo(['umount', $mp]);
+            if ($res['code'] !== 0) {
+                // Reintento con lazy unmount si el punto está ocupado.
+                if (SystemService::sudo(['umount', '-l', $mp])['code'] !== 0) {
+                    $ok = false;
+                }
+            }
+        }
+        return $ok;
     }
 
     /**
@@ -167,7 +232,7 @@ class StorageService
      * Formatea (GPT + mkfs) y monta un disco/partición de datos en /srv/nas.
      * Requiere la confirmación textual 'SI-FORMATEAR'. Nunca opera sobre el disco del SO.
      */
-    public function formatAndMount(string $device, string $fstype, string $confirm): array
+    public function formatAndMount(string $device, string $fstype, string $confirm, bool $unmount = false): array
     {
         $device = trim($device);
         $fstype = strtolower(trim($fstype));
@@ -188,9 +253,14 @@ class StorageService
         if ($this->isOsDisk($name)) {
             return ['success' => false, 'error' => 'Operación prohibida: es el disco del sistema operativo.'];
         }
-        $mp = trim(SystemService::runCommand(['lsblk', '-ln', '-o', 'MOUNTPOINT', $device])['stdout'] ?? '');
-        if ($mp !== '') {
-            return ['success' => false, 'error' => 'El dispositivo está montado; desmóntalo antes de formatear.'];
+
+        if ($this->deviceHasMount($device)) {
+            if (!$unmount) {
+                return ['success' => false, 'error' => 'El dispositivo (o una de sus particiones) está montado; habilita la opción de desmontar para continuar.'];
+            }
+            if (!$this->unmountDevice($device)) {
+                return ['success' => false, 'error' => 'No se pudieron desmontar todos los puntos de montaje del dispositivo.'];
+            }
         }
 
         $type = trim(SystemService::runCommand(['lsblk', '-no', 'TYPE', $device])['stdout'] ?? '');
@@ -216,7 +286,7 @@ class StorageService
     /**
      * Crea LVM (PV/VG/LV), formatea y monta en /srv/nas.
      */
-    public function lvmCreate(string $disk, string $vg, string $lv, string $size, string $fstype, string $confirm): array
+    public function lvmCreate(string $disk, string $vg, string $lv, string $size, string $fstype, string $confirm, bool $unmount = false): array
     {
         if ($confirm !== 'SI-FORMATEAR') {
             return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-FORMATEAR).'];
@@ -232,6 +302,14 @@ class StorageService
         }
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "LVM simulado ($vg/$lv) (modo dev)."];
+        }
+        if ($this->deviceHasMount($disk)) {
+            if (!$unmount) {
+                return ['success' => false, 'error' => 'El disco (o una de sus particiones) está montado; habilita la opción de desmontar para continuar.'];
+            }
+            if (!$this->unmountDevice($disk)) {
+                return ['success' => false, 'error' => 'No se pudieron desmontar todos los puntos de montaje del disco.'];
+            }
         }
         $always = !str_ends_with($size, '%') ? '--yes' : null;
         SystemService::sudo(['pvcreate', '-f', '-y', $disk]);
