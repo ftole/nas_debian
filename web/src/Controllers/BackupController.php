@@ -122,4 +122,29 @@ class BackupController
 
         Response::success(['id' => $cleanId, 'logs' => $logs]);
     }
+
+    public function test(Request $request): void
+    {
+        $res = $this->backup->testConnection($request->getBody());
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'No se pudo conectar al origen.');
+            return;
+        }
+        Response::success(null, $res['message'] ?? 'Conexión de prueba correcta.');
+    }
+
+    public function status(Request $request, array $params = []): void
+    {
+        $id = $params['id'] ?? $request->get('id');
+        if (empty($id)) {
+            Response::error('Identificador de tarea no especificado.');
+            return;
+        }
+        $cleanId = strtolower(trim((string) $id));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $cleanId)) {
+            Response::error('Identificador de tarea inválido.');
+            return;
+        }
+        Response::success($this->backup->getTaskProgress($cleanId));
+    }
 }
