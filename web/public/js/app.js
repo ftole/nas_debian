@@ -635,6 +635,8 @@ async function deleteShare(name) {
 // ==============================================================================
 // 6. Módulo: Central de Respaldos (Backups)
 // ==============================================================================
+let _backupRefreshTimer = null;
+
 async function loadBackups() {
   const tbody = document.getElementById('backups-table-body');
   if (!tbody) return;
@@ -645,10 +647,20 @@ async function loadBackups() {
 
     if (tasks.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
+      scheduleBackupRefresh(false);
       return;
     }
 
-    tbody.innerHTML = tasks.map(t => `
+    let anyRunning = false;
+    tbody.innerHTML = tasks.map(t => {
+      if (t.running) anyRunning = true;
+      const statusBadge = t.last_status === 'OK' ? 'badge-ok'
+        : (t.last_status === 'Error' ? 'badge-err'
+        : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
+      const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
+      const fillColor = t.last_status === 'Error' ? 'var(--accent-danger)' : 'var(--accent-success)';
+
+      return `
       <tr>
         <td><strong>${escapeHtml(t.id)}</strong></td>
         <td><span class="tag-pill">${escapeHtml(t.protocol)}</span></td>
@@ -656,9 +668,15 @@ async function loadBackups() {
         <td>${escapeHtml(t.cron_desc)}</td>
         <td>${t.retention} snapshots</td>
         <td>
-          ${t.last_status === 'OK' ? '<span class="badge badge-ok">OK</span>' : (t.last_status === 'Error' ? '<span class="badge badge-danger">Error</span>' : '<span class="badge badge-gray">Pendiente</span>')}
+          <span class="badge ${statusBadge}">${escapeHtml(t.last_status)}</span>
+          <div class="progress-bar-wrap" style="margin-top:5px; height:6px;">
+            <div class="progress-bar-fill" style="width:${pct}%; background:${fillColor};"></div>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+            ${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}
+          </div>
         </td>
-        <td style="text-align:right;">
+        <td style="text-align:right; white-space:nowrap;">
           <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
             <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
           </button>
@@ -670,9 +688,47 @@ async function loadBackups() {
           </button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
+
+    scheduleBackupRefresh(anyRunning);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
+    scheduleBackupRefresh(false);
+  }
+}
+
+function scheduleBackupRefresh(anyRunning) {
+  if (_backupRefreshTimer) {
+    clearTimeout(_backupRefreshTimer);
+    _backupRefreshTimer = null;
+  }
+  if (anyRunning && AppState.activeView === 'backups') {
+    _backupRefreshTimer = setTimeout(() => {
+      if (AppState.activeView === 'backups') loadBackups();
+    }, 4000);
+  }
+}
+
+async function testBackupConnection() {
+  const btn = document.getElementById('btn-test-backup');
+  const payload = {
+    proto: document.getElementById('bkp-proto').value,
+    ip: document.getElementById('bkp-ip').value,
+    share: document.getElementById('bkp-share').value,
+    path: document.getElementById('bkp-path').value,
+    port: 22,
+    user: document.getElementById('bkp-user').value,
+    password: document.getElementById('bkp-pass').value,
+  };
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/backups/test', { method: 'POST', body: JSON.stringify(payload) });
+    showToast(res.message || 'Conexión de prueba correcta.', 'success');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
