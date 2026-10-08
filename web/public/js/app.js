@@ -856,7 +856,7 @@ async function loadStorage() {
 
     tbody.innerHTML = disks.map(d => `
       <tr>
-        <td><strong>${escapeHtml(d.name)}</strong></td>
+        <td><strong>${escapeHtml(d.name)}</strong>${d.protected ? ' <span class="badge badge-err">SO · protegido</span>' : (d.in_use ? ' <span class="badge badge-warn">En uso</span>' : ' <span class="badge badge-ok">Disponible</span>')}</td>
         <td>${escapeHtml(d.model)}</td>
         <td>${escapeHtml(d.size)}</td>
         <td>${escapeHtml(d.type)}</td>
@@ -884,6 +884,79 @@ async function runStorageTrim() {
     showToast('Optimización fstrim ejecutada.', 'success');
   } catch (e) {
     // Ya mostrado
+  }
+}
+
+async function openStorageManage() {
+  try {
+    const res = await apiFetch('/api/storage');
+    const disks = res.data?.disks || [];
+    const sel = document.getElementById('stg-device');
+    const usable = disks.filter(d => !d.protected);
+    sel.innerHTML = usable.length
+      ? usable.map(d => {
+        const dev = d.device || ('/dev/' + d.name);
+        return `<option value="${escapeHtml(dev)}">${escapeHtml(dev)} — ${escapeHtml(d.size)} ${escapeHtml(d.model || '')}${d.mount ? ' (montado ' + escapeHtml(d.mount) + ')' : ''}</option>`;
+      }).join('')
+      : '<option value="">(sin discos de datos disponibles)</option>';
+    toggleStorageOp();
+    openModal('modal-storage-manage');
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
+function toggleStorageOp() {
+  const op = document.getElementById('stg-op').value;
+  document.getElementById('stg-lvm-wrap').style.display = op === 'lvm' ? 'block' : 'none';
+  document.getElementById('stg-subvol-wrap').style.display = op === 'subvolume' ? 'block' : 'none';
+  document.getElementById('stg-fs-wrap').style.display = op === 'subvolume' ? 'none' : 'block';
+}
+
+async function submitStorageManage(event) {
+  event.preventDefault();
+  const op = document.getElementById('stg-op').value;
+  const device = document.getElementById('stg-device').value;
+  const confirm = document.getElementById('stg-confirm').value;
+  const fstype = document.getElementById('stg-fstype').value;
+
+  if (!device) {
+    showToast('No hay ningún disco de datos seleccionado.', 'warning');
+    return;
+  }
+  if (confirm !== 'SI-FORMATEAR') {
+    showToast('Escribe SI-FORMATEAR para confirmar la operación.', 'warning');
+    return;
+  }
+
+  let url = '/api/storage/format';
+  let payload = { device, fstype, confirm };
+  if (op === 'lvm') {
+    url = '/api/storage/lvm';
+    payload = {
+      disk: device,
+      vg: document.getElementById('stg-vg').value,
+      lv: document.getElementById('stg-lv').value,
+      size: document.getElementById('stg-size').value,
+      fstype, confirm,
+    };
+  } else if (op === 'subvolume') {
+    url = '/api/storage/subvolume';
+    payload = { device, subvolume: document.getElementById('stg-subvol').value, confirm };
+  }
+
+  const btn = document.getElementById('btn-submit-storage');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+    showToast('Operación de almacenamiento completada.', 'success');
+    closeModal('modal-storage-manage');
+    document.getElementById('stg-confirm').value = '';
+    loadStorage();
+  } catch (e) {
+    // Ya mostrado
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
