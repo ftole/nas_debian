@@ -518,6 +518,9 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
             <p>Monitoreo de particiones, integridad de datos y mantenimiento BTRFS / TRIM</p>
           </div>
           <div class="page-head-actions">
+            <button class="btn btn-primary" onclick="openStorageManage()">
+              <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión de disco
+            </button>
             <button class="btn btn-secondary" onclick="runStorageScrub()">
               <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
             </button>
@@ -1346,9 +1349,62 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Modal: Gestión de Disco -->
+  <div class="modal-backdrop" id="modal-storage-manage">
+    <div class="modal-dialog" style="max-width:640px;">
+      <div class="modal-header">
+        <h3>Gestión de disco</h3>
+        <button class="modal-close" onclick="closeModal('modal-storage-manage')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-warning">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+          <span>Operación destructiva. El disco del sistema está protegido y no se lista. Escribe <code>SI-FORMATEAR</code> para confirmar.</span>
+        </div>
+        <form id="form-storage-manage" onsubmit="submitStorageManage(event)">
+          <div class="form-group">
+            <label for="stg-op">Operación:</label>
+            <select id="stg-op" onchange="toggleStorageOp()">
+              <option value="format">Formatear y montar en /srv/nas (ext4/Btrfs)</option>
+              <option value="lvm">Crear volumen LVM (PV/VG/LV) y montar</option>
+              <option value="subvolume">Crear subvolumen Btrfs</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="stg-device">Disco / partición (/dev/...):</label>
+            <select id="stg-device"></select>
+          </div>
+          <div class="form-group" id="stg-fs-wrap">
+            <label for="stg-fstype">Sistema de archivos:</label>
+            <select id="stg-fstype"><option value="ext4">ext4</option><option value="btrfs">Btrfs</option></select>
+          </div>
+          <div class="form-group" id="stg-lvm-wrap" style="display:none;">
+            <label for="stg-vg">Grupo de volúmenes (VG):</label>
+            <input type="text" id="stg-vg" value="nas_vg" pattern="[a-z0-9_]+">
+            <label for="stg-lv" style="margin-top:8px; display:block;">Volumen lógico (LV):</label>
+            <input type="text" id="stg-lv" value="nas_lv" pattern="[a-z0-9_]+">
+            <label for="stg-size" style="margin-top:8px; display:block;">Tamaño (ej. 100%FREE, 500G):</label>
+            <input type="text" id="stg-size" value="100%FREE">
+          </div>
+          <div class="form-group" id="stg-subvol-wrap" style="display:none;">
+            <label for="stg-subvol">Nombre del subvolumen:</label>
+            <input type="text" id="stg-subvol" value="datos" pattern="[a-zA-Z0-9._-]+">
+          </div>
+          <div class="form-group">
+            <label for="stg-confirm">Confirmación (escribe SI-FORMATEAR):</label>
+            <input type="text" id="stg-confirm" placeholder="SI-FORMATEAR" autocomplete="off">
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-manage')">Cancelar</button>
+            <button type="submit" class="btn btn-danger" id="btn-submit-storage">Ejecutar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Nuevo Usuario -->
-  <div class="modal-backdrop" id="modal-new-user">
-    <div class="modal-dialog">
+  <div class="modal-backdrop" id="modal-new-user">    <div class="modal-dialog">
       <div class="modal-header">
         <h3>Dar de alta usuario</h3>
         <button class="modal-close" onclick="closeModal('modal-new-user')">&times;</button>
