@@ -182,25 +182,51 @@ class StorageService
     }
 
     /**
-     * Desmonta /srv/nas y todos los puntos de montaje del dispositivo indicado.
+     * Desmonta un dispositivo y sus particiones ejecutando desmontaje tanto por
+     * puntos de montaje como por la ruta del dispositivo (/dev/...).
      */
-    private function unmountDevice(string $device): bool
+    public function unmountDevice(string $device): bool
     {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return true;
+        }
+
         $points = $this->mountedPointsOf($device);
         if (!in_array('/srv/nas', $points, true) && is_dir('/srv/nas')) {
             $points[] = '/srv/nas';
         }
-        $ok = true;
+
+        // 1. Desmontar por puntos de montaje
         foreach ($points as $mp) {
             $res = SystemService::sudo(['umount', $mp]);
             if ($res['code'] !== 0) {
                 // Reintento con lazy unmount si el punto está ocupado.
-                if (SystemService::sudo(['umount', '-l', $mp])['code'] !== 0) {
-                    $ok = false;
+                SystemService::sudo(['umount', '-l', $mp]);
+            }
+        }
+
+        // 2. Desmontar directamente por ruta de dispositivo /dev/... si aplica
+        if (str_starts_with($device, '/dev/')) {
+            $devPaths = [$device];
+            $outDevs = SystemService::runCommand(['lsblk', '-ln', '-o', 'PATH', $device])['stdout'] ?? '';
+            foreach (preg_split('/\r\n|\r|\n/', (string) $outDevs) as $line) {
+                $p = trim($line);
+                if ($p !== '' && str_starts_with($p, '/dev/') && !in_array($p, $devPaths, true)) {
+                    $devPaths[] = $p;
+                }
+            }
+            // Desmontar particiones primero (longitud mayor primero, ej. /dev/sdb1 antes de /dev/sdb)
+            usort($devPaths, fn($a, $b) => strlen($b) <=> strlen($a));
+
+            foreach ($devPaths as $dev) {
+                $res = SystemService::sudo(['umount', $dev]);
+                if ($res['code'] !== 0) {
+                    SystemService::sudo(['umount', '-l', $dev]);
                 }
             }
         }
-        return $ok;
+
+        return !$this->deviceHasMount($device);
     }
 
     /**
