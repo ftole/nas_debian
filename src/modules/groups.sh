@@ -75,7 +75,7 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                 ;;
 
             3)
-                GRUPOS_ELIM=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_sistemas" {print $1}' /etc/group | sort)
+                GRUPOS_ELIM=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort)
                 if [ -z "$GRUPOS_ELIM" ]; then
                     whiptail --title "Aviso" --ok-button "< Aceptar >" \
                         --msgbox "No hay grupos personalizados disponibles para eliminar." 8 55
