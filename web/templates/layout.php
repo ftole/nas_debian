@@ -866,7 +866,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                   <th>Origen remoto</th>
                   <th>Horario Cron</th>
                   <th>Retención</th>
-                  <th>Último estado</th>
+                  <th>Estado / Progreso</th>
                   <th style="width:160px; text-align:right;">Acciones</th>
                 </tr>
               </thead>
@@ -1334,7 +1334,10 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <label for="bkp-retention">Snapshots a conservar antes de rotar:</label>
             <input type="number" id="bkp-retention" value="30" min="1" max="365">
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
+          <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+            <button type="button" class="btn btn-secondary" onclick="testBackupConnection()" id="btn-test-backup" style="margin-right:auto;">
+              <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
+            </button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-backup')">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btn-submit-new-backup">Programar respaldo</button>
           </div>
