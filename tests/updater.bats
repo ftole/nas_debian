@@ -69,3 +69,31 @@ setup() {
     rm -rf "$tmp_dir"
 }
 
+@test "_hook_post_actualizacion despliega nas-terminal y sudoers de forma segura en rutas configurables" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_term="$tmp_dir/bin/nas-terminal"
+    local fake_sudoers_dir="$tmp_dir/sudoers.d"
+    mkdir -p "$(dirname "$fake_term")" "$fake_sudoers_dir"
+    local fake_sudoers="$fake_sudoers_dir/nas-web"
+
+    NAS_TERMINAL_DEST="$fake_term" \
+    NAS_SUDOERS_DIR="$fake_sudoers_dir" \
+    NAS_SUDOERS_DEST="$fake_sudoers" \
+    run _hook_post_actualizacion
+
+    [ "$status" -eq 0 ]
+    [ -s "$fake_term" ]
+    [ -x "$fake_term" ]
+    run grep -q 'SESSION="nas-web-term-\${TARGET_USER}"' "$fake_term"
+    [ "$status" -eq 0 ]
+
+    [ -s "$fake_sudoers" ]
+    run grep -q 'NAS_STORAGE' "$fake_sudoers"
+    [ "$status" -eq 0 ]
+    run grep -q '/dev/\[a-zA-Z0-9/_-\]\*' "$fake_sudoers"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp_dir"
+}
+
