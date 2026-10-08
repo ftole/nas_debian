@@ -33,6 +33,11 @@ class BackupService
                     'retention' => 30,
                     'last_status' => 'OK',
                     'last_run' => date('Y-m-d 23:00'),
+                    'running' => false,
+                    'percent' => 100,
+                    'elapsed' => '00:02:14',
+                    'remaining' => '00:00:00',
+                    'speed' => '48.2MB/s',
                 ],
                 [
                     'id' => 'lnx_web_prod',
@@ -43,6 +48,11 @@ class BackupService
                     'retention' => 15,
                     'last_status' => 'OK',
                     'last_run' => date('Y-m-d H:00'),
+                    'running' => false,
+                    'percent' => 100,
+                    'elapsed' => '00:00:41',
+                    'remaining' => '00:00:00',
+                    'speed' => '22.7MB/s',
                 ],
             ];
         }
@@ -90,20 +100,17 @@ class BackupService
                 }
             }
 
-            // Estado del último log
+            // Estado y progreso de la última ejecución
             $logFile = $this->logRoot . '/backup_' . $taskId . '.log';
-            $lastStatus = 'Sin ejecutar';
-            $lastRun = 'Nunca';
-
-            if (file_exists($logFile)) {
-                $lastRun = date('Y-m-d H:i', (int) filemtime($logFile));
-                $lastLogLines = $this->getLastLines($logFile, 15);
-                if (str_contains($lastLogLines, 'FINALIZADO CON ÉXITO') || str_contains($lastLogLines, 'PROMOVIDO EXITOSAMENTE') || str_contains($lastLogLines, 'EXITO')) {
-                    $lastStatus = 'OK';
-                } elseif (str_contains($lastLogLines, 'ERROR') || str_contains($lastLogLines, 'ABORTADO')) {
-                    $lastStatus = 'Error';
-                }
-            }
+            $lastRun = file_exists($logFile) ? date('Y-m-d H:i', (int) filemtime($logFile)) : 'Nunca';
+            $state = $this->getTaskStatus($taskId);
+            $progress = $this->getTaskProgress($taskId);
+            $statusLabel = [
+                'running' => 'En curso',
+                'ok' => 'OK',
+                'error' => 'Error',
+                'idle' => 'Sin ejecutar',
+            ][$state] ?? 'Sin ejecutar';
 
             $tasks[] = [
                 'id' => $taskId,
@@ -112,8 +119,13 @@ class BackupService
                 'cron' => $cronExpr,
                 'cron_desc' => $this->describeCron($cronExpr),
                 'retention' => $retention,
-                'last_status' => $lastStatus,
+                'last_status' => $statusLabel,
                 'last_run' => $lastRun,
+                'running' => $state === 'running',
+                'percent' => $progress['percent'],
+                'elapsed' => $progress['elapsed'],
+                'remaining' => $progress['remaining'],
+                'speed' => $progress['speed'],
             ];
         }
 
@@ -304,6 +316,177 @@ class BackupService
         return $this->getLastLines($logFile, $lines);
     }
 
+    private function isDev(): bool
+    {
+        return DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing';
+    }
+
+    /**
+     * Prueba la conexión al origen de la tarea (CIFS/SMB, SSH o Local) sin crear la tarea.
+     */
+    public function testConnection(array $data): array
+    {
+        $proto = strtolower(trim($data['proto'] ?? 'cifs'));
+
+        if ($this->isDev()) {
+            return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
+        }
+
+        if ($proto === 'cifs') {
+            $ip = trim($data['ip'] ?? '');
+            $share = trim($data['share'] ?? '');
+            $user = trim($data['user'] ?? '');
+            $pass = (string) ($data['password'] ?? '');
+            if ($ip === '' || $share === '') {
+                return ['success' => false, 'error' => 'IP y recurso compartido son obligatorios.'];
+            }
+            $res = SystemService::runCommand(
+                ['smbclient', '//' . $ip . '/' . $share, '-U', $user, '-c', 'exit'], $pass . "\n", 15);
+            $out = $res['stdout'] . ' ' . $res['stderr'];
+            if ($res['code'] === 0 && !str_contains($out, 'NT_STATUS_LOGON_FAILURE') && !str_contains($out, 'NT_STATUS_BAD_NETWORK_NAME')) {
+                return ['success' => true, 'message' => "Conexión SMB correcta a //$ip/$share."];
+            }
+            return ['success' => false, 'error' => 'No se pudo conectar: ' . trim(preg_replace('/\s+/', ' ', $out))];
+        }
+
+        if ($proto === 'ssh') {
+            $ip = trim($data['ip'] ?? '');
+            $port = (int) ($data['port'] ?? 22);
+            $user = trim($data['user'] ?? 'root');
+            $pass = (string) ($data['password'] ?? '');
+            if ($ip === '') {
+                return ['success' => false, 'error' => 'La IP del servidor Linux es obligatoria.'];
+            }
+            $tmp = @tempnam(sys_get_temp_dir(), 'nas_ssh_');
+            if ($tmp === false) {
+                return ['success' => false, 'error' => 'No se pudo preparar la prueba SSH.'];
+            }
+            file_put_contents($tmp, $pass . "\n");
+            @chmod($tmp, 0600);
+            $res = SystemService::runCommand(
+                ['sshpass', '-f', $tmp, 'ssh', '-p', (string) $port, '-o', 'StrictHostKeyChecking=accept-new',
+                 '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8', $user . '@' . $ip, 'echo NAS_OK'], null, 20);
+            @unlink($tmp);
+            if ($res['code'] === 0 && str_contains($res['stdout'], 'NAS_OK')) {
+                return ['success' => true, 'message' => "Conexión SSH correcta a $user@$ip:$port."];
+            }
+            return ['success' => false, 'error' => 'No se pudo conectar por SSH: ' . trim($res['stderr'] ?: $res['stdout'])];
+        }
+
+        if ($proto === 'local') {
+            $path = trim($data['path'] ?? '');
+            if ($path === '') {
+                return ['success' => false, 'error' => 'La ruta local es obligatoria.'];
+            }
+            $res = SystemService::runCommand(['test', '-d', $path]);
+            if ($res['code'] === 0) {
+                return ['success' => true, 'message' => "Ruta local accesible: $path."];
+            }
+            return ['success' => false, 'error' => "La ruta local no existe o no es accesible: $path."];
+        }
+
+        return ['success' => false, 'error' => 'Protocolo no soportado para prueba.'];
+    }
+
+    /**
+     * Estado de la última/más reciente ejecución: running | ok | error | idle.
+     */
+    public function getTaskStatus(string $taskId): string
+    {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return 'idle';
+        }
+        if ($this->isDev()) {
+            return 'ok';
+        }
+
+        $pg = SystemService::runCommand(['pgrep', '-f', 'backup_' . $taskId . '.sh']);
+        if ($pg['code'] === 0 && trim($pg['stdout']) !== '') {
+            return 'running';
+        }
+
+        $log = $this->logRoot . '/backup_' . $taskId . '.log';
+        if (!file_exists($log)) {
+            return 'idle';
+        }
+        $tail = strtoupper($this->getLastLines($log, 25));
+        if (str_contains($tail, 'ABORTADO') || str_contains($tail, 'FAILED') || str_contains($tail, 'ERROR')) {
+            return 'error';
+        }
+        if (str_contains($tail, 'BACKUP FINALIZADO CON ÉXITO') || str_contains($tail, 'PROMOVIDO EXITOSAMENTE') || str_contains($tail, 'BACKUP_COMPLETED')) {
+            return 'ok';
+        }
+        return 'idle';
+    }
+
+    /**
+     * Progreso de la tarea a partir del log (rsync --info=progress2).
+     */
+    public function getTaskProgress(string $taskId): array
+    {
+        $taskId = strtolower(trim($taskId));
+        $status = $this->getTaskStatus($taskId);
+        $result = [
+            'status' => $status,
+            'percent' => 0,
+            'speed' => '',
+            'elapsed_sec' => 0,
+            'elapsed' => '00:00:00',
+            'remaining' => '--:--:--',
+        ];
+
+        $log = $this->logRoot . '/backup_' . $taskId . '.log';
+        if (!file_exists($log)) {
+            return $result;
+        }
+        $lines = preg_split('/\r\n|\r|\n/', (string) @file_get_contents($log));
+        if (!is_array($lines)) {
+            return $result;
+        }
+
+        $start = null;
+        foreach ($lines as $ln) {
+            if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $ln, $m)) {
+                $start = strtotime($m[1]);
+                break;
+            }
+        }
+
+        $percent = 0;
+        $speed = '';
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            if (preg_match('/(\d{1,3})%/', $lines[$i], $pm)) {
+                $percent = min(100, (int) $pm[1]);
+                if (preg_match('/([\d.]+[KMGkmg]?B\/s)/', $lines[$i], $sm)) {
+                    $speed = $sm[1];
+                }
+                break;
+            }
+        }
+
+        $elapsed = $start !== null ? max(0, time() - $start) : 0;
+        $result['percent'] = $percent;
+        $result['speed'] = $speed;
+        $result['elapsed_sec'] = $elapsed;
+        $result['elapsed'] = $this->formatDuration($elapsed);
+        if ($percent > 0 && $elapsed > 0) {
+            $result['remaining'] = $this->formatDuration((int) round($elapsed * (100 - $percent) / $percent));
+        } elseif ($status === 'ok') {
+            $result['percent'] = 100;
+            $result['remaining'] = '00:00:00';
+        }
+        return $result;
+    }
+
+    private function formatDuration(int $seconds): string
+    {
+        $h = intdiv($seconds, 3600);
+        $m = intdiv($seconds % 3600, 60);
+        $s = $seconds % 60;
+        return sprintf('%02d:%02d:%02d', $h, $m, $s);
+    }
+
     private function ensureDirectory(string $dir): void
     {
         if (is_dir($dir)) {
@@ -489,7 +672,8 @@ if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
 fi
 
 mkdir -p "\$STAGE_SNAPSHOT"
-if rsync "\${RSYNC_OPTS[@]}" "\$MOUNT_POINT/" "\$STAGE_SNAPSHOT/" >> "\$LOG_FILE" 2>&1; then
+rsync "\${RSYNC_OPTS[@]}" --info=progress2 --no-inc-recursive "\$MOUNT_POINT/" "\$STAGE_SNAPSHOT/" 2>&1 | tr '\\r' '\\n' >> "\$LOG_FILE"
+if [ "\${PIPESTATUS[0]}" -eq 0 ]; then
     log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 else
     log_backup_event "RSYNC_FAILED" "err" "Fallo en la sincronizacion rsync"
@@ -611,7 +795,8 @@ fi
 mkdir -p "\$STAGE_SNAPSHOT"
 PASS=\$(cat "\$CRED_FILE")
 export SSHPASS="\$PASS"
-if sshpass -e rsync "\${RSYNC_OPTS[@]}" -e "ssh -p \$SRC_PORT -o StrictHostKeyChecking=accept-new" "\$SRC_USER@\$SRC_IP:\$SRC_PATH/" "\$STAGE_SNAPSHOT/" >> "\$LOG_FILE" 2>&1; then
+sshpass -e rsync "\${RSYNC_OPTS[@]}" --info=progress2 --no-inc-recursive -e "ssh -p \$SRC_PORT -o StrictHostKeyChecking=accept-new" "\$SRC_USER@\$SRC_IP:\$SRC_PATH/" "\$STAGE_SNAPSHOT/" 2>&1 | tr '\\r' '\\n' >> "\$LOG_FILE"
+if [ "\${PIPESTATUS[0]}" -eq 0 ]; then
     log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 else
     log_backup_event "RSYNC_FAILED" "err" "Fallo en la sincronizacion rsync SSH"
@@ -727,7 +912,8 @@ if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
 fi
 
 mkdir -p "\$STAGE_SNAPSHOT"
-if rsync "\${RSYNC_OPTS[@]}" "\$SRC_PATH/" "\$STAGE_SNAPSHOT/" >> "\$LOG_FILE" 2>&1; then
+rsync "\${RSYNC_OPTS[@]}" --info=progress2 --no-inc-recursive "\$SRC_PATH/" "\$STAGE_SNAPSHOT/" 2>&1 | tr '\\r' '\\n' >> "\$LOG_FILE"
+if [ "\${PIPESTATUS[0]}" -eq 0 ]; then
     log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 else
     log_backup_event "RSYNC_FAILED" "err" "Fallo en la sincronizacion rsync local"
