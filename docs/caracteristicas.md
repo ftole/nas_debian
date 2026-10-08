@@ -74,8 +74,8 @@ El servidor incluye una interfaz web nativa basada en PHP 8 MVC y el sistema de 
   - Descarga archivos individuales o carpetas completas comprimidas en ZIP al vuelo.
   - **Papelera de Reciclaje Integrada (`.trash/`):** Al eliminar un archivo, se mueve a la papelera con su ruta original registrada. El panel muestra un contador flotante (badge) con los elementos en papelera, permitiendo restaurarlos a su ubicación exacta o vaciarla definitivamente.
   - **Visor y Editor de Texto en Caliente:** Permite previsualizar documentos de texto, código, registros, imágenes y PDFs. Incluye un editor de texto interactivo con numeración de líneas y botón de guardado en vivo sin salir del navegador.
-- **Terminal Bash Real con Historial:**  
-  Ejecuta comandos del sistema operativo mediante subprocesos controlados, recordando el directorio de trabajo activo (`cwd` persistente) para navegar con `cd`. Incluye historial con flechas ↑ y ↓, botones de acceso rápido (`df -h`, `free -m`, `uptime`, `smbstatus`) y avisos inteligentes ante comandos que requieran TTY interactiva como `nano` o `htop`.
+- **Terminal PTY Real (tmux) con `sudo`:**  
+  Ejecuta una sesión `tmux` auténtica *como el usuario de la sesión* (no como `www-data`), habilitando programas interactivos de pantalla completa (`top`, `htop`, `nano`, `vi`) y `Ctrl+C`. Soporta `sudo` solicitando la contraseña igual que en SSH, arranca en el directorio de inicio del usuario, persiste en el servidor y conserva historial con flechas ↑ y ↓ más botones de acceso rápido (`df -h`, `free -m`, `uptime`, `smbstatus`, `realm list`).
 - **Integración con Active Directory (AD):**  
   Permite descubrir controladores de dominio en la red corporativa y unir el servidor NAS al dominio Windows mediante `realmd`, `sssd` y `adcli` con un solo formulario.
 - **Auditoría y Registros del Sistema:**  
