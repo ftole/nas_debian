@@ -609,8 +609,12 @@ case "$ACTION" in
     start)
         COLS="${1:-200}"
         ROWS="${2:-50}"
+        TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)
+        if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+            TARGET_HOME=/srv/nas
+        fi
         if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
-            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS"
+            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME"
         fi
         ;;
     keys)
