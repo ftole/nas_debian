@@ -1246,6 +1246,12 @@ code, kbd, pre, samp {
   word-break: break-word;
   max-width: 420px;
 }
+/* Mensajes del sistema (ufw/cron/journald): texto más pequeño y atenuado */
+.log-system {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
 
 /* ==============================================================================
  * Dominio Active Directory
