@@ -410,12 +410,44 @@ class BackupService
         if (!file_exists($log)) {
             return 'idle';
         }
-        $tail = strtoupper($this->getLastLines($log, 25));
-        if (str_contains($tail, 'ABORTADO') || str_contains($tail, 'FAILED') || str_contains($tail, 'ERROR')) {
-            return 'error';
+
+        $classified = $this->classifyLatestRun((string) @file_get_contents($log));
+        return $classified === 'idle' ? 'idle' : $classified;
+    }
+
+    /**
+     * Clasifica el resultado de la ÚLTIMA ejecución a partir del contenido del log.
+     * Los logs son acumulativos: se analiza únicamente el segmento posterior al
+     * último LOCK_ACQUIRED/INICIANDO BACKUP para no arrastrar fallos anteriores.
+     *
+     * @return string 'ok' | 'error' | 'idle'
+     */
+    public function classifyLatestRun(string $content): string
+    {
+        $lines = preg_split('/\r\n|\r|\n/', $content);
+        if (!is_array($lines)) {
+            return 'idle';
         }
-        if (str_contains($tail, 'BACKUP FINALIZADO CON ÉXITO') || str_contains($tail, 'PROMOVIDO EXITOSAMENTE') || str_contains($tail, 'BACKUP_COMPLETED')) {
+
+        $startIdx = 0;
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            if (str_contains($lines[$i], 'LOCK_ACQUIRED') || str_contains($lines[$i], 'INICIANDO BACKUP')) {
+                $startIdx = $i;
+                break;
+            }
+        }
+        $segment = strtoupper(implode("\n", array_slice($lines, $startIdx)));
+
+        if (str_contains($segment, 'BACKUP FINALIZADO CON ÉXITO')
+            || str_contains($segment, 'PROMOVIDO EXITOSAMENTE')
+            || str_contains($segment, 'BACKUP_COMPLETED')) {
             return 'ok';
+        }
+        if (str_contains($segment, 'BACKUP_FAILED')
+            || str_contains($segment, 'RSYNC_FAILED')
+            || str_contains($segment, 'MOUNT_FAILED')
+            || str_contains($segment, 'ABORTADO')) {
+            return 'error';
         }
         return 'idle';
     }
@@ -446,9 +478,12 @@ class BackupService
         }
 
         $start = null;
-        foreach ($lines as $ln) {
-            if (str_contains($ln, 'LOCK_ACQUIRED') && preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $ln, $m)) {
+        $startIdx = 0;
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            if (str_contains($lines[$i], 'LOCK_ACQUIRED') && preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $lines[$i], $m)) {
                 $start = strtotime($m[1]);
+                $startIdx = $i;
+                break;
             }
         }
         if ($start === null) {
@@ -460,9 +495,10 @@ class BackupService
             }
         }
 
+        // El progreso también debe provenir solo de la última ejecución.
         $percent = 0;
         $speed = '';
-        for ($i = count($lines) - 1; $i >= 0; $i--) {
+        for ($i = count($lines) - 1; $i >= $startIdx; $i--) {
             if (preg_match('/(\d{1,3})%/', $lines[$i], $pm)) {
                 $percent = min(100, (int) $pm[1]);
                 if (preg_match('/([\d.]+[KMGkmg]?B\/s)/', $lines[$i], $sm)) {
