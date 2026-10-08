@@ -665,6 +665,7 @@ class SystemService
                             continue;
                         }
                     }
+                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     $results[] = [
                         'source' => 'system',
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
@@ -676,6 +677,8 @@ class SystemService
                         'badge' => 'gray',
                         'status' => 'OK',
                         'message' => $j['message'] ?? '',
+                        'human' => $h['human'],
+                        'level' => $h['level'],
                         'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
                     ];
                     if (count($results) >= $limit) {
@@ -700,6 +703,7 @@ class SystemService
                             continue;
                         }
                     }
+                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     $system[] = [
                         'source' => 'system',
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
@@ -711,6 +715,8 @@ class SystemService
                         'badge' => 'gray',
                         'status' => 'OK',
                         'message' => $j['message'] ?? '',
+                        'human' => $h['human'],
+                        'level' => $h['level'],
                         'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
                     ];
                 }
@@ -724,6 +730,48 @@ class SystemService
 
                 return array_slice($merged, 0, $limit);
         }
+    }
+
+    /**
+     * Traduce mensajes del sistema (ufw, cron, sshd...) a texto entendible.
+     *
+     * @return array{human:string,level:string}
+     */
+    private function humanizeSystemLog(string $unit, string $message): array
+    {
+        $u = strtolower(trim($unit));
+        $m = trim($message);
+
+        // Firewall UFW: bloques de paquetes
+        if (stripos($m, 'UFW') !== false) {
+            $proto = preg_match('/PROTO=(\S+)/', $m, $p) ? strtoupper($p[1]) : '';
+            $src = preg_match('/SRC=(\S+)/', $m, $x) ? $x[1] : '?';
+            $dst = preg_match('/DST=(\S+)/', $m, $y) ? $y[1] : '?';
+            $spt = preg_match('/SPT=(\d+)/', $m, $w) ? $w[1] : '';
+            $dpt = preg_match('/DPT=(\d+)/', $m, $z) ? $z[1] : '';
+            $accion = (stripos($m, 'BLOCK') !== false) ? 'Bloqueado' : ((stripos($m, 'ALLOW') !== false) ? 'Permitido' : 'Evento');
+            $origen = $src . ($spt !== '' ? ':' . $spt : '');
+            $destino = $dst . ($dpt !== '' ? ':' . $dpt : '');
+            return ['human' => "[UFW] {$accion} {$proto} de {$origen} → {$destino}", 'level' => 'warn'];
+        }
+
+        // Cron: ejecuciones programadas
+        if ($u === 'cron' || stripos($m, 'CRON') !== false) {
+            if (preg_match('/\(([^)]+)\)\s+CMD\s+\((.*)\)/', $m, $cm)) {
+                return ['human' => "[Cron] {$cm[1]} ejecutó: {$cm[2]}", 'level' => 'info'];
+            }
+            if (preg_match('/CMD\s+\((.*)\)/', $m, $cm2)) {
+                return ['human' => "[Cron] ejecutó: {$cm2[1]}", 'level' => 'info'];
+            }
+            return ['human' => '[Cron] ' . $m, 'level' => 'info'];
+        }
+
+        // SSH: intentos fallidos
+        if ($u === 'sshd' && stripos($m, 'Failed') !== false) {
+            return ['human' => '[SSH] ' . $m, 'level' => 'warn'];
+        }
+
+        return ['human' => $m, 'level' => 'info'];
     }
 
     private function toLower(string $str): string
