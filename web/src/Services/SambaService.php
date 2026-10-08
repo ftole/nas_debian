@@ -33,8 +33,8 @@ class SambaService
                     'hidden' => false,
                     'read_only' => false,
                     'guest_ok' => false,
-                    'valid_users' => ['@grp_sistemas'],
-                    'write_list' => ['@grp_sistemas'],
+                    'valid_users' => ['@grp_samba'],
+                    'write_list' => ['@grp_samba'],
                 ],
                 [
                     'name' => 'BACKUPS_WINDOWS$',
@@ -45,8 +45,8 @@ class SambaService
                     'hidden' => true,
                     'read_only' => false,
                     'guest_ok' => false,
-                    'valid_users' => ['@grp_sistemas'],
-                    'write_list' => ['@grp_sistemas'],
+                    'valid_users' => ['@grp_samba'],
+                    'write_list' => ['@grp_samba'],
                 ],
                 [
                     'name' => 'PUBLICO',
@@ -148,7 +148,7 @@ class SambaService
 
         // 1. Preparar directorio en disco
         SystemService::sudo(['mkdir', '-p', $path]);
-        SystemService::sudo(['chown', 'root:grp_sistemas', $path]);
+        SystemService::sudo(['chown', 'root:grp_samba', $path]);
         SystemService::sudo(['chmod', '2770', $path]);
 
         // Construir directivas Samba según esquema
@@ -171,9 +171,9 @@ class SambaService
                 $cleanGroups[] = '@' . $gClean;
             }
         }
-        // Los administradores (grp_sistemas) conservan acceso a todos los recursos
-        if (!in_array('@grp_sistemas', $cleanGroups, true)) {
-            $cleanGroups[] = '@grp_sistemas';
+        // Los administradores (grp_samba) conservan acceso a todos los recursos
+        if (!in_array('@grp_samba', $cleanGroups, true)) {
+            $cleanGroups[] = '@grp_samba';
         }
 
         switch ($scheme) {
@@ -193,7 +193,7 @@ class SambaService
                 $wEntry = '@' . $wgClean;
                 $allUsers = array_unique(array_merge($cleanGroups, [$wEntry]));
                 $shareProps['valid users'] = implode(' ', $allUsers);
-                $shareProps['write list'] = trim($wEntry . ' @grp_sistemas');
+                $shareProps['write list'] = trim($wEntry . ' @grp_samba');
 
                 // Configurar ACLs POSIX para que los nuevos archivos hereden lectura al resto
                 if (!empty($wgClean)) {
@@ -236,8 +236,9 @@ class SambaService
             return $updateRes;
         }
 
-        // 3. Recargar servicio Samba
+        // 3. Recargar servicio Samba y sincronizar ACL POSIX con el esquema definido.
         SystemService::sudo(['systemctl', 'reload', 'smbd']);
+        $this->syncShareAcls($name);
 
         return ['success' => true, 'message' => "Recurso compartido [$name] creado y activo en Samba."];
     }
@@ -405,9 +406,9 @@ class SambaService
         $scheme = (int) ($data['scheme'] ?? 0);
         $comment = trim((string) ($data['comment'] ?? ''));
         $groups = $this->cleanGroupTokens((array) ($data['groups'] ?? []));
-        // Los administradores (grp_sistemas) conservan acceso a todos los recursos
-        if (!in_array('@grp_sistemas', $groups, true)) {
-            $groups[] = '@grp_sistemas';
+        // Los administradores (grp_samba) conservan acceso a todos los recursos
+        if (!in_array('@grp_samba', $groups, true)) {
+            $groups[] = '@grp_samba';
         }
         $writeGroup = ltrim(trim((string) ($data['write_group'] ?? '')), '@');
         $writeEntry = $writeGroup !== '' ? '@' . $writeGroup : '';
@@ -447,7 +448,7 @@ class SambaService
                 $groupsWithWriter[] = $writeEntry;
             }
             $props['valid users'] = $this->joinTokens(array_merge($groupsWithWriter, $validUsers));
-            $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers, ['@grp_sistemas']));
+            $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers, ['@grp_samba']));
         } else {
             $props['read only'] = 'yes';
             $props['guest ok'] = 'no';
@@ -468,6 +469,7 @@ class SambaService
             return $res;
         }
         SystemService::sudo(['systemctl', 'reload', 'smbd']);
+        $this->syncShareAcls($name);
 
         return ['success' => true, 'message' => "Recurso [$name] actualizado correctamente."];
     }
@@ -537,8 +539,84 @@ class SambaService
             return $res;
         }
         SystemService::sudo(['systemctl', 'reload', 'smbd']);
+        $this->syncShareAcls($share);
 
         return ['success' => true, 'message' => "Acceso de [$target] en [$share] fijado a '$level'."];
+    }
+
+    /**
+     * Recalcula las ACL POSIX del directorio de un recurso para que coincidan con
+     * 'valid users' / 'write list' de smb.conf. Corrige desajustes donde Samba
+     * autoriza a un grupo pero el sistema de archivos lo deniega (y viceversa).
+     */
+    public function syncShareAcls(string $name): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return ['success' => true, 'message' => "ACL de [$name] sincronizadas (modo dev)."];
+        }
+
+        $sections = $this->parseSmbConf();
+        if (!isset($sections[$name])) {
+            return ['success' => false, 'error' => "El recurso [$name] no existe en smb.conf."];
+        }
+
+        $props = $sections[$name];
+        $path = trim((string) ($props['path'] ?? ''));
+        if ($path === '' || !str_starts_with($path, '/srv/nas')) {
+            return ['success' => false, 'error' => 'El recurso no apunta a una ruta administrada en /srv/nas.'];
+        }
+
+        SystemService::sudo(['mkdir', '-p', $path]);
+
+        $guestOk = (strtolower((string) ($props['guest ok'] ?? 'no')) === 'yes');
+        if ($guestOk) {
+            SystemService::sudo(['chmod', '2777', $path]);
+            SystemService::sudo(['setfacl', '-m', 'u:www-data:rwx', $path]);
+            return ['success' => true, 'message' => "Recurso público [$name]: permisos abiertos aplicados."];
+        }
+
+        // Base: propietario root, grupo administrador con acceso total.
+        SystemService::sudo(['chown', 'root:grp_samba', $path]);
+        SystemService::sudo(['chmod', '2770', $path]);
+
+        $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+        $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+
+        // Combinar niveles: la escritura prevalece sobre la lectura.
+        $levels = [];
+        foreach ($valid as $t) {
+            $levels[$t] = 'read';
+        }
+        foreach ($write as $t) {
+            $levels[$t] = 'write';
+        }
+        // Los administradores (grp_samba) siempre conservan acceso total.
+        $levels['@grp_samba'] = 'write';
+        // El panel web accede por Samba; se concede a www-data para tareas internas.
+        $levels['u:www-data'] = 'write';
+
+        $applied = 0;
+        foreach ($levels as $token => $level) {
+            $perm = ($level === 'write') ? 'rwx' : 'r-x';
+            if (str_starts_with($token, '@')) {
+                $entry = 'g:' . ltrim($token, '@') . ':' . $perm;
+            } elseif (str_starts_with($token, 'u:')) {
+                $entry = $token . ':' . $perm;
+            } else {
+                $entry = 'u:' . $token . ':' . $perm;
+            }
+            SystemService::sudo(['setfacl', '-R', '-m', $entry, $path]);
+            SystemService::sudo(['setfacl', '-R', '-d', '-m', $entry, $path]);
+            $applied++;
+        }
+
+        // Permitir la travesía de /srv/nas a cualquier cuenta autenticada.
+        SystemService::sudo(['chmod', 'o+x', '/srv/nas']);
+
+        return [
+            'success' => true,
+            'message' => "ACL de [$name] sincronizadas ($applied entradas) en $path.",
+        ];
     }
 
     /**
