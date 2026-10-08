@@ -447,9 +447,16 @@ class BackupService
 
         $start = null;
         foreach ($lines as $ln) {
-            if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $ln, $m)) {
+            if (str_contains($ln, 'LOCK_ACQUIRED') && preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $ln, $m)) {
                 $start = strtotime($m[1]);
-                break;
+            }
+        }
+        if ($start === null) {
+            foreach ($lines as $ln) {
+                if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $ln, $m)) {
+                    $start = strtotime($m[1]);
+                    break;
+                }
             }
         }
 
@@ -470,11 +477,11 @@ class BackupService
         $result['speed'] = $speed;
         $result['elapsed_sec'] = $elapsed;
         $result['elapsed'] = $this->formatDuration($elapsed);
-        if ($percent > 0 && $elapsed > 0) {
-            $result['remaining'] = $this->formatDuration((int) round($elapsed * (100 - $percent) / $percent));
-        } elseif ($status === 'ok') {
+        if ($status === 'ok') {
             $result['percent'] = 100;
             $result['remaining'] = '00:00:00';
+        } elseif ($percent > 0 && $elapsed > 0) {
+            $result['remaining'] = $this->formatDuration((int) round($elapsed * (100 - $percent) / $percent));
         }
         return $result;
     }
