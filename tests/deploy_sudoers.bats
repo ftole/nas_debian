@@ -39,7 +39,7 @@ _extraer_bloque_sudoers() {
     [ "$status" -ne 0 ]
 
     # Un ':' sin escapar en los argumentos (p. ej. chown root:grupo) es error de sintaxis.
-    run grep -q 'root:grp_sistemas' "$tmp"
+    run grep -q 'root:grp_samba' "$tmp"
     [ "$status" -ne 0 ]
 
     rm -f "$tmp"
