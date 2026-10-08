@@ -44,3 +44,21 @@ _extraer_bloque_sudoers() {
 
     rm -f "$tmp"
 }
+
+@test "el alias NAS_STORAGE autoriza desmontaje por ruta de dispositivo /dev/*" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q '/bin/umount /dev/\[a-zA-Z0-9/_-\]\*' "$tmp"
+    [ "$status" -eq 0 ]
+    run grep -q '/usr/bin/umount /dev/\[a-zA-Z0-9/_-\]\*' "$tmp"
+    [ "$status" -eq 0 ]
+    run grep -q '/bin/umount -l /dev/\[a-zA-Z0-9/_-\]\*' "$tmp"
+    [ "$status" -eq 0 ]
+    run grep -q '/usr/bin/umount -l /dev/\[a-zA-Z0-9/_-\]\*' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
