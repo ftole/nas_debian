@@ -27,7 +27,10 @@ $diskPct = (float) ($storage['usage_percent'] ?? 0);
 $deviceType = htmlspecialchars((string) ($storage['device_type'] ?? 'Disco'), ENT_QUOTES, 'UTF-8');
 $activeView = htmlspecialchars((string) ($activeView ?? 'dashboard'), ENT_QUOTES, 'UTF-8');
 $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? 'sistemas'), ENT_QUOTES, 'UTF-8');
-$isAdmin = !empty($_SESSION['nas_user']['is_admin']);
+$role = (string) ($_SESSION['nas_user']['role'] ?? 'operator');
+$isSuper = !empty($_SESSION['nas_user']['is_superadmin']) || $role === 'superadmin';
+$isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
+$roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? ($isAdmin ? 'Administrador' : 'Operador Web')), ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
 <html lang="es" data-theme="dark">
@@ -46,7 +49,7 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
     })();
   </script>
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>;</script>
+  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>;</script>
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
 </head>
 <body>
@@ -194,7 +197,6 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
           <span class="nav-badge" id="badge-logs">Live</span>
         </div>
 
-<?php if ($isAdmin): ?>
         <div class="nav-section-title">ALMACENAMIENTO Y RECURSOS</div>
 
         <div class="nav-item <?= $activeView === 'shares' ? 'active' : '' ?>" data-view="shares">
@@ -213,6 +215,7 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
           <span class="nav-badge" id="badge-backups">...</span>
         </div>
 
+<?php if ($isAdmin): ?>
         <div class="nav-item <?= $activeView === 'storage' ? 'active' : '' ?>" data-view="storage">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-hard-drive"></use></svg>
@@ -220,9 +223,11 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
           </div>
           <span class="nav-badge" id="badge-storage"><?= round($diskTotal / 1024, 1) ?> TB</span>
         </div>
+<?php endif; ?>
 
         <div class="nav-section-title">ADMINISTRACIÓN Y SISTEMA</div>
 
+<?php if ($isAdmin): ?>
         <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
@@ -230,6 +235,7 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
           </div>
           <span class="nav-badge">CLI</span>
         </div>
+<?php endif; ?>
 
         <div class="nav-item <?= $activeView === 'users' ? 'active' : '' ?>" data-view="users">
           <div class="nav-item-left">
@@ -237,22 +243,6 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
             <span>Usuarios y grupos</span>
           </div>
           <span class="nav-badge" id="badge-users">...</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'permissions' ? 'active' : '' ?>" data-view="permissions">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-shield"></use></svg>
-            <span>Permisos de acceso</span>
-          </div>
-          <span class="nav-badge">ACL</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-domain"></use></svg>
-            <span>Dominio AD</span>
-          </div>
-          <span class="nav-badge" id="badge-domain">AD</span>
         </div>
 
         <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
@@ -277,6 +267,15 @@ $isAdmin = !empty($_SESSION['nas_user']['is_admin']);
             <span>Redes</span>
           </div>
           <span class="nav-badge">1 Gbps</span>
+        </div>
+
+<?php if ($isAdmin): ?>
+        <div class="nav-item <?= $activeView === 'domain' ? 'active' : '' ?>" data-view="domain">
+          <div class="nav-item-left">
+            <svg class="icon"><use href="#icon-domain"></use></svg>
+            <span>Dominio AD</span>
+          </div>
+          <span class="nav-badge" id="badge-domain">AD</span>
         </div>
 
         <div class="nav-item <?= $activeView === 'updates' ? 'active' : '' ?>" data-view="updates">
@@ -959,30 +958,27 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </div>
           </div>
         </div>
-      </section>
 
-      <!-- 9.1 PERMISOS DE ACCESO A RECURSOS (PERMISSIONS) -->
-      <section id="view-permissions" class="view-section <?= $activeView === 'permissions' ? 'active' : '' ?>">
-        <div class="page-head">
-          <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Permisos de acceso a recursos</h2>
-            <p>Acceso por grupo y por usuario a las redes compartidas (smb.conf). Clic en una celda para alternar: Sin acceso → Lectura → Escritura.</p>
+        <!-- Permisos de acceso a recursos (integrados en Usuarios) -->
+        <div class="panel-card" style="margin-top:20px;">
+          <div class="panel-card-head">
+            <h3>Permisos de acceso a recursos (ACL / smb.conf)</h3>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-secondary btn-sm" onclick="repairAcls()" title="Recalcular las ACL POSIX de disco según smb.conf">
+                <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Reparar ACL
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="loadAccessMatrix()">
+                <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Actualizar
+              </button>
+            </div>
           </div>
-          <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadAccessMatrix()">
-              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
-            </button>
+          <div class="filter-toolbar" style="margin:0; padding:10px 4px;">
+            <div class="filter-chips" id="perm-filter-chips">
+              <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
+              <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
+            </div>
+            <small style="color:var(--text-muted);">Clic en una celda para alternar: Sin acceso → Solo lectura → Lectura y escritura.</small>
           </div>
-        </div>
-
-        <div class="filter-toolbar">
-          <div class="filter-chips" id="perm-filter-chips">
-            <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
-            <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
-          </div>
-        </div>
-
-        <div class="panel-card">
           <div class="table-responsive" id="perm-matrix-container">
             <p style="padding:18px; color:var(--text-muted);">Cargando matriz de permisos...</p>
           </div>
@@ -1360,7 +1356,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-body">
         <div class="alert-box alert-box-warning">
           <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
-          <span>Operación destructiva. El disco del sistema está protegido y no se lista. Escribe <code>SI-FORMATEAR</code> para confirmar.</span>
+          <span>Operación destructiva. El disco del sistema está protegido y no se lista. Escribe <code>SI-FORMATEAR</code> para confirmar. Si el disco (o <code>/srv/nas</code>) está montado, se te ofrecerá desmontarlo antes de continuar.</span>
         </div>
         <form id="form-storage-manage" onsubmit="submitStorageManage(event)">
           <div class="form-group">
@@ -1433,13 +1429,19 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="user-can-web">
-              <span>Acceso al panel web (rol usuario: Vista general, Archivos y Logs)</span>
+              <span>Acceso al panel web (rol operador: dashboard, archivos, logs, recursos, respaldos, usuarios, servicios, diagnóstico y red)</span>
             </label>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="user-admin-role-wrap">
             <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="user-is-admin">
               <span>Administrador (root/sudo + panel completo + SSH)</span>
+            </label>
+          </div>
+          <div class="form-group" id="user-superadmin-role-wrap" style="display:none;">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="user-is-superadmin">
+              <span><strong>Superadministrador</strong> (control total e inmutable)</span>
             </label>
           </div>
           <div class="form-group">
@@ -1510,13 +1512,19 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="edit-user-can-web">
-              <span>Acceso al panel web (rol usuario: Vista general, Archivos y Logs)</span>
+              <span>Acceso al panel web (rol operador)</span>
             </label>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="edit-user-admin-role-wrap">
             <label style="display:flex; align-items:center; gap:8px;">
               <input type="checkbox" id="edit-user-is-admin">
               <span>Administrador (root/sudo + panel completo + SSH)</span>
+            </label>
+          </div>
+          <div class="form-group" id="edit-user-superadmin-role-wrap" style="display:none;">
+            <label style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="edit-user-is-superadmin" disabled>
+              <span><strong>Superadministrador</strong> (control total e inmutable; no revocable)</span>
             </label>
           </div>
           <div class="form-group">
