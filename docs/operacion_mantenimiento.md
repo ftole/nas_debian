@@ -37,7 +37,7 @@ La pestaña **Almacenamiento** lista los dispositivos de bloque con su estado (`
 - **Crear un volumen LVM** (PV → VG → LV) y montarlo en `/srv/nas`.
 - **Crear un subvolumen Btrfs**.
 
-Toda operación destructiva exige escribir textualmente `SI-FORMATEAR`. El disco del sistema operativo queda siempre protegido (`isOsDisk`) y nunca se lista como candidato; los discos en uso (montados, PV de LVM o miembros de RAID) también se excluyen.
+Toda operación destructiva exige escribir textualmente `SI-FORMATEAR`. El disco del sistema operativo queda siempre protegido (`isOsDisk`) y nunca se lista como candidato; los discos en uso (montados, PV de LVM o miembros de RAID) también se excluyen. Si el disco destino (o una de sus particiones, como `/srv/nas`) está montado, el panel **ofrece desmontarlo** antes de continuar en lugar de rechazar la operación.
 
 ### 2.4 Monitoreo de Capacidad
 Para verificar el espacio en cualquier momento:
