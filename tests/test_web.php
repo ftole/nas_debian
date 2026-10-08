@@ -913,6 +913,8 @@ $disksOk = is_array($disksInfo) && (empty($disksInfo) || (isset($disksInfo[0]['p
 assertTrue($disksOk, 'StorageService::getDisks expone los campos protected e in_use');
 $fmtBad = $storage->formatAndMount('/dev/sdz', 'ext4', 'NO');
 assertTrue(!$fmtBad['success'], 'StorageService::formatAndMount exige la confirmación SI-FORMATEAR');
+$unmountDev = $storage->unmountDevice('/dev/sdb');
+assertTrue($unmountDev === true, 'StorageService::unmountDevice ejecuta desmontaje pasando ruta de dispositivo');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
