@@ -133,18 +133,36 @@ function escapeHtml(str) {
 // ==============================================================================
 const VALID_VIEWS = [
   'dashboard', 'files', 'logs', 'storage', 'networking', 'services', 'terminal',
-  'shares', 'backups', 'users', 'permissions', 'diagnostics', 'updates', 'applications', 'domain'
+  'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
 ];
 
-// Módulos permitidos a un usuario web (no administrador)
-const WEB_USER_VIEWS = ['dashboard', 'files', 'logs'];
+// Módulos permitidos al rol operador (grp_web)
+const WEB_USER_VIEWS = ['dashboard', 'files', 'logs', 'shares', 'backups', 'users', 'services', 'diagnostics', 'networking'];
+
+// Ajusta la interfaz según el rol de la sesión (administrador / superadministrador / operador).
+function applyRoleUi() {
+  const isAdmin = window.NAS_IS_ADMIN !== false;
+  const isSuper = window.NAS_IS_SUPER === true;
+
+  ['user-admin-role-wrap', 'edit-user-admin-role-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isAdmin ? '' : 'none';
+  });
+  ['user-superadmin-role-wrap', 'edit-user-superadmin-role-wrap'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isSuper ? '' : 'none';
+  });
+}
 
 function switchView(viewName, updateHash = true) {
+  if (viewName === 'permissions') {
+    viewName = 'users';
+  }
   if (!VALID_VIEWS.includes(viewName)) {
     viewName = 'dashboard';
   }
 
-  // Los usuarios web solo pueden ver Dashboard, Archivos y Logs
+  // Los operadores solo pueden ver los módulos delegados; el resto se redirige al dashboard.
   if (window.NAS_IS_ADMIN === false && !WEB_USER_VIEWS.includes(viewName)) {
     viewName = 'dashboard';
   }
@@ -204,8 +222,6 @@ function switchView(viewName, updateHash = true) {
       break;
     case 'users':
       loadUsersAndGroups();
-      break;
-    case 'permissions':
       loadAccessMatrix();
       break;
     case 'services':
@@ -481,10 +497,10 @@ async function populateShareGroupOptions() {
     }
 
     container.innerHTML = selectable.map(g => {
-      const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
       return `
       <label style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
+        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}" ${g.name === 'grp_samba' ? 'checked' : ''}>
         <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
       </label>`;
     }).join('');
@@ -509,7 +525,7 @@ async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup)
     const groups = res.data || [];
     const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
     container.innerHTML = groups.map(g => {
-      const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
       return `
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" name="edit_share_group" value="${escapeHtml(g.name)}" ${sel.includes(g.name) ? 'checked' : ''}>
@@ -953,13 +969,27 @@ async function submitStorageManage(event) {
   const btn = document.getElementById('btn-submit-storage');
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
   try {
-    await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+    try {
+      await apiFetch(url, { method: 'POST', body: JSON.stringify(payload), silentToast: true });
+    } catch (err) {
+      const msg = String(err.message || '');
+      if (/montad|desmont/i.test(msg)) {
+        const proceed = confirm('El dispositivo (o una de sus particiones, como /srv/nas) está montado.\n\n¿Deseas DESMONTARLO y continuar con la operación? Los datos del disco serán destruidos.');
+        if (!proceed) {
+          showToast('Operación cancelada por el usuario.', 'warning');
+          return;
+        }
+        await apiFetch(url, { method: 'POST', body: JSON.stringify({ ...payload, unmount: true }) });
+      } else {
+        throw err;
+      }
+    }
     showToast('Operación de almacenamiento completada.', 'success');
     closeModal('modal-storage-manage');
     document.getElementById('stg-confirm').value = '';
     loadStorage();
   } catch (e) {
-    // Ya mostrado
+    showToast(e.message || 'No se pudo completar la operación.', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
@@ -988,12 +1018,16 @@ async function loadUsersAndGroups() {
     _groupsData = gRes.data || [];
 
     if (usersTbody) {
+      const isAdminCaller = window.NAS_IS_ADMIN !== false;
       usersTbody.innerHTML = _usersData.map(u => {
-        const isProtected = PROTECTED_USERS.includes(u.username);
-        const rol = u.is_admin
-          ? '<span class="badge badge-warn">Admin</span>'
-          : (u.can_web ? '<span class="badge badge-blue">Web</span>' : '<span class="badge badge-gray">Estándar</span>');
+        const isProtected = PROTECTED_USERS.includes(u.username) || !!u.is_superadmin;
+        const rol = u.is_superadmin
+          ? '<span class="badge badge-err">Superadmin</span>'
+          : (u.is_admin
+              ? '<span class="badge badge-warn">Admin</span>'
+              : (u.can_web ? '<span class="badge badge-blue">Operador</span>' : '<span class="badge badge-gray">Estándar</span>'));
         const netEnabled = !!(u.samba_enabled ?? u.enabled);
+        const canManage = !isProtected && (isAdminCaller || !u.is_admin);
         return `
         <tr data-username="${escapeHtml(u.username)}" data-admin="${u.is_admin ? '1' : '0'}" data-enabled="${netEnabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
           <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.full_name || '')}</div></td>
@@ -1002,11 +1036,11 @@ async function loadUsersAndGroups() {
           <td>${netEnabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Suspendido</span>'}</td>
           <td>${u.is_samba ? '<span class="badge badge-ok">Sync</span>' : '<span class="badge badge-err">Sin SMB</span>'}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${isProtected ? '<span class="badge badge-gray">Protegida</span>' : `
+            ${canManage ? `
               <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
               <button class="btn btn-secondary btn-sm" title="${netEnabled ? 'Suspender acceso a red' : 'Reactivar acceso a red'}" onclick="toggleUser('${escapeHtml(u.username)}', ${netEnabled ? 'false' : 'true'})"><svg class="icon icon-sm"><use href="#icon-${netEnabled ? 'lock' : 'unlock'}"></use></svg></button>
               <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
-            `}
+            ` : `<span class="badge badge-gray">${isProtected ? (u.is_superadmin ? 'Inmutable' : 'Protegida') : 'Solo lectura'}</span>`}
           </td>
         </tr>`;
       }).join('') || '<tr><td colspan="6" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
@@ -1015,7 +1049,7 @@ async function loadUsersAndGroups() {
 
     if (groupsTbody) {
       groupsTbody.innerHTML = _groupsData.map(g => {
-        const isSpecial = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+        const isSpecial = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
         return `
         <tr>
           <td><strong>${escapeHtml(g.name)}</strong></td>
@@ -1051,7 +1085,7 @@ function populateUserGroupOptions(groups) {
   }
 
   container.innerHTML = list.map(g => {
-    const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
       <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}" ${special ? 'disabled' : ''}>
       <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
@@ -1088,11 +1122,16 @@ function openEditUser(username) {
   document.getElementById('edit-user-is-admin').checked = !!u.is_admin;
   document.getElementById('edit-user-can-web').checked = !!(u.can_web || u.is_admin);
   document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
+  const superChk = document.getElementById('edit-user-is-superadmin');
+  if (superChk) superChk.checked = !!u.is_superadmin;
+  // El superadministrador es inmutable: no se puede degradar desde el panel.
+  const adminChk = document.getElementById('edit-user-is-admin');
+  if (adminChk) adminChk.disabled = !!u.is_superadmin;
 
   const checked = (u.groups || []).filter(g => g.startsWith('grp_'));
   const container = document.getElementById('edit-user-groups-list');
   container.innerHTML = _groupsData.map(g => {
-    const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
     const sel = (!special && checked.includes(g.name)) ? 'checked' : '';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
       <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel} ${special ? 'disabled' : ''}>
@@ -1110,6 +1149,7 @@ async function submitUpdateUser(event) {
   const isAdmin = document.getElementById('edit-user-is-admin').checked;
   const canWeb = document.getElementById('edit-user-can-web').checked;
   const sambaEnabled = document.getElementById('edit-user-samba-enabled').checked;
+  const isSuperadmin = document.getElementById('edit-user-is-superadmin')?.checked ?? false;
   const groups = Array.from(document.querySelectorAll('input[name="edit_user_group"]:checked')).map(cb => cb.value);
 
   const btn = document.getElementById('btn-submit-edit-user') || event.target.querySelector('button[type="submit"]');
@@ -1118,7 +1158,7 @@ async function submitUpdateUser(event) {
   try {
     await apiFetch('/api/users/update', {
       method: 'POST',
-      body: JSON.stringify({ username, full_name, password, groups, is_admin: isAdmin, can_web: canWeb, samba_enabled: sambaEnabled }),
+      body: JSON.stringify({ username, full_name, password, groups, is_admin: isAdmin, can_web: canWeb, samba_enabled: sambaEnabled, is_superadmin: isSuperadmin }),
     });
     showToast(`Usuario [${username}] actualizado.`, 'success');
     closeModal('modal-edit-user');
@@ -1321,6 +1361,19 @@ async function cyclePerm(kind, name, share) {
   }
 }
 
+async function repairAcls() {
+  if (!confirm('¿Recalcular las ACL POSIX de todos los recursos según smb.conf?\n\nEsto corrige accesos denegados por desajustes entre Samba y los permisos de disco.')) {
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/shares/access/repair', { method: 'POST', body: JSON.stringify({}) });
+    showToast(res.message || 'ACL reparadas.', 'success');
+    loadAccessMatrix();
+  } catch (e) {
+    // Ya mostrado
+  }
+}
+
 async function submitNewUser(event) {
   event.preventDefault();
   const username = document.getElementById('user-uname').value;
@@ -1329,6 +1382,7 @@ async function submitNewUser(event) {
   const isAdmin = document.getElementById('user-is-admin').checked;
   const canWeb = document.getElementById('user-can-web').checked;
   const sambaEnabled = document.getElementById('user-samba-enabled').checked;
+  const isSuperadmin = document.getElementById('user-is-superadmin')?.checked ?? false;
 
   const selectedGroups = Array.from(document.querySelectorAll('input[name="user_group"]:checked'))
     .map(cb => cb.value);
@@ -1350,6 +1404,7 @@ async function submitNewUser(event) {
         is_admin: isAdmin,
         can_web: canWeb,
         samba_enabled: sambaEnabled,
+        is_superadmin: isSuperadmin,
       }),
     });
 
@@ -2146,7 +2201,7 @@ function renderFileTable(items) {
       : `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'download')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
 
     const ownerStr = escapeHtml(item.owner || 'sistemas');
-    const groupStr = escapeHtml(item.group || 'grp_sistemas');
+    const groupStr = escapeHtml(item.group || 'grp_samba');
     const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
 
     return `
@@ -3284,6 +3339,8 @@ async function loadDiagnostics() {
 // 15. Inicialización Robusta al Cargar el DOM
 // ==============================================================================
 function initApp() {
+  applyRoleUi();
+
   // Configurar listeners de navegación sidebar
   document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
     item.addEventListener('click', () => {
