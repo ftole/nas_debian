@@ -46,3 +46,26 @@ setup() {
     run _verificar_firma_tag "tag-que-no-existe-xyz" ""
     [ "$status" -ne 0 ]
 }
+
+@test "_hook_post_actualizacion se ejecuta sin errores de forma no destructiva" {
+    run _hook_post_actualizacion
+    [ "$status" -eq 0 ]
+}
+
+@test "_hook_post_actualizacion extrae la definicion de nas-terminal desde deploy.sh" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_term="$tmp_dir/nas-terminal"
+
+    awk '
+        /^cat << '\''NAS_TERM_EOF'\'' > \/usr\/local\/sbin\/nas-terminal$/ { capture=1; next }
+        capture && /^NAS_TERM_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_term"
+
+    [ -s "$tmp_term" ]
+    run grep -q 'SESSION="nas-web-term-\${TARGET_USER}"' "$tmp_term"
+    [ "$status" -eq 0 ]
+    rm -rf "$tmp_dir"
+}
+
