@@ -719,6 +719,7 @@ Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub 
     /bin/mount /dev/[a-zA-Z0-9/]* *, /usr/bin/mount /dev/[a-zA-Z0-9/]* *, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
     /bin/umount /srv/nas*, /usr/bin/umount /srv/nas*, /bin/umount -l /srv/nas*, /usr/bin/umount -l /srv/nas*, \\
     /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, /bin/umount -l /mnt/nas-btrfs-tmp, /usr/bin/umount -l /mnt/nas-btrfs-tmp, \\
+    /bin/umount /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount /dev/[a-zA-Z0-9/_-]*, /bin/umount -l /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount -l /dev/[a-zA-Z0-9/_-]*, \\
     /bin/cp /tmp/nas_fstab_* /etc/fstab, /usr/bin/cp /tmp/nas_fstab_* /etc/fstab
 Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
