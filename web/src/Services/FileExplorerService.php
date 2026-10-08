@@ -132,7 +132,7 @@ class FileExplorerService
             $uid = @fileowner($fullPath);
             $gid = @filegroup($fullPath);
             $owner = 'sistemas';
-            $group = 'grp_sistemas';
+            $group = 'grp_samba';
             if ($uid !== false && function_exists('posix_getpwuid')) {
                 $pw = @posix_getpwuid($uid);
                 if (is_array($pw) && !empty($pw['name'])) {
@@ -258,9 +258,9 @@ class FileExplorerService
 
             if ($moved) {
                 @chmod($destination, 0660);
-                // Si existe el grupo corporativo grp_sistemas, asignarlo
+                // Si existe el grupo corporativo grp_samba, asignarlo
                 if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-                    @chgrp($destination, 'grp_sistemas');
+                    @chgrp($destination, 'grp_samba');
                 }
 
                 $uploaded[] = [
@@ -315,7 +315,7 @@ class FileExplorerService
         }
 
         if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-            @chgrp($target, 'grp_sistemas');
+            @chgrp($target, 'grp_samba');
         }
 
         AuditService::log('dir_create', ($parentSubpath !== '' ? $parentSubpath . '/' : '') . $cleanDirName, 'SUCCESS');
@@ -371,7 +371,7 @@ class FileExplorerService
         if (!is_dir($trashDir)) {
             @mkdir($trashDir, 0770, true);
             if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-                @chgrp($trashDir, 'grp_sistemas');
+                @chgrp($trashDir, 'grp_samba');
             }
         }
         return $trashDir;
@@ -560,7 +560,7 @@ class FileExplorerService
                 return ['success' => false, 'error' => 'No se pudo recrear la carpeta de destino original.'];
             }
             if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-                @chgrp($parentDir, 'grp_sistemas');
+                @chgrp($parentDir, 'grp_samba');
             }
         }
 
@@ -789,7 +789,7 @@ class FileExplorerService
                 return ['success' => false, 'error' => 'No se pudo crear la carpeta contenedora.'];
             }
             if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-                @chgrp($parent, 'grp_sistemas');
+                @chgrp($parent, 'grp_samba');
             }
         }
 
@@ -800,7 +800,7 @@ class FileExplorerService
 
         @chmod($target, 0660);
         if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-            @chgrp($target, 'grp_sistemas');
+            @chgrp($target, 'grp_samba');
         }
 
         $normalizedContent = (string) preg_replace('/(\r\n|\n|\r)$/D', '', $content);
