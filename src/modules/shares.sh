@@ -200,7 +200,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 READ_ONLY="no"
                 GUEST_OK="no"
                 MASK="0770"
-                GRUPO_DUENO="grp_sistemas"
+                GRUPO_DUENO="grp_samba"
                 TIPO_TXT=""
 
                 case "$TIPO_PERM" in
@@ -208,7 +208,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         local -a LISTA_OPC=()
                         for g in $GRUPOS_DISP; do
                             STATUS="OFF"
-                            [ "$g" == "grp_sistemas" ] && STATUS="ON"
+                            [ "$g" == "grp_samba" ] && STATUS="ON"
                             LISTA_OPC+=("$g" "$g" "$STATUS")
                         done
 
@@ -265,7 +265,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         local -a LISTA_OPC=()
                         for g in $GRUPOS_DISP; do
                             STATUS="OFF"
-                            [ "$g" == "grp_sistemas" ] && STATUS="ON"
+                            [ "$g" == "grp_samba" ] && STATUS="ON"
                             LISTA_OPC+=("$g" "$g" "$STATUS")
                         done
 
