@@ -123,9 +123,9 @@ El motor de respaldos trabaja de forma autónoma mediante tareas de `cron` o eje
 
 | Ruta | Propósito | Permisos |
 | :--- | :--- | :--- |
-| `/srv/nas` | Raíz de almacenamiento de datos compartidos y backups | `2770 root:grp_sistemas` |
-| `/srv/nas/BACKUPS_HISTORICOS/` | Repositorio de snapshots inmutables deduplicados | `0750 root:grp_sistemas` |
-| `/srv/nas/LOGS_BACKUP/` | Bitácoras de cada tarea de respaldo | `0750 root:grp_sistemas` |
+| `/srv/nas` | Raíz de almacenamiento de datos compartidos y backups | `2770 root:grp_samba` |
+| `/srv/nas/BACKUPS_HISTORICOS/` | Repositorio de snapshots inmutables deduplicados | `0750 root:grp_samba` |
+| `/srv/nas/LOGS_BACKUP/` | Bitácoras de cada tarea de respaldo | `0750 root:grp_samba` |
 | `/var/lib/nas/nas.sqlite` | Base de datos SQLite (auditoría, configuración, historial) | `0660 www-data:www-data` |
 | `/etc/backup-credentials/` | Archivos de credenciales CIFS de origen | `0600 root:root` |
 | `/root/.ssh/known_hosts_backup` | Almacén de huellas SSH para tareas de respaldo | `0600 root:root` |
