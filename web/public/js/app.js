@@ -417,6 +417,9 @@ async function loadShares() {
         <td>${s.hidden ? '<span class="badge badge-gray">Oculto ($)</span>' : '<span class="badge badge-ok">Visible</span>'}</td>
         <td>${(s.valid_users || []).map(u => `<span class="tag-pill">${escapeHtml(u)}</span>`).join(' ') || (s.guest_ok ? '<em>Invitados</em>' : '<em>Sistemas</em>')}</td>
         <td style="text-align:right; white-space:nowrap;">
+          <button class="btn btn-secondary btn-sm" title="Permisos de acceso" onclick="switchView('permissions')">
+            <svg class="icon icon-sm"><use href="#icon-shield"></use></svg>
+          </button>
           <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditShare('${escapeHtml(s.name)}')">
             <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
           </button>
@@ -464,14 +467,22 @@ async function populateShareGroupOptions() {
   try {
     const res = await apiFetch('/api/groups');
     AppState.groupsCache = res.data || [];
-    const selectable = AppState.groupsCache.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web');
+    const selectable = AppState.groupsCache;
 
-    container.innerHTML = selectable.map(g => `
+    if (!selectable.length) {
+      container.innerHTML = '<em style="color:var(--text-muted);">No hay grupos disponibles. Crea uno en “Usuarios y grupos”.</em>';
+      if (writeSelect) writeSelect.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = selectable.map(g => {
+      const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+      return `
       <label style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}">
-        <span>${escapeHtml(g.name)}</span>
-      </label>
-    `).join('');
+        <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}" ${g.name === 'grp_sistemas' ? 'checked' : ''}>
+        <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
+      </label>`;
+    }).join('');
 
     if (writeSelect) {
       writeSelect.innerHTML = selectable.map(g => `
@@ -490,14 +501,16 @@ async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup)
 
   try {
     const res = await apiFetch('/api/groups');
-    const groups = (res.data || []).filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web');
+    const groups = res.data || [];
     const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
-    container.innerHTML = groups.map(g => `
+    container.innerHTML = groups.map(g => {
+      const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+      return `
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" name="edit_share_group" value="${escapeHtml(g.name)}" ${sel.includes(g.name) ? 'checked' : ''}>
-        <span>${escapeHtml(g.name)}</span>
-      </label>
-    `).join('');
+        <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
+      </label>`;
+    }).join('');
 
     if (writeSelect) {
       writeSelect.innerHTML = groups.map(g => `
@@ -896,12 +909,20 @@ function populateUserGroupOptions(groups) {
   const container = document.getElementById('user-groups-list');
   if (!container) return;
 
-  container.innerHTML = groups.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web').map(g => `
-    <label style="display:flex; align-items:center; gap:8px;">
-      <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}">
-      <span>${escapeHtml(g.name)}</span>
-    </label>
-  `).join('');
+  const list = groups || [];
+  if (!list.length) {
+    container.innerHTML = '<em style="color:var(--text-muted);">No hay grupos disponibles. ' +
+      '<a href="#" onclick="event.preventDefault(); closeModal(\'modal-new-user\'); openModal(\'modal-new-group\');">Crear un grupo</a>.</em>';
+    return;
+  }
+
+  container.innerHTML = list.map(g => {
+    const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+    return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
+      <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}" ${special ? 'disabled' : ''}>
+      <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
+    </label>`;
+  }).join('');
 }
 
 function setUsersFilter(filter) {
@@ -934,13 +955,14 @@ function openEditUser(username) {
   document.getElementById('edit-user-can-web').checked = !!(u.can_web || u.is_admin);
   document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
 
-  const checked = (u.groups || []).filter(g => g.startsWith('grp_') && g !== 'grp_sistemas' && g !== 'grp_web');
+  const checked = (u.groups || []).filter(g => g.startsWith('grp_'));
   const container = document.getElementById('edit-user-groups-list');
-  container.innerHTML = _groupsData.filter(g => g.name !== 'grp_sistemas' && g.name !== 'grp_web').map(g => {
-    const sel = checked.includes(g.name) ? 'checked' : '';
-    return `<label style="display:flex; align-items:center; gap:8px;">
-      <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel}>
-      <span>${escapeHtml(g.name)}</span>
+  container.innerHTML = _groupsData.map(g => {
+    const special = !!g.is_special || g.name === 'grp_sistemas' || g.name === 'grp_web';
+    const sel = (!special && checked.includes(g.name)) ? 'checked' : '';
+    return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
+      <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel} ${special ? 'disabled' : ''}>
+      <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
     </label>`;
   }).join('');
   openModal('modal-edit-user');
@@ -1115,8 +1137,8 @@ async function loadAccessMatrix() {
 }
 
 function permBadge(level) {
-  if (level === 'write') return '<span class="badge badge-ok">Escritura</span>';
-  if (level === 'read') return '<span class="badge badge-blue">Lectura</span>';
+  if (level === 'write') return '<span class="badge badge-ok">Lectura y escritura</span>';
+  if (level === 'read') return '<span class="badge badge-blue">Solo lectura</span>';
   return '<span class="badge badge-gray">Sin acceso</span>';
 }
 
