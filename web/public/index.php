@@ -150,6 +150,11 @@ $router->get('/api/system/updates', [SystemController::class, 'updates']);
 // Rutas API: Consola Terminal Web Real
 $router->post('/api/terminal/exec', [TerminalController::class, 'exec']);
 $router->get('/api/terminal/history', [TerminalController::class, 'history']);
+$router->post('/api/terminal/session', [TerminalController::class, 'session']);
+$router->post('/api/terminal/send', [TerminalController::class, 'send']);
+$router->get('/api/terminal/capture', [TerminalController::class, 'capture']);
+$router->post('/api/terminal/resize', [TerminalController::class, 'resize']);
+$router->post('/api/terminal/kill', [TerminalController::class, 'kill']);
 
 // Rutas API: Explorador de Archivos y Almacenamiento (/srv/nas)
 $router->get('/api/files', [FileExplorerController::class, 'list']);
