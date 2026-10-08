@@ -42,11 +42,16 @@ class DashboardController
         $storage = $this->storage->getStorageOverview();
         $services = $this->system->getServicesStatus();
 
+        $activeView = $params['view'] ?? 'dashboard';
+        if ($activeView === 'permissions') {
+            $activeView = 'users';
+        }
+
         Response::html($templatePath, [
             'metrics' => $metrics,
             'storage' => $storage,
             'services' => $services,
-            'activeView' => $params['view'] ?? 'dashboard',
+            'activeView' => $activeView,
         ]);
     }
 
