@@ -118,6 +118,9 @@ $router->get('/api/storage/disks', [StorageController::class, 'overview']);
 $router->post('/api/storage/scrub', [StorageController::class, 'scrubStart']);
 $router->get('/api/storage/scrub', [StorageController::class, 'scrubStatus']);
 $router->post('/api/storage/trim', [StorageController::class, 'trim']);
+$router->post('/api/storage/format', [StorageController::class, 'format']);
+$router->post('/api/storage/lvm', [StorageController::class, 'lvm']);
+$router->post('/api/storage/subvolume', [StorageController::class, 'subvolume']);
 
 // Rutas API: Usuarios y Grupos
 $router->get('/api/users', [UserController::class, 'users']);
