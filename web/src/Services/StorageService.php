@@ -145,20 +145,31 @@ class StorageService
     }
 
     /**
-     * Indica si un dispositivo o cualquiera de sus particiones hijas está montado.
+     * Indica si un dispositivo o punto de montaje está actualmente montado en el sistema.
      */
-    private function deviceHasMount(string $device): bool
+    public function deviceHasMount(string $device): bool
     {
         if (DIRECTORY_SEPARATOR === '\\') {
             return false;
         }
-        $out = SystemService::runCommand(['lsblk', '-ln', '-o', 'MOUNTPOINT', $device])['stdout'] ?? '';
-        foreach (preg_split('/\r\n|\r|\n/', (string) $out) as $line) {
-            if (trim($line) !== '') {
-                return true;
-            }
+
+        $device = trim($device);
+        if ($device === '') {
+            return false;
         }
-        return false;
+
+        if (str_starts_with($device, '/dev/')) {
+            $out = SystemService::runCommand(['lsblk', '-ln', '-o', 'MOUNTPOINT', $device])['stdout'] ?? '';
+            foreach (preg_split('/\r\n|\r|\n/', (string) $out) as $line) {
+                if (trim($line) !== '') {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        $out = SystemService::runCommand(['findmnt', '-n', '-M', $device])['stdout'] ?? '';
+        return trim($out) !== '';
     }
 
     /**
@@ -184,6 +195,7 @@ class StorageService
     /**
      * Desmonta un dispositivo y sus particiones ejecutando desmontaje tanto por
      * puntos de montaje como por la ruta del dispositivo (/dev/...).
+     * Soporta también la ruta directa de un punto de montaje (ej. /mnt/disco2 o /srv/nas).
      */
     public function unmountDevice(string $device): bool
     {
@@ -191,9 +203,34 @@ class StorageService
             return true;
         }
 
-        $points = $this->mountedPointsOf($device);
-        if (!in_array('/srv/nas', $points, true) && is_dir('/srv/nas')) {
-            $points[] = '/srv/nas';
+        $device = trim($device);
+        if ($device === '') {
+            return false;
+        }
+
+        $points = [];
+        $devPaths = [];
+
+        if (str_starts_with($device, '/dev/')) {
+            $points = $this->mountedPointsOf($device);
+            $devPaths = [$device];
+
+            $outDevs = SystemService::runCommand(['lsblk', '-ln', '-o', 'PATH', $device])['stdout'] ?? '';
+            foreach (preg_split('/\r\n|\r|\n/', (string) $outDevs) as $line) {
+                $p = trim($line);
+                if ($p !== '' && str_starts_with($p, '/dev/') && !in_array($p, $devPaths, true)) {
+                    $devPaths[] = $p;
+                }
+            }
+            // Desmontar particiones primero (longitud mayor primero, ej. /dev/sdb1 antes de /dev/sdb)
+            usort($devPaths, fn($a, $b) => strlen($b) <=> strlen($a));
+        } else {
+            // Se pasó directamente una ruta de punto de montaje
+            $points = [$device];
+            $src = trim(SystemService::runCommand(['findmnt', '-n', '-o', 'SOURCE', $device])['stdout'] ?? '');
+            if ($src !== '' && str_starts_with($src, '/dev/')) {
+                $devPaths[] = $src;
+            }
         }
 
         // 1. Desmontar por puntos de montaje
@@ -206,23 +243,10 @@ class StorageService
         }
 
         // 2. Desmontar directamente por ruta de dispositivo /dev/... si aplica
-        if (str_starts_with($device, '/dev/')) {
-            $devPaths = [$device];
-            $outDevs = SystemService::runCommand(['lsblk', '-ln', '-o', 'PATH', $device])['stdout'] ?? '';
-            foreach (preg_split('/\r\n|\r|\n/', (string) $outDevs) as $line) {
-                $p = trim($line);
-                if ($p !== '' && str_starts_with($p, '/dev/') && !in_array($p, $devPaths, true)) {
-                    $devPaths[] = $p;
-                }
-            }
-            // Desmontar particiones primero (longitud mayor primero, ej. /dev/sdb1 antes de /dev/sdb)
-            usort($devPaths, fn($a, $b) => strlen($b) <=> strlen($a));
-
-            foreach ($devPaths as $dev) {
-                $res = SystemService::sudo(['umount', $dev]);
-                if ($res['code'] !== 0) {
-                    SystemService::sudo(['umount', '-l', $dev]);
-                }
+        foreach ($devPaths as $dev) {
+            $res = SystemService::sudo(['umount', $dev]);
+            if ($res['code'] !== 0) {
+                SystemService::sudo(['umount', '-l', $dev]);
             }
         }
 
