@@ -76,7 +76,11 @@ desinstalar_guiado() {
 obtener_estado_despliegue() {
     if [ -f /etc/samba/smb.conf ] && getent group grp_samba &>/dev/null && [ -d /srv/nas ]; then
         local rol="ARCHIVOS"
-        if grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
+        if [ -s /etc/nas/role ]; then
+            rol=$(cat /etc/nas/role | tr -cd 'A-Za-z_' | tr '[:lower:]' '[:upper:]')
+            [ "$rol" == "HIBRIDO" ] && rol="ARCHIVOS_BACKUP"
+            [ "$rol" == "ARCHIVOSBACKUP" ] && rol="ARCHIVOS_BACKUP"
+        elif grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
             rol="BACKUP"
         fi
         echo "$rol"
@@ -93,21 +97,34 @@ while true; do
     if [ -n "$ROL_ACTUAL" ]; then
         TAG_OPC1="[1]  [✔] Servidor Configurado (Rol: $ROL_ACTUAL)"
     else
-        TAG_OPC1="[1]  Desplegar Servidor (NAS de Archivos o Central de Backup)"
+        TAG_OPC1="[1]  Desplegar Servidor (NAS de Archivos, Backup o Híbrido)"
     fi
 
+    MENU_OPTS=()
+    MENU_OPTS+=("1" "$TAG_OPC1")
+    MENU_OPTS+=("2" "[2]  Gestión de Grupos de Seguridad (Crear / Listar / Eliminar)")
+
+    if [ "$ROL_ACTUAL" == "BACKUP" ]; then
+        MENU_OPTS+=("3" "[3]  Gestión de Recursos de Backup Ocultos ($)")
+    else
+        MENU_OPTS+=("3" "[3]  Gestión de Recursos Compartidos (Ver / Crear / Deshabilitar / Borrar)")
+    fi
+
+    if [ "$ROL_ACTUAL" != "ARCHIVOS" ]; then
+        MENU_OPTS+=("4" "[4]  Gestión de Tareas de Backup (Windows / Linux / Local)")
+    fi
+
+    MENU_OPTS+=("5" "[5]  Gestión de Usuarios y Empleados (Crear, Grupos y Claves)")
+    MENU_OPTS+=("6" "[6]  Ver Diagnóstico, Discos y Recursos Compartidos")
+    MENU_OPTS+=("7" "[7]  Reiniciar Servicios de Red (Samba / Web)")
+    MENU_OPTS+=("8" "[8]  Buscar Actualizaciones desde GitHub (Auto-Update)")
+    MENU_OPTS+=("9" "[9]  Desinstalar y Limpiar Servidor")
+
+    num_items=$(( ${#MENU_OPTS[@]} / 2 ))
     OPCION=$(whiptail --title "$APP_TITLE" \
         --ok-button "< Seleccionar >" --cancel-button "< Salir >" \
-        --menu "Selecciona una opción usando las flechas y presiona Enter:" 21 74 9 \
-        "1" "$TAG_OPC1" \
-        "2" "[2]  Gestión de Grupos de Seguridad (Crear / Listar / Eliminar)" \
-        "3" "[3]  Gestión de Recursos Compartidos (Ver / Crear / Deshabilitar / Borrar)" \
-        "4" "[4]  Gestión de Tareas de Backup (Windows / Linux / Local)" \
-        "5" "[5]  Gestión de Usuarios y Empleados (Crear, Grupos y Claves)" \
-        "6" "[6]  Ver Diagnóstico, Discos y Recursos Compartidos" \
-        "7" "[7]  Reiniciar Servicios de Red (Samba / Web)" \
-        "8" "[8]  Buscar Actualizaciones desde GitHub (Auto-Update)" \
-        "9" "[9]  Desinstalar y Limpiar Servidor" 3>&1 1>&2 2>&3)
+        --menu "Selecciona una opción usando las flechas y presiona Enter:" 21 74 "$num_items" \
+        "${MENU_OPTS[@]}" 3>&1 1>&2 2>&3)
 
     RET=$?
     if [ $RET -ne 0 ]; then
@@ -126,7 +143,14 @@ while true; do
             ;;
         2) gestionar_grupos ;;
         3) gestionar_recursos_compartidos ;;
-        4) gestionar_backups ;;
+        4)
+            if [ "$ROL_ACTUAL" == "ARCHIVOS" ]; then
+                whiptail --title "Módulo Deshabilitado" --ok-button "< Aceptar >" \
+                    --msgbox "El módulo de copias de seguridad no está activo en un servidor con rol exclusivo ARCHIVOS." 8 68
+            else
+                gestionar_backups
+            fi
+            ;;
         5) gestionar_usuarios ;;
         6) diagnostico_nas ;;
         7) 
