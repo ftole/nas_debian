@@ -94,7 +94,25 @@ class AuthService
             ];
         }
 
-        // Entorno Debian 13 en producción: Validar contra Samba mediante smbclient
+        // En entornos Windows de desarrollo sin Samba real, rechazar si se fuerza producción
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [
+                'success' => false,
+                'error' => 'Autenticación real no disponible en entorno Windows local.',
+            ];
+        }
+
+        // Entorno Debian 13 en producción: Validar contra Samba mediante smbclient.
+        // Primero, verificar que el usuario exista en la base de cuentas de Samba (pdbedit)
+        // para prevenir autenticaciones espurias debidas al mapeo a invitado (map to guest = Bad User).
+        $userCheck = SystemService::sudo(['pdbedit', '-v', '-u', $cleanUsername]);
+        if ($userCheck['code'] !== 0) {
+            return [
+                'success' => false,
+                'error' => 'Usuario o contraseña incorrectos.',
+            ];
+        }
+
         $res = SystemService::sudo(
             ['smbclient', '//127.0.0.1/IPC$', '-U', $cleanUsername, '-c', 'exit'],
             $password . "\n"
