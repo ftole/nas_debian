@@ -54,7 +54,7 @@ case "$1" in
     help|--help|-h)
         # Ayuda nativa de test_remote.sh
         ;;
-    install|uninstall|update|web|samba|backups|suite|console|status|config|"")
+    install|uninstall|update|web|samba|backups|suite|console|status|config|--env-file*|--non-interactive|"")
         if command -v python3 &>/dev/null && [ -f "$SCRIPT_DIR/test_remote.py" ]; then
             if python3 -c "import paramiko" &>/dev/null; then
                 exec python3 "$SCRIPT_DIR/test_remote.py" "$@"
