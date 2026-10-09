@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 putenv('APP_ENV=testing');
+putenv('NAS_TEST_ADMIN_PASS=Admin123#');
+putenv('NAS_TEST_SISTEMAS_PASS=Ead2026#');
+putenv('NAS_TEST_ADMIN_TOKENS=admin123,Admin123#,Ead2026#');
 
 /**
  * Pruebas unitarias e integrales para el entorno web MVC PHP 8 (App\).
@@ -955,6 +958,73 @@ $unmountEmpty = $storage->unmountDevice('');
 assertTrue($unmountEmpty === false, 'StorageService::unmountDevice rechaza rutas vacías');
 $hasMountEmpty = $storage->deviceHasMount('');
 assertTrue($hasMountEmpty === false, 'StorageService::deviceHasMount retorna false para rutas vacías');
+
+// 26. Pruebas de Roles de Servidor, Restricciones de Endpoints y Rate Limiting
+putenv('NAS_SERVER_ROLE=ARCHIVOS');
+assertTrue(SystemService::getServerRole() === 'ARCHIVOS', 'SystemService::getServerRole retorna ARCHIVOS según variable');
+assertTrue(SystemService::getServerRoleLabel() === 'ARCHIVOS', 'SystemService::getServerRoleLabel retorna etiqueta ARCHIVOS');
+
+putenv('NAS_SERVER_ROLE=BACKUP');
+assertTrue(SystemService::getServerRole() === 'BACKUP', 'SystemService::getServerRole retorna BACKUP');
+assertTrue(SystemService::getServerRoleLabel() === 'BACKUP', 'SystemService::getServerRoleLabel retorna etiqueta BACKUP');
+
+putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
+assertTrue(SystemService::getServerRole() === 'ARCHIVOS_BACKUP', 'SystemService::getServerRole retorna ARCHIVOS_BACKUP');
+assertTrue(SystemService::getServerRoleLabel() === 'ARCHIVOS & BACKUP', 'SystemService::getServerRoleLabel retorna etiqueta ARCHIVOS & BACKUP');
+
+// AuthMiddleware y Server Role
+putenv('NAS_SERVER_ROLE=ARCHIVOS');
+assertTrue(!AuthMiddleware::isServerRoleAllowed('/backups'), 'AuthMiddleware bloquea /backups en rol ARCHIVOS');
+assertTrue(!AuthMiddleware::isServerRoleAllowed('/api/backups/task1'), 'AuthMiddleware bloquea /api/backups en rol ARCHIVOS');
+assertTrue(AuthMiddleware::isServerRoleAllowed('/shares'), 'AuthMiddleware permite /shares en rol ARCHIVOS');
+
+putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
+assertTrue(AuthMiddleware::isServerRoleAllowed('/backups'), 'AuthMiddleware permite /backups en rol ARCHIVOS_BACKUP');
+assertTrue(AuthMiddleware::isServerRoleAllowed('/shares'), 'AuthMiddleware permite /shares en rol ARCHIVOS_BACKUP');
+
+// SambaController y restricción en rol BACKUP
+putenv('NAS_SERVER_ROLE=BACKUP');
+$_SESSION['nas_user'] = ['username' => 'sistemas', 'is_admin' => true, 'role' => 'admin'];
+$sambaCtrl = new \App\Controllers\SambaController();
+unset($_SERVER['CONTENT_TYPE']);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = ['name' => 'PUBLICO', 'scheme' => 4];
+$reqPublic = new Request();
+ob_start();
+$sambaCtrl->create($reqPublic);
+$respPublic = ob_get_clean();
+$jsonPub = json_decode($respPublic, true);
+assertTrue(isset($jsonPub['error']) && str_contains($jsonPub['error'], 'ocultos'), 'SambaController rechaza recursos públicos en rol BACKUP');
+
+$_POST = ['name' => 'BACKUP_DEV', 'scheme' => 1, 'hidden' => true];
+$reqHidden = new Request();
+ob_start();
+$sambaCtrl->create($reqHidden);
+$respHidden = ob_get_clean();
+$jsonHidden = json_decode($respHidden, true);
+assertTrue(isset($jsonHidden['success']) && $jsonHidden['success'] === true, 'SambaController acepta recursos ocultos en rol BACKUP');
+
+// Rate limiting SQLite
+$testIp = '127.0.0.99';
+$testKey = 'rate_crit:' . $testIp . ':/api/storage/format';
+AuthService::clearRateLimits($testKey);
+$limitOk = true;
+for ($i = 0; $i < 10; $i++) {
+    if (!AuthService::checkRateLimit($testKey, 10, 60)) {
+        $limitOk = false;
+        break;
+    }
+}
+assertTrue($limitOk, 'AuthService::checkRateLimit permite hasta el umbral de solicitudes');
+$limitBlocked = !AuthService::checkRateLimit($testKey, 10, 60);
+assertTrue($limitBlocked, 'AuthService::checkRateLimit bloquea la solicitud que excede el umbral');
+
+AuthService::clearRateLimits($testKey);
+$limitReset = AuthService::checkRateLimit($testKey, 10, 60);
+assertTrue($limitReset, 'AuthService::clearRateLimits restablece la ventana de rate limiting');
+
+// Restaurar rol por defecto
+putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
 // Restaurar rutas originales y limpiar temporales
 SystemService::$sambaAuditPath = $origSambaPath;
