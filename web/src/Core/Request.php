@@ -163,4 +163,12 @@ class Request
 
         return filter_var($remoteAddr, FILTER_VALIDATE_IP) ? $remoteAddr : '127.0.0.1';
     }
+
+    /**
+     * Alias de conveniencia para getClientIp().
+     */
+    public function getIp(): string
+    {
+        return $this->getClientIp();
+    }
 }
