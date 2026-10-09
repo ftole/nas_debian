@@ -31,6 +31,8 @@ $role = (string) ($_SESSION['nas_user']['role'] ?? 'operator');
 $isSuper = !empty($_SESSION['nas_user']['is_superadmin']) || $role === 'superadmin';
 $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
 $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? ($isAdmin ? 'Administrador' : 'Operador Web')), ENT_QUOTES, 'UTF-8');
+$serverRole = \App\Services\SystemService::getServerRole();
+$serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
 ?>
 <!DOCTYPE html>
 <html lang="es" data-theme="dark">
@@ -49,7 +51,7 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
     })();
   </script>
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>;</script>
+  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>; window.NAS_SERVER_ROLE = <?= json_encode($serverRole) ?>;</script>
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
 </head>
 <body>
@@ -132,7 +134,7 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
 
     <div class="masthead-tools">
       <div class="header-meta-pill">
-        <span>Rol:</span> <strong>ARCHIVOS & BACKUP</strong>
+        <span>Rol:</span> <strong><?= htmlspecialchars($serverRoleLabel, ENT_QUOTES, 'UTF-8') ?></strong>
       </div>
       <div class="header-meta-pill">
         <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
@@ -209,6 +211,7 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
           <span class="nav-badge" id="badge-shares">...</span>
         </div>
 
+<?php if ($serverRole !== 'ARCHIVOS'): ?>
         <div class="nav-item <?= $activeView === 'backups' ? 'active' : '' ?>" data-view="backups">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-shield"></use></svg>
@@ -216,6 +219,7 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
           </div>
           <span class="nav-badge" id="badge-backups">...</span>
         </div>
+<?php endif; ?>
 
 <?php if ($isAdmin): ?>
         <div class="nav-item <?= $activeView === 'storage' ? 'active' : '' ?>" data-view="storage">
@@ -329,9 +333,11 @@ $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? (
             <button class="btn btn-primary" onclick="switchView('shares'); openNewShare();">
               <svg class="icon"><use href="#icon-plus"></use></svg> Nueva red compartida
             </button>
+<?php if ($serverRole !== 'ARCHIVOS'): ?>
             <button class="btn btn-secondary" onclick="switchView('backups'); openModal('modal-new-backup');">
               <svg class="icon"><use href="#icon-shield"></use></svg> Nuevo respaldo
             </button>
+<?php endif; ?>
           </div>
         </div>
 
