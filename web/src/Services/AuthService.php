@@ -14,12 +14,27 @@ class AuthService
     public bool $dryRun = false;
 
     /**
-     * Credenciales predeterminadas para entorno de pruebas o desarrollo.
+     * Almacén en memoria de usuarios de prueba (sin contraseñas fijas en código fuente).
      */
-    public static array $mockUsers = [
-        'administrador' => 'Admin123#',
-        'sistemas' => 'Ead2026#',
-    ];
+    public static array $mockUsers = [];
+
+    /**
+     * Obtiene las credenciales para la suite de pruebas unitarias desde variables de entorno
+     * o desde el almacén en memoria configurado en el test runner.
+     */
+    public static function getTestCredentials(): array
+    {
+        $creds = self::$mockUsers;
+        $adminPass = getenv('NAS_TEST_ADMIN_PASS');
+        if ($adminPass !== false && $adminPass !== '' && !isset($creds['administrador'])) {
+            $creds['administrador'] = (string) $adminPass;
+        }
+        $sistemasPass = getenv('NAS_TEST_SISTEMAS_PASS');
+        if ($sistemasPass !== false && $sistemasPass !== '' && !isset($creds['sistemas'])) {
+            $creds['sistemas'] = (string) $sistemasPass;
+        }
+        return $creds;
+    }
 
     /**
      * Autentica a un usuario validando credenciales contra Samba y verificando privilegios de administración.
@@ -48,9 +63,17 @@ class AuthService
 
         // Modo suite de pruebas unitarias explícito
         if (getenv('APP_ENV') === 'testing') {
-            if (isset(self::$mockUsers[$cleanUsername])) {
-                $expected = self::$mockUsers[$cleanUsername];
-                if ($password === $expected || ($cleanUsername === 'administrador' && in_array($password, ['Admin123#', 'admin123', 'Ead2026#'], true))) {
+            $testCreds = self::getTestCredentials();
+            if (isset($testCreds[$cleanUsername])) {
+                $expected = $testCreds[$cleanUsername];
+                $isValid = ($password === $expected);
+                if (!$isValid && $cleanUsername === 'administrador') {
+                    $tokens = array_filter(explode(',', (string) (getenv('NAS_TEST_ADMIN_TOKENS') ?: '')));
+                    if (in_array($password, $tokens, true)) {
+                        $isValid = true;
+                    }
+                }
+                if ($isValid) {
                     $isSuper = ($cleanUsername === 'administrador');
                     return [
                         'success' => true,
@@ -230,6 +253,57 @@ class AuthService
             );
         } catch (\Throwable $e) {
             error_log('Error limpiando intentos fallidos: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Comprueba y registra una petición contra el Rate Limiter global en SQLite.
+     * Retorna true si la petición es admitida, o false si excede el límite permitido.
+     *
+     * @param string $key Identificador único (ej: ip:ruta o usuario:ruta)
+     * @param int $maxHits Número máximo de peticiones permitidas en la ventana de tiempo.
+     * @param int $windowSeconds Duración de la ventana de tiempo en segundos.
+     * @return bool True si está dentro del límite, false si fue excedido.
+     */
+    public static function checkRateLimit(string $key, int $maxHits = 10, int $windowSeconds = 60): bool
+    {
+        try {
+            // Poda probabilística (5%) de registros antiguos fuera de la ventana
+            if (random_int(1, 20) === 1) {
+                DatabaseService::execute(
+                    "DELETE FROM api_rate_limits WHERE created_at < datetime('now', '-" . ($windowSeconds * 2) . " seconds')"
+                );
+            }
+
+            $rows = DatabaseService::query(
+                "SELECT COUNT(*) as cnt FROM api_rate_limits WHERE key = :key AND created_at >= datetime('now', '-{$windowSeconds} seconds')",
+                ['key' => $key]
+            );
+            $count = (int) ($rows[0]['cnt'] ?? 0);
+            if ($count >= $maxHits) {
+                return false;
+            }
+
+            DatabaseService::insert('api_rate_limits', ['key' => $key]);
+            return true;
+        } catch (\Throwable $e) {
+            error_log('Error comprobando api rate limit: ' . $e->getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * Limpia los registros de rate limit para una clave específica (útil en testing o desbloqueo manual).
+     */
+    public static function clearRateLimits(string $key): void
+    {
+        try {
+            DatabaseService::execute(
+                'DELETE FROM api_rate_limits WHERE key = :key',
+                ['key' => $key]
+            );
+        } catch (\Throwable $e) {
+            error_log('Error limpiando api rate limit: ' . $e->getMessage());
         }
     }
 }
