@@ -152,6 +152,13 @@ function applyRoleUi() {
     const el = document.getElementById(id);
     if (el) el.style.display = isSuper ? '' : 'none';
   });
+
+  // Ocultar módulo de respaldos en frontend si el rol exclusivo es ARCHIVOS
+  if (window.NAS_SERVER_ROLE === 'ARCHIVOS') {
+    document.querySelectorAll('[data-view="backups"]').forEach(el => el.style.display = 'none');
+    const backupView = document.getElementById('view-backups');
+    if (backupView) backupView.style.display = 'none';
+  }
 }
 
 function switchView(viewName, updateHash = true) {
@@ -159,6 +166,11 @@ function switchView(viewName, updateHash = true) {
     viewName = 'users';
   }
   if (!VALID_VIEWS.includes(viewName)) {
+    viewName = 'dashboard';
+  }
+
+  // Si el servidor opera en rol ARCHIVOS, denegar acceso a backups
+  if (window.NAS_SERVER_ROLE === 'ARCHIVOS' && viewName === 'backups') {
     viewName = 'dashboard';
   }
 
@@ -459,6 +471,19 @@ async function loadShares() {
 
 async function openNewShare() {
   await populateShareGroupOptions();
+  if (window.NAS_SERVER_ROLE === 'BACKUP') {
+    const hiddenChk = document.getElementById('share-hidden');
+    if (hiddenChk) {
+      hiddenChk.checked = true;
+      hiddenChk.disabled = true;
+    }
+    const schemeSelect = document.getElementById('share-scheme');
+    if (schemeSelect) {
+      const opt4 = schemeSelect.querySelector('option[value="4"]');
+      if (opt4) opt4.style.display = 'none';
+      if (schemeSelect.value === '4') schemeSelect.value = '1';
+    }
+  }
   toggleSchemeFields();
   openModal('modal-new-share');
 }
