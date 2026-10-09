@@ -397,7 +397,9 @@ class SSHManager:
         def tar_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
             name = tarinfo.name.replace("\\", "/")
             # Exclusiones
-            if any(part in name.split("/") for part in ["__pycache__", ".git", "vendor", "node_modules", ".pytest_cache"]):
+            if any(part in name.split("/") for part in ["__pycache__", ".git", "node_modules", ".pytest_cache"]):
+                return None
+            if "vendor" in name.split("/") and not name.startswith("web/public/js/vendor"):
                 return None
             if name.endswith((".pyc", ".sqlite", ".sqlite-wal", ".sqlite-shm", ".swp")):
                 return None
