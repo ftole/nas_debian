@@ -36,11 +36,14 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | Archivo / Ruta | Tipo | Descripción |
 | :--- | :--- | :--- |
 | `install.sh` | Script Bash CLI | **Instalador Remoto Oficial y Gestor CLI** para desplegar el comando `nas`, con auto-actualización (`update`) y desinstalación limpia. |
+| `nas_admin.bat` | Batch Script Windows | **Lanzador Automatizado para Windows** con autodetección de Python en múltiples rutas, aprovisionamiento transparente de `.venv` e instalación silenciosa de dependencias para ejecutar el asistente administrativo. |
+| `nas_admin.py` | Python CLI / TUI | **Asistente de Administración Remota para Windows y Linux** con menú interactivo (despliegue, diagnóstico, actualización, servicios, bitácoras, consola y desinstalación) y almacenamiento seguro de credenciales (Keyring / `.env`). |
 | `test_remote.py` | Python CLI / TUI | **Suite Interactiva de Pruebas Remotas y Diagnóstico** con persistencia en `.env`, auditoría SSH/SSL, Samba, deduplicación por hardlinks y rollback. |
 | `test_remote.sh` | Bash CLI / TUI | **Lanzador y Suite Bash para Pruebas Remotas** con OpenSSH (`accept-new`), curl y fallback nativo. |
 | `.env.example` | Plantilla Config | **Plantilla documentada de credenciales locales** para pruebas remotas en Debian 13. |
+| `requirements-assistant.txt` | Dependencias Python | Dependencias requeridas por el asistente de administración remota (`paramiko`, `keyring`, `colorama`). |
 | `src/asistente.sh` | Script Bash (TUI `whiptail`) | **Asistente Visual Interactivo** con colores nativos, detección dinámica de discos/IP/usuario, validación en vivo, ciclo de edición y 9 módulos de gestión. |
-| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS` o `BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
+| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS`, `BACKUP` o `ARCHIVOS_BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
@@ -95,33 +98,36 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Bitácoras | Rotación semanal/mensual con directiva `copytruncate` y compresión `gzip`. | Mantiene controlados los registros de actividad evitando que saturen el espacio de almacenamiento. |
 | **WSDD2 con Override Systemd** | Descubrimiento de Red | Implementación ligera del protocolo Web Services Discovery y LLMNR. | Visibilidad instantánea en el explorador de red de Windows 10/11 sin activar protocolos obsoletos ni inseguros como NetBIOS broadcast o SMBv1. |
 | **ACLs POSIX (`setfacl`) con Herencia por Defecto** | Control de Acceso Granular | Configuración de permisos multi-grupo y reglas por defecto (`default ACL`) en carpetas compartidas. | Permite esquemas mixtos donde coexisten grupos con solo lectura y grupos con permisos de escritura exclusiva, garantizando que todo nuevo archivo herede los permisos correctos. |
+| **Lanzador de Administración Windows (`nas_admin.bat`)** | Administración y CLI Windows | Script Batch de arranque que autodetecta Python en múltiples rutas estándar (py launcher, PATH, LocalAppData, ProgramFiles), inicializa `.venv` e instala dependencias (`requirements-assistant.txt`). | Elimina errores de dependencias o configuración en clientes Windows; permite ejecutar el asistente remoto con doble clic o desde terminal sin preparación manual previa. |
+| **Rate Limiting Global en SQLite (`api_rate_limits`)** | Ciberseguridad Web y API | Limitación de peticiones sensibles y autenticación en `/var/lib/nas/nas.sqlite` con ventanas temporales y purga periódica. | Mitigación robusta contra fuerza bruta, ataques DoS y enumeración de usuarios sin requerir Redis ni demonios externos en memoria. |
+| **Hardening de Cabeceras HTTP Nginx (CSP, HSTS, X-Frame)** | Seguridad Web | Directivas de seguridad HTTP estrictas (`Content-Security-Policy`, `HSTS`, `X-Content-Type-Options`, `X-Frame-Options`, `Permissions-Policy`). | Blindaje contra cross-site scripting (XSS), secuestro de clics (clickjacking), inyección de contenido y degradación de protocolo SSL. |
 
 ---
 
 ## 3. Roles del Servidor y Matriz de Seguridad
 
-El sistema está diseñado para operar bajo dos roles mutuamente excluyentes:
+El sistema está diseñado para operar bajo tres roles especializados configurables en el despliegue:
 
 ```text
-                               ┌─────────────────────────┐
-                               │    Servidor Debian 13   │
-                               └────────────┬────────────┘
-                     ┌──────────────────────┴──────────────────────┐
-                     ▼                                             ▼
-        ┌─────────────────────────┐                   ┌─────────────────────────┐
-        │      Rol: ARCHIVOS      │                   │       Rol: BACKUP       │
-        │    (NAS Departamental)  │                   │  (Central de Respaldos) │
-        └────────────┬────────────┘                   └────────────┬────────────┘
-                     │                                             │
-      ┌──────────────┴──────────────┐               ┌──────────────┴──────────────┐
-      ▼                             ▼               ▼                             ▼
-Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grupos:
-[SISTEMAS]                    grp_samba    [BACKUPS_WINDOWS$]            SOLO grp_samba
-[CAMPANA_UNO_*]               grp_empleados   [BACKUPS_LINUX$]              SOLO grp_backups
-[CAMPANA_DOS_*]               grp_c1_*, c2_*  [BACKUPS_SERVIDORES$]         (Cero empleados)
+                               ┌─────────────────────────────────────────────────────────┐
+                               │                    Servidor Debian 13                   │
+                               └────────────────────────────┬────────────────────────────┘
+                     ┌──────────────────────────────────────┼──────────────────────────────────────┐
+                     ▼                                      ▼                                      ▼
+        ┌─────────────────────────┐            ┌───────────────────────────┐          ┌─────────────────────────┐
+        │      Rol: ARCHIVOS      │            │    Rol: ARCHIVOS_BACKUP   │          │       Rol: BACKUP       │
+        │    (NAS Departamental)  │            │   (Híbrido Archivos+Bkp)  │          │  (Central de Respaldos) │
+        └────────────┬────────────┘            └─────────────┬─────────────┘          └────────────┬────────────┘
+                     │                                      │                                      │
+      ┌──────────────┴──────────────┐        ┌──────────────┴──────────────┐        ┌──────────────┴──────────────┐
+      ▼                             ▼        ▼                             ▼        ▼                             ▼
+Carpetas Visibles:            Grupos:  Recursos Visibles + Ocultos ($)  Grupos:     Carpetas Ocultas ($):         Grupos:
+[SISTEMAS]                    grp_sambaSoporte total shares + backups  grp_samba,   [BACKUPS_WINDOWS$]            SOLO grp_samba
+[CAMPANA_UNO_*]               grp_emp  Panel Web: /shares y /backups   grp_backups, [BACKUPS_LINUX$]              SOLO grp_backups
+[CAMPANA_DOS_*]               grp_c*   Ambos mundos habilitados        grp_emp      [BACKUPS_SERVIDORES$]         (Cero empleados)
 ```
 
-### A. Despliegue Base Limpio (Servidor NAS o Central de Backup):
+### A. Despliegue Base Limpio y Sistema de Roles Tripartito:
 * **0 Redes Compartidas Automáticas:** El archivo `smb.conf` se inicializa únicamente con la sección `[global]` optimizada, sin recursos de prueba ni carpetas innecesarias.
 * **Grupos Especiales:** Se crean `grp_samba` (permisos totales `2770` sobre `/srv/nas`), `grp_web` (operador del panel) y `grp_superadmin` (control total e inmutable). El **superadministrador** designado en el despliegue (cuenta nueva o existente, registrada en `/etc/nas/superadmin`) queda asignado a `sudo,adm,grp_samba,grp_superadmin`.
 * **Roles del Panel:** `superadmin` (total, inmutable), `admin` (`grp_samba`/sudo, panel completo) y `operator` (`grp_web`: dashboard, archivos, logs, recursos, respaldos, usuarios, servicios, diagnóstico y red; sin almacenamiento, terminal, dominio ni reinicio).
@@ -133,21 +139,48 @@ Carpetas Visibles:            Grupos:         Carpetas Ocultas ($):         Grup
     3. *Solo Lectura Estricta:* Consulta histórica mediante ACL POSIX de solo lectura (`read only = yes`, `mask 0770`).
     4. *Acceso Público / Invitados:* Libre acceso con o sin clave (`guest ok = yes`).
 
-### B. Selección Condicional de Filesystem según Rol y Hardware:
+### B. Persistencia del Rol en `/etc/nas/role` y Control de Acceso Web:
+* **Persistencia Inmutable:** Durante el despliegue (`deploy.sh`), el rol seleccionado (`ARCHIVOS`, `BACKUP` o `ARCHIVOS_BACKUP`) se persiste en `/etc/nas/role` con permisos `0644 root:root`.
+* **Normalización de Alias Retrocompatibles:** Las entradas como `HIBRIDO` o `ARCHIVOSBACKUP` se normalizan automáticamente a `ARCHIVOS_BACKUP` en CLI, asistentes y TUI.
+* **Inspección Dinámica en el Backend Web:** `SystemService::getServerRole()` lee `/etc/nas/role` en tiempo real (con fallback automático a los comentarios de cabecera en `smb.conf` o a la variable de entorno `NAS_SERVER_ROLE`).
+* **Protección Estricta de Rutas (`AuthMiddleware`):** El middleware web verifica dinámicamente si la ruta solicitada corresponde al rol configurado (`AuthMiddleware::isServerRoleAllowed()`):
+  * Rol `ARCHIVOS`: restringe `/backups` y redirige a `/dashboard` con mensaje de advertencia.
+  * Rol `BACKUP`: restringe `/shares` y redirige a `/dashboard`.
+  * Rol `ARCHIVOS_BACKUP`: concede acceso simultáneo a `/shares` y `/backups` sin restricciones entre módulos.
+* **Interfaz Dinámica (Slate UI):** El banner superior (`layout.php`) y la lógica de interfaz (`app.js`) muestran el badge en vivo del rol (`ARCHIVOS`, `BACKUP` o `ARCHIVOS & BACKUP`) y ajustan las opciones de la barra de navegación de manera reactiva.
+
+### C. Selección Condicional de Filesystem según Rol y Hardware:
 * El script `deploy.sh` y el asistente inspeccionan `/sys/block/<disco>/queue/rotational`:
   * **Rol ARCHIVOS en HDD (`rotational=1`):** Formateo en `ext4`, reducción de reserva con `tune2fs -m 1`, montaje con `rw,noatime,commit=2` (sincronización cada 2s para resiliencia ante apagones) y readahead de `4096 KB`.
   * **Rol ARCHIVOS en SSD (`rotational=0`):** `ext4` con `rw,noatime,commit=5`, readahead de `1024 KB` y activación de `fstrim.timer`.
   * **Rol BACKUP en HDD (`rotational=1`):** Formateo en `Btrfs`, montaje con `rw,noatime,compress=zstd:3,space_cache=v2,autodefrag`, readahead de `4096 KB` y auditoría mensual contra *Bit Rot*.
   * **Rol BACKUP en SSD (`rotational=0`):** `Btrfs` con `rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async`, readahead de `1024 KB`, `fstrim.timer` y auditoría mensual.
+  * **Rol ARCHIVOS_BACKUP (Híbrido):** Selección flexible de filesystem según hardware y disco (`ext4` optimizado para compatibilidad y HDD estándar, o `Btrfs` con compresión `zstd:3` y scrub mensual en almacenamiento avanzado).
 
-### C. Reutilización de Datos Existentes (`--keep-data`):
+### D. Rate Limiting Global y Protección contra Fuerza Bruta (`api_rate_limits`):
+* **Capa de Seguridad en SQLite:** El servicio de autenticación (`AuthService.php`) gestiona un contador de intentos fallidos y solicitudes sensibles en la tabla `api_rate_limits` con índice `idx_api_rate_limits(key, created_at DESC)` en `/var/lib/nas/nas.sqlite`.
+* **Ventana Deslizante y Limpieza Automática:** Se impone un límite de intentos por clave/IP en una ventana de tiempo predefinida; se purgan automáticamente los registros obsoletos en cada comprobación para evitar el crecimiento innecesario de la base de datos.
+* **Cero Sobrecarga de Memoria:** Al utilizar SQLite nativo en modo WAL, la mitigación de fuerza bruta no requiere demonios en segundo plano como Redis o Memcached.
+
+### E. Hardening de Cabeceras HTTP Nginx y Política de Seguridad de Contenido (CSP):
+* **Aislamiento en Nginx-light:** En la configuración SSL generada por `deploy.sh` se inyecta un conjunto estricto de cabeceras HTTP de protección:
+  * `Content-Security-Policy`: `"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'self';"` garantizando una política 100% offline y bloqueando recursos externos no autorizados.
+  * `Strict-Transport-Security`: `"max-age=31536000; includeSubDomains"` para forzar HTTPS continuo.
+  * `X-Content-Type-Options`: `"nosniff"` para prevenir ataques de MIME sniffing.
+  * `X-Frame-Options`: `"SAMEORIGIN"` para evitar incrustaciones no autorizadas y clickjacking.
+  * `X-XSS-Protection`: `"1; mode=block"`.
+  * `Referrer-Policy`: `"strict-origin-when-cross-origin"`.
+  * `Permissions-Policy`: `"camera=(), microphone=(), geolocation=(), payment=()"`.
+* **Aislamiento en Explorador de Archivos:** `FileExplorerService` inyecta adicionalmente `Content-Security-Policy: default-src 'none'; sandbox` al previsualizar o descargar archivos no confiables.
+
+### F. Reutilización de Datos Existentes (`--keep-data`):
 * Soporte en el Asistente visual y en CLI (`--keep-data`) para montar discos preexistentes en `/srv/nas` sin formatear ni perder información. Detección automática de la partición válida (`NAS_DATA` o partición previa) y de su sistema de archivos (`ext4`, `btrfs`, etc.) con opciones optimizadas.
 
-### D. Optimización Samba para Office / Excel (+100 puestos concurrentes):
+### G. Optimización Samba para Office / Excel (+100 puestos concurrentes):
 * Inclusión de módulos VFS `acl_xattr` y `streams_xattr` para emulación nativa de flujos alternativos NTFS y almacenamiento de ACLs.
 * Directivas de red de alto rendimiento: `store dos attributes = yes`, `inherit permissions = yes`, `strict sync = yes`, `use sendfile = yes`, `aio read/write size = 16384` y `max open files = 65535`.
 
-### E. Herencia de Permisos y ACLs por Defecto (Esquema 2):
+### H. Herencia de Permisos y ACLs por Defecto (Esquema 2):
 * Inyección de `default ACL` (`setfacl -d`) en subdirectorios para que cualquier archivo creado por el grupo de escritura otorgue lectura a los demás grupos autorizados sin requerir tareas cron de corrección.
 
 ---
@@ -231,6 +264,19 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SR
 
 # Servidor de Backup con disco secundario formateándolo desde cero (/dev/sdb):
 printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SRV-EAD-BKP admin - BACKUP
+
+# Servidor Híbrido (Archivos y Backup unificados en el mismo equipo):
+printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-SRV admin - ARCHIVOS_BACKUP
+```
+
+### Administración Remota desde Windows:
+```cmd
+:: Lanzador de administración interactiva (gestiona Python y dependencias automáticamente):
+nas_admin.bat
+
+:: Ejecución de acciones directas desde Windows:
+nas_admin.bat status
+nas_admin.bat deploy
 ```
 
 > [!IMPORTANT]
