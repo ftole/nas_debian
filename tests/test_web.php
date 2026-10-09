@@ -1023,6 +1023,11 @@ AuthService::clearRateLimits($testKey);
 $limitReset = AuthService::checkRateLimit($testKey, 10, 60);
 assertTrue($limitReset, 'AuthService::clearRateLimits restablece la ventana de rate limiting');
 
+// Pruebas de lectura de Workgroup
+putenv('NAS_WORKGROUP=TEST_WG');
+assertTrue(SystemService::getWorkgroup() === 'TEST_WG', 'SystemService::getWorkgroup retorna valor según entorno');
+putenv('NAS_WORKGROUP=');
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
