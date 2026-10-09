@@ -1059,6 +1059,12 @@ assertTrue($goodSizeVg['success'], 'StorageService::lvmCreate acepta 50%VG (modo
 $goodSizeFixed = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', '200G', 'ext4', 'SI-FORMATEAR');
 assertTrue($goodSizeFixed['success'], 'StorageService::lvmCreate acepta tamaño fijo 200G (modo dev/test)');
 
+// Verificación de integridad en web/public/js/app.js (Cero variable shadowing en diálogos del navegador)
+$appJsContent = file_get_contents(__DIR__ . '/../web/public/js/app.js');
+assertTrue(!preg_match('/\b(const|let|var)\s+(confirm|alert|prompt)\b/', $appJsContent), 'app.js no declara variables locales confirm/alert/prompt que rompan APIs globales');
+assertTrue(!preg_match('/(?<!\.)\b(confirm|prompt)\s*\(/', $appJsContent), 'app.js invoca confirm/prompt exclusivamente mediante window.');
+assertTrue(str_contains($appJsContent, 'confirmText'), 'submitStorageManage utiliza confirmText para evitar enmascarar confirm');
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
