@@ -661,7 +661,7 @@ async function submitNewShare(event) {
 }
 
 async function deleteShare(name) {
-  if (!confirm(`¿Confirmas la eliminación del recurso compartido [${name}]? (Los archivos en disco se conservarán)`)) {
+  if (!window.confirm(`¿Confirmas la eliminación del recurso compartido [${name}]? (Los archivos en disco se conservarán)`)) {
     return;
   }
 
@@ -867,7 +867,7 @@ async function viewBackupLogs(taskId) {
 }
 
 async function deleteBackupTask(taskId) {
-  if (!confirm(`¿Deseas eliminar la tarea de backup [${taskId}]? Los snapshots históricos ya creados se preservarán.`)) {
+  if (!window.confirm(`¿Deseas eliminar la tarea de backup [${taskId}]? Los snapshots históricos ya creados se preservarán.`)) {
     return;
   }
 
@@ -963,20 +963,20 @@ async function submitStorageManage(event) {
   event.preventDefault();
   const op = document.getElementById('stg-op').value;
   const device = document.getElementById('stg-device').value;
-  const confirm = document.getElementById('stg-confirm').value;
+  const confirmText = document.getElementById('stg-confirm').value;
   const fstype = document.getElementById('stg-fstype').value;
 
   if (!device) {
     showToast('No hay ningún disco de datos seleccionado.', 'warning');
     return;
   }
-  if (confirm !== 'SI-FORMATEAR') {
+  if (confirmText !== 'SI-FORMATEAR') {
     showToast('Escribe SI-FORMATEAR para confirmar la operación.', 'warning');
     return;
   }
 
   let url = '/api/storage/format';
-  let payload = { device, fstype, confirm };
+  let payload = { device, fstype, confirm: confirmText };
   if (op === 'lvm') {
     url = '/api/storage/lvm';
     payload = {
@@ -984,11 +984,12 @@ async function submitStorageManage(event) {
       vg: document.getElementById('stg-vg').value,
       lv: document.getElementById('stg-lv').value,
       size: document.getElementById('stg-size').value,
-      fstype, confirm,
+      fstype,
+      confirm: confirmText,
     };
   } else if (op === 'subvolume') {
     url = '/api/storage/subvolume';
-    payload = { device, subvolume: document.getElementById('stg-subvol').value, confirm };
+    payload = { device, subvolume: document.getElementById('stg-subvol').value, confirm: confirmText };
   }
 
   const btn = document.getElementById('btn-submit-storage');
@@ -999,12 +1000,12 @@ async function submitStorageManage(event) {
     } catch (err) {
       const msg = String(err.message || '');
       if (/montad|desmont/i.test(msg)) {
-        const proceed = confirm('El dispositivo (o una de sus particiones, como /srv/nas) está montado.\n\n¿Deseas DESMONTARLO y continuar con la operación? Los datos del disco serán destruidos.');
+        const proceed = window.confirm('El dispositivo (o una de sus particiones, como /srv/nas) está montado.\n\n¿Deseas DESMONTARLO y continuar con la operación? Los datos del disco serán destruidos.');
         if (!proceed) {
           showToast('Operación cancelada por el usuario.', 'warning');
           return;
         }
-        await apiFetch(url, { method: 'POST', body: JSON.stringify({ ...payload, unmount: true }) });
+        await apiFetch(url, { method: 'POST', body: JSON.stringify({ ...payload, unmount: true }), silentToast: true });
       } else {
         throw err;
       }
@@ -1197,7 +1198,7 @@ async function submitUpdateUser(event) {
 
 async function toggleUser(username, enabled) {
   const verb = enabled ? 'Desbloquear' : 'Bloquear';
-  if (!confirm(`¿${verb} la cuenta [${username}]?`)) return;
+  if (!window.confirm(`¿${verb} la cuenta [${username}]?`)) return;
 
   try {
     await apiFetch('/api/users/toggle', {
@@ -1253,7 +1254,7 @@ async function addGroupMember() {
 }
 
 async function removeGroupMember(username) {
-  if (!confirm(`¿Quitar a [${username}] del grupo ${_activeGroup}?`)) return;
+  if (!window.confirm(`¿Quitar a [${username}] del grupo ${_activeGroup}?`)) return;
   try {
     await apiFetch('/api/users/groups', {
       method: 'POST',
@@ -1387,7 +1388,7 @@ async function cyclePerm(kind, name, share) {
 }
 
 async function repairAcls() {
-  if (!confirm('¿Recalcular las ACL POSIX de todos los recursos según smb.conf?\n\nEsto corrige accesos denegados por desajustes entre Samba y los permisos de disco.')) {
+  if (!window.confirm('¿Recalcular las ACL POSIX de todos los recursos según smb.conf?\n\nEsto corrige accesos denegados por desajustes entre Samba y los permisos de disco.')) {
     return;
   }
   try {
@@ -1448,7 +1449,7 @@ async function submitNewUser(event) {
 }
 
 async function deleteUser(username) {
-  if (!confirm(`¿Confirmas la eliminación del usuario [${username}] y su directorio home?`)) {
+  if (!window.confirm(`¿Confirmas la eliminación del usuario [${username}] y su directorio home?`)) {
     return;
   }
 
@@ -1496,7 +1497,7 @@ async function submitNewGroup(event) {
 }
 
 async function deleteGroup(name) {
-  if (!confirm(`¿Confirmas la eliminación del grupo corporativo [${name}]?`)) {
+  if (!window.confirm(`¿Confirmas la eliminación del grupo corporativo [${name}]?`)) {
     return;
   }
 
@@ -2826,7 +2827,7 @@ async function restoreTrashItem(id, name) {
 }
 
 async function deleteTrashItem(id, name) {
-  if (!confirm(`¿Eliminar definitivamente "${name}"? Esta acción no se puede deshacer.`)) {
+  if (!window.confirm(`¿Eliminar definitivamente "${name}"? Esta acción no se puede deshacer.`)) {
     return;
   }
 
@@ -3639,9 +3640,9 @@ async function handleDomainJoin(e) {
 }
 
 async function handleDomainLeave() {
-  const user = prompt('Introduce el usuario administrador del dominio para desvincular (ej. Administrator):');
+  const user = window.prompt('Introduce el usuario administrador del dominio para desvincular (ej. Administrator):');
   if (!user) return;
-  const password = prompt('Introduce la contraseña del administrador del dominio:');
+  const password = window.prompt('Introduce la contraseña del administrador del dominio:');
   if (!password) return;
 
   try {
