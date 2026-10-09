@@ -112,6 +112,7 @@ def get_default_known_hosts_path() -> pathlib.Path:
 def load_env_file(filepath: pathlib.Path) -> Dict[str, str]:
     """Carga y parsea un archivo de variables de entorno .env."""
     data: Dict[str, str] = {}
+    filepath = pathlib.Path(filepath)
     if not filepath.is_file():
         return data
 
@@ -139,6 +140,7 @@ def load_env_file(filepath: pathlib.Path) -> Dict[str, str]:
 
 def save_env_file(filepath: pathlib.Path, data: Dict[str, str]) -> bool:
     """Guarda las variables de entorno en el archivo .env con permisos seguros."""
+    filepath = pathlib.Path(filepath)
     lines = [
         "# ==============================================================================",
         "# Servidor NAS & Central de Respaldos (Debian 13) - Credenciales de Prueba",
@@ -616,7 +618,7 @@ def ensure_env_config(env_path: Optional[pathlib.Path] = None, allow_interactive
 # Módulos de Prueba Automatizada
 # -----------------------------------------------------------------------------
 
-def test_install_action(manager: SSHManager) -> bool:
+def test_install_action(manager: SSHManager, role: str = "ARCHIVOS_BACKUP") -> bool:
     """Acción 1: Sincroniza el repositorio y ejecuta el despliegue limpio de deploy.sh e install.sh."""
     log_step("1/7", "Prueba de Despliegue e Instalación Limpia (test install)")
 
@@ -644,11 +646,11 @@ def test_install_action(manager: SSHManager) -> bool:
         log_success("CLI 'nas' registrado en /usr/local/bin/nas.")
 
     # 3. Ejecutar deploy.sh con parámetros estándar
-    log_info("Ejecutando deploy.sh en servidor remoto (Rol: ARCHIVOS, Disco: LOCAL)...")
+    log_info(f"Ejecutando deploy.sh en servidor remoto (Rol: {role}, Disco: LOCAL)...")
     deploy_cmd = (
         "cd /tmp/nas_debian_test && "
         f"printf '%s\\n' {shlex.quote(manager.root_password)} | "
-        f"bash src/core/deploy.sh LOCAL WORKGROUP SRV-NAS {shlex.quote(manager.user)} - ARCHIVOS --force --confirm"
+        f"bash src/core/deploy.sh LOCAL WORKGROUP SRV-NAS {shlex.quote(manager.user)} - {shlex.quote(role)} --force --confirm"
     )
 
     code, out, err = manager.run_command(deploy_cmd, sudo=True, timeout=300, stream=True)
@@ -873,8 +875,10 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
                 session_cookie = raw_cookie.split(";")[0]
                 log_success(f"Cookie de sesión recibida: {session_cookie[:25]}...")
 
-            # Extraer CSRF Token del HTML
-            m_csrf = re.search(r'name=["\']csrf_token["\']\s+value=["\']([a-f0-9]{64})["\']', body, re.IGNORECASE)
+            # Extraer CSRF Token del HTML (soportando cualquier orden de atributos y etiquetas intercaladas)
+            m_csrf = re.search(r'name=["\']csrf_token["\'][^>]*?value=["\']([a-f0-9]{64})["\']', body, re.IGNORECASE)
+            if not m_csrf:
+                m_csrf = re.search(r'value=["\']([a-f0-9]{64})["\'][^>]*?name=["\']csrf_token["\']', body, re.IGNORECASE)
             if m_csrf:
                 csrf_token = m_csrf.group(1)
                 log_success(f"Token CSRF detectado en /login: {csrf_token[:16]}... (Longitud: 64 hex)")
