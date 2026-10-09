@@ -8,7 +8,16 @@ gestionar_recursos_compartidos() {
     local NOMBRE_DIR COMENTARIO RUTA_SHARE RUTA_REAL TIPO_PERM GRUPOS_DISP LISTA_OPC GRUPOS_SEL TODOS_GRPS
     local VALID_USERS WRITE_LIST READ_ONLY MASK GRUPO_DUENO TIPO_TXT GRUPOS_RO GRUPOS_RO_ESTRICTO
     local GRUPO_RW MENU_RW STATUS LISTA_SHARES MENU_ITEMS TARGET_SHARE NUEVO_ESTADO
-    local LISTA_ELIMINAR MENU_DEL SHARE_A_BORRAR BACKUP_SMB TMP_SMB g
+    local LISTA_ELIMINAR MENU_DEL SHARE_A_BORRAR BACKUP_SMB TMP_SMB g ROL_ACTUAL
+
+    ROL_ACTUAL=""
+    if [ -s /etc/nas/role ]; then
+        ROL_ACTUAL=$(cat /etc/nas/role | tr -cd 'A-Za-z_' | tr '[:lower:]' '[:upper:]')
+        [ "$ROL_ACTUAL" == "HIBRIDO" ] && ROL_ACTUAL="ARCHIVOS_BACKUP"
+        [ "$ROL_ACTUAL" == "ARCHIVOSBACKUP" ] && ROL_ACTUAL="ARCHIVOS_BACKUP"
+    elif grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
+        ROL_ACTUAL="BACKUP"
+    fi
     
     if [ ! -f /etc/samba/smb.conf ]; then
         whiptail --title "Samba no configurado" --ok-button "< Aceptar >" \
@@ -111,22 +120,29 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     continue
                 fi
 
-                OPC_VIS=$(whiptail --title "Visibilidad en Red (Samba / Windows)" \
-                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-                    --menu "Selecciona la visibilidad del recurso en el entorno de red de Windows:" 15 72 2 \
-                    "1" "Recurso OCULTO ($) - No visible en explorador (Recomendado)" \
-                    "2" "Recurso VISIBLE - Visible en explorador de red para todos" 3>&1 1>&2 2>&3)
-                RET=$?
-                if [ $RET -ne 0 ] || [ -z "$OPC_VIS" ]; then continue; fi
-
-                if [ "$OPC_VIS" == "1" ]; then
+                if [ "$ROL_ACTUAL" == "BACKUP" ]; then
+                    OPC_VIS="1"
                     [[ "$NOMBRE_SHARE" != *\$ ]] && NOMBRE_SHARE="${NOMBRE_SHARE}\$"
                     BROWSEABLE="no"
-                    VIS_TXT="Oculto ($) [Invisible en explorador de red]"
+                    VIS_TXT="Oculto ($) [Invisible en explorador de red - Rol BACKUP]"
                 else
-                    NOMBRE_SHARE="${NOMBRE_SHARE%\$}"
-                    BROWSEABLE="yes"
-                    VIS_TXT="Visible en red"
+                    OPC_VIS=$(whiptail --title "Visibilidad en Red (Samba / Windows)" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "Selecciona la visibilidad del recurso en el entorno de red de Windows:" 15 72 2 \
+                        "1" "Recurso OCULTO ($) - No visible en explorador (Recomendado)" \
+                        "2" "Recurso VISIBLE - Visible en explorador de red para todos" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    if [ $RET -ne 0 ] || [ -z "$OPC_VIS" ]; then continue; fi
+
+                    if [ "$OPC_VIS" == "1" ]; then
+                        [[ "$NOMBRE_SHARE" != *\$ ]] && NOMBRE_SHARE="${NOMBRE_SHARE}\$"
+                        BROWSEABLE="no"
+                        VIS_TXT="Oculto ($) [Invisible en explorador de red]"
+                    else
+                        NOMBRE_SHARE="${NOMBRE_SHARE%\$}"
+                        BROWSEABLE="yes"
+                        VIS_TXT="Visible en red"
+                    fi
                 fi
 
                 NOMBRE_DIR="${NOMBRE_SHARE%\$}"
@@ -178,13 +194,22 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 [ -z "$COMENTARIO" ] && COMENTARIO="Carpeta compartida $NOMBRE_DIR"
                 COMENTARIO=$(printf '%s' "$COMENTARIO" | tr -d '\r\n')
 
-                TIPO_PERM=$(whiptail --title "Esquema de Seguridad y Permisos" \
-                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-                    --menu "Selecciona el esquema de permisos para este recurso:" 16 72 4 \
-                    "1" "Lectura y Escritura (Todos los grupos autorizados pueden editar)" \
-                    "2" "Solo Lectura General + Escritura Exclusiva (write list)" \
-                    "3" "Solo Lectura Estricta (Nadie puede modificar desde la red)" \
-                    "4" "Acceso Público / Invitados (Sin requerir contraseña)" 3>&1 1>&2 2>&3)
+                if [ "$ROL_ACTUAL" == "BACKUP" ]; then
+                    TIPO_PERM=$(whiptail --title "Esquema de Seguridad y Permisos (Backup)" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "Selecciona el esquema de permisos para este recurso de backup:" 15 72 3 \
+                        "1" "Lectura y Escritura (Todos los grupos autorizados pueden editar)" \
+                        "2" "Solo Lectura General + Escritura Exclusiva (write list)" \
+                        "3" "Solo Lectura Estricta (Nadie puede modificar desde la red)" 3>&1 1>&2 2>&3)
+                else
+                    TIPO_PERM=$(whiptail --title "Esquema de Seguridad y Permisos" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "Selecciona el esquema de permisos para este recurso:" 16 72 4 \
+                        "1" "Lectura y Escritura (Todos los grupos autorizados pueden editar)" \
+                        "2" "Solo Lectura General + Escritura Exclusiva (write list)" \
+                        "3" "Solo Lectura Estricta (Nadie puede modificar desde la red)" \
+                        "4" "Acceso Público / Invitados (Sin requerir contraseña)" 3>&1 1>&2 2>&3)
+                fi
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$TIPO_PERM" ]; then continue; fi
 
