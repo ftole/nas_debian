@@ -18,15 +18,19 @@ instalar_nas() {
     # --------------------------------------------------------------------------
     ROL_OPCION=$(whiptail --title "Paso 1 de 5: Rol Principal del Servidor" \
         --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-        --menu "Selecciona la función principal que cumplirá este servidor:" 16 74 2 \
+        --menu "Selecciona la función principal que cumplirá este servidor:" 17 74 3 \
         "1" "Servidor NAS de Archivos (Almacenamiento Departamental Compartido)" \
-        "2" "Central de Backup (Inmune a Ransomware - Carpetas Ocultas $)" 3>&1 1>&2 2>&3)
+        "2" "Central de Backup (Inmune a Ransomware - Carpetas Ocultas $)" \
+        "3" "Híbrido: Archivos y Backups (NAS Departamental + Central de Respaldos)" 3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -ne 0 ] || [ -z "$ROL_OPCION" ]; then return; fi
 
     if [ "$ROL_OPCION" == "2" ]; then
         ROL_SERVER="BACKUP"
         ROL_NETBIOS="SRV-EAD-BKP"
+    elif [ "$ROL_OPCION" == "3" ]; then
+        ROL_SERVER="ARCHIVOS_BACKUP"
+        ROL_NETBIOS="$DEFAULT_NETBIOS"
     else
         ROL_SERVER="ARCHIVOS"
         ROL_NETBIOS="$DEFAULT_NETBIOS"
@@ -54,7 +58,7 @@ instalar_nas() {
                 if disco_en_uso "$dev_path"; then
                     MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - EN USO (no recomendado)")
                 else
-                    if [ "$ROL_SERVER" == "BACKUP" ]; then
+                    if [ "$ROL_SERVER" == "BACKUP" ] || [ "$ROL_SERVER" == "ARCHIVOS_BACKUP" ]; then
                         MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - BTRFS + ZSTD")
                     else
                         MENU_DISCOS+=("$dev_path" "Disco dedicado ($size, $d_media) - EXT4 optimizado")
