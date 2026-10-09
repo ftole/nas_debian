@@ -128,6 +128,27 @@ class AuthMiddleware
             }
         }
 
+        // Restricción por rol de servidor activo:
+        if (!self::isServerRoleAllowed($path)) {
+            if ($request->isJson()) {
+                Response::error('Módulo o recurso no habilitado para el rol actual del servidor.', 403);
+            } else {
+                if (!headers_sent()) {
+                    http_response_code(403);
+                }
+                echo '<h1>403 - Módulo no habilitado para el rol actual del servidor</h1>';
+                if (getenv('APP_ENV') !== 'testing') {
+                    exit;
+                }
+            }
+            return false;
+        }
+
+        // Rate limiting en SQLite para operaciones críticas
+        if (!self::checkCriticalRateLimit($request)) {
+            return false;
+        }
+
         // Validación estricta de CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
         if (in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
             // Permitir formulario y API pública de login sin token CSRF previo
@@ -175,5 +196,66 @@ class AuthMiddleware
         }
 
         return false;
+    }
+
+    /**
+     * Valida si el módulo o ruta solicitada está permitido para el rol activo del servidor.
+     * En rol ARCHIVOS, los módulos de backup están deshabilitados (403).
+     */
+    public static function isServerRoleAllowed(string $path): bool
+    {
+        $serverRole = \App\Services\SystemService::getServerRole();
+        if ($serverRole === 'ARCHIVOS') {
+            if ($path === '/backups' || str_starts_with($path, '/api/backups')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Aplica Rate Limiting estricto mediante SQLite para operaciones críticas del sistema.
+     */
+    public static function checkCriticalRateLimit(Request $request): bool
+    {
+        $path = $request->getPath();
+        $isCritical = false;
+
+        $criticalExact = [
+            '/api/storage/format',
+            '/api/storage/lvm',
+            '/api/storage/subvolume',
+            '/api/storage/scrub',
+            '/api/terminal/session',
+            '/api/terminal/exec',
+            '/api/system/reboot',
+        ];
+
+        if (in_array($path, $criticalExact, true)) {
+            $isCritical = true;
+        } elseif (preg_match('#^/api/backups/[^/]+/run$#', $path)) {
+            $isCritical = true;
+        }
+
+        if ($isCritical) {
+            $ip = $request->getIp();
+            $key = 'rate_crit:' . $ip . ':' . $path;
+            if (!\App\Services\AuthService::checkRateLimit($key, 10, 60)) {
+                if ($request->isJson()) {
+                    Response::error('Límite de solicitudes críticas excedido. Intente más tarde.', 429);
+                } else {
+                    if (!headers_sent()) {
+                        http_response_code(429);
+                    }
+                    echo '<h1>429 - Límite de solicitudes excedido</h1>';
+                    if (getenv('APP_ENV') !== 'testing') {
+                        exit;
+                    }
+                }
+                return false;
+            }
+        }
+
+        return true;
     }
 }
