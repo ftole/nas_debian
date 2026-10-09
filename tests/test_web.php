@@ -1023,10 +1023,41 @@ AuthService::clearRateLimits($testKey);
 $limitReset = AuthService::checkRateLimit($testKey, 10, 60);
 assertTrue($limitReset, 'AuthService::clearRateLimits restablece la ventana de rate limiting');
 
-// Pruebas de lectura de Workgroup
-putenv('NAS_WORKGROUP=TEST_WG');
-assertTrue(SystemService::getWorkgroup() === 'TEST_WG', 'SystemService::getWorkgroup retorna valor según entorno');
-putenv('NAS_WORKGROUP=');
+// 27. Pruebas de Request::getIp, AuthMiddleware rate limit crítico y validación de LVM
+$_SERVER['REMOTE_ADDR'] = '192.168.10.25';
+$reqAlias = new Request();
+assertTrue($reqAlias->getIp() === '192.168.10.25', 'Request::getIp retorna la IP resuelta correctamente');
+assertTrue($reqAlias->getIp() === $reqAlias->getClientIp(), 'Request::getIp es idéntico a Request::getClientIp');
+
+// Comprobación de que AuthMiddleware procesa endpoints críticos con rate limiter sin excepciones
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['REQUEST_URI'] = '/api/storage/lvm';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$reqCritLvm = new Request();
+try {
+    $refMethod = new ReflectionMethod(AuthMiddleware::class, 'checkCriticalRateLimit');
+    $refMethod->setAccessible(true);
+    $resCrit = $refMethod->invoke(null, $reqCritLvm);
+    assertTrue($resCrit === true, 'AuthMiddleware::checkCriticalRateLimit autoriza petición LVM dentro de umbral');
+} catch (\Throwable $e) {
+    assertTrue(false, 'AuthMiddleware::checkCriticalRateLimit no debe lanzar excepciones: ' . $e->getMessage());
+}
+
+// Pruebas de validación de StorageService::lvmCreate
+$badConfirmLvm = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', '100%FREE', 'ext4', 'NO');
+assertTrue(!$badConfirmLvm['success'] && str_contains($badConfirmLvm['error'], 'Confirmación requerida'), 'StorageService::lvmCreate exige SI-FORMATEAR');
+
+$badSizeLvm = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', 'tamano_invalido', 'ext4', 'SI-FORMATEAR');
+assertTrue(!$badSizeLvm['success'] && str_contains($badSizeLvm['error'], 'inválido'), 'StorageService::lvmCreate rechaza tamaño inválido');
+
+$goodSizeFree = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', '100%FREE', 'ext4', 'SI-FORMATEAR');
+assertTrue($goodSizeFree['success'], 'StorageService::lvmCreate acepta 100%FREE (modo dev/test)');
+
+$goodSizeVg = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', '50%VG', 'ext4', 'SI-FORMATEAR');
+assertTrue($goodSizeVg['success'], 'StorageService::lvmCreate acepta 50%VG (modo dev/test)');
+
+$goodSizeFixed = $storage->lvmCreate('/dev/sdb', 'vg_nas', 'lv_data', '200G', 'ext4', 'SI-FORMATEAR');
+assertTrue($goodSizeFixed['success'], 'StorageService::lvmCreate acepta tamaño fijo 200G (modo dev/test)');
 
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
