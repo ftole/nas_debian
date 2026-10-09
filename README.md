@@ -32,14 +32,16 @@ Para mantener este repositorio organizado y este documento directo al grano, el 
 
 ---
 
-## 🎯 Dos Roles Especializados
+## 🎯 Tres Roles Especializados (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`)
 
-Durante el despliegue puedes configurar tu máquina para una de dos misiones fundamentales:
+Durante el despliegue puedes configurar tu máquina para uno de tres perfiles según tus necesidades operativas:
 
-- **Rol ARCHIVOS (NAS Departamental):** Diseñado para compartir carpetas en red a toda la oficina. Utiliza **ext4 optimizado** (`commit=2` en HDD para soportar cortes de energía), expone recursos visibles en el explorador de Windows y soporta más de 100 puestos simultáneos trabajando en hojas de cálculo de Excel sin bloqueos temporales (`~$`).
-- **Rol BACKUP (Central de Respaldos):** Diseñado como caja fuerte para recibir copias de servidores Windows, Linux y locales. Utiliza **Btrfs con compresión Zstandard** (`zstd:3`), deduplicación por enlaces duros (`rsync --link-dest` con >85% de ahorro), recursos ocultos terminados en `$` y revisiones mensuales automáticas contra corrupción silenciosa (*Bit Rot*).
+- **Rol ARCHIVOS (NAS Departamental):** Diseñado para compartir carpetas en red a toda la oficina. Utiliza **ext4 optimizado** (`commit=2` en HDD para soportar cortes de energía), expone recursos visibles en el explorador de Windows y soporta más de 100 puestos simultáneos trabajando en hojas de cálculo de Excel sin bloqueos temporales (`~$`). En el panel web, restringe el módulo de respaldos y concentra la operativa en recursos compartidos (`/shares`).
+- **Rol BACKUP (Central de Respaldos):** Diseñado como caja fuerte para recibir copias de servidores Windows, Linux y locales. Utiliza **Btrfs con compresión Zstandard** (`zstd:3`), deduplicación por enlaces duros (`rsync --link-dest` con >85% de ahorro), recursos ocultos terminados en `$` y revisiones mensuales automáticas contra corrupción silenciosa (*Bit Rot*). En el panel web, restringe el módulo de recursos abiertos y concentra la gestión en tareas de copias de seguridad (`/backups`).
+- **Rol ARCHIVOS_BACKUP (Híbrido - Archivos y Respaldos):** La solución integral que combina ambas funciones en un único servidor. Permite desplegar recursos compartidos departamentales visibles para la red corporativa y, de manera paralela, programar respaldos automatizados multiplataforma con carpetas protegidas. En el panel web, **habilita simultáneamente tanto Recursos Compartidos (`/shares`) como Tareas de Respaldo (`/backups`)**, adaptando la navegación, métricas y permisos en tiempo real.
 
-Ambos roles admiten el modo **`--keep-data`**, permitiéndote reutilizar discos con terabytes de información previa sin formatear.
+### Persistencia del Rol y Comportamiento en el Panel Web
+El rol seleccionado se guarda de forma inmutable en `/etc/nas/role`. El backend web (`SystemService`) lee este archivo dinámicamente y el middleware de control de acceso (`AuthMiddleware`) adapta el acceso a rutas y la navegación lateral, mostrando además el badge correspondiente (`ARCHIVOS`, `BACKUP` o `ARCHIVOS & BACKUP`) en la cabecera. Todos los roles admiten el modo **`--keep-data`** para reutilizar discos sin formatear.
 
 ![Matriz de Roles y Selección de Almacenamiento](docs/assets/roles_almacenamiento.svg)
 
@@ -136,6 +138,51 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP 
 
 # Central de Respaldos formateando disco secundario (/dev/sdb):
 printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP SRV-BKP admin - BACKUP
+
+# Servidor Híbrido (Archivos y Respaldos combinados) en partición local o disco secundario:
+printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL WORKGROUP SRV-NAS admin - ARCHIVOS_BACKUP
+```
+
+---
+
+## 🪟 Asistente de Administración Remota en Windows (`nas_admin.bat` / `nas_admin.py`)
+
+Para administrar, desplegar y monitorear el servidor remotamente desde cualquier equipo Windows (mediante consola PowerShell, CMD o directamente con doble clic) sin preocuparse por dependencias de Python ni configuraciones manuales de entorno:
+
+### Lanzador Automatizado Oficial `nas_admin.bat` (Recomendado)
+El archivo `nas_admin.bat` gestiona de manera transparente todo el entorno de ejecución:
+1. **Detección inteligente de Python 3:** Localiza automáticamente el intérprete evaluando de forma sucesiva: el lanzador `py -3`, el ejecutable en la variable `PATH`, `python3`, el directorio de instalación estándar por usuario en `%LOCALAPPDATA%\Programs\Python\Python3*\python.exe` y las instalaciones a nivel de sistema en `%ProgramFiles%\Python`.
+2. **Entorno virtual aislado (`.venv`):** Si no existe el directorio `.venv`, lo crea automáticamente en la raíz del proyecto para aislar todas las librerías sin alterar el sistema operativo.
+3. **Instalación silenciosa de dependencias:** Comprueba las librerías requeridas y las instala automáticamente con `pip` desde `requirements-assistant.txt` (`paramiko`, `keyring`, `colorama`), garantizando cero errores de tipo `ModuleNotFoundError`.
+4. **Ejecución directa:** Abre el menú interactivo con navegación por colores o reenvía cualquier argumento recibido por línea de comandos.
+
+```cmd
+:: Iniciar el menú interactivo con doble clic o terminal:
+nas_admin.bat
+
+:: Ejecutar acciones directas por línea de comandos:
+nas_admin.bat status      :: Chequeo de salud del servidor y recursos
+nas_admin.bat deploy      :: Iniciar asistente interactivo de despliegue remoto
+nas_admin.bat update      :: Sincronizar y actualizar versión en el servidor
+nas_admin.bat services    :: Gestionar demonios (Samba, Nginx, PHP, WSDD2)
+nas_admin.bat logs        :: Monitorear bitácoras del sistema y respaldos
+nas_admin.bat console     :: Abrir consola SSH interactiva directa
+nas_admin.bat config      :: Configurar credenciales y probar conexión
+nas_admin.bat uninstall   :: Desinstalación completa (requiere confirmación)
+```
+
+### Invocación Manual de `nas_admin.py`
+Si operas en Linux o deseas invocar Python directamente en Windows:
+```bash
+# 1. Instalar dependencias requeridas
+pip install -r requirements-assistant.txt
+
+# 2. Ejecutar asistente interactivo
+python nas_admin.py
+
+# 3. Invocar comandos directos
+python nas_admin.py status
+python nas_admin.py deploy
 ```
 
 ---
@@ -194,9 +241,12 @@ python test_remote.py console     # Consola SSH interactiva directa
 ```text
 nas_debian/
 ├── install.sh             -> Instalador remoto oficial y gestor CLI `nas`
+├── nas_admin.bat          -> Lanzador automatizado para Windows (gestiona Python y .venv)
+├── nas_admin.py           -> Asistente de administración remota interactiva y CLI
 ├── test_remote.py         -> Suite interactiva y CLI de pruebas remotas en Python
 ├── test_remote.sh         -> Lanzador y suite de pruebas remotas en Bash
 ├── .env.example           -> Plantilla documentada de credenciales para pruebas
+├── requirements-assistant.txt -> Dependencias del asistente Windows (paramiko, keyring, colorama)
 ├── docs/                  -> Documentación técnica completa y guías operativas
 │   ├── assets/            -> Diagramas vectoriales SVG del sistema
 │   ├── arquitectura.md    -> Arquitectura detallada, capas y flujo de procesos
