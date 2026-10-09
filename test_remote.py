@@ -391,8 +391,8 @@ class SSHManager:
 
         # Crear archivo tar en memoria
         tar_buffer = io.BytesIO()
-        include_dirs = ["src", "web"]
-        include_files = ["install.sh", "README.md", "AGENTS.md"]
+        include_dirs = ["src", "web", "tests"]
+        include_files = ["install.sh", "README.md", "AGENTS.md", "requirements-dev.txt", ".flake8"]
 
         def tar_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
             name = tarinfo.name.replace("\\", "/")
