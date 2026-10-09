@@ -748,8 +748,10 @@ Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub 
     /usr/sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, \\
     /usr/sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
     /usr/bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/lvcreate *, /usr/sbin/pvs, /usr/sbin/vgs, /usr/sbin/lvs, /usr/sbin/blkid *, \\
+    /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /sbin/pvcreate * /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, /sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \\
+    /usr/sbin/lvcreate *, /sbin/lvcreate *, /usr/sbin/pvs, /sbin/pvs, /usr/sbin/vgs, /sbin/vgs, /usr/sbin/lvs, /sbin/lvs, \\
+    /usr/sbin/blkid *, /sbin/blkid *, \\
     /usr/bin/btrfs subvolume create /mnt/nas-btrfs-tmp/*, \\
     /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \\
     /bin/mkdir -p /srv/nas, /usr/bin/mkdir -p /srv/nas, \\
