@@ -170,6 +170,13 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts(ip, attempted_at DESC);
+
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_api_rate_limits ON api_rate_limits(key, created_at DESC);
 SQL;
 
         $pdo->exec($schema);
