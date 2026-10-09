@@ -117,6 +117,7 @@ else
     rm -rf /etc/samba
     rm -rf /var/www/nas-web
     rm -rf /var/lib/nas
+    rm -rf /etc/nas
     rm -f /etc/ssl/certs/nas-web.crt /etc/ssl/private/nas-web.key
     rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
     rm -f /etc/php/*/fpm/pool.d/nas-web.conf /run/php/php-fpm-nas.sock
