@@ -77,7 +77,7 @@ obtener_estado_despliegue() {
     if [ -f /etc/samba/smb.conf ] && getent group grp_samba &>/dev/null && [ -d /srv/nas ]; then
         local rol="ARCHIVOS"
         if [ -s /etc/nas/role ]; then
-            rol=$(cat /etc/nas/role | tr -cd 'A-Za-z_' | tr '[:lower:]' '[:upper:]')
+            rol=$(tr -cd 'A-Za-z_' < /etc/nas/role | tr '[:lower:]' '[:upper:]')
             [ "$rol" == "HIBRIDO" ] && rol="ARCHIVOS_BACKUP"
             [ "$rol" == "ARCHIVOSBACKUP" ] && rol="ARCHIVOS_BACKUP"
         elif grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
