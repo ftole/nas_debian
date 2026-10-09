@@ -893,4 +893,65 @@ class SystemService
             'channel' => $channel,
         ];
     }
+
+    /**
+     * Lee dinámicamente el rol del servidor (/etc/nas/role), con fallback a smb.conf o entorno.
+     * Retorna 'ARCHIVOS', 'BACKUP' o 'ARCHIVOS_BACKUP'.
+     */
+    public static function getServerRole(): string
+    {
+        $roleFile = '/etc/nas/role';
+        if (file_exists($roleFile) && is_readable($roleFile)) {
+            $role = strtoupper(trim((string) @file_get_contents($roleFile)));
+            $role = preg_replace('/[^A-Z_]/', '', $role);
+            if (in_array($role, ['ARCHIVOS', 'BACKUP', 'ARCHIVOS_BACKUP'], true)) {
+                return $role;
+            }
+            if ($role === 'HIBRIDO' || $role === 'ARCHIVOSBACKUP') {
+                return 'ARCHIVOS_BACKUP';
+            }
+        }
+
+        // Variable de entorno para suites de pruebas o desarrollo
+        $envRole = getenv('NAS_SERVER_ROLE');
+        if ($envRole) {
+            $envRole = strtoupper(trim((string) $envRole));
+            $envRole = preg_replace('/[^A-Z_]/', '', $envRole);
+            if (in_array($envRole, ['ARCHIVOS', 'BACKUP', 'ARCHIVOS_BACKUP'], true)) {
+                return $envRole;
+            }
+            if ($envRole === 'HIBRIDO' || $envRole === 'ARCHIVOSBACKUP') {
+                return 'ARCHIVOS_BACKUP';
+            }
+        }
+
+        // Fallback a smb.conf
+        $smbConf = '/etc/samba/smb.conf';
+        if (file_exists($smbConf) && is_readable($smbConf)) {
+            $content = (string) @file_get_contents($smbConf);
+            if (stripos($content, 'Servidor ARCHIVOS_BACKUP') !== false || (stripos($content, 'ARCHIVOS') !== false && stripos($content, 'BACKUP') !== false)) {
+                return 'ARCHIVOS_BACKUP';
+            }
+            if (stripos($content, 'Servidor BACKUP') !== false) {
+                return 'BACKUP';
+            }
+        }
+
+        return 'ARCHIVOS_BACKUP';
+    }
+
+    /**
+     * Retorna la etiqueta legible del rol de servidor para la interfaz web.
+     */
+    public static function getServerRoleLabel(): string
+    {
+        $role = self::getServerRole();
+        return match ($role) {
+            'ARCHIVOS' => 'ARCHIVOS',
+            'BACKUP' => 'BACKUP',
+            'ARCHIVOS_BACKUP' => 'ARCHIVOS & BACKUP',
+            default => 'ARCHIVOS & BACKUP',
+        };
+    }
 }
+
