@@ -104,6 +104,21 @@ def test_save_env_file_writes_and_reloads(tmp_path: pathlib.Path) -> None:
     assert reloaded["NAS_ROOT_PASSWORD"] == "rootpassword456"
 
 
+def test_load_env_file_soporta_string_path(tmp_path: pathlib.Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("NAS_TEST_IP=10.0.0.1\n", encoding="utf-8")
+    data = test_remote.load_env_file(str(env_file))
+    assert data["NAS_TEST_IP"] == "10.0.0.1"
+
+
+def test_save_env_file_soporta_string_path(tmp_path: pathlib.Path) -> None:
+    env_file = tmp_path / ".env"
+    payload = {"NAS_TEST_IP": "10.0.0.2"}
+    assert test_remote.save_env_file(str(env_file), payload) is True
+    data = test_remote.load_env_file(str(env_file))
+    assert data["NAS_TEST_IP"] == "10.0.0.2"
+
+
 def test_validate_env_config_detects_missing() -> None:
     incomplete = {"NAS_TEST_IP": "10.0.0.1"}
     valid, missing = test_remote.validate_env_config(incomplete)
