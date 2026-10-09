@@ -143,3 +143,20 @@ def test_persist_credentials_con_keyring_no_escribe_env_con_claves() -> None:
     wns.assert_called_once()
     assert ss.call_count == 2
     save.assert_not_called()
+
+
+def test_main_permite_help_sin_paramiko(capsys: pytest.CaptureFixture) -> None:
+    with mock.patch.object(nas_admin.tr, "paramiko", None):
+        with pytest.raises(SystemExit) as exc:
+            nas_admin.main(["--help"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert "Asistente de Administración Remota" in captured.out
+
+
+def test_main_exige_paramiko_para_accion(capsys: pytest.CaptureFixture) -> None:
+    with mock.patch.object(nas_admin.tr, "paramiko", None):
+        code = nas_admin.main(["status"])
+        assert code == 1
+        captured = capsys.readouterr()
+        assert "paramiko" in captured.out
