@@ -900,19 +900,7 @@ class SystemService
      */
     public static function getServerRole(): string
     {
-        $roleFile = '/etc/nas/role';
-        if (file_exists($roleFile) && is_readable($roleFile)) {
-            $role = strtoupper(trim((string) @file_get_contents($roleFile)));
-            $role = preg_replace('/[^A-Z_]/', '', $role);
-            if (in_array($role, ['ARCHIVOS', 'BACKUP', 'ARCHIVOS_BACKUP'], true)) {
-                return $role;
-            }
-            if ($role === 'HIBRIDO' || $role === 'ARCHIVOSBACKUP') {
-                return 'ARCHIVOS_BACKUP';
-            }
-        }
-
-        // Variable de entorno para suites de pruebas o desarrollo
+        // Variable de entorno para suites de pruebas o desarrollo (prevalece para test runners)
         $envRole = getenv('NAS_SERVER_ROLE');
         if ($envRole) {
             $envRole = strtoupper(trim((string) $envRole));
@@ -921,6 +909,18 @@ class SystemService
                 return $envRole;
             }
             if ($envRole === 'HIBRIDO' || $envRole === 'ARCHIVOSBACKUP') {
+                return 'ARCHIVOS_BACKUP';
+            }
+        }
+
+        $roleFile = '/etc/nas/role';
+        if (file_exists($roleFile) && is_readable($roleFile)) {
+            $role = strtoupper(trim((string) @file_get_contents($roleFile)));
+            $role = preg_replace('/[^A-Z_]/', '', $role);
+            if (in_array($role, ['ARCHIVOS', 'BACKUP', 'ARCHIVOS_BACKUP'], true)) {
+                return $role;
+            }
+            if ($role === 'HIBRIDO' || $role === 'ARCHIVOSBACKUP') {
                 return 'ARCHIVOS_BACKUP';
             }
         }
