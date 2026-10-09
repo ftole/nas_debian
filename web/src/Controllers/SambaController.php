@@ -37,6 +37,18 @@ class SambaController
             return;
         }
 
+        // En rol Central de Backup (BACKUP), no se permiten recursos públicos
+        $serverRole = \App\Services\SystemService::getServerRole();
+        if ($serverRole === 'BACKUP') {
+            $scheme = (int) ($data['scheme'] ?? 1);
+            $guestOk = !empty($data['guest_ok']);
+            $hidden = !empty($data['hidden']) || str_ends_with($name, '$');
+            if ($scheme === 4 || $guestOk || !$hidden) {
+                Response::error('En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.', 403);
+                return;
+            }
+        }
+
         $res = $this->samba->createShare($data);
         if (!$res['success']) {
             AuditService::log('share_create', $name, 'FAILED', ['error' => $res['error'] ?? '']);
