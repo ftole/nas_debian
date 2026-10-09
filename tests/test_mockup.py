@@ -137,3 +137,28 @@ def test_app_js_localstorage_safety():
     assert "try {" in js and "localStorage.getItem('nas_theme')" in js
     # La alternancia de tema debe estar protegida
     assert "localStorage.setItem('nas_theme'" in js
+
+
+def test_web_app_js_no_confirm_shadowing():
+    """Garantizar que web/public/js/app.js no tenga shadowing ni llamadas directas sin window."""
+    app_js_path = os.path.join(
+        os.path.dirname(__file__), "..", "web", "public", "js", "app.js"
+    )
+    with open(app_js_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # No debe declarar variables confirm, alert o prompt
+    shadow_decl = re.findall(
+        r"\b(?:const|let|var)\s+(?:confirm|alert|prompt)\b", content
+    )
+    assert shadow_decl == [], f"Variables que causan shadowing: {shadow_decl}"
+
+    # Todas las llamadas a confirm o prompt deben tener prefijo window.
+    bare_dialogs = re.findall(
+        r"(?<!\.)\b(?:confirm|prompt)\s*\(", content
+    )
+    assert bare_dialogs == [], f"Llamadas sin prefijo window.: {bare_dialogs}"
+
+    # submitStorageManage debe usar confirmText y window.confirm
+    assert "confirmText" in content
+    assert "window.confirm(" in content
