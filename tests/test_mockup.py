@@ -153,9 +153,9 @@ def test_web_app_js_no_confirm_shadowing():
     )
     assert shadow_decl == [], f"Variables que causan shadowing: {shadow_decl}"
 
-    # Todas las llamadas a confirm o prompt deben tener prefijo window.
+    # Todas las llamadas a confirm, prompt o alert deben tener prefijo window.
     bare_dialogs = re.findall(
-        r"(?<!\.)\b(?:confirm|prompt)\s*\(", content
+        r"(?<!\.)\b(?:confirm|prompt|alert)\s*\(", content
     )
     assert bare_dialogs == [], f"Llamadas sin prefijo window.: {bare_dialogs}"
 
