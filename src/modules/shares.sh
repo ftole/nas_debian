@@ -12,7 +12,7 @@ gestionar_recursos_compartidos() {
 
     ROL_ACTUAL=""
     if [ -s /etc/nas/role ]; then
-        ROL_ACTUAL=$(cat /etc/nas/role | tr -cd 'A-Za-z_' | tr '[:lower:]' '[:upper:]')
+        ROL_ACTUAL=$(tr -cd 'A-Za-z_' < /etc/nas/role | tr '[:lower:]' '[:upper:]')
         [ "$ROL_ACTUAL" == "HIBRIDO" ] && ROL_ACTUAL="ARCHIVOS_BACKUP"
         [ "$ROL_ACTUAL" == "ARCHIVOSBACKUP" ] && ROL_ACTUAL="ARCHIVOS_BACKUP"
     elif grep -qi "Servidor BACKUP" /etc/samba/smb.conf 2>/dev/null; then
