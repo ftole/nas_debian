@@ -1273,18 +1273,18 @@ def diagnostico_action(manager: SSHManager) -> None:
     log_step("DIAGNÓSTICO", "Ejecutando Diagnóstico en Vivo del Servidor (nas status)...")
     cmd = (
         "if command -v nas &>/dev/null; then "
-        "  sudo nas status; "
+        "  nas status; "
         "elif [ -f /opt/nas_debian/src/asistente.sh ]; then "
-        "  sudo bash /opt/nas_debian/src/asistente.sh --status; "
+        "  bash /opt/nas_debian/src/asistente.sh --status; "
         "elif [ -f /tmp/nas_debian_test/src/asistente.sh ]; then "
-        "  sudo bash /tmp/nas_debian_test/src/asistente.sh --status; "
+        "  bash /tmp/nas_debian_test/src/asistente.sh --status; "
         "else "
         "  echo '=== INFORMACIÓN DEL SISTEMA ==='; uname -a; uptime; "
         "  echo -e '\\n=== MEMORIA Y DISCO ==='; free -h; df -h / /srv/nas 2>/dev/null || df -h /; "
         "  echo -e '\\n=== ESTADO DE SERVICIOS NAS ==='; systemctl status smbd wsdd2 nginx --no-pager 2>&1 || true; "
         "fi"
     )
-    manager.run_command(cmd, sudo=False, timeout=30, stream=True)
+    manager.run_command(cmd, sudo=True, timeout=30, stream=True)
 
 
 # -----------------------------------------------------------------------------
