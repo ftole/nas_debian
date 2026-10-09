@@ -1052,6 +1052,11 @@ if [ -z "$PHP_FPM_SVC" ]; then
     PHP_FPM_SVC="php${PHP_VER}-fpm"
 fi
 
+if systemctl is-active apache2 &>/dev/null || systemctl is-enabled apache2 &>/dev/null; then
+    systemctl stop apache2 2>/dev/null || true
+    systemctl disable apache2 2>/dev/null || true
+fi
+
 systemctl daemon-reload
 if ! systemctl restart smbd nmbd wsdd2 nginx "$PHP_FPM_SVC" 2>/dev/null; then
     if ! systemctl restart smbd nmbd wsdd2 nginx 2>/dev/null; then
@@ -1100,12 +1105,14 @@ service auditd restart 2>/dev/null || systemctl restart auditd 2>/dev/null || tr
 systemctl enable auditd 2>/dev/null || true
 
 # Inicialización no bloqueante de base de datos AIDE
-aideinit -y -f 2>/dev/null || aide --init 2>/dev/null || true
-if [ -f /var/lib/aide/aide.db.new ]; then
-    cp -f /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
-elif [ -f /var/lib/aide/aide.db.new.gz ]; then
-    cp -f /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz 2>/dev/null || true
-fi
+(
+    aideinit -y -f 2>/dev/null || aide --init 2>/dev/null || true
+    if [ -f /var/lib/aide/aide.db.new ]; then
+        cp -f /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
+    elif [ -f /var/lib/aide/aide.db.new.gz ]; then
+        cp -f /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz 2>/dev/null || true
+    fi
+) &
 
 for _svc in smbd nmbd wsdd2 nginx cron rsyslog auditd; do
     if systemctl list-unit-files --type=service "${_svc}.service" &>/dev/null; then
