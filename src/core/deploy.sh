@@ -57,8 +57,12 @@ SERVER_ROLE="${6:-ARCHIVOS}"
 # Sanear identificadores de red para evitar expansión/inyección en las configuraciones
 SMB_NETBIOS=$(printf '%s' "$SMB_NETBIOS" | tr -cd 'A-Za-z0-9_-' | tr '[:lower:]' '[:upper:]')
 SMB_WORKGROUP=$(printf '%s' "$SMB_WORKGROUP" | tr -cd 'A-Za-z0-9_-' | tr '[:lower:]' '[:upper:]')
-SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')
-[ -z "$SERVER_ROLE" ] && SERVER_ROLE="ARCHIVOS"
+SERVER_ROLE=$(printf '%s' "$SERVER_ROLE" | tr -cd 'A-Za-z_' | tr '[:lower:]' '[:upper:]')
+[ "$SERVER_ROLE" == "HIBRIDO" ] && SERVER_ROLE="ARCHIVOS_BACKUP"
+[ "$SERVER_ROLE" == "ARCHIVOSBACKUP" ] && SERVER_ROLE="ARCHIVOS_BACKUP"
+if [ "$SERVER_ROLE" != "ARCHIVOS" ] && [ "$SERVER_ROLE" != "BACKUP" ] && [ "$SERVER_ROLE" != "ARCHIVOS_BACKUP" ]; then
+    SERVER_ROLE="ARCHIVOS"
+fi
 
 # Validar estrictamente el nombre de usuario administrador antes de usarlo.
 if [[ ! "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
@@ -88,6 +92,10 @@ echo " INICIANDO DESPLIEGUE: $SERVER_ROLE (IP: $SERVER_IP)"
 echo " Servidor: $SMB_NETBIOS | Workgroup: $SMB_WORKGROUP | Admin: $ADMIN_USER"
 echo "=============================================================================="
 log "Inicio de despliegue: rol=$SERVER_ROLE disco=$TARGET_DISK netbios=$SMB_NETBIOS"
+install -d -m 0755 -o root -g root /etc/nas
+printf '%s\n' "$SERVER_ROLE" > /etc/nas/role
+chmod 0644 /etc/nas/role
+chown root:root /etc/nas/role 2>/dev/null || true
 
 echo " [1/9] Actualizando repositorios e instalando paquetes base..."
 if ! DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1; then
@@ -134,7 +142,7 @@ auto_tune_hardware() {
     ES_HDD=$(cat "/sys/block/$DISCO_BASE/queue/rotational" 2>/dev/null || echo "1")
 
     # 1. Configuración de Filesystem por Rol y Hardware
-    if [ "$SERVER_ROLE" == "BACKUP" ]; then
+    if [ "$SERVER_ROLE" == "BACKUP" ] || [ "$SERVER_ROLE" == "ARCHIVOS_BACKUP" ]; then
         FS_TYPE="btrfs"
         if [ "$ES_HDD" = "0" ]; then
             FS_OPTS="rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async"
@@ -210,7 +218,7 @@ if [ "$TARGET_DISK" == "LOCAL" ] || [ "$TARGET_DISK" == "$ROOT_DEV" ] || [ "$TAR
     if [ "$ES_HDD" = "0" ]; then
         systemctl enable --now fstrim.timer 2>/dev/null || true
     fi
-    if [ "$SERVER_ROLE" == "BACKUP" ]; then
+    if [ "$SERVER_ROLE" == "BACKUP" ] || [ "$SERVER_ROLE" == "ARCHIVOS_BACKUP" ]; then
         ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "")
         if [ "$ROOT_FS" == "btrfs" ]; then
             cat << 'CRON_SCRUB' > /etc/cron.d/nas-btrfs-scrub
@@ -437,7 +445,7 @@ else
     if [ "$ES_HDD" = "0" ]; then
         systemctl enable --now fstrim.timer 2>/dev/null || true
     fi
-    if [ "$SERVER_ROLE" == "BACKUP" ] && [ "$FS_TYPE" == "btrfs" ]; then
+    if { [ "$SERVER_ROLE" == "BACKUP" ] || [ "$SERVER_ROLE" == "ARCHIVOS_BACKUP" ]; } && [ "$FS_TYPE" == "btrfs" ]; then
         cat << 'CRON_SCRUB' > /etc/cron.d/nas-btrfs-scrub
 0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
 CRON_SCRUB
@@ -563,6 +571,9 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'self';" always;
 
     client_max_body_size 512M;
 
@@ -822,10 +833,13 @@ echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "$SUDOERS_FILE"
 chmod 0440 "$SUDOERS_FILE"
 
 # Registrar el superadministrador canónico para el panel web y las herramientas.
-install -d -m 0750 -o root -g root /etc/nas
+install -d -m 0755 -o root -g root /etc/nas
 printf '%s\n' "$ADMIN_USER" > /etc/nas/superadmin
-chmod 0640 /etc/nas/superadmin
+chmod 0644 /etc/nas/superadmin
 chown root:root /etc/nas/superadmin 2>/dev/null || true
+printf '%s\n' "$SERVER_ROLE" > /etc/nas/role
+chmod 0644 /etc/nas/role
+chown root:root /etc/nas/role 2>/dev/null || true
 
 # 3. Asignar contraseña: la suministrada por el operador o una aleatoria fuerte generada aquí.
 CLAVE_GENERADA=false
