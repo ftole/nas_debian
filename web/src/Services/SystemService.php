@@ -953,5 +953,26 @@ class SystemService
             default => 'ARCHIVOS & BACKUP',
         };
     }
+
+    /**
+     * Obtiene dinámicamente el grupo de trabajo (Workgroup) desde smb.conf o entorno, con fallback a TEAM-JOFRATO.
+     */
+    public static function getWorkgroup(): string
+    {
+        $envWg = getenv('NAS_WORKGROUP');
+        if ($envWg !== false && trim((string) $envWg) !== '') {
+            return strtoupper(trim((string) $envWg));
+        }
+
+        $smbConf = '/etc/samba/smb.conf';
+        if (file_exists($smbConf) && is_readable($smbConf)) {
+            $content = (string) @file_get_contents($smbConf);
+            if (preg_match('/^\s*workgroup\s*=\s*([A-Za-z0-9_-]+)/mi', $content, $m)) {
+                return strtoupper(trim($m[1]));
+            }
+        }
+
+        return 'TEAM-JOFRATO';
+    }
 }
 
