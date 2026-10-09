@@ -391,8 +391,13 @@ class SSHManager:
 
         # Crear archivo tar en memoria
         tar_buffer = io.BytesIO()
-        include_dirs = ["src", "web", "tests"]
-        include_files = ["install.sh", "README.md", "AGENTS.md", "requirements-dev.txt", ".flake8", "test_remote.sh", "test_remote.py"]
+        include_dirs = ["src", "web", "tests", "docs"]
+        include_files = [
+            "install.sh", "README.md", "AGENTS.md", "LICENSE",
+            ".env.example", ".flake8", "requirements-dev.txt",
+            "requirements-assistant.txt", "test_remote.sh", "test_remote.py",
+            "nas_admin.py", "nas_admin.bat"
+        ]
 
         def tar_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
             name = tarinfo.name.replace("\\", "/")
@@ -435,6 +440,7 @@ class SSHManager:
                 f"tar -xzf {remote_tar} -C {remote_dest} && "
                 f"find {remote_dest} -type f -name '*.sh' -exec sed -i 's/\\r$//' {{}} + 2>/dev/null && "
                 f"find {remote_dest} -type f -name '*.sh' -exec chmod +x {{}} + 2>/dev/null && "
+                f"chown -R {self.user}:{self.user} {remote_dest} && "
                 f"rm -f {remote_tar}"
             )
             code, out, err = self.run_command(unpack_cmd, sudo=True, timeout=60)
