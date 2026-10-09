@@ -64,9 +64,26 @@ def test_build_deploy_command_backup_sin_keep_data() -> None:
     assert "--keep-data" not in cmd
 
 
+def test_build_deploy_command_archivos_backup() -> None:
+    cmd = nas_admin.build_deploy_command("LOCAL", "GRUPO", "SRV-NAS", "admin", "ARCHIVOS_BACKUP")
+    assert "deploy.sh LOCAL GRUPO SRV-NAS admin - ARCHIVOS_BACKUP --force --confirm" in cmd
+
+
+def test_build_deploy_command_hibrido_normaliza_a_archivos_backup() -> None:
+    cmd = nas_admin.build_deploy_command("LOCAL", "GRUPO", "SRV-NAS", "admin", "HIBRIDO")
+    assert "deploy.sh LOCAL GRUPO SRV-NAS admin - ARCHIVOS_BACKUP --force --confirm" in cmd
+
+
 def test_build_deploy_command_rol_desconocido_queda_en_archivos() -> None:
     cmd = nas_admin.build_deploy_command("LOCAL", "WG", "NB", "adm", "OTRO")
     assert " - ARCHIVOS --force" in cmd
+
+
+def test_check_dependencies_detecta_paramiko_ausente(capsys: pytest.CaptureFixture) -> None:
+    with mock.patch.object(nas_admin.tr, "paramiko", None):
+        assert nas_admin.check_dependencies() is False
+        captured = capsys.readouterr()
+        assert "paramiko" in captured.out
 
 
 def test_replace_placeholder_inyecta_clave_por_stdin() -> None:
