@@ -693,9 +693,6 @@ def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    if not check_dependencies():
-        return 1
-
     parser = argparse.ArgumentParser(
         description="Asistente de Administración Remota NAS (Windows) - Producción",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -718,6 +715,9 @@ def main(argv=None) -> int:
     parser.add_argument("--env-file", type=str, default="", help="Ruta alternativa al archivo .env")
     parser.add_argument("--non-interactive", action="store_true", help="No solicitar datos interactivamente si faltan")
     args = parser.parse_args(argv)
+
+    if not check_dependencies():
+        return 1
 
     env_path = pathlib.Path(args.env_file).resolve() if args.env_file else tr.get_default_env_path()
 
