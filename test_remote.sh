@@ -50,11 +50,22 @@ print_banner() {
 # ------------------------------------------------------------------------------
 # Delegación prioritaria a Python si está disponible
 # ------------------------------------------------------------------------------
-if command -v python3 &>/dev/null && [ -f "$SCRIPT_DIR/test_remote.py" ]; then
-    if python3 -c "import paramiko" &>/dev/null; then
-        exec python3 "$SCRIPT_DIR/test_remote.py" "$@"
-    fi
-fi
+case "$1" in
+    help|--help|-h)
+        # Ayuda nativa de test_remote.sh
+        ;;
+    install|uninstall|update|web|samba|backups|suite|console|status|config|"")
+        if command -v python3 &>/dev/null && [ -f "$SCRIPT_DIR/test_remote.py" ]; then
+            if python3 -c "import paramiko" &>/dev/null; then
+                exec python3 "$SCRIPT_DIR/test_remote.py" "$@"
+            fi
+        fi
+        ;;
+    *)
+        log_err "Comando desconocido: '$1'. Usa 'bash test_remote.sh help' para ver la lista de comandos."
+        exit 1
+        ;;
+esac
 
 # ------------------------------------------------------------------------------
 # Motor Nativo en Bash (Fallback sin Python/Paramiko)
