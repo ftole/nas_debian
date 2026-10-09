@@ -344,13 +344,13 @@ class StorageService
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $disk) || !preg_match('/^[a-z0-9_]{2,20}$/', $vg) || !preg_match('/^[a-z0-9_]{2,20}$/', $lv)) {
             return ['success' => false, 'error' => 'Parámetros LVM inválidos.'];
         }
-        if (!preg_match('/^([0-9]+%|[0-9]+[KMGT])$/', $size)) {
+        if (!preg_match('/^([0-9]+%(FREE|VG|PVS)?|[0-9]+[KMGTkmgt]B?)$/i', $size)) {
             return ['success' => false, 'error' => 'Tamaño LVM inválido (ej. 100%FREE, 500G).'];
         }
         if ($this->isOsDisk(basename($disk))) {
             return ['success' => false, 'error' => 'Operación prohibida sobre el disco del sistema.'];
         }
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "LVM simulado ($vg/$lv) (modo dev)."];
         }
         if ($this->deviceHasMount($disk)) {
@@ -361,12 +361,18 @@ class StorageService
                 return ['success' => false, 'error' => 'No se pudieron desmontar todos los puntos de montaje del disco.'];
             }
         }
-        $always = !str_ends_with($size, '%') ? '--yes' : null;
-        SystemService::sudo(['pvcreate', '-f', '-y', $disk]);
-        SystemService::sudo(['vgcreate', $vg, $disk]);
-        $lvArgs = ['lvcreate', '-y', '-n', $lv, '-L', $size, $vg];
-        if ($always === null) {
+        $pvRes = SystemService::sudo(['pvcreate', '-f', '-y', $disk]);
+        if ($pvRes['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al inicializar volumen físico (PV): ' . ($pvRes['stderr'] ?: $pvRes['stdout'])];
+        }
+        $vgRes = SystemService::sudo(['vgcreate', $vg, $disk]);
+        if ($vgRes['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al crear grupo de volúmenes (VG): ' . ($vgRes['stderr'] ?: $vgRes['stdout'])];
+        }
+        if (str_contains($size, '%')) {
             $lvArgs = ['lvcreate', '-y', '-l', $size, '-n', $lv, $vg];
+        } else {
+            $lvArgs = ['lvcreate', '-y', '-L', $size, '-n', $lv, $vg];
         }
         $lvRes = SystemService::sudo($lvArgs);
         if ($lvRes['code'] !== 0) {
@@ -392,7 +398,7 @@ class StorageService
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $device) || !preg_match('/^[a-zA-Z0-9._-]{1,60}$/', $subvol)) {
             return ['success' => false, 'error' => 'Parámetros inválidos para subvolumen Btrfs.'];
         }
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Subvolumen Btrfs $subvol simulado (modo dev)."];
         }
         $mountPoint = '/mnt/nas-btrfs-tmp';
