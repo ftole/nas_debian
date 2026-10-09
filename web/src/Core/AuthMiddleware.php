@@ -238,7 +238,7 @@ class AuthMiddleware
         }
 
         if ($isCritical) {
-            $ip = $request->getIp();
+            $ip = $request->getClientIp();
             $key = 'rate_crit:' . $ip . ':' . $path;
             if (!\App\Services\AuthService::checkRateLimit($key, 10, 60)) {
                 if ($request->isJson()) {
