@@ -137,7 +137,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         <span>Rol:</span> <strong><?= htmlspecialchars($serverRoleLabel, ENT_QUOTES, 'UTF-8') ?></strong>
       </div>
       <div class="header-meta-pill">
-        <span>Workgroup:</span> <strong>TEAM-JOFRATO</strong>
+        <span>Workgroup:</span> <strong><?= htmlspecialchars(\App\Services\SystemService::getWorkgroup(), ENT_QUOTES, 'UTF-8') ?></strong>
       </div>
 <?php if ($isAdmin): ?>
       <button class="btn btn-secondary btn-sm" onclick="switchView('terminal')" title="Abrir Consola Web Interactiva">
@@ -578,7 +578,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             </div>
             <div class="info-row">
               <span class="info-label">Workgroup:</span>
-              <strong class="info-val">TEAM-JOFRATO</strong>
+              <strong class="info-val"><?= htmlspecialchars(\App\Services\SystemService::getWorkgroup(), ENT_QUOTES, 'UTF-8') ?></strong>
             </div>
             <div class="info-row">
               <span class="info-label">Protocolo SMB:</span>
