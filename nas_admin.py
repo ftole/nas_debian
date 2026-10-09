@@ -209,7 +209,9 @@ def build_deploy_command(disk: str, workgroup: str, netbios: str, admin_user: st
                          repo_dir: str = REPO_DIR) -> str:
     """Construye el comando remoto de deploy.sh con el placeholder de clave."""
     role = (role or "ARCHIVOS").upper()
-    if role not in ("ARCHIVOS", "BACKUP"):
+    if role in ("HIBRIDO", "ARCHIVOSBACKUP"):
+        role = "ARCHIVOS_BACKUP"
+    if role not in ("ARCHIVOS", "BACKUP", "ARCHIVOS_BACKUP"):
         role = "ARCHIVOS"
     extra = " --keep-data" if keep_data else ""
     inner = (
@@ -416,8 +418,12 @@ def deploy_wizard(manager, config):
         tr.log_warn("Despliegue cancelado.")
         return
 
-    role = input(f" {Colors.CYAN}[?] Rol [ARCHIVOS/BACKUP] (ARCHIVOS): {Colors.RESET}").strip().upper() or "ARCHIVOS"
-    if role not in ("ARCHIVOS", "BACKUP"):
+    role_in = input(f" {Colors.CYAN}[?] Rol [ARCHIVOS/BACKUP/ARCHIVOS_BACKUP] (ARCHIVOS): {Colors.RESET}").strip().upper() or "ARCHIVOS"
+    if role_in in ("HIBRIDO", "ARCHIVOSBACKUP"):
+        role = "ARCHIVOS_BACKUP"
+    elif role_in in ("ARCHIVOS", "BACKUP", "ARCHIVOS_BACKUP"):
+        role = role_in
+    else:
         role = "ARCHIVOS"
 
     workgroup = input(f" {Colors.CYAN}[?] Workgroup [{detect_workgroup_default(manager)}]: {Colors.RESET}").strip().upper() \
@@ -612,7 +618,21 @@ def action_uninstall(manager) -> None:
 # -----------------------------------------------------------------------------
 # Menú principal y CLI
 # -----------------------------------------------------------------------------
+def check_dependencies() -> bool:
+    """Verifica si las librerías necesarias están disponibles antes de solicitar credenciales."""
+    if tr.paramiko is None:
+        print(f"\n{Colors.RED}{Colors.BOLD}[-] ERROR: La librería requerida 'paramiko' no está disponible.{Colors.RESET}")
+        print(f"{Colors.YELLOW}Para utilizar el Asistente NAS en Windows, instala los paquetes requeridos:{Colors.RESET}")
+        print("    pip install -r requirements-assistant.txt\n")
+        print(f"{Colors.CYAN}O ejecuta directamente el lanzador automatizado en Windows:{Colors.RESET}")
+        print("    nas_admin.bat\n")
+        return False
+    return True
+
+
 def run_interactive_menu(env_path: pathlib.Path) -> None:
+    if not check_dependencies():
+        return
     while True:
         try:
             config = ensure_config(env_path)
@@ -672,6 +692,9 @@ def run_interactive_menu(env_path: pathlib.Path) -> None:
 def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+
+    if not check_dependencies():
+        return 1
 
     parser = argparse.ArgumentParser(
         description="Asistente de Administración Remota NAS (Windows) - Producción",
