@@ -22,7 +22,7 @@ class DomainService
             return [
                 'joined' => false,
                 'status' => 'standalone',
-                'workgroup' => 'TEAM-JOFRATO',
+                'workgroup' => SystemService::getWorkgroup(),
                 'message' => 'Servidor operando en modo Autónomo (Standalone) - Entorno simulado Windows.',
             ];
         }
@@ -42,7 +42,7 @@ class DomainService
         return [
             'joined' => false,
             'status' => 'standalone',
-            'workgroup' => 'TEAM-JOFRATO',
+            'workgroup' => SystemService::getWorkgroup(),
             'message' => 'Servidor operando en modo Autónomo (Standalone). No está integrado en Active Directory.',
         ];
     }
