@@ -1091,8 +1091,7 @@ code, kbd, pre, samp {
 }
 .preview-pdf-frame {
   width: 100%;
-  height: 68vh;
-  border: none;
+  height: inherit;
 }
 
 /* ==============================================================================
