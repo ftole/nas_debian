@@ -183,6 +183,7 @@ find "$INSTALL_DIR" -type f \( -name "*.sh" -o -path "*/bin/*" \) -exec chmod +x
 git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
 echo -e " ${C_BOLD}[3/4]${C_RESET} Creando comando global del sistema ${C_GREEN}nas${C_RESET} en ${C_WHITE}$BIN_PATH${C_RESET}..."
+rm -f "$BIN_PATH"
 cat << 'EOF' > "$BIN_PATH"
 #!/bin/bash
 # Wrapper CLI Global: nas
