@@ -221,6 +221,85 @@ $extraArgs = array_slice($positionalArgs, 2);
 
 switch ($module) {
     // -------------------------------------------------------------------------
+    // ESTADO GENERAL Y DIAGNÓSTICO INTEGRAL (status / diagnostico / diagnostics)
+    // -------------------------------------------------------------------------
+    case 'status':
+    case 'diagnostico':
+    case 'diagnostics':
+        $sysSvc = new SystemService();
+        $stgSvc = new StorageService();
+        $smbSvc = new SambaService();
+        $bkpSvc = new BackupService();
+        $fileSvc = new FileExplorerService();
+
+        $metrics = $sysSvc->getSystemMetrics();
+        $role = $sysSvc->getServerRoleLabel();
+        $storage = $stgSvc->getStorageOverview();
+        $services = $sysSvc->getServicesStatus();
+        $shares = $smbSvc->listShares();
+        $backups = $bkpSvc->listTasks();
+        $trashCount = $fileSvc->getTrashCount();
+
+        $statusPayload = [
+            'success' => true,
+            'system' => array_merge($metrics, ['role' => $role]),
+            'storage' => $storage,
+            'services' => $services,
+            'shares_count' => count($shares),
+            'backups_count' => count($backups),
+            'trash_count' => $trashCount,
+        ];
+
+        if ($isJson) {
+            outData($statusPayload, true);
+        }
+
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL;
+        echo CliTheme::BOLD . "  DIAGNÓSTICO EN VIVO • SERVIDOR NAS & BACKUP DEBIAN 13" . CliTheme::RESET . PHP_EOL;
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL . PHP_EOL;
+
+        echo CliTheme::BOLD . "=== 1. INFORMACIÓN Y SALUD DEL SISTEMA ===" . CliTheme::RESET . PHP_EOL;
+        renderKeyValues([
+            'Nombre del Host'  => $metrics['hostname'] ?? gethostname(),
+            'Rol del Servidor' => $role,
+            'Sistema Operativo'=> ($metrics['os'] ?? 'Debian 13') . " (" . ($metrics['kernel'] ?? php_uname('r')) . ")",
+            'Tiempo Activo'    => $metrics['uptime'] ?? 'N/A',
+            'Uso de CPU'       => ($metrics['cpu_usage_pct'] ?? ($metrics['cpu_usage'] ?? 0)) . "%",
+            'Memoria RAM'      => ($metrics['ram_used_gb'] ?? round(($metrics['ram_used_mb'] ?? 0) / 1024, 2)) . " GB de " . ($metrics['ram_total_gb'] ?? round(($metrics['ram_total_mb'] ?? 0) / 1024, 2)) . " GB (" . ($metrics['ram_usage_pct'] ?? ($metrics['ram_pct'] ?? 0)) . "%)",
+        ]);
+        echo PHP_EOL;
+
+        echo CliTheme::BOLD . "=== 2. ALMACENAMIENTO DEL SERVIDOR (/srv/nas) ===" . CliTheme::RESET . PHP_EOL;
+        renderKeyValues([
+            'Punto de Montaje' => $storage['path'] ?? '/srv/nas',
+            'Capacidad Total'  => ($storage['total_gb'] ?? 0) . " GB",
+            'Espacio Usado'    => ($storage['used_gb'] ?? 0) . " GB (" . ($storage['usage_percent'] ?? 0) . "%)",
+            'Espacio Libre'    => ($storage['free_gb'] ?? 0) . " GB",
+            'Filesystem'       => strtoupper((string) ($storage['filesystem'] ?? 'N/A')),
+            'Tipo de Medio'    => $storage['device_type'] ?? 'N/A',
+        ]);
+        echo PHP_EOL;
+
+        echo CliTheme::BOLD . "=== 3. ESTADO DE SERVICIOS EN TIEMPO REAL ===" . CliTheme::RESET . PHP_EOL;
+        foreach ($services as $s) {
+            $badge = ($s['active'] ?? false)
+                ? CliTheme::GREEN . "[● ACTIVO]  " . CliTheme::RESET
+                : CliTheme::RED . "[● INACTIVO]" . CliTheme::RESET;
+            echo "  " . $badge . " " . str_pad((string) $s['service'], 16) . " " . CliTheme::GRAY . "(" . ($s['name'] ?? '') . ")" . CliTheme::RESET . PHP_EOL;
+        }
+        echo PHP_EOL;
+
+        echo CliTheme::BOLD . "=== 4. RECURSOS Y TAREAS PROGRAMADAS ===" . CliTheme::RESET . PHP_EOL;
+        renderKeyValues([
+            'Recursos Compartidos Samba' => count($shares) . " configurados",
+            'Tareas de Copia (Backup)'   => count($backups) . " programadas",
+            'Elementos en Papelera'      => $trashCount . " items",
+        ]);
+        echo PHP_EOL;
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL;
+        exit(0);
+
+    // -------------------------------------------------------------------------
     // ALMACENAMIENTO (storage / stg)
     // -------------------------------------------------------------------------
     case 'storage':
@@ -1075,6 +1154,7 @@ switch ($module) {
                 break;
 
             case 'admin':
+            case 'audit':
                 $adminLogs = $svc->parseAdminAuditLog($limit, $query);
                 if ($isJson) {
                     outData($adminLogs, true);
@@ -1091,6 +1171,7 @@ switch ($module) {
                 break;
 
             case 'backup':
+            case 'backups':
                 $bkpLogs = $svc->parseBackupAuditLog($limit, $query);
                 if ($isJson) {
                     outData($bkpLogs, true);
@@ -1118,7 +1199,7 @@ switch ($module) {
                 break;
 
             default:
-                outError("Fuente de logs no reconocida: $action. Opciones disponibles: all, samba, admin, backup, journal", 1, null, $isJson);
+                outError("Fuente de logs no reconocida: $action. Opciones disponibles: all, samba, admin (audit), backup (backups), journal", 1, null, $isJson);
         }
         break;
 
@@ -1176,6 +1257,7 @@ switch ($module) {
             case 'index':
             case 'metrics':
             case 'status':
+            case 'info':
                 $metrics = $svc->getSystemMetrics();
                 if ($isJson) {
                     outData($metrics, true);
@@ -1215,7 +1297,7 @@ switch ($module) {
                 break;
 
             default:
-                outError("Acción de sistema no reconocida: $action. Opciones disponibles: metrics, reboot, updates", 1, null, $isJson);
+                outError("Acción de sistema no reconocida: $action. Opciones disponibles: metrics, status, info, reboot, updates", 1, null, $isJson);
         }
         break;
 
@@ -1252,7 +1334,8 @@ switch ($module) {
         echo "  " . CliTheme::GREEN . "service" . CliTheme::RESET . "     Control granular de demonios smbd, nmbd, wsdd2, nginx, php-fpm y ufw." . PHP_EOL;
         echo "              list | status | start | stop | restart | reload" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "system" . CliTheme::RESET . "      Métricas en vivo de CPU/RAM/Disco, reinicio y comprobación de versión." . PHP_EOL;
-        echo "              metrics | reboot | updates" . PHP_EOL;
+        echo "              metrics | status | info | reboot | updates" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "status" . CliTheme::RESET . "      Diagnóstico de salud integral del servidor (métricas, discos, servicios, shares, backups)." . PHP_EOL;
         echo "  " . CliTheme::GREEN . "help" . CliTheme::RESET . "        Muestra esta guía técnica de referencia." . PHP_EOL . PHP_EOL;
 
         echo CliTheme::BOLD . "Opciones globales:" . CliTheme::RESET . PHP_EOL;
