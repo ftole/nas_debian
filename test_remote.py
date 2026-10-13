@@ -45,6 +45,9 @@ try:
 except ImportError:
     paramiko = None
 
+# Evitar que pytest intente recolectar este script operativo como suite de pruebas
+__test__ = False
+
 
 # -----------------------------------------------------------------------------
 # Constantes y Colores ANSI
