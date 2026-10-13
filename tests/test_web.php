@@ -1065,6 +1065,20 @@ assertTrue(!preg_match('/\b(const|let|var)\s+(confirm|alert|prompt)\b/', $appJsC
 assertTrue(!preg_match('/(?<!\.)\b(confirm|prompt|alert)\s*\(/', $appJsContent), 'app.js invoca confirm/prompt/alert exclusivamente mediante window.');
 assertTrue(str_contains($appJsContent, 'confirmText'), 'submitStorageManage utiliza confirmText para evitar enmascarar confirm');
 
+// Verificación de resolución de usuario y contexto en modo CLI para auditoría
+AuditService::setCurrentUser('operador_test');
+assertTrue(AuditService::getCurrentUser() === 'operador_test', 'AuditService respeta override explícito de usuario');
+AuditService::setCurrentUser(null);
+
+$savedUser = $_SESSION['nas_user'] ?? null;
+unset($_SESSION['nas_user']);
+putenv('SUDO_USER=sistemas_sudo');
+assertTrue(AuditService::getCurrentUser() === 'sistemas_sudo', 'AuditService resuelve SUDO_USER en entorno CLI');
+putenv('SUDO_USER');
+if ($savedUser !== null) {
+    $_SESSION['nas_user'] = $savedUser;
+}
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
