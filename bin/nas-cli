@@ -1,0 +1,1274 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * ==============================================================================
+ * CLI DE ADMINISTRACIÓN UNIFICADA: Servidor NAS & Central de Respaldos (Debian 13)
+ * ==============================================================================
+ * Provee control programático y 100% de paridad con la interfaz web nativa.
+ * Compatible con salida tabular ANSI coloreada y modo máquina (--json).
+ * ==============================================================================
+ */
+
+// 1. Configuración de entorno y zona horaria
+date_default_timezone_set('UTC');
+
+// 2. Autocarga PSR-4 del núcleo y servicios web
+$baseDir = dirname(__DIR__);
+$webDir = $baseDir . '/web';
+
+$composerAutoload = $webDir . '/vendor/autoload.php';
+if (file_exists($composerAutoload)) {
+    require_once $composerAutoload;
+} else {
+    spl_autoload_register(function (string $class) use ($webDir): void {
+        $prefix = 'App\\';
+        $srcDir = $webDir . '/src/';
+        $len = strlen($prefix);
+        if (strncmp($prefix, $class, $len) !== 0) {
+            return;
+        }
+        $relativeClass = substr($class, $len);
+        $file = $srcDir . str_replace('\\', '/', $relativeClass) . '.php';
+        if (file_exists($file)) {
+            require_once $file;
+        }
+    });
+}
+
+use App\Services\AuditService;
+use App\Services\BackupService;
+use App\Services\DatabaseService;
+use App\Services\DomainService;
+use App\Services\FileExplorerService;
+use App\Services\SambaService;
+use App\Services\StorageService;
+use App\Services\SystemService;
+use App\Services\UserService;
+
+// 3. Resolución del usuario operador para auditoría
+$operator = getenv('SUDO_USER') ?: ($_SERVER['SUDO_USER'] ?? (getenv('LOGNAME') ?: ($_SERVER['USER'] ?? 'root')));
+AuditService::setCurrentUser($operator);
+
+// 4. Parser de argumentos de línea de comandos
+$rawArgs = array_slice($argv, 1);
+$isJson = false;
+$parsedOptions = [];
+$positionalArgs = [];
+
+foreach ($rawArgs as $arg) {
+    if ($arg === '--json') {
+        $isJson = true;
+    } elseif (str_starts_with($arg, '--')) {
+        $optBody = substr($arg, 2);
+        if (str_contains($optBody, '=')) {
+            [$k, $v] = explode('=', $optBody, 2);
+            $parsedOptions[$k] = $v;
+        } else {
+            $parsedOptions[$optBody] = true;
+        }
+    } else {
+        $positionalArgs[] = $arg;
+    }
+}
+
+// 5. Paleta ANSI para terminal
+class CliTheme
+{
+    public const RESET = "\033[0m";
+    public const BOLD = "\033[1m";
+    public const DIM = "\033[2m";
+    public const RED = "\033[1;31m";
+    public const GREEN = "\033[1;32m";
+    public const YELLOW = "\033[1;33m";
+    public const BLUE = "\033[1;34m";
+    public const MAGENTA = "\033[1;35m";
+    public const CYAN = "\033[1;36m";
+    public const WHITE = "\033[1;37m";
+    public const GRAY = "\033[0;90m";
+}
+
+// 6. Helpers de salida estructurada
+function outSuccess(string $message, ?array $data = null, bool $isJson = false): void
+{
+    if ($isJson) {
+        echo json_encode([
+            'success' => true,
+            'message' => $message,
+            'data' => $data ?? [],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+        exit(0);
+    }
+    echo CliTheme::GREEN . "✔ " . CliTheme::RESET . CliTheme::BOLD . $message . CliTheme::RESET . PHP_EOL;
+    if ($data !== null && !empty($data)) {
+        renderKeyValues($data);
+    }
+    exit(0);
+}
+
+function outError(string $message, int $code = 1, ?array $data = null, bool $isJson = false): void
+{
+    if ($isJson) {
+        echo json_encode([
+            'success' => false,
+            'error' => $message,
+            'data' => $data ?? [],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+        exit($code);
+    }
+    fwrite(STDERR, CliTheme::RED . "✖ Error: " . CliTheme::RESET . $message . PHP_EOL);
+    if ($data !== null && !empty($data)) {
+        renderKeyValues($data, true);
+    }
+    exit($code);
+}
+
+function outData(mixed $data, bool $isJson = false): void
+{
+    if ($isJson) {
+        echo json_encode([
+            'success' => true,
+            'data' => $data,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+        exit(0);
+    }
+}
+
+function renderKeyValues(array $kv, bool $toStderr = false): void
+{
+    $stream = $toStderr ? STDERR : STDOUT;
+    $maxKeyLen = 0;
+    foreach ($kv as $k => $v) {
+        $maxKeyLen = max($maxKeyLen, strlen((string) $k));
+    }
+    foreach ($kv as $k => $v) {
+        if (is_array($v) || is_object($v)) {
+            $vStr = json_encode($v, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        } elseif (is_bool($v)) {
+            $vStr = $v ? 'true' : 'false';
+        } else {
+            $vStr = (string) $v;
+        }
+        $paddedKey = str_pad((string) $k, $maxKeyLen + 2);
+        fwrite($stream, "  " . CliTheme::CYAN . $paddedKey . CliTheme::RESET . ": " . $vStr . PHP_EOL);
+    }
+}
+
+function safeStrWidth(string $str): int
+{
+    return function_exists('mb_strwidth') ? mb_strwidth($str) : strlen($str);
+}
+
+function renderTable(array $headers, array $rows): void
+{
+    if (empty($rows)) {
+        echo CliTheme::YELLOW . "(Sin elementos que mostrar)" . CliTheme::RESET . PHP_EOL;
+        return;
+    }
+
+    $colWidths = [];
+    foreach ($headers as $colKey => $colLabel) {
+        $colWidths[$colKey] = safeStrWidth((string) $colLabel);
+    }
+
+    foreach ($rows as $row) {
+        foreach ($headers as $colKey => $colLabel) {
+            $val = $row[$colKey] ?? '';
+            if (is_array($val)) {
+                $val = implode(', ', $val);
+            } elseif (is_bool($val)) {
+                $val = $val ? 'Sí' : 'No';
+            }
+            $colWidths[$colKey] = max($colWidths[$colKey], safeStrWidth((string) $val));
+        }
+    }
+
+    // Cabecera
+    $headerLine = " ";
+    $separatorLine = " ";
+    foreach ($headers as $colKey => $colLabel) {
+        $w = $colWidths[$colKey] + 2;
+        $headerLine .= CliTheme::BOLD . CliTheme::CYAN . str_pad((string) $colLabel, $w) . CliTheme::RESET;
+        $separatorLine .= str_repeat("─", $w);
+    }
+    echo $headerLine . PHP_EOL;
+    echo CliTheme::GRAY . $separatorLine . CliTheme::RESET . PHP_EOL;
+
+    // Filas
+    foreach ($rows as $row) {
+        $rowLine = " ";
+        foreach ($headers as $colKey => $colLabel) {
+            $w = $colWidths[$colKey] + 2;
+            $val = $row[$colKey] ?? '';
+            if (is_array($val)) {
+                $val = implode(', ', $val);
+            } elseif (is_bool($val)) {
+                $val = $val ? 'Sí' : 'No';
+            }
+            $rowLine .= str_pad((string) $val, $w);
+        }
+        echo $rowLine . PHP_EOL;
+    }
+    echo PHP_EOL;
+}
+
+// 7. Enrutador de comandos principales
+$module = strtolower($positionalArgs[0] ?? 'help');
+$action = strtolower($positionalArgs[1] ?? 'index');
+$extraArgs = array_slice($positionalArgs, 2);
+
+switch ($module) {
+    // -------------------------------------------------------------------------
+    // ALMACENAMIENTO (storage / stg)
+    // -------------------------------------------------------------------------
+    case 'storage':
+    case 'stg':
+        $svc = new StorageService();
+        switch ($action) {
+            case 'index':
+            case 'overview':
+                $overview = $svc->getStorageOverview();
+                if ($isJson) {
+                    outData($overview, true);
+                }
+                echo CliTheme::BOLD . "=== RESUMEN DE ALMACENAMIENTO (/srv/nas) ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Ruta de Montaje' => $overview['path'] ?? '/srv/nas',
+                    'Capacidad Total' => ($overview['total_gb'] ?? 0) . " GB (" . number_format((float) ($overview['total_bytes'] ?? 0)) . " bytes)",
+                    'Espacio Usado'   => ($overview['used_gb'] ?? 0) . " GB (" . ($overview['usage_pct'] ?? 0) . "%)",
+                    'Espacio Libre'   => ($overview['free_gb'] ?? 0) . " GB",
+                    'Filesystem'      => strtoupper((string) ($overview['fs_type'] ?? 'desconocido')),
+                    'Tipo de Medio'   => ($overview['is_hdd'] ?? true) ? 'HDD (Mecánico)' : 'SSD (Estado Sólido)',
+                ]);
+                break;
+
+            case 'disks':
+            case 'list':
+                $disks = $svc->getDisks();
+                if ($isJson) {
+                    outData($disks, true);
+                }
+                echo CliTheme::BOLD . "=== DISCOS Y PARTICIONES DETECTADOS ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'name'        => 'DISCO',
+                    'path'        => 'RUTA',
+                    'model'       => 'MODELO',
+                    'size'        => 'TAMAÑO',
+                    'type'        => 'TIPO',
+                    'mountpoint'  => 'MONTAJE',
+                    'in_use'      => 'EN USO',
+                    'protected'   => 'PROTEGIDO',
+                ], $disks);
+                break;
+
+            case 'format':
+                $disk = $extraArgs[0] ?? ($parsedOptions['disk'] ?? null);
+                $fs = $extraArgs[1] ?? ($parsedOptions['fs'] ?? 'ext4');
+                $confirm = $parsedOptions['confirm'] ?? ($extraArgs[2] ?? '');
+                if (!$disk) {
+                    outError("Debes especificar el disco a formatear. Ejemplo: nas storage format /dev/sdb ext4 --confirm=SI-FORMATEAR", 1, null, $isJson);
+                }
+                $res = $svc->formatAndMount((string) $disk, (string) $fs, (string) $confirm);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al formatear el disco', 1, $res, $isJson);
+                }
+                AuditService::log('storage_format', (string) $disk, 'SUCCESS', ['fs' => $fs]);
+                outSuccess($res['message'] ?? 'Disco formateado y montado con éxito en /srv/nas', $res, $isJson);
+                break;
+
+            case 'lvm':
+                $disk = $extraArgs[0] ?? ($parsedOptions['disk'] ?? null);
+                $vg = $extraArgs[1] ?? ($parsedOptions['vg'] ?? null);
+                $lv = $extraArgs[2] ?? ($parsedOptions['lv'] ?? null);
+                $fs = $extraArgs[3] ?? ($parsedOptions['fs'] ?? 'ext4');
+                $size = $extraArgs[4] ?? ($parsedOptions['size'] ?? '100%FREE');
+                $confirm = $parsedOptions['confirm'] ?? ($extraArgs[5] ?? '');
+                if (!$disk || !$vg || !$lv) {
+                    outError("Faltan parámetros. Uso: nas storage lvm <disco> <vg> <lv> [ext4|btrfs] [tamano] --confirm=SI-FORMATEAR", 1, null, $isJson);
+                }
+                $res = $svc->lvmCreate((string) $disk, (string) $vg, (string) $lv, (string) $fs, (string) $size, (string) $confirm);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al aprovisionar volumen LVM', 1, $res, $isJson);
+                }
+                AuditService::log('storage_lvm_create', "$vg/$lv", 'SUCCESS', ['disk' => $disk, 'fs' => $fs, 'size' => $size]);
+                outSuccess($res['message'] ?? 'Volumen LVM aprovisionado con éxito en /srv/nas', $res, $isJson);
+                break;
+
+            case 'subvol':
+            case 'subvolumes':
+                $subAction = strtolower($extraArgs[0] ?? 'list');
+                if ($subAction === 'create') {
+                    $subName = $extraArgs[1] ?? ($parsedOptions['name'] ?? null);
+                    if (!$subName) {
+                        outError("Debes especificar el nombre del subvolumen. Ejemplo: nas storage subvol create mi_subvol", 1, null, $isJson);
+                    }
+                    $res = $svc->btrfsCreateSubvolume((string) $subName);
+                    if (empty($res['success'])) {
+                        outError($res['error'] ?? 'Fallo al crear subvolumen Btrfs', 1, $res, $isJson);
+                    }
+                    AuditService::log('storage_btrfs_subvol_create', (string) $subName, 'SUCCESS');
+                    outSuccess($res['message'] ?? 'Subvolumen Btrfs creado con éxito', $res, $isJson);
+                } else {
+                    $subvols = $svc->btrfsListSubvolumes();
+                    if ($isJson) {
+                        outData($subvols, true);
+                    }
+                    echo CliTheme::BOLD . "=== SUBVOLÚMENES BTRFS EN /srv/nas ===" . CliTheme::RESET . PHP_EOL;
+                    renderTable([
+                        'id'   => 'ID',
+                        'name' => 'NOMBRE',
+                        'path' => 'RUTA COMPLETA',
+                    ], $subvols);
+                }
+                break;
+
+            case 'scrub':
+                $res = $svc->startBtrfsScrub();
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al iniciar BTRFS scrub', 1, $res, $isJson);
+                }
+                AuditService::log('storage_btrfs_scrub', '/srv/nas', 'SUCCESS');
+                outSuccess($res['message'] ?? 'Auditoría BTRFS scrub iniciada', $res, $isJson);
+                break;
+
+            case 'trim':
+                $res = $svc->startSsdTrim();
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al iniciar SSD TRIM', 1, $res, $isJson);
+                }
+                AuditService::log('storage_ssd_trim', '/srv/nas', 'SUCCESS');
+                outSuccess($res['message'] ?? 'Optimización SSD TRIM ejecutada', $res, $isJson);
+                break;
+
+            case 'unmount':
+            case 'umount':
+                $target = $extraArgs[0] ?? ($parsedOptions['target'] ?? null);
+                if (!$target) {
+                    outError("Debes especificar el dispositivo o punto de montaje. Ejemplo: nas storage unmount /srv/nas", 1, null, $isJson);
+                }
+                $res = $svc->unmountDevice((string) $target);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al desmontar el almacenamiento', 1, $res, $isJson);
+                }
+                AuditService::log('storage_unmount', (string) $target, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Dispositivo desmontado con éxito', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de almacenamiento no reconocida: $action. Acciones disponibles: overview, disks, format, lvm, subvol, scrub, trim, unmount", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // RECURSOS COMPARTIDOS SAMBA (share / smb)
+    // -------------------------------------------------------------------------
+    case 'share':
+    case 'smb':
+        $svc = new SambaService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+                $shares = $svc->listShares();
+                if ($isJson) {
+                    outData($shares, true);
+                }
+                echo CliTheme::BOLD . "=== RECURSOS COMPARTIDOS SAMBA ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'name'        => 'RECURSO',
+                    'path'        => 'RUTA EN DISCO',
+                    'scheme_name' => 'ESQUEMA DE PERMISOS',
+                    'hidden'      => 'OCULTO ($)',
+                    'read_only'   => 'SOLO LECTURA',
+                    'guest_ok'    => 'INVITADOS',
+                    'valid_users' => 'USUARIOS / GRUPOS VÁLIDOS',
+                    'write_list'  => 'LISTA DE ESCRITURA',
+                ], $shares);
+                break;
+
+            case 'create':
+                $name = $parsedOptions['name'] ?? ($extraArgs[0] ?? null);
+                $path = $parsedOptions['path'] ?? ($extraArgs[1] ?? null);
+                $comment = $parsedOptions['comment'] ?? ($extraArgs[2] ?? '');
+                $scheme = (int) ($parsedOptions['scheme'] ?? 1);
+                $hidden = isset($parsedOptions['hidden']) ? (bool) $parsedOptions['hidden'] : false;
+                $readOnly = isset($parsedOptions['read-only']) ? (bool) $parsedOptions['read-only'] : false;
+                $guestOk = isset($parsedOptions['guest-ok']) ? (bool) $parsedOptions['guest-ok'] : false;
+
+                $validUsers = isset($parsedOptions['valid-users'])
+                    ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])))
+                    : [];
+                $writeList = isset($parsedOptions['write-list'])
+                    ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['write-list'])))
+                    : [];
+
+                if (!$name || !$path) {
+                    outError("Faltan parámetros obligatorios. Uso: nas share create --name=<nombre> --path=<ruta> [--comment=<comentario>] [--scheme=1..4] [--hidden] [--read-only] [--guest-ok] [--valid-users=u1,u2] [--write-list=w1,w2]", 1, null, $isJson);
+                }
+
+                $res = $svc->createShare([
+                    'name'        => $name,
+                    'path'        => $path,
+                    'comment'     => $comment,
+                    'scheme'      => $scheme,
+                    'hidden'      => $hidden,
+                    'read_only'   => $readOnly,
+                    'guest_ok'    => $guestOk,
+                    'valid_users' => $validUsers,
+                    'write_list'  => $writeList,
+                ]);
+
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al crear recurso compartido', 1, $res, $isJson);
+                }
+                AuditService::log('share_create', (string) $name, 'SUCCESS', ['path' => $path, 'scheme' => $scheme]);
+                outSuccess($res['message'] ?? 'Recurso compartido creado exitosamente', $res, $isJson);
+                break;
+
+            case 'update':
+                $name = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$name) {
+                    outError("Debes especificar el nombre del recurso a actualizar. Ejemplo: nas share update SISTEMAS --comment='Nuevo comentario'", 1, null, $isJson);
+                }
+
+                $updateData = [];
+                if (isset($parsedOptions['comment'])) {
+                    $updateData['comment'] = (string) $parsedOptions['comment'];
+                }
+                if (isset($parsedOptions['browseable'])) {
+                    $updateData['browseable'] = $parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true';
+                }
+                if (isset($parsedOptions['read-only'])) {
+                    $updateData['read_only'] = $parsedOptions['read-only'] === 'yes' || $parsedOptions['read-only'] === 'true';
+                }
+                if (isset($parsedOptions['guest-ok'])) {
+                    $updateData['guest_ok'] = $parsedOptions['guest-ok'] === 'yes' || $parsedOptions['guest-ok'] === 'true';
+                }
+                if (isset($parsedOptions['valid-users'])) {
+                    $updateData['valid_users'] = array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])));
+                }
+                if (isset($parsedOptions['write-list'])) {
+                    $updateData['write_list'] = array_filter(array_map('trim', explode(',', (string) $parsedOptions['write-list'])));
+                }
+
+                $res = $svc->updateShare((string) $name, $updateData);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al actualizar recurso compartido', 1, $res, $isJson);
+                }
+                AuditService::log('share_update', (string) $name, 'SUCCESS', $updateData);
+                outSuccess($res['message'] ?? 'Recurso actualizado con éxito', $res, $isJson);
+                break;
+
+            case 'access':
+                $name = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                $kind = $extraArgs[1] ?? ($parsedOptions['kind'] ?? 'group');
+                $target = $extraArgs[2] ?? ($parsedOptions['target'] ?? null);
+                $level = $extraArgs[3] ?? ($parsedOptions['level'] ?? 'rw');
+                if (!$name || !$target) {
+                    outError("Uso: nas share access <recurso> <user|group> <nombre_destino> <ro|rw|none>", 1, null, $isJson);
+                }
+                $res = $svc->setAccess((string) $name, (string) $kind, (string) $target, (string) $level);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al configurar nivel de acceso', 1, $res, $isJson);
+                }
+                AuditService::log('share_access_set', (string) $name, 'SUCCESS', ['target' => $target, 'kind' => $kind, 'level' => $level]);
+                outSuccess($res['message'] ?? 'Permiso de acceso actualizado con éxito', $res, $isJson);
+                break;
+
+            case 'repair':
+            case 'sync':
+                $name = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$name) {
+                    outError("Debes indicar el recurso a reparar. Ejemplo: nas share repair SISTEMAS", 1, null, $isJson);
+                }
+                $res = $svc->syncShareAcls((string) $name);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al sincronizar ACLs del recurso', 1, $res, $isJson);
+                }
+                AuditService::log('share_sync_acls', (string) $name, 'SUCCESS');
+                outSuccess($res['message'] ?? 'ACLs y permisos POSIX reparados exitosamente', $res, $isJson);
+                break;
+
+            case 'delete':
+                $name = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                $deleteFiles = isset($parsedOptions['delete-files']) ? (bool) $parsedOptions['delete-files'] : false;
+                if (!$name) {
+                    outError("Debes especificar el nombre del recurso a eliminar. Ejemplo: nas share delete OBSOLETO [--delete-files]", 1, null, $isJson);
+                }
+                $res = $svc->deleteShare((string) $name, $deleteFiles);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al eliminar recurso', 1, $res, $isJson);
+                }
+                AuditService::log('share_delete', (string) $name, 'SUCCESS', ['delete_files' => $deleteFiles]);
+                outSuccess($res['message'] ?? 'Recurso eliminado correctamente', $res, $isJson);
+                break;
+
+            case 'access-map':
+                $map = $svc->getAccessMap();
+                if ($isJson) {
+                    outData($map, true);
+                }
+                echo CliTheme::BOLD . "=== MAPA DE ACCESOS Y PERMISOS ===" . CliTheme::RESET . PHP_EOL;
+                foreach ($map as $shName => $aclData) {
+                    echo CliTheme::CYAN . "[$shName]" . CliTheme::RESET . PHP_EOL;
+                    renderKeyValues($aclData);
+                    echo PHP_EOL;
+                }
+                break;
+
+            default:
+                outError("Acción no reconocida: $action. Acciones disponibles: list, create, update, access, repair, delete, access-map", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // RESPALDOS Y COPIAS DE SEGURIDAD (backup / bkp)
+    // -------------------------------------------------------------------------
+    case 'backup':
+    case 'bkp':
+        $svc = new BackupService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+                $tasks = $svc->listTasks();
+                if ($isJson) {
+                    outData($tasks, true);
+                }
+                echo CliTheme::BOLD . "=== TAREAS DE COPIA DE SEGURIDAD ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'id'          => 'ID TAREA',
+                    'protocol'    => 'PROTOCOLO',
+                    'destination' => 'ORIGEN / DESTINO',
+                    'cron'        => 'CRON',
+                    'retention'   => 'RETENCIÓN',
+                    'last_status' => 'ÚLTIMO ESTADO',
+                ], $tasks);
+                break;
+
+            case 'create':
+                $taskId = $parsedOptions['id'] ?? ($extraArgs[0] ?? null);
+                $proto = $parsedOptions['proto'] ?? ($extraArgs[1] ?? 'cifs');
+                $target = $parsedOptions['target'] ?? ($parsedOptions['ip'] ?? ($extraArgs[2] ?? null));
+                $path = $parsedOptions['path'] ?? ($parsedOptions['share'] ?? ($extraArgs[3] ?? null));
+                $cron = $parsedOptions['cron'] ?? ($extraArgs[4] ?? '0 2 * * *');
+                $retention = (int) ($parsedOptions['retention'] ?? 7);
+
+                if (!$taskId || !$target || !$path) {
+                    outError("Faltan parámetros obligatorios. Uso: nas backup create --id=<id> --proto=cifs|ssh|local --target=<ip_o_host> --path=<recurso_o_ruta> [--cron='0 2 * * *'] [--retention=7] [--user=...] [--password=...] [--port=...]", 1, null, $isJson);
+                }
+
+                $res = $svc->createTask([
+                    'task_id'       => $taskId,
+                    'proto'         => $proto,
+                    'target'        => $target,
+                    'path'          => $path,
+                    'cron'          => $cron,
+                    'retention'     => $retention,
+                    'user'          => $parsedOptions['user'] ?? '',
+                    'password'      => $parsedOptions['password'] ?? '',
+                    'port'          => isset($parsedOptions['port']) ? (int) $parsedOptions['port'] : null,
+                    'source_path'   => $parsedOptions['source_path'] ?? $path,
+                    'exclude'       => $parsedOptions['exclude'] ?? '',
+                ]);
+
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al programar tarea de backup', 1, $res, $isJson);
+                }
+                AuditService::log('backup_create', (string) $taskId, 'SUCCESS', ['proto' => $proto, 'target' => $target]);
+                outSuccess($res['message'] ?? 'Tarea de respaldo creada con éxito', $res, $isJson);
+                break;
+
+            case 'test':
+                $proto = $parsedOptions['proto'] ?? ($extraArgs[0] ?? 'cifs');
+                $target = $parsedOptions['target'] ?? ($parsedOptions['ip'] ?? ($extraArgs[1] ?? null));
+                $path = $parsedOptions['path'] ?? ($parsedOptions['share'] ?? ($extraArgs[2] ?? ''));
+                if (!$target) {
+                    outError("Debes especificar el host objetivo. Uso: nas backup test --proto=cifs|ssh --target=<ip> [--path=<recurso>] [--user=...] [--password=...]", 1, null, $isJson);
+                }
+                $res = $svc->testConnection([
+                    'proto'    => $proto,
+                    'target'   => $target,
+                    'path'     => $path,
+                    'user'     => $parsedOptions['user'] ?? '',
+                    'password' => $parsedOptions['password'] ?? '',
+                    'port'     => isset($parsedOptions['port']) ? (int) $parsedOptions['port'] : null,
+                ]);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo en la prueba de conexión remota', 1, $res, $isJson);
+                }
+                outSuccess($res['message'] ?? 'Conexión remota verificada correctamente', $res, $isJson);
+                break;
+
+            case 'run':
+                $taskId = $extraArgs[0] ?? ($parsedOptions['id'] ?? null);
+                if (!$taskId) {
+                    outError("Debes indicar el ID de la tarea a ejecutar. Ejemplo: nas backup run bkp_contabilidad", 1, null, $isJson);
+                }
+                $res = $svc->runTaskNow((string) $taskId);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al ejecutar tarea de backup', 1, $res, $isJson);
+                }
+                AuditService::log('backup_run_manual', (string) $taskId, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Tarea de respaldo ejecutada correctamente', $res, $isJson);
+                break;
+
+            case 'status':
+                $taskId = $extraArgs[0] ?? ($parsedOptions['id'] ?? null);
+                if (!$taskId) {
+                    outError("Debes indicar el ID de la tarea. Ejemplo: nas backup status bkp_contabilidad", 1, null, $isJson);
+                }
+                $status = $svc->getTaskStatus((string) $taskId);
+                if ($isJson) {
+                    outData(['task_id' => $taskId, 'status' => $status], true);
+                }
+                echo "Estado de la tarea " . CliTheme::BOLD . $taskId . CliTheme::RESET . ": " . CliTheme::CYAN . $status . CliTheme::RESET . PHP_EOL;
+                break;
+
+            case 'progress':
+                $taskId = $extraArgs[0] ?? ($parsedOptions['id'] ?? null);
+                if (!$taskId) {
+                    outError("Debes indicar el ID de la tarea. Ejemplo: nas backup progress bkp_contabilidad", 1, null, $isJson);
+                }
+                $progress = $svc->getTaskProgress((string) $taskId);
+                if ($isJson) {
+                    outData($progress, true);
+                }
+                renderKeyValues($progress);
+                break;
+
+            case 'logs':
+                $taskId = $extraArgs[0] ?? ($parsedOptions['id'] ?? null);
+                $lines = (int) ($parsedOptions['lines'] ?? 100);
+                if (!$taskId) {
+                    outError("Debes indicar el ID de la tarea. Ejemplo: nas backup logs bkp_contabilidad", 1, null, $isJson);
+                }
+                $logs = $svc->getTaskLogs((string) $taskId, $lines);
+                if ($isJson) {
+                    outData(['task_id' => $taskId, 'logs' => $logs], true);
+                }
+                echo CliTheme::BOLD . "=== BITÁCORA DE EJECUCIÓN ($taskId) ===" . CliTheme::RESET . PHP_EOL;
+                echo $logs . PHP_EOL;
+                break;
+
+            case 'delete':
+                $taskId = $extraArgs[0] ?? ($parsedOptions['id'] ?? null);
+                $delBackups = isset($parsedOptions['delete-backups']) ? (bool) $parsedOptions['delete-backups'] : false;
+                if (!$taskId) {
+                    outError("Debes indicar el ID de la tarea a eliminar. Ejemplo: nas backup delete bkp_contabilidad [--delete-backups]", 1, null, $isJson);
+                }
+                $res = $svc->deleteTask((string) $taskId, $delBackups);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al eliminar tarea de backup', 1, $res, $isJson);
+                }
+                AuditService::log('backup_delete', (string) $taskId, 'SUCCESS', ['delete_backups' => $delBackups]);
+                outSuccess($res['message'] ?? 'Tarea de respaldo eliminada con éxito', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción no reconocida: $action. Acciones disponibles: list, create, test, run, status, progress, logs, delete", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // PAPELERA DE RECICLAJE (trash / papelera)
+    // -------------------------------------------------------------------------
+    case 'trash':
+    case 'papelera':
+        $svc = new FileExplorerService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+                $trash = $svc->listTrash();
+                if ($isJson) {
+                    outData($trash, true);
+                }
+                echo CliTheme::BOLD . "=== PAPELERA DE RECICLAJE (/srv/nas/.trash) ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'id'            => 'ID',
+                    'filename'      => 'ELEMENTO',
+                    'original_path' => 'UBICACIÓN ORIGINAL',
+                    'size_bytes'    => 'TAMAÑO (BYTES)',
+                    'deleted_by'    => 'ELIMINADO POR',
+                    'deleted_at'    => 'FECHA ELIMINACIÓN',
+                ], $trash);
+                break;
+
+            case 'count':
+                $cnt = $svc->getTrashCount();
+                if ($isJson) {
+                    outData(['count' => $cnt], true);
+                }
+                echo "Total de elementos en papelera: " . CliTheme::BOLD . $cnt . CliTheme::RESET . PHP_EOL;
+                break;
+
+            case 'restore':
+                $id = (int) ($extraArgs[0] ?? ($parsedOptions['id'] ?? 0));
+                if ($id <= 0) {
+                    outError("Debes especificar el ID del elemento a restaurar. Ejemplo: nas trash restore 42", 1, null, $isJson);
+                }
+                $res = $svc->restoreTrashItem($id);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al restaurar elemento de papelera', 1, $res, $isJson);
+                }
+                AuditService::log('trash_restore', (string) $id, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Elemento restaurado a su ubicación original', $res, $isJson);
+                break;
+
+            case 'delete':
+                $id = (int) ($extraArgs[0] ?? ($parsedOptions['id'] ?? 0));
+                if ($id <= 0) {
+                    outError("Debes especificar el ID del elemento a eliminar definitivamente. Ejemplo: nas trash delete 42", 1, null, $isJson);
+                }
+                $res = $svc->deleteTrashItem($id);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al eliminar elemento de papelera', 1, $res, $isJson);
+                }
+                AuditService::log('trash_delete', (string) $id, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Elemento eliminado permanentemente de la papelera', $res, $isJson);
+                break;
+
+            case 'empty':
+                $res = $svc->emptyTrash();
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al vaciar la papelera', 1, $res, $isJson);
+                }
+                AuditService::log('trash_empty', 'all', 'SUCCESS');
+                outSuccess($res['message'] ?? 'Papelera vaciada por completo', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de papelera no reconocida: $action. Acciones disponibles: list, count, restore, delete, empty", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // USUARIOS (user / usr)
+    // -------------------------------------------------------------------------
+    case 'user':
+    case 'usr':
+        $svc = new UserService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+                $users = $svc->listUsers();
+                if ($isJson) {
+                    outData($users, true);
+                }
+                echo CliTheme::BOLD . "=== USUARIOS DEL SISTEMA Y SAMBA ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'username'       => 'USUARIO',
+                    'uid'            => 'UID',
+                    'full_name'      => 'NOMBRE COMPLETO',
+                    'groups'         => 'GRUPOS',
+                    'is_superadmin'  => 'SUPERADMIN',
+                    'is_admin'       => 'ADMIN',
+                    'can_web'        => 'OPERADOR',
+                    'samba_enabled'  => 'SAMBA',
+                    'enabled'        => 'ACTIVO',
+                ], $users);
+                break;
+
+            case 'create':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                $password = $parsedOptions['password'] ?? ($extraArgs[1] ?? '');
+                $fullName = $parsedOptions['fullname'] ?? ($extraArgs[2] ?? '');
+                $groups = isset($parsedOptions['groups']) ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['groups']))) : [];
+                $isAdmin = isset($parsedOptions['admin']) ? (bool) $parsedOptions['admin'] : false;
+                $canWeb = isset($parsedOptions['operator']) ? (bool) $parsedOptions['operator'] : false;
+                $sambaEnabled = !isset($parsedOptions['no-samba']);
+                $isSuperadmin = isset($parsedOptions['superadmin']) ? (bool) $parsedOptions['superadmin'] : false;
+
+                if (!$username || empty($password)) {
+                    outError("Faltan parámetros obligatorios. Uso: nas user create <usuario> --password=<clave> [--fullname='Nombre'] [--groups=grp1,grp2] [--admin] [--operator] [--no-samba] [--superadmin]", 1, null, $isJson);
+                }
+
+                $res = $svc->createUser((string) $username, (string) $password, (string) $fullName, $groups, $isAdmin, $canWeb, $sambaEnabled, $isSuperadmin);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al crear usuario', 1, $res, $isJson);
+                }
+                AuditService::log('user_create', (string) $username, 'SUCCESS', ['groups' => $groups, 'admin' => $isAdmin]);
+                outSuccess($res['message'] ?? 'Usuario creado correctamente', $res, $isJson);
+                break;
+
+            case 'update':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                if (!$username) {
+                    outError("Debes especificar el usuario a actualizar. Ejemplo: nas user update jdoe [--fullname='...']", 1, null, $isJson);
+                }
+
+                $password = $parsedOptions['password'] ?? null;
+                $fullName = $parsedOptions['fullname'] ?? '';
+                $groups = isset($parsedOptions['groups']) ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['groups']))) : [];
+                $isAdmin = isset($parsedOptions['admin']) ? ($parsedOptions['admin'] === 'yes' || $parsedOptions['admin'] === 'true') : false;
+                $canWeb = isset($parsedOptions['operator']) ? ($parsedOptions['operator'] === 'yes' || $parsedOptions['operator'] === 'true') : false;
+                $sambaEnabled = isset($parsedOptions['samba']) ? ($parsedOptions['samba'] === 'yes' || $parsedOptions['samba'] === 'true') : true;
+                $isSuperadmin = isset($parsedOptions['superadmin']) ? ($parsedOptions['superadmin'] === 'yes' || $parsedOptions['superadmin'] === 'true') : false;
+
+                $res = $svc->updateUser((string) $username, $password, (string) $fullName, $groups, $isAdmin, $canWeb, $sambaEnabled, $isSuperadmin);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al actualizar usuario', 1, $res, $isJson);
+                }
+                AuditService::log('user_update', (string) $username, 'SUCCESS', ['groups' => $groups]);
+                outSuccess($res['message'] ?? 'Usuario actualizado correctamente', $res, $isJson);
+                break;
+
+            case 'passwd':
+            case 'password':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                $password = $extraArgs[1] ?? ($parsedOptions['password'] ?? null);
+                if (!$username || !$password) {
+                    outError("Uso: nas user passwd <usuario> <nueva_clave>", 1, null, $isJson);
+                }
+                $res = $svc->setPassword((string) $username, (string) $password);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al cambiar contraseña', 1, $res, $isJson);
+                }
+                AuditService::log('user_passwd', (string) $username, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Contraseña actualizada con éxito en Linux y Samba', $res, $isJson);
+                break;
+
+            case 'toggle':
+            case 'enable':
+            case 'disable':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                if (!$username) {
+                    outError("Debes especificar el usuario. Ejemplo: nas user toggle jdoe enable", 1, null, $isJson);
+                }
+                $enabled = ($action === 'enable') ? true : (($action === 'disable') ? false : (($extraArgs[1] ?? 'enable') === 'enable'));
+                $res = $svc->setEnabled((string) $username, $enabled);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al alternar estado del usuario', 1, $res, $isJson);
+                }
+                AuditService::log($enabled ? 'user_enable' : 'user_disable', (string) $username, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Estado de la cuenta actualizado con éxito', $res, $isJson);
+                break;
+
+            case 'delete':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                if (!$username) {
+                    outError("Debes especificar el usuario a eliminar. Ejemplo: nas user delete jdoe", 1, null, $isJson);
+                }
+                $res = $svc->deleteUser((string) $username);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al eliminar usuario', 1, $res, $isJson);
+                }
+                AuditService::log('user_delete', (string) $username, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Usuario eliminado correctamente del sistema y Samba', $res, $isJson);
+                break;
+
+            case 'add-group':
+                $username = $extraArgs[0] ?? null;
+                $group = $extraArgs[1] ?? null;
+                if (!$username || !$group) {
+                    outError("Uso: nas user add-group <usuario> <grupo>", 1, null, $isJson);
+                }
+                $res = $svc->addUserToGroup((string) $username, (string) $group);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al añadir grupo al usuario', 1, $res, $isJson);
+                }
+                AuditService::log('user_group_add', "$username:$group", 'SUCCESS');
+                outSuccess($res['message'] ?? 'Usuario añadido al grupo exitosamente', $res, $isJson);
+                break;
+
+            case 'remove-group':
+                $username = $extraArgs[0] ?? null;
+                $group = $extraArgs[1] ?? null;
+                if (!$username || !$group) {
+                    outError("Uso: nas user remove-group <usuario> <grupo>", 1, null, $isJson);
+                }
+                $res = $svc->removeUserFromGroup((string) $username, (string) $group);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al remover usuario del grupo', 1, $res, $isJson);
+                }
+                AuditService::log('user_group_remove', "$username:$group", 'SUCCESS');
+                outSuccess($res['message'] ?? 'Usuario removido del grupo exitosamente', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de usuario no reconocida: $action. Acciones disponibles: list, create, update, passwd, toggle, delete, add-group, remove-group", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // GRUPOS DE SEGURIDAD (group / grp)
+    // -------------------------------------------------------------------------
+    case 'group':
+    case 'grp':
+        $svc = new UserService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+                $groups = $svc->listGroups();
+                if ($isJson) {
+                    outData($groups, true);
+                }
+                echo CliTheme::BOLD . "=== GRUPOS DE SEGURIDAD DEL NAS ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'name'    => 'GRUPO',
+                    'gid'     => 'GID',
+                    'members' => 'MIEMBROS',
+                ], $groups);
+                break;
+
+            case 'create':
+                $groupName = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$groupName) {
+                    outError("Debes especificar el nombre del grupo. Ejemplo: nas group create grp_contabilidad", 1, null, $isJson);
+                }
+                $res = $svc->createGroup((string) $groupName);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al crear grupo', 1, $res, $isJson);
+                }
+                AuditService::log('group_create', (string) $groupName, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Grupo creado exitosamente', $res, $isJson);
+                break;
+
+            case 'rename':
+                $oldName = $extraArgs[0] ?? ($parsedOptions['old'] ?? null);
+                $newName = $extraArgs[1] ?? ($parsedOptions['new'] ?? null);
+                if (!$oldName || !$newName) {
+                    outError("Uso: nas group rename <nombre_actual> <nuevo_nombre>", 1, null, $isJson);
+                }
+                $res = $svc->renameGroup((string) $oldName, (string) $newName);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al renombrar grupo', 1, $res, $isJson);
+                }
+                AuditService::log('group_rename', "$oldName -> $newName", 'SUCCESS');
+                outSuccess($res['message'] ?? 'Grupo renombrado con éxito', $res, $isJson);
+                break;
+
+            case 'delete':
+                $groupName = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$groupName) {
+                    outError("Debes especificar el grupo a eliminar. Ejemplo: nas group delete grp_obsoleto", 1, null, $isJson);
+                }
+                $res = $svc->deleteGroup((string) $groupName);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al eliminar grupo', 1, $res, $isJson);
+                }
+                AuditService::log('group_delete', (string) $groupName, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Grupo eliminado con éxito', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de grupo no reconocida: $action. Acciones disponibles: list, create, rename, delete", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // DOMINIO ACTIVE DIRECTORY (domain / ad)
+    // -------------------------------------------------------------------------
+    case 'domain':
+    case 'ad':
+        $svc = new DomainService();
+        switch ($action) {
+            case 'index':
+            case 'status':
+                $st = $svc->getStatus();
+                if ($isJson) {
+                    outData($st, true);
+                }
+                echo CliTheme::BOLD . "=== ESTADO DE INTEGRACIÓN ACTIVE DIRECTORY ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Unido a Dominio' => ($st['joined'] ?? false) ? 'SÍ (En línea)' : 'NO (Independiente)',
+                    'Nombre Dominio'  => $st['domain'] ?? 'N/A',
+                    'Reino (Realm)'   => $st['realm'] ?? 'N/A',
+                    'Workgroup'       => $st['workgroup'] ?? 'WORKGROUP',
+                    'Detalles'        => $st['details'] ?? '',
+                ]);
+                break;
+
+            case 'discover':
+                $domain = $extraArgs[0] ?? ($parsedOptions['domain'] ?? null);
+                if (!$domain) {
+                    outError("Debes indicar el dominio a descubrir. Ejemplo: nas domain discover corp.local", 1, null, $isJson);
+                }
+                $disc = $svc->discover((string) $domain);
+                if (empty($disc['success'])) {
+                    outError($disc['error'] ?? 'Fallo al descubrir controlador de dominio', 1, $disc, $isJson);
+                }
+                if ($isJson) {
+                    outData($disc, true);
+                }
+                echo CliTheme::BOLD . "=== DETALLES DEL DOMINIO DESCUBIERTO ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Dominio'     => $disc['domain'] ?? $domain,
+                    'Reino Realm' => $disc['realm_name'] ?? 'N/A',
+                    'Tipo'        => $disc['domain_type'] ?? 'Active Directory',
+                    'Detalles'    => $disc['raw_output'] ?? '',
+                ]);
+                break;
+
+            case 'join':
+                $domain = $extraArgs[0] ?? ($parsedOptions['domain'] ?? null);
+                $user = $parsedOptions['user'] ?? ($extraArgs[1] ?? null);
+                $password = $parsedOptions['password'] ?? ($extraArgs[2] ?? null);
+                $ou = $parsedOptions['ou'] ?? null;
+                if (!$domain || !$user || empty($password)) {
+                    outError("Faltan parámetros. Uso: nas domain join <dominio> --user=<admin_ad> --password=<clave> [--ou=<un_organizativa>]", 1, null, $isJson);
+                }
+                $res = $svc->join((string) $domain, (string) $user, (string) $password, $ou);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al unirse al dominio AD', 1, $res, $isJson);
+                }
+                AuditService::log('domain_join', (string) $domain, 'SUCCESS', ['user' => $user]);
+                outSuccess($res['message'] ?? 'Servidor incorporado exitosamente al dominio Active Directory', $res, $isJson);
+                break;
+
+            case 'leave':
+                $domain = $extraArgs[0] ?? ($parsedOptions['domain'] ?? '');
+                $res = $svc->leave((string) $domain);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al desvincular del dominio', 1, $res, $isJson);
+                }
+                AuditService::log('domain_leave', (string) $domain, 'SUCCESS');
+                outSuccess($res['message'] ?? 'Servidor desvinculado del dominio correctamente', $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de dominio no reconocida: $action. Acciones disponibles: status, discover, join, leave", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // REGISTROS Y AUDITORÍA UNIFICADA (log / logs)
+    // -------------------------------------------------------------------------
+    case 'log':
+    case 'logs':
+        $svc = new SystemService();
+        $limit = (int) ($parsedOptions['limit'] ?? 50);
+        $query = $parsedOptions['query'] ?? ($parsedOptions['q'] ?? null);
+
+        switch ($action) {
+            case 'index':
+            case 'all':
+                $logs = $svc->getLogs('all', $limit, $query);
+                if ($isJson) {
+                    outData($logs, true);
+                }
+                echo CliTheme::BOLD . "=== REGISTROS AUDITADOS UNIFICADOS (Últimos $limit) ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'timestamp' => 'FECHA / HORA',
+                    'source'    => 'ORIGEN',
+                    'user'      => 'USUARIO',
+                    'action'    => 'ACCIÓN',
+                    'target'    => 'OBJETIVO',
+                    'status'    => 'ESTADO',
+                ], $logs);
+                break;
+
+            case 'samba':
+                $sambaLogs = $svc->parseSambaAuditLog($limit, $query);
+                if ($isJson) {
+                    outData($sambaLogs, true);
+                }
+                echo CliTheme::BOLD . "=== AUDITORÍA DE ARCHIVOS SAMBA (full_audit) ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'timestamp' => 'FECHA / HORA',
+                    'user'      => 'USUARIO',
+                    'ip'        => 'IP CLIENTE',
+                    'action'    => 'ACCIÓN',
+                    'share'     => 'RECURSO',
+                    'file'      => 'ARCHIVO AFECTADO',
+                ], $sambaLogs);
+                break;
+
+            case 'admin':
+                $adminLogs = $svc->parseAdminAuditLog($limit, $query);
+                if ($isJson) {
+                    outData($adminLogs, true);
+                }
+                echo CliTheme::BOLD . "=== AUDITORÍA DE ACCIONES ADMINISTRATIVAS ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'timestamp' => 'FECHA / HORA',
+                    'user'      => 'ADMIN',
+                    'ip'        => 'IP ORIGEN',
+                    'action'    => 'ACCIÓN',
+                    'target'    => 'OBJETIVO',
+                    'status'    => 'ESTADO',
+                ], $adminLogs);
+                break;
+
+            case 'backup':
+                $bkpLogs = $svc->parseBackupAuditLog($limit, $query);
+                if ($isJson) {
+                    outData($bkpLogs, true);
+                }
+                echo CliTheme::BOLD . "=== REGISTROS DE COPIAS DE SEGURIDAD ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'timestamp' => 'FECHA / HORA',
+                    'task'      => 'TAREA',
+                    'event'     => 'EVENTO',
+                    'severity'  => 'SEVERIDAD',
+                    'message'   => 'MENSAJE',
+                ], $bkpLogs);
+                break;
+
+            case 'journal':
+                $unit = $parsedOptions['unit'] ?? null;
+                $journal = $svc->getJournalLogs($limit, $unit);
+                if ($isJson) {
+                    outData($journal, true);
+                }
+                echo CliTheme::BOLD . "=== REGISTROS DE JOURNALD (SYSTEMD) ===" . CliTheme::RESET . PHP_EOL;
+                foreach ($journal as $line) {
+                    echo $line . PHP_EOL;
+                }
+                break;
+
+            default:
+                outError("Fuente de logs no reconocida: $action. Opciones disponibles: all, samba, admin, backup, journal", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // CONTROL DE SERVICIOS DE RED (service / svc)
+    // -------------------------------------------------------------------------
+    case 'service':
+    case 'svc':
+        $svc = new SystemService();
+        switch ($action) {
+            case 'index':
+            case 'list':
+            case 'status':
+                $services = $svc->getServicesStatus();
+                if ($isJson) {
+                    outData($services, true);
+                }
+                echo CliTheme::BOLD . "=== ESTADO DE SERVICIOS DEL SISTEMA ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'service'     => 'DEMONIO',
+                    'name'        => 'DESCRIPCIÓN',
+                    'status'      => 'ESTADO',
+                    'description' => 'DETALLE',
+                ], $services);
+                break;
+
+            case 'start':
+            case 'stop':
+            case 'restart':
+            case 'reload':
+                $serviceName = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$serviceName) {
+                    outError("Debes especificar el nombre del servicio. Ejemplo: nas service restart smbd", 1, null, $isJson);
+                }
+                $res = $svc->manageService((string) $serviceName, $action);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? "Fallo al ejecutar $action sobre $serviceName", 1, $res, $isJson);
+                }
+                AuditService::log('service_manage', (string) $serviceName, 'SUCCESS', ['action' => $action]);
+                outSuccess($res['message'] ?? "Servicio $serviceName: acción $action completada con éxito", $res, $isJson);
+                break;
+
+            default:
+                outError("Acción de servicio no reconocida: $action. Acciones disponibles: list, status, start, stop, restart, reload", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // ESTADO Y GESTIÓN DEL SISTEMA (system / sys)
+    // -------------------------------------------------------------------------
+    case 'system':
+    case 'sys':
+        $svc = new SystemService();
+        switch ($action) {
+            case 'index':
+            case 'metrics':
+            case 'status':
+                $metrics = $svc->getSystemMetrics();
+                if ($isJson) {
+                    outData($metrics, true);
+                }
+                echo CliTheme::BOLD . "=== MÉTRICAS GENERALES DEL SISTEMA ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Nombre del Host'  => $metrics['hostname'] ?? gethostname(),
+                    'Uptime (Activo)'  => $metrics['uptime'] ?? 'N/A',
+                    'Uso de CPU'       => ($metrics['cpu_usage'] ?? 0) . "%",
+                    'Memoria RAM'      => ($metrics['ram_used_mb'] ?? 0) . " MB usados de " . ($metrics['ram_total_mb'] ?? 0) . " MB (" . ($metrics['ram_pct'] ?? 0) . "%)",
+                    'Carga del Sistema'=> implode(', ', (array) ($metrics['load_avg'] ?? [])),
+                    'Rol del Servidor' => $svc->getServerRoleLabel(),
+                ]);
+                break;
+
+            case 'reboot':
+                $res = $svc->rebootServer();
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al solicitar reinicio', 1, $res, $isJson);
+                }
+                AuditService::log('server_reboot', 'system', 'SUCCESS');
+                outSuccess($res['message'] ?? 'Orden de reinicio emitida exitosamente al sistema', $res, $isJson);
+                break;
+
+            case 'updates':
+                $updates = $svc->checkUpdates();
+                if ($isJson) {
+                    outData($updates, true);
+                }
+                echo CliTheme::BOLD . "=== ESTADO DE ACTUALIZACIONES DE SOFTWARE ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Versión Local'    => $updates['current_version'] ?? '1.0',
+                    'Commit Local'     => $updates['current_commit'] ?? 'N/A',
+                    'Actualizaciones'  => ($updates['has_updates'] ?? false) ? 'HAY ACTUALIZACIONES DISPONIBLES' : 'Sistema al día',
+                    'Último Remoto'    => $updates['remote_commit'] ?? 'N/A',
+                ]);
+                break;
+
+            default:
+                outError("Acción de sistema no reconocida: $action. Opciones disponibles: metrics, reboot, updates", 1, null, $isJson);
+        }
+        break;
+
+    // -------------------------------------------------------------------------
+    // AYUDA GENERAL (help / --help / -h)
+    // -------------------------------------------------------------------------
+    case 'help':
+    case '--help':
+    case '-h':
+    default:
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL;
+        echo CliTheme::BOLD . "  CLI DE ADMINISTRACIÓN UNIFICADA: SERVIDOR NAS & BACKUP DEBIAN 13" . CliTheme::RESET . PHP_EOL;
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL;
+        echo CliTheme::BOLD . "Uso general:" . CliTheme::RESET . PHP_EOL;
+        echo "  nas <módulo> <acción> [parámetros...] [--json]" . PHP_EOL . PHP_EOL;
+
+        echo CliTheme::BOLD . "Módulos y comandos disponibles:" . CliTheme::RESET . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "storage" . CliTheme::RESET . "     Gestión de discos, formato ext4/Btrfs, LVM, subvolúmenes, scrub y TRIM." . PHP_EOL;
+        echo "              overview | disks | format | lvm | subvol | scrub | trim | unmount" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "share" . CliTheme::RESET . "       Recursos compartidos Samba, 4 esquemas de permisos y reparación ACLs." . PHP_EOL;
+        echo "              list | create | update | access | repair | delete | access-map" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "backup" . CliTheme::RESET . "      Copias de seguridad CIFS/SSH/Local, snapshots atómicos y rotación." . PHP_EOL;
+        echo "              list | create | test | run | status | progress | logs | delete" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "trash" . CliTheme::RESET . "       Papelera de reciclaje segura en /srv/nas/.trash con base SQLite." . PHP_EOL;
+        echo "              list | count | restore | delete | empty" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "user" . CliTheme::RESET . "        Usuarios de Linux y Samba, roles superadmin/operador y credenciales." . PHP_EOL;
+        echo "              list | create | update | passwd | toggle | delete | add-group | remove-group" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "group" . CliTheme::RESET . "       Grupos departamentales de seguridad y permisos POSIX." . PHP_EOL;
+        echo "              list | create | rename | delete" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "domain" . CliTheme::RESET . "      Integración nativa con Directorio Activo (realmd / SSSD / Kerberos)." . PHP_EOL;
+        echo "              status | discover | join | leave" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "log" . CliTheme::RESET . "         Auditoría unificada: Samba full_audit, eventos admin, backups y journald." . PHP_EOL;
+        echo "              all | samba | admin | backup | journal" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "service" . CliTheme::RESET . "     Control granular de demonios smbd, nmbd, wsdd2, nginx, php-fpm y ufw." . PHP_EOL;
+        echo "              list | status | start | stop | restart | reload" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "system" . CliTheme::RESET . "      Métricas en vivo de CPU/RAM/Disco, reinicio y comprobación de versión." . PHP_EOL;
+        echo "              metrics | reboot | updates" . PHP_EOL;
+        echo "  " . CliTheme::GREEN . "help" . CliTheme::RESET . "        Muestra esta guía técnica de referencia." . PHP_EOL . PHP_EOL;
+
+        echo CliTheme::BOLD . "Opciones globales:" . CliTheme::RESET . PHP_EOL;
+        echo "  " . CliTheme::YELLOW . "--json" . CliTheme::RESET . "      Emite la respuesta estructurada en formato JSON para automatización." . PHP_EOL . PHP_EOL;
+
+        echo CliTheme::BOLD . "Ejemplos prácticos:" . CliTheme::RESET . PHP_EOL;
+        echo "  sudo nas storage disks" . PHP_EOL;
+        echo "  sudo nas storage format /dev/sdb ext4 --confirm=SI-FORMATEAR" . PHP_EOL;
+        echo "  sudo nas share list --json" . PHP_EOL;
+        echo "  sudo nas share repair SISTEMAS" . PHP_EOL;
+        echo "  sudo nas backup run bkp_ventas" . PHP_EOL;
+        echo "  sudo nas trash restore 14" . PHP_EOL;
+        echo "  sudo nas user create jdoe --password=Clave123# --fullname='John Doe' --groups=grp_samba" . PHP_EOL;
+        echo "  sudo nas domain status" . PHP_EOL;
+        echo "  sudo nas log samba --limit=20" . PHP_EOL;
+        echo "  sudo nas service restart smbd" . PHP_EOL;
+        echo CliTheme::BOLD . CliTheme::CYAN . "==============================================================================" . CliTheme::RESET . PHP_EOL;
+        exit(0);
+}
