@@ -9,6 +9,16 @@ gestionar_recursos_compartidos() {
     local VALID_USERS WRITE_LIST READ_ONLY MASK GRUPO_DUENO TIPO_TXT GRUPOS_RO GRUPOS_RO_ESTRICTO
     local GRUPO_RW MENU_RW STATUS LISTA_SHARES MENU_ITEMS TARGET_SHARE NUEVO_ESTADO
     local LISTA_ELIMINAR MENU_DEL SHARE_A_BORRAR BACKUP_SMB TMP_SMB g ROL_ACTUAL
+    local CLI_RUNNER EDIT_SHARE NUEVO_COM NUEVO_RO NUEVO_GUEST TARGET_KIND TARGET_NAME ACCESS_LVL SYNC_SHARE OUT
+
+    CLI_RUNNER=""
+    if [ -x "/usr/local/bin/nas" ]; then
+        CLI_RUNNER="/usr/local/bin/nas"
+    elif [ -f "$SRC_DIR/../bin/nas-cli" ]; then
+        CLI_RUNNER="php $SRC_DIR/../bin/nas-cli"
+    elif [ -f "/opt/nas_debian/bin/nas-cli" ]; then
+        CLI_RUNNER="php /opt/nas_debian/bin/nas-cli"
+    fi
 
     ROL_ACTUAL=""
     if [ -s /etc/nas/role ]; then
@@ -28,15 +38,18 @@ gestionar_recursos_compartidos() {
     while true; do
         OPC_SHARE=$(whiptail --title "$APP_TITLE" \
             --ok-button "< Seleccionar >" --cancel-button "< Volver >" \
-            --menu "GESTIÓN DE RECURSOS COMPARTIDOS (SAMBA):" 17 72 5 \
+            --menu "GESTIÓN DE RECURSOS COMPARTIDOS (SAMBA):" 20 74 8 \
             "1" "[*] Listar y ver detalles de recursos compartidos" \
             "2" "[+] Crear un nuevo recurso compartido (Carpeta de Red)" \
-            "3" "[~] Alternar estado (Habilitar / Deshabilitar recurso)" \
-            "4" "[-] Eliminar un recurso compartido de la red" \
-            "5" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
+            "3" "[E] Editar configuración de recurso compartido" \
+            "4" "[A] Gestionar accesos por usuario / grupo (RO / RW)" \
+            "5" "[R] Sincronizar y reparar permisos POSIX / ACLs" \
+            "6" "[~] Alternar estado (Habilitar / Deshabilitar recurso)" \
+            "7" "[-] Eliminar un recurso compartido de la red" \
+            "8" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
 
         RET=$?
-        if [ $RET -ne 0 ] || [ "$OPC_SHARE" == "5" ]; then
+        if [ $RET -ne 0 ] || [ "$OPC_SHARE" == "8" ]; then
             break
         fi
 
@@ -431,6 +444,140 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 LISTA_SHARES=$(python3 -c '
 import re
 with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
+    for line in f:
+        m = re.match(r"^\s*\[([^\]]+)\]", line)
+        if m and m.group(1).strip().lower() != "global":
+            print(m.group(1).strip())
+')
+                if [ -z "$LISTA_SHARES" ]; then
+                    whiptail --ok-button "< Aceptar >" --msgbox "No hay recursos disponibles para editar." 8 45
+                    continue
+                fi
+                MENU_ITEMS=()
+                for s in $LISTA_SHARES; do
+                    MENU_ITEMS+=("$s" "Recurso_Samba")
+                done
+                EDIT_SHARE=$(whiptail --title "Editar Recurso Compartido" \
+                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona el recurso que deseas editar:" 16 68 6 \
+                    "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$EDIT_SHARE" ]; then
+                    NUEVO_COM=$(whiptail --title "Editar Comentario" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --inputbox "Ingresa el nuevo comentario descriptivo para [$EDIT_SHARE]:" 10 65 "" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    [ $RET -ne 0 ] && continue
+
+                    NUEVO_RO=$(whiptail --title "Modo de Solo Lectura" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "¿El recurso debe ser de Solo Lectura?" 12 55 2 \
+                        "no"  "Lectura y Escritura permitida" \
+                        "yes" "Solo Lectura estricta" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    [ $RET -ne 0 ] && continue
+
+                    NUEVO_GUEST=$(whiptail --title "Acceso de Invitados" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "¿Permitir acceso a invitados sin contraseña?" 12 55 2 \
+                        "no"  "Requiere credenciales" \
+                        "yes" "Permite invitados (guest ok)" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    [ $RET -ne 0 ] && continue
+
+                    OUT=$($CLI_RUNNER share update "$EDIT_SHARE" --comment="$NUEVO_COM" --read-only="$NUEVO_RO" --guest-ok="$NUEVO_GUEST" 2>&1 || true)
+                    whiptail --title "Resultado de Actualización" --ok-button "< Aceptar >" \
+                        --msgbox "$OUT" 10 65
+                fi
+                ;;
+
+            4)
+                LISTA_SHARES=$(python3 -c '
+import re
+with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
+    for line in f:
+        m = re.match(r"^\s*\[([^\]]+)\]", line)
+        if m and m.group(1).strip().lower() != "global":
+            print(m.group(1).strip())
+')
+                if [ -z "$LISTA_SHARES" ]; then
+                    whiptail --ok-button "< Aceptar >" --msgbox "No hay recursos compartidos configurados." 8 45
+                    continue
+                fi
+                MENU_ITEMS=()
+                for s in $LISTA_SHARES; do
+                    MENU_ITEMS+=("$s" "Recurso_Samba")
+                done
+                TARGET_SHARE=$(whiptail --title "Gestionar Nivel de Acceso" \
+                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona el recurso a configurar:" 16 68 6 \
+                    "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$TARGET_SHARE" ]; then
+                    TARGET_KIND=$(whiptail --title "Tipo de Destino" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --menu "Asignar permiso a:" 12 55 2 \
+                        "group" "Grupo de seguridad (ej. grp_contabilidad)" \
+                        "user"  "Usuario individual (ej. jdoe)" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    [ $RET -ne 0 ] && continue
+
+                    TARGET_NAME=$(whiptail --title "Nombre del $TARGET_KIND" \
+                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                        --inputbox "Ingresa el nombre del $TARGET_KIND:" 10 65 "" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    if [ $RET -ne 0 ] || [ -z "$TARGET_NAME" ]; then
+                        continue
+                    fi
+
+                    ACCESS_LVL=$(whiptail --title "Nivel de Permiso" \
+                        --ok-button "< Aplicar >" --cancel-button "< Cancelar >" \
+                        --menu "Selecciona el nivel de acceso en [$TARGET_SHARE]:" 13 60 3 \
+                        "rw"   "Lectura y Escritura completa" \
+                        "ro"   "Solo Lectura" \
+                        "none" "Denegar acceso por completo" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    [ $RET -ne 0 ] && continue
+
+                    OUT=$($CLI_RUNNER share access "$TARGET_SHARE" "$TARGET_KIND" "$TARGET_NAME" "$ACCESS_LVL" 2>&1 || true)
+                    whiptail --title "Permiso Actualizado" --ok-button "< Aceptar >" \
+                        --msgbox "$OUT" 10 65
+                fi
+                ;;
+
+            5)
+                LISTA_SHARES=$(python3 -c '
+import re
+with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
+    for line in f:
+        m = re.match(r"^\s*\[([^\]]+)\]", line)
+        if m and m.group(1).strip().lower() != "global":
+            print(m.group(1).strip())
+')
+                if [ -z "$LISTA_SHARES" ]; then
+                    whiptail --ok-button "< Aceptar >" --msgbox "No hay recursos compartidos configurados." 8 45
+                    continue
+                fi
+                MENU_ITEMS=()
+                for s in $LISTA_SHARES; do
+                    MENU_ITEMS+=("$s" "Recurso_Samba")
+                done
+                SYNC_SHARE=$(whiptail --title "Reparar Permisos y ACLs" \
+                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona el recurso para recalcular y aplicar sus ACLs:" 16 68 6 \
+                    "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$SYNC_SHARE" ]; then
+                    OUT=$($CLI_RUNNER share repair "$SYNC_SHARE" 2>&1 || true)
+                    whiptail --title "Reparación de ACLs" --ok-button "< Aceptar >" \
+                        --msgbox "$OUT" 12 68
+                fi
+                ;;
+
+            6)
+                LISTA_SHARES=$(python3 -c '
+import re
+with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
     text = f.read()
 for m in re.finditer(r"\[([^\]]+)\]", text):
     s = m.group(1).strip()
@@ -497,7 +644,7 @@ if m:
                 fi
                 ;;
 
-            4)
+            7)
                 LISTA_ELIMINAR=$(python3 -c '
 import re
 with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
