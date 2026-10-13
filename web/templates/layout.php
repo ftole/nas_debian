@@ -1743,7 +1743,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <img id="preview-img-element" class="preview-image" src="" alt="Previsualización de imagen">
         </div>
         <div id="preview-pdf-container" style="display:none; flex:1; height:600px; width:100%;">
-          <iframe id="preview-pdf-frame" class="preview-pdf-frame" src="" style="width:100%; height:100%; border:none;"></iframe>
+          <iframe id="preview-pdf-frame" class="preview-pdf-frame" src="" style="width:100%; height:inherit;"></iframe>
         </div>
         <div id="preview-media-container" class="preview-media-wrap" style="display:none;">
           <video id="preview-video-element" controls style="max-width:100%; max-height:480px; border-radius:var(--radius-sm); display:none;"></video>
