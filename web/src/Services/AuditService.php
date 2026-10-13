@@ -14,6 +14,7 @@ use App\Core\Request;
 class AuditService
 {
     private static string $logPath = '/var/log/nas-admin.log';
+    private static ?string $currentUserOverride = null;
 
     public static function setLogPath(string $path): void
     {
@@ -23,6 +24,16 @@ class AuditService
     public static function getLogPath(): string
     {
         return self::$logPath;
+    }
+
+    public static function setCurrentUser(?string $user): void
+    {
+        self::$currentUserOverride = $user;
+    }
+
+    public static function getCurrentUser(): string
+    {
+        return self::resolveCurrentUser();
     }
 
     /**
@@ -93,8 +104,19 @@ class AuditService
 
     private static function resolveCurrentUser(): string
     {
+        if (self::$currentUserOverride !== null && self::$currentUserOverride !== '') {
+            return self::$currentUserOverride;
+        }
         if (isset($_SESSION) && !empty($_SESSION['nas_user']['username'])) {
             return (string) $_SESSION['nas_user']['username'];
+        }
+        $sudoUser = getenv('SUDO_USER') ?: ($_SERVER['SUDO_USER'] ?? null);
+        if (!empty($sudoUser)) {
+            return (string) $sudoUser;
+        }
+        $logname = getenv('LOGNAME') ?: ($_SERVER['USER'] ?? null);
+        if (!empty($logname)) {
+            return (string) $logname;
         }
         return 'sistema';
     }
