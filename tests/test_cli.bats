@@ -92,6 +92,39 @@ setup() {
     [[ "$output" =~ '"success": true' ]]
 }
 
+@test "nas-cli status muestra el diagnostico de salud y retorna 0" {
+    run php bin/nas-cli status
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "DIAGNÓSTICO EN VIVO" ]]
+    [[ "$output" =~ "INFORMACIÓN Y SALUD DEL SISTEMA" ]]
+}
+
+@test "nas-cli status --json retorna diagnostico estructurado con success true" {
+    run php bin/nas-cli status --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"system"' ]]
+    [[ "$output" =~ '"storage"' ]]
+    [[ "$output" =~ '"services"' ]]
+}
+
+@test "nas-cli system info --json es alias valido de metrics" {
+    run php bin/nas-cli system info --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"cpu_usage_pct"' ]]
+}
+
+@test "nas-cli log audit --json y backups son aliases validos" {
+    run php bin/nas-cli log audit --json --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+
+    run php bin/nas-cli log backups --json --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
 @test "nas-cli storage format sin parametros rechaza con codigo 1" {
     run php bin/nas-cli storage format
     [ "$status" -eq 1 ]
