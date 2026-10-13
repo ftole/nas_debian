@@ -1,0 +1,117 @@
+#!/usr/bin/env bats
+
+# Pruebas de la CLI de administración unificada (bin/nas-cli).
+
+setup() {
+    export APP_ENV=testing
+}
+
+@test "nas-cli help muestra la lista completa de modulos y retorna 0" {
+    run php bin/nas-cli help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "storage" ]]
+    [[ "$output" =~ "share" ]]
+    [[ "$output" =~ "backup" ]]
+    [[ "$output" =~ "trash" ]]
+    [[ "$output" =~ "user" ]]
+    [[ "$output" =~ "group" ]]
+    [[ "$output" =~ "domain" ]]
+    [[ "$output" =~ "log" ]]
+    [[ "$output" =~ "service" ]]
+    [[ "$output" =~ "system" ]]
+}
+
+@test "nas-cli storage overview --json retorna JSON valido con /srv/nas" {
+    run php bin/nas-cli storage overview --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"path": "/srv/nas"' ]]
+}
+
+@test "nas-cli storage disks --json retorna listado valido" {
+    run php bin/nas-cli storage disks --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli share list --json retorna listado estructurado de recursos" {
+    run php bin/nas-cli share list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli user list --json retorna listado de cuentas" {
+    run php bin/nas-cli user list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli group list --json retorna grupos de seguridad" {
+    run php bin/nas-cli group list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli domain status --json retorna estado de Directorio Activo" {
+    run php bin/nas-cli domain status --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli service status --json reporta servicios de red" {
+    run php bin/nas-cli service status --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"service": "smbd"' ]]
+}
+
+@test "nas-cli system metrics --json reporta metricas de rendimiento" {
+    run php bin/nas-cli system metrics --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"cpu_usage_pct"' ]]
+}
+
+@test "nas-cli system updates --json reporta version y commit" {
+    run php bin/nas-cli system updates --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"version"' ]]
+}
+
+@test "nas-cli trash count --json reporta contador de papelera" {
+    run php bin/nas-cli trash count --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"count"' ]]
+}
+
+@test "nas-cli log all --json retorna bitacoras unificadas" {
+    run php bin/nas-cli log all --json --limit=5
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli storage format sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli storage format
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Debes especificar el disco" ]]
+}
+
+@test "nas-cli share create sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli share create
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Faltan parámetros obligatorios" ]]
+}
+
+@test "nas-cli backup create sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli backup create
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Faltan parámetros obligatorios" ]]
+}
+
+@test "nas-cli comando no reconocido rechaza y muestra ayuda con codigo 0" {
+    run php bin/nas-cli modulo_inexistente_xyz
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Módulos y comandos disponibles" ]]
+}
