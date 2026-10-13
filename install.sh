@@ -117,9 +117,9 @@ echo "  ╭───────────────────────
 echo "  │        INSTALADOR OFICIAL • SERVIDOR NAS & BACKUP EAD-COL (DEBIAN 13)    │"
 echo -e "  ╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 
-echo -e " ${C_BOLD}[1/4]${C_RESET} Verificando e instalando herramientas base (git, curl, whiptail)..."
+echo -e " ${C_BOLD}[1/4]${C_RESET} Verificando e instalando herramientas base (git, curl, whiptail, php)..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl wget whiptail ca-certificates btrfs-progs samba-vfs-modules >/dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl wget whiptail ca-certificates btrfs-progs samba-vfs-modules php-cli php-sqlite3 >/dev/null 2>&1
 
 echo -e " ${C_BOLD}[2/4]${C_RESET} Descargando y sincronizando componentes en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -179,7 +179,7 @@ else
     fi
 fi
 
-find "$INSTALL_DIR" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
+find "$INSTALL_DIR" -type f \( -name "*.sh" -o -path "*/bin/*" \) -exec chmod +x {} + 2>/dev/null || true
 git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
 echo -e " ${C_BOLD}[3/4]${C_RESET} Creando comando global del sistema ${C_GREEN}nas${C_RESET} en ${C_WHITE}$BIN_PATH${C_RESET}..."
@@ -209,18 +209,6 @@ case "$1" in
         fi
         ;;
 
-    status|--status|-s)
-        if [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
-            export TERM="${TERM:-xterm-256color}"
-            bash "$INSTALL_DIR/src/asistente.sh" --status 2>/dev/null || bash -c "
-                echo '=== ESTADO DEL SERVIDOR ==='
-                systemctl status smbd wsdd2 nginx --no-pager
-                df -h /srv/nas 2>/dev/null || true
-            "
-        fi
-        exit 0
-        ;;
-
     version|--version|-v)
         if [ -d "$INSTALL_DIR/.git" ]; then
             cd "$INSTALL_DIR"
@@ -244,28 +232,30 @@ case "$1" in
         exit 0
         ;;
 
-    help|--help|-h)
-        echo "Uso: sudo nas [COMANDO]"
-        echo ""
-        echo "Comandos disponibles:"
-        echo "  nas              Abre el Asistente Visual Interactivo (Menú Whiptail)"
-        echo "  nas update       Actualiza el software a la última versión de GitHub"
-        echo "  nas status       Muestra el estado de los servicios y discos"
-        echo "  nas version      Muestra la versión actual y el commit instalado"
-        echo "  nas uninstall    Desinstala el comando 'nas' y limpia el servidor"
-        echo "  nas help         Muestra esta ayuda"
-        exit 0
+    "")
+        if [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
+            export TERM="${TERM:-xterm-256color}"
+            if [ ! -t 0 ]; then
+                exec < /dev/tty 2>/dev/null || true
+            fi
+            exec bash "$INSTALL_DIR/src/asistente.sh"
+        else
+            echo "[-] Error: No se encontró $INSTALL_DIR/src/asistente.sh"
+            exit 1
+        fi
         ;;
 
     *)
-        if [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
+        if [ -f "$INSTALL_DIR/bin/nas-cli" ]; then
+            exec php "$INSTALL_DIR/bin/nas-cli" "$@"
+        elif [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
             export TERM="${TERM:-xterm-256color}"
             if [ ! -t 0 ]; then
                 exec < /dev/tty 2>/dev/null || true
             fi
             exec bash "$INSTALL_DIR/src/asistente.sh" "$@"
         else
-            echo "[-] Error: No se encontró $INSTALL_DIR/src/asistente.sh"
+            echo "[-] Error: No se encontraron los componentes de ejecución en $INSTALL_DIR"
             exit 1
         fi
         ;;
