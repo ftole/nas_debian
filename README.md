@@ -91,35 +91,57 @@ Si por políticas corporativas de auditoría prefieres auditar y ejecutar cada p
 
 ## 🛠️ Comandos Globales del CLI `nas`
 
-Una vez instalado, tienes a tu disposición el comando global `nas`:
+Una vez instalado, tienes a tu disposición el comando global `nas` tanto para administración interactiva por menús como para gestión programática por subcomandos con salida enriquecida ANSI o formato estructurado `--json`:
 
+### Gestión Interactiva y del Sistema
 | Comando | Función |
 | :--- | :--- |
-| `sudo nas` | Inicia el asistente interactivo de menús (TUI). |
+| `sudo nas` | Inicia el asistente visual interactivo de menús (TUI con 13 módulos). |
 | `sudo nas status` | Realiza un diagnóstico completo de salud (servicios, discos, recursos, backups). |
 | `sudo nas update` | Sincroniza con GitHub, valida sintaxis y realiza rollback automático si hay errores. |
 | `sudo nas version` | Muestra la versión y el commit exacto instalado. |
 | `sudo nas uninstall` | Desinstala el software y limpia las configuraciones del servidor. |
 
+### Control Total por Subcomandos Programáticos (CLI / Scripts)
+| Módulo / Subcomando | Descripción de Operaciones |
+| :--- | :--- |
+| `sudo nas storage <subcomando>` | `overview`, `disks`, `format`, `lvm-create`, `btrfs-subvolume`, `btrfs-scrub`, `trim`, `unmount`. |
+| `sudo nas share <subcomando>` | `list`, `create`, `delete`, `edit`, `sync-acls`. |
+| `sudo nas backup <subcomando>` | `list`, `create`, `delete`, `run`, `logs`. |
+| `sudo nas trash <subcomando>` | `list`, `count`, `restore`, `delete`, `empty`. |
+| `sudo nas user <subcomando>` | `list`, `create`, `delete`, `status`. |
+| `sudo nas group <subcomando>` | `list`, `create`, `delete`, `rename`. |
+| `sudo nas domain <subcomando>` | `status`, `discover`, `join`, `leave`. |
+| `sudo nas log <subcomando>` | `all`, `samba`, `admin`, `backup`, `system`. Soporta filtros `--limit=N` y `--query=TEXTO`. |
+| `sudo nas service <subcomando>`| `status`, `start`, `stop`, `restart` para demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`, `php`, `ufw`). |
+| `sudo nas system <subcomando>` | `metrics`, `role`, `updates`, `reboot`. |
+
+> [!TIP]
+> Todos los subcomandos aceptan la bandera opcional `--json` para emitir la respuesta en formato JSON estructurado, ideal para integración con pipelines CI/CD, scripts de monitoreo y automatización.
+
 ---
 
 ## 🖥️ Módulos del Asistente Interactivo
 
-Al ejecutar `sudo nas` accederás a un menú visual guiado con 9 módulos:
+Al ejecutar `sudo nas` accederás a un menú visual guiado con 13 módulos completos:
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                 PANEL DE GESTIÓN NAS DEBIAN                 │
 ├─────────────────────────────────────────────────────────────┤
 │  [1] Desplegar servidor       -> Asistente guiado en 5 pasos│
-│  [2] Gestión de grupos        -> Crear/eliminar grupos grp_*│
-│  [3] Recursos compartidos     -> Crear/administrar Samba    │
-│  [4] Tareas de backup         -> Central de copias de red   │
-│  [5] Usuarios                 -> Cuentas del sistema y SMB  │
+│  [2] Gestión de grupos        -> Crear/renombrar/borrar grp_│
+│  [3] Recursos compartidos     -> Crear/editar/reparar ACLs  │
+│  [4] Tareas de backup         -> Copias red, ejecutar y logs│
+│  [5] Usuarios                 -> Cuentas, roles y permisos  │
 │  [6] Diagnóstico de salud     -> Chequeo en vivo del estado │
-│  [7] Reiniciar servicios      -> Recarga limpia de demonios │
-│  [8] Actualizar software      -> Descarga segura con rollback│
-│  [9] Desinstalar              -> Limpieza total del sistema │
+│  [7] Gestionar servicios red  -> Control granular demonios  │
+│  [8] Almacenamiento y discos  -> Formato, LVM, Btrfs, TRIM  │
+│  [9] Papelera de reciclaje    -> Listar, restaurar y vaciar │
+│ [10] Dominio Active Directory -> Descubrir, unir y desunir  │
+│ [11] Registros y auditoría    -> Samba audit, admin, journal│
+│ [12] Actualizar software      -> Descarga segura con rollback│
+│ [13] Desinstalar              -> Limpieza total del sistema │
 └─────────────────────────────────────────────────────────────┘
 ```
 
