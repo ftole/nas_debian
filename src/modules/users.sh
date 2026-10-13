@@ -74,10 +74,16 @@ crear_usuario_guiado() {
         whiptail --title "Error" --ok-button "< Aceptar >" --msgbox "La contraseña no puede estar vacía." 8 45
     done
 
-    # Política de aislamiento: Admin (Web+SSH) vs Empleado (Solo red)
-    if echo "$GRUPO_FINAL" | grep -qw "grp_samba"; then
+    # Política de aislamiento de roles
+    if echo "$GRUPO_FINAL" | grep -qw "grp_superadmin"; then
+        SHELL_TYPE="/bin/bash"
+        PERM_TXT="Superadministrador Inmutable (Control total de sistema, web y red)"
+    elif echo "$GRUPO_FINAL" | grep -qw "grp_samba"; then
         SHELL_TYPE="/bin/bash"
         PERM_TXT="Administrador del Servidor (Acceso Panel Web + Consola SSH + Red)"
+    elif echo "$GRUPO_FINAL" | grep -qw "grp_web"; then
+        SHELL_TYPE="/usr/sbin/nologin"
+        PERM_TXT="Operador de Panel Web (Dashboard, Archivos, Backups, sin consola ni almacenamiento)"
     else
         SHELL_TYPE="/usr/sbin/nologin"
         PERM_TXT="Empleado de Red (Acceso exclusivo a carpetas Samba, sin consola ni web)"
@@ -228,8 +234,12 @@ for u, data in users.items():
     is_disabled = "D" in data["flags"]
     status = "○ SUSPENDIDO" if is_disabled else "● ACTIVO"
     
-    if "grp_samba" in all_grps or "sudo" in all_grps:
+    if "grp_superadmin" in all_grps:
+        role = "Superadmin (Total)"
+    elif "grp_samba" in all_grps or "sudo" in all_grps:
         role = "Admin (Web+SSH)"
+    elif "grp_web" in all_grps:
+        role = "Operador Web"
     else:
         role = "Solo Red SMB"
         
@@ -372,6 +382,30 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     "${MENU_USERS[@]}" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -eq 0 ] && [ -n "$USER_DEL_SEL" ]; then
+                    local SUPERADMIN_USER
+                    SUPERADMIN_USER=$(cat /etc/nas/superadmin 2>/dev/null || echo "")
+                    if [ "$USER_DEL_SEL" == "$SUPERADMIN_USER" ] || id -Gn "$USER_DEL_SEL" 2>/dev/null | grep -qw "grp_superadmin"; then
+                        whiptail --title "Operación Denegada" --ok-button "< Aceptar >" \
+                            --msgbox "No es posible eliminar la cuenta Superadministrador ($USER_DEL_SEL)." 8 60
+                        continue
+                    fi
+
+                    local CURRENT_OPERATOR
+                    CURRENT_OPERATOR="${SUDO_USER:-$USER}"
+                    if [ "$USER_DEL_SEL" == "$CURRENT_OPERATOR" ]; then
+                        whiptail --title "Operación Denegada" --ok-button "< Aceptar >" \
+                            --msgbox "No puedes eliminar la cuenta activa con la que estás operando ($USER_DEL_SEL)." 8 65
+                        continue
+                    fi
+
+                    local TARGET_UID
+                    TARGET_UID=$(id -u "$USER_DEL_SEL" 2>/dev/null || echo 0)
+                    if [ "$TARGET_UID" -lt 1000 ]; then
+                        whiptail --title "Operación Denegada" --ok-button "< Aceptar >" \
+                            --msgbox "No está permitido eliminar cuentas de sistema ($USER_DEL_SEL)." 8 60
+                        continue
+                    fi
+
                     if (whiptail --title "Confirmación de Eliminación" \
                         --yes-button "< Sí, Eliminar >" --no-button "< Cancelar >" \
                         --yesno "¿Estás seguro de eliminar al usuario '$USER_DEL_SEL' de Samba y Linux?" 10 60); then
