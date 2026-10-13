@@ -396,15 +396,15 @@ switch ($module) {
                 $readOnly = isset($parsedOptions['read-only']) ? (bool) $parsedOptions['read-only'] : false;
                 $guestOk = isset($parsedOptions['guest-ok']) ? (bool) $parsedOptions['guest-ok'] : false;
 
-                $validUsers = isset($parsedOptions['valid-users'])
-                    ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])))
-                    : [];
-                $writeList = isset($parsedOptions['write-list'])
-                    ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['write-list'])))
-                    : [];
+                $groups = isset($parsedOptions['groups'])
+                    ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['groups'])))
+                    : (isset($parsedOptions['valid-users'])
+                        ? array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])))
+                        : []);
+                $writeGroup = $parsedOptions['write-group'] ?? ($parsedOptions['write_group'] ?? ($parsedOptions['write-list'] ?? ''));
 
-                if (!$name || !$path) {
-                    outError("Faltan parámetros obligatorios. Uso: nas share create --name=<nombre> --path=<ruta> [--comment=<comentario>] [--scheme=1..4] [--hidden] [--read-only] [--guest-ok] [--valid-users=u1,u2] [--write-list=w1,w2]", 1, null, $isJson);
+                if (!$name) {
+                    outError("Faltan parámetros obligatorios. Uso: nas share create --name=<nombre> [--path=<ruta>] [--comment=<comentario>] [--scheme=1..4] [--hidden] [--read-only] [--guest-ok] [--groups=grp1,grp2] [--write-group=grp1]", 1, null, $isJson);
                 }
 
                 $res = $svc->createShare([
@@ -415,14 +415,14 @@ switch ($module) {
                     'hidden'      => $hidden,
                     'read_only'   => $readOnly,
                     'guest_ok'    => $guestOk,
-                    'valid_users' => $validUsers,
-                    'write_list'  => $writeList,
+                    'groups'      => $groups,
+                    'write_group' => $writeGroup,
                 ]);
 
                 if (empty($res['success'])) {
                     outError($res['error'] ?? 'Fallo al crear recurso compartido', 1, $res, $isJson);
                 }
-                AuditService::log('share_create', (string) $name, 'SUCCESS', ['path' => $path, 'scheme' => $scheme]);
+                AuditService::log('share_create', (string) $name, 'SUCCESS', ['scheme' => $scheme]);
                 outSuccess($res['message'] ?? 'Recurso compartido creado exitosamente', $res, $isJson);
                 break;
 
