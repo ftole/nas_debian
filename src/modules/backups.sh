@@ -17,20 +17,33 @@ validar_cron() {
 gestionar_backups() {
     local OPC_BKP TABLA_BKPS TASK_NAME WIN_IP WIN_SHARE WIN_USER WIN_PASS LNX_IP LNX_PORT LNX_USER LNX_PASS LNX_PATH LOC_SRC
     local CRON_SCHED CRON_EXPR RETENTION CRED_FILE RUNNER TAREAS_DEL MENU_DEL TASK_DEL_SEL TEST_CONN UNIDAD_ABORTAR
+    local CLI_RUNNER TAREAS_RUN MENU_RUN TASK_RUN_SEL TAREAS_LOG MENU_LOG TASK_LOG_SEL OUT
+
+    CLI_RUNNER=""
+    if [ -x "/usr/local/bin/nas" ]; then
+        CLI_RUNNER="/usr/local/bin/nas"
+    elif [ -f "$SRC_DIR/../bin/nas-cli" ]; then
+        CLI_RUNNER="php $SRC_DIR/../bin/nas-cli"
+    elif [ -f "/opt/nas_debian/bin/nas-cli" ]; then
+        CLI_RUNNER="php /opt/nas_debian/bin/nas-cli"
+    fi
+
     while true; do
         OPC_BKP=$(whiptail --title "$APP_TITLE" \
             --ok-button "< Seleccionar >" --cancel-button "< Volver >" \
-            --menu "GESTIÓN DE TAREAS DE COPIAS DE SEGURIDAD:" 18 72 6 \
+            --menu "GESTIÓN DE TAREAS DE COPIAS DE SEGURIDAD:" 20 74 8 \
             "1" "[*] Listar Tareas de Backup Programadas" \
             "2" "[+] Nueva Tarea: Servidor Windows / Carpeta SMB (CIFS)" \
             "3" "[+] Nueva Tarea: Servidor Linux Remoto (SSH + Rsync)" \
             "4" "[+] Nueva Tarea: Carpeta Local del Servidor" \
-            "5" "[-] Eliminar una Tarea de Backup Programada" \
-            "6" "[!] Abortar una Tarea en Ejecución" \
-            "7" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
+            "5" "[▶] Ejecutar Tarea de Backup Manualmente Ahora" \
+            "6" "[L] Ver Bitácora y Registros de Ejecución de Tarea" \
+            "7" "[-] Eliminar una Tarea de Backup Programada" \
+            "8" "[!] Abortar una Tarea en Ejecución" \
+            "9" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
 
         RET=$?
-        if [ $RET -ne 0 ] || [ "$OPC_BKP" == "7" ]; then
+        if [ $RET -ne 0 ] || [ "$OPC_BKP" == "9" ]; then
             break
         fi
 
@@ -828,6 +841,58 @@ RUNNER_EOF
                 ;;
 
             5)
+                # Ejecutar tarea ahora
+                TAREAS_RUN=$(find /usr/local/bin -maxdepth 1 -name "backup_*.sh" -printf "%f\n" 2>/dev/null | sed "s|backup_||; s|\.sh||" || echo "")
+                if [ -z "$TAREAS_RUN" ]; then
+                    whiptail --ok-button "< Aceptar >" --msgbox "No hay tareas programadas para ejecutar." 8 50
+                    continue
+                fi
+
+                MENU_RUN=()
+                for t in $TAREAS_RUN; do
+                    MENU_RUN+=("$t" "Ejecutar_Inmediatamente")
+                done
+
+                TASK_RUN_SEL=$(whiptail --title "Ejecutar Backup Ahora" \
+                    --ok-button "< Ejecutar >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona la tarea a iniciar inmediatamente:" 16 68 6 \
+                    "${MENU_RUN[@]}" 3>&1 1>&2 2>&3)
+
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$TASK_RUN_SEL" ]; then
+                    OUT=$($CLI_RUNNER backup run "$TASK_RUN_SEL" 2>&1 || true)
+                    whiptail --title "Resultado de Ejecución" --ok-button "< Aceptar >" \
+                        --msgbox "$OUT" 12 70
+                fi
+                ;;
+
+            6)
+                # Ver bitácora de tarea
+                TAREAS_LOG=$(find /usr/local/bin -maxdepth 1 -name "backup_*.sh" -printf "%f\n" 2>/dev/null | sed "s|backup_||; s|\.sh||" || echo "")
+                if [ -z "$TAREAS_LOG" ]; then
+                    whiptail --ok-button "< Aceptar >" --msgbox "No hay tareas para consultar bitácoras." 8 50
+                    continue
+                fi
+
+                MENU_LOG=()
+                for t in $TAREAS_LOG; do
+                    MENU_LOG+=("$t" "Ver_Bitácora")
+                done
+
+                TASK_LOG_SEL=$(whiptail --title "Bitácora de Backup" \
+                    --ok-button "< Ver Logs >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona la tarea para ver su registro de ejecución:" 16 68 6 \
+                    "${MENU_LOG[@]}" 3>&1 1>&2 2>&3)
+
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$TASK_LOG_SEL" ]; then
+                    OUT=$($CLI_RUNNER backup logs "$TASK_LOG_SEL" --lines=40 2>&1 || true)
+                    whiptail --title "Bitácora: $TASK_LOG_SEL" --ok-button "< Aceptar >" \
+                        --msgbox "$OUT" 22 78
+                fi
+                ;;
+
+            7)
                 # Eliminar tarea
                 TAREAS_DEL=$(find /usr/local/bin -maxdepth 1 -name "backup_*.sh" -printf "%f\n" 2>/dev/null | sed "s|backup_||; s|\.sh||" || echo "")
                 if [ -z "$TAREAS_DEL" ]; then
@@ -858,7 +923,7 @@ RUNNER_EOF
                 fi
                 ;;
 
-            6)
+            8)
                 # Abortar una tarea en ejecución (unidades systemd transitorias)
                 local -a MENU_ABORT=()
                 while read -r unidad; do
