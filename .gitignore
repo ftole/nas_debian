@@ -19,6 +19,8 @@ web/data/
 !.env.example
 .nas_known_hosts
 server_pruebas.txt
+Servidor_*.txt
+Servidor_de_pruebas.txt
 .venv/
 venv/
 
