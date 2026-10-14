@@ -192,6 +192,32 @@ _hook_post_actualizacion() {
             chmod -R 755 /var/www/nas-web 2>/dev/null || true
         fi
     fi
+
+    # 5. Sincronizar configuración Nginx (redirección 301 y cabeceras HSTS) si existe
+    local nginx_sites="${NAS_NGINX_SITES:-/etc/nginx/sites-available}"
+    local nginx_dest="${NAS_NGINX_DEST:-$nginx_sites/nas-web}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$nginx_sites" ]; then
+        local tmp_nginx
+        tmp_nginx="$(mktemp 2>/dev/null || echo "/tmp/nas_nginx.$$")"
+        if awk '
+            /^cat << '\''NGINX_EOF'\'' > \/etc\/nginx\/sites-available\/nas-web$/ { capture=1; next }
+            capture && /^NGINX_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_nginx" 2>/dev/null && [ -s "$tmp_nginx" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$nginx_sites" ]; then
+                if [ ! -f "$nginx_dest" ] || ! cmp -s "$tmp_nginx" "$nginx_dest" 2>/dev/null; then
+                    cp -f "$tmp_nginx" "$nginx_dest" 2>/dev/null || true
+                    chmod 0644 "$nginx_dest" 2>/dev/null || true
+                    if command -v nginx >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+                        if nginx -t >/dev/null 2>&1; then
+                            systemctl reload nginx 2>/dev/null || true
+                        fi
+                    fi
+                fi
+            fi
+        fi
+        rm -f "$tmp_nginx" 2>/dev/null || true
+    fi
 }
 
 actualizar_desde_git() {
