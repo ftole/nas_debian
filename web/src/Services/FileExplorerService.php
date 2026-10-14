@@ -958,27 +958,35 @@ class FileExplorerService
     {
         $targetDir = $this->resolveSafePath($subpath);
         if ($targetDir === null || !is_dir($targetDir)) {
-            http_response_code(404);
+            if (!headers_sent()) {
+                http_response_code(404);
+            }
             echo 'Directorio no encontrado.';
             return;
         }
 
         if (!class_exists(ZipArchive::class)) {
-            http_response_code(500);
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
             echo 'Error: La extensión php-zip no está habilitada en el servidor.';
             return;
         }
 
         $realTargetDir = realpath($targetDir);
         if ($realTargetDir === false) {
-            http_response_code(404);
+            if (!headers_sent()) {
+                http_response_code(404);
+            }
             echo 'Directorio no encontrado.';
             return;
         }
 
         $realBaseDir = realpath(self::getRootDir());
         if (trim($subpath, '/\\') === '' || ($realBaseDir !== false && $realTargetDir === $realBaseDir)) {
-            http_response_code(400);
+            if (!headers_sent()) {
+                http_response_code(400);
+            }
             echo 'La descarga comprimida de la raíz del almacenamiento (/srv/nas) no está permitida.';
             return;
         }
