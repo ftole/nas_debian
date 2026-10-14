@@ -1774,7 +1774,7 @@ function runBackupTask(taskId) {
         ? `[4/8] Conectando a origen Windows CIFS [${task.src}] con credenciales AD (0600 root:root)...`
         : `[4/8] Negociando túnel SSH seguro con host Linux origen y StrictHostKeyChecking=accept-new...` },
     { t: 2600, level: 'term-ok',   text: isWindows
-        ? `✔ Montaje temporal CIFS exitoso (ro,vers=3.1.1,noserverino,cache=none,soft,timeo=30) en /mnt/backup_sources/${taskId}`
+        ? `✔ Montaje temporal CIFS exitoso (ro,vers=3.1.1,noserverino,cache=none,soft,echo_interval=15) en /mnt/backup_sources/${taskId}`
         : `✔ Llave de host registrada en /root/.ssh/known_hosts_backup. Túnel SSH autenticado sin intermediarios.` },
     { t: 3400, level: 'term-cmd',  text: isWindows
         ? `[5/8] Ejecutando rsync -aAXH --numeric-ids --link-dest=../snapshot_reciente /mnt/backup_sources/${taskId}/ ${stagingDir}/`
