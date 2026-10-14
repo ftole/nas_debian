@@ -545,30 +545,12 @@ fi
 # 4. Configurar Host Virtual de Nginx (HTTP + HTTPS)
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
-# 1. Servidor HTTP (Puerto 80: Acceso Directo Web)
+# 1. Servidor HTTP (Puerto 80: Redirección permanente a HTTPS)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    root /var/www/nas-web/public;
-    index index.php index.html;
-
-    client_max_body_size 512M;
-
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php-fpm-nas.sock;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-
-    location ~ /\. {
-        deny all;
-    }
+    return 301 https://$host$request_uri;
 }
 
 # 2. Servidor HTTPS (Puerto 443: Acceso Seguro SSL)
@@ -585,6 +567,7 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     # Cabeceras de seguridad
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
@@ -633,7 +616,7 @@ if ! id "$TARGET_USER" >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_web|grp_samba'; then
+if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_samba|grp_superadmin'; then
     echo "el usuario no tiene acceso web" >&2
     exit 1
 fi
@@ -774,7 +757,9 @@ Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/mkdir -p /etc/backup-credentials, /usr/bin/mkdir -p /etc/backup-credentials, \\
     /bin/mkdir -p /usr/local/bin, /usr/bin/mkdir -p /usr/local/bin, \\
     /bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
-    /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
+    /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
+    /bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
+    /bin/chattr *, /usr/bin/chattr *
 Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \\
     /bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, \\
