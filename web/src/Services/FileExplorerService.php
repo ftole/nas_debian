@@ -466,7 +466,7 @@ class FileExplorerService
             return ['success' => false, 'error' => 'Operación no permitida: No se puede eliminar la raíz del almacenamiento.'];
         }
 
-        $isDir = is_dir($target);
+        $isDir = !is_link($target) && is_dir($target);
         $deleted = $isDir ? $this->deleteDirectoryRecursive($target) : @unlink($target);
 
         if (!$deleted) {
@@ -1001,7 +1001,9 @@ class FileExplorerService
 
         $zip = new ZipArchive();
         if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            http_response_code(500);
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
             echo 'Error al crear el archivo comprimido temporal.';
             return;
         }
@@ -1038,7 +1040,9 @@ class FileExplorerService
                 if ($totalSize > $maxZipSize) {
                     $zip->close();
                     @unlink($zipFile);
-                    http_response_code(413);
+                    if (!headers_sent()) {
+                        http_response_code(413);
+                    }
                     echo 'El tamaño de la carpeta supera el límite web permitido (500 MB). Utilice la red compartida Samba para transferencias masivas.';
                     return;
                 }
@@ -1055,7 +1059,9 @@ class FileExplorerService
         $zip->close();
 
         if (!file_exists($zipFile)) {
-            http_response_code(500);
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
             echo 'Error al generar archivo comprimido.';
             return;
         }
@@ -1070,7 +1076,9 @@ class FileExplorerService
     {
         $target = $this->resolveSafePath($subpath);
         if ($target === null || !file_exists($target)) {
-            http_response_code(404);
+            if (!headers_sent()) {
+                http_response_code(404);
+            }
             echo 'Elemento no encontrado.';
             return;
         }
