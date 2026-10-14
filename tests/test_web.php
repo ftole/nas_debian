@@ -1079,6 +1079,69 @@ if ($savedUser !== null) {
     $_SESSION['nas_user'] = $savedUser;
 }
 
+// Pruebas de remediaciones de seguridad, almacenamiento y servicios (Fases 1, 2 y 3)
+
+// 1. SambaService: rechazo de nombres reservados en creación y actualización
+$sambaSec = new SambaService('/nonexistent/smb.conf');
+foreach (['global', 'printers', 'print$'] as $reservedName) {
+    $resCreate = $sambaSec->createShare(['name' => $reservedName, 'path' => '/srv/nas/' . $reservedName]);
+    assertTrue(!$resCreate['success'] && (str_contains($resCreate['error'], 'reservado') || str_contains($resCreate['error'], 'protegida')), "SambaService::createShare rechaza nombre reservado '$reservedName'");
+
+    $resUpdate = $sambaSec->updateShare($reservedName, ['comment' => 'test']);
+    assertTrue(!$resUpdate['success'] && (str_contains($resUpdate['error'], 'reservado') || str_contains($resUpdate['error'], 'protegida')), "SambaService::updateShare rechaza seccion reservada '$reservedName'");
+}
+
+// 2. SambaService::setAccess normaliza 'ro' y 'rw' a 'read' y 'write'
+$resRo = $sambaSec->setAccess('RECURSO_INEXISTENTE', 'group', 'grp_ventas', 'ro');
+assertTrue($resRo['error'] !== 'Nivel de acceso inválido (use read/write/none o ro/rw).' && str_contains($resRo['error'], 'no existe'), "SambaService::setAccess acepta y normaliza 'ro'");
+$resRw = $sambaSec->setAccess('RECURSO_INEXISTENTE', 'group', 'grp_ventas', 'rw');
+assertTrue($resRw['error'] !== 'Nivel de acceso inválido (use read/write/none o ro/rw).' && str_contains($resRw['error'], 'no existe'), "SambaService::setAccess acepta y normaliza 'rw'");
+
+// 3. StorageService: listado y creacion de subvolumenes Btrfs
+$btrfsList = $storage->btrfsListSubvolumes('/srv/nas');
+assertTrue(is_array($btrfsList) && count($btrfsList) > 0 && isset($btrfsList[0]['name']), 'StorageService::btrfsListSubvolumes retorna listado de subvolumenes');
+$btrfsBad = $storage->btrfsCreateSubvolume('nombre invalido con espacios');
+assertTrue(!$btrfsBad['success'] && str_contains($btrfsBad['error'], 'inválido'), 'StorageService::btrfsCreateSubvolume valida nombre');
+$btrfsGood = $storage->btrfsCreateSubvolume('subvol_qa_test');
+assertTrue($btrfsGood['success'] && str_contains($btrfsGood['path'], 'subvol_qa_test'), 'StorageService::btrfsCreateSubvolume crea subvolumen exitosamente');
+
+// 4. SystemService: bloqueo de accion 'stop' para servicios criticos web (nginx, php-fpm)
+$sysManage = new SystemService();
+$stopNginx = $sysManage->manageService('nginx', 'stop');
+assertTrue(!$stopNginx['success'] && str_contains($stopNginx['error'], 'no está permitida'), 'SystemService::manageService bloquea accion stop para nginx');
+$stopPhp = $sysManage->manageService('php8.4-fpm', 'stop');
+assertTrue(!$stopPhp['success'] && str_contains($stopPhp['error'], 'no está permitida'), 'SystemService::manageService bloquea accion stop para php-fpm');
+
+// 5. UserController: bloqueo de elevacion o modificacion de cuentas administrativas por operadores
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = [
+    'username' => 'sistemas',
+    'group' => 'grp_samba',
+    'action' => 'add',
+];
+$userCtrlQa = new \App\Controllers\UserController();
+$savedUserSession = $_SESSION['nas_user'] ?? null;
+$_SESSION['nas_user'] = ['username' => 'operador_no_admin', 'role' => 'operator', 'is_admin' => false];
+ob_start();
+$reqPriv = new Request();
+$userCtrlQa->userGroups($reqPriv);
+$outPriv = ob_get_clean();
+$jsonPriv = json_decode($outPriv, true);
+assertTrue(isset($jsonPriv['success']) && $jsonPriv['success'] === false && str_contains($jsonPriv['error'] ?? '', 'No tienes permisos para modificar grupos'), 'UserController::userGroups bloquea intentos de alterar cuentas administrativas por operadores');
+if ($savedUserSession !== null) {
+    $_SESSION['nas_user'] = $savedUserSession;
+} else {
+    unset($_SESSION['nas_user']);
+}
+$_POST = [];
+
+// 6. FileExplorerService: bloqueo de descarga ZIP de la raiz completa (/srv/nas)
+$fExpQa = new FileExplorerService();
+ob_start();
+$fExpQa->downloadDirectoryZip('');
+$zipRootOut = ob_get_clean();
+assertTrue(str_contains($zipRootOut, 'no está permitida'), 'FileExplorerService::downloadDirectoryZip responde con bloqueo de descarga al intentar comprimir la raiz /srv/nas');
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
