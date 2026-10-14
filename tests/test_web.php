@@ -1142,6 +1142,33 @@ $fExpQa->downloadDirectoryZip('');
 $zipRootOut = ob_get_clean();
 assertTrue(str_contains($zipRootOut, 'no está permitida'), 'FileExplorerService::downloadDirectoryZip responde con bloqueo de descarga al intentar comprimir la raiz /srv/nas');
 
+// 7. StorageService::runTrim y startBtrfsScrub en modo testing devuelven success
+$trimRes = $storage->runTrim('/srv/nas');
+assertTrue($trimRes['success'] === true && str_contains($trimRes['message'], 'modo dev/test'), 'StorageService::runTrim retorna éxito simulado en modo test');
+$scrubRes = $storage->startBtrfsScrub('/srv/nas');
+assertTrue($scrubRes['success'] === true && str_contains($scrubRes['message'], 'modo dev/test'), 'StorageService::startBtrfsScrub retorna éxito simulado en modo test');
+
+// 8. BackupService: no travesía destructiva por symlinks en removeDirectoryRecursive
+$tmpBase = sys_get_temp_dir() . '/nas_test_bkp_symlink_' . uniqid();
+$targetDir = $tmpBase . '/target_dir';
+$bkpDir = $tmpBase . '/bkp_dir';
+@mkdir($targetDir, 0777, true);
+@mkdir($bkpDir, 0777, true);
+file_put_contents($targetDir . '/important.txt', 'DATOS_CRITICOS');
+@symlink($targetDir, $bkpDir . '/link_to_target');
+
+$bkpRefl = new \ReflectionClass(BackupService::class);
+$rmMethod = $bkpRefl->getMethod('removeDirectoryRecursive');
+$rmMethod->setAccessible(true);
+$bkpInst = new BackupService();
+$rmMethod->invoke($bkpInst, $bkpDir);
+
+assertTrue(!file_exists($bkpDir), 'BackupService::removeDirectoryRecursive elimina la carpeta de backup');
+assertTrue(file_exists($targetDir . '/important.txt'), 'BackupService::removeDirectoryRecursive no destruye archivos fuera del enlace simbolico');
+@unlink($targetDir . '/important.txt');
+@rmdir($targetDir);
+@rmdir($tmpBase);
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
