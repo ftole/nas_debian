@@ -269,9 +269,12 @@ class StorageService
         if ($rootDisk === '') {
             $rootDisk = basename($rootSrc);
         }
+        $rootDevs = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', $rootSrc])['stdout'] ?? '';
+        $rootDevSet = array_filter(preg_split('/\s+/', trim($rootDevs)));
+
         $parents = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', '/dev/' . $name])['stdout'] ?? '';
         foreach (preg_split('/\s+/', trim($parents)) as $p) {
-            if ($p !== '' && $p === $rootDisk) {
+            if ($p !== '' && ($p === $rootDisk || in_array($p, $rootDevSet, true))) {
                 return true;
             }
         }
@@ -507,6 +510,13 @@ class StorageService
      */
     public function startBtrfsScrub(string $path = '/srv/nas'): array
     {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return [
+                'success' => true,
+                'message' => 'Scrub BTRFS iniciado en ' . $path . ' (modo dev/test).',
+            ];
+        }
+
         $res = SystemService::sudo(['btrfs', 'scrub', 'start', $path]);
         if ($res['code'] !== 0) {
             return [
@@ -546,6 +556,13 @@ class StorageService
      */
     public function runTrim(string $path = '/srv/nas'): array
     {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return [
+                'success' => true,
+                'message' => $path . ': 10 GiB descartados via fstrim (modo dev/test).',
+            ];
+        }
+
         $res = SystemService::sudo(['fstrim', '-v', $path]);
         if ($res['code'] !== 0) {
             return [
