@@ -193,6 +193,11 @@ class SystemService
             return ['success' => false, 'error' => 'Servicio no permitido para gestión: ' . $service];
         }
 
+        // Prohibir la detención del servidor web o del intérprete PHP para evitar pérdida de acceso al panel
+        if ($action === 'stop' && preg_match('/^(nginx|php[\d\.]*-fpm)$/', $service)) {
+            return ['success' => false, 'error' => "La acción 'stop' no está permitida para $service para prevenir la pérdida de acceso al panel web."];
+        }
+
         $res = self::sudo(['systemctl', $action, $service]);
         if ($res['code'] !== 0) {
             return [
