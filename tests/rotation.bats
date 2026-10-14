@@ -46,7 +46,10 @@ EOF
 teardown() {
     export PATH="$ORIG_PATH"
     unset LOCK_DIR
-    rm -rf "$SANDBOX"
+    if [ -d "$SANDBOX" ]; then
+        chattr -R -i "$SANDBOX" 2>/dev/null || true
+        rm -rf "$SANDBOX"
+    fi
 }
 
 @test "la rotación elimina los snapshots más antiguos al superar la retención" {
