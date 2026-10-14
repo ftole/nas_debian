@@ -112,7 +112,7 @@ El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Acti
 | :--- | :--- | :--- | :--- |
 | **Espacio insuficiente (<2 GB o >95%)** | Aborta antes de transferir datos y registra alerta clara. | Chequeo preventivo `df -Pk`. | `failure_runners.bats` |
 | **`rsync` falla a mitad de copia** | Sale con código de error y destruye el staging temporal. | Trampa `trap cleanup EXIT TERM INT`. | `failure_runners.bats` |
-| **Host remoto se desconecta a mitad de copia** | Sale con error; no cuelga el kernel del NAS. | Montaje con `soft,timeo=30` y `noserverino`. | `failure_runners.bats` |
+| **Host remoto se desconecta a mitad de copia** | Sale con error; no cuelga el kernel del NAS. | Montaje con `soft,echo_interval=15` y `noserverino`. | `failure_runners.bats` |
 | **Credenciales rechazadas** | Falla con mensaje explícito sin reintentos infinitos. | Validación previa de salida de autenticación. | `failure_runners.bats` |
 | **Ejecución simultánea de la misma tarea** | La segunda ejecución se descarta sin error ("BACKUP OMITIDO"). | Cerrojo exclusivo con `flock`. | `failure_runners.bats` |
 | **Corte de energía / Apagón repentino** | El snapshot parcial queda en `.inprogress_*` y se purga al reiniciar; el histórico solo expone copias 100% íntegras. | Staging atómico + promoción `mv`. | Inspección en laboratorio |
