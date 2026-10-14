@@ -323,12 +323,18 @@ actualizar_desde_git() {
     fi
 
     if [ "$CURRENT_REV" == "$REMOTE_REV" ]; then
-        if [ -t 0 ] && command -v whiptail &>/dev/null; then
-            whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Aceptar >" \
-                --msgbox "✔ Tu versión ya está completamente actualizada a la última versión de GitHub.\n\nCommit: $(git log -1 --format='%h - %s (%cd)' --date=short)" 10 70
-        else
-            echo -e "${C_GREEN}✔ Ya tienes la última versión instalada ($(git log -1 --format='%h - %s (%cd)' --date=short)).${C_RESET}"
+        if [ "$FORCE_FLAG" != "1" ]; then
+            if [ -t 0 ] && command -v whiptail &>/dev/null; then
+                whiptail --title "${APP_TITLE:-Actualizador NAS}" --ok-button "< Aceptar >" \
+                    --msgbox "✔ Tu versión ya está completamente actualizada a la última versión de GitHub.\n\nCommit: $(git log -1 --format='%h - %s (%cd)' --date=short)" 10 70
+            else
+                echo -e "${C_GREEN}✔ Ya tienes la última versión instalada ($(git log -1 --format='%h - %s (%cd)' --date=short)).${C_RESET}"
+            fi
+            return 0
         fi
+        echo -e " [•] La versión coincide con el repositorio; ejecutando sincronizaciones de seguridad..."
+        _hook_post_actualizacion
+        echo -e "${C_GREEN}✔ Sincronizaciones aplicadas correctamente sobre la versión $(git log -1 --format='%h - %s').${C_RESET}"
         return 0
     fi
 
