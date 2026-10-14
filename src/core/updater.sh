@@ -133,24 +133,8 @@ _hook_post_actualizacion() {
         fi
     fi
 
-    local term_src=""
-    local candidate
-    for candidate in "$PROJECT_ROOT/src/core/nas-terminal" "$PROJECT_ROOT/src/bin/nas-terminal" "$PROJECT_ROOT/src/nas-terminal"; do
-        if [ -f "$candidate" ]; then
-            term_src="$candidate"
-            break
-        fi
-    done
-
     local term_dest="${NAS_TERMINAL_DEST:-/usr/local/sbin/nas-terminal}"
-    if [ -n "$term_src" ]; then
-        if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
-            mkdir -p "$(dirname "$term_dest")" 2>/dev/null || true
-            cp -f "$term_src" "$term_dest" 2>/dev/null || true
-            chmod 0755 "$term_dest" 2>/dev/null || true
-            chown root:root "$term_dest" 2>/dev/null || true
-        fi
-    elif [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_TERM_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_TERM_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
         local tmp_term
         tmp_term="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal.$$")"
         if awk '
