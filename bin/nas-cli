@@ -315,11 +315,11 @@ switch ($module) {
                 echo CliTheme::BOLD . "=== RESUMEN DE ALMACENAMIENTO (/srv/nas) ===" . CliTheme::RESET . PHP_EOL;
                 renderKeyValues([
                     'Ruta de Montaje' => $overview['path'] ?? '/srv/nas',
-                    'Capacidad Total' => ($overview['total_gb'] ?? 0) . " GB (" . number_format((float) ($overview['total_bytes'] ?? 0)) . " bytes)",
-                    'Espacio Usado'   => ($overview['used_gb'] ?? 0) . " GB (" . ($overview['usage_pct'] ?? 0) . "%)",
+                    'Capacidad Total' => ($overview['total_gb'] ?? 0) . " GB",
+                    'Espacio Usado'   => ($overview['used_gb'] ?? 0) . " GB (" . ($overview['usage_percent'] ?? 0) . "%)",
                     'Espacio Libre'   => ($overview['free_gb'] ?? 0) . " GB",
-                    'Filesystem'      => strtoupper((string) ($overview['fs_type'] ?? 'desconocido')),
-                    'Tipo de Medio'   => ($overview['is_hdd'] ?? true) ? 'HDD (Mecánico)' : 'SSD (Estado Sólido)',
+                    'Filesystem'      => strtoupper((string) ($overview['filesystem'] ?? 'desconocido')),
+                    'Tipo de Medio'   => $overview['device_type'] ?? (($overview['is_hdd'] ?? true) ? 'HDD (Mecánico)' : 'SSD (Estado Sólido)'),
                 ]);
                 break;
 
@@ -332,11 +332,11 @@ switch ($module) {
                 echo CliTheme::BOLD . "=== DISCOS Y PARTICIONES DETECTADOS ===" . CliTheme::RESET . PHP_EOL;
                 renderTable([
                     'name'        => 'DISCO',
-                    'path'        => 'RUTA',
+                    'device'      => 'RUTA',
                     'model'       => 'MODELO',
                     'size'        => 'TAMAÑO',
                     'type'        => 'TIPO',
-                    'mountpoint'  => 'MONTAJE',
+                    'mount'       => 'MONTAJE',
                     'in_use'      => 'EN USO',
                     'protected'   => 'PROTEGIDO',
                 ], $disks);
@@ -361,13 +361,20 @@ switch ($module) {
                 $disk = $extraArgs[0] ?? ($parsedOptions['disk'] ?? null);
                 $vg = $extraArgs[1] ?? ($parsedOptions['vg'] ?? null);
                 $lv = $extraArgs[2] ?? ($parsedOptions['lv'] ?? null);
-                $fs = $extraArgs[3] ?? ($parsedOptions['fs'] ?? 'ext4');
-                $size = $extraArgs[4] ?? ($parsedOptions['size'] ?? '100%FREE');
+                $arg3 = $extraArgs[3] ?? null;
+                $arg4 = $extraArgs[4] ?? null;
+                if ($arg3 !== null && preg_match('/^([0-9]+%(FREE|VG|PVS)?|[0-9]+[KMGTkmgt]B?)$/i', (string) $arg3)) {
+                    $size = $parsedOptions['size'] ?? $arg3;
+                    $fs = $parsedOptions['fs'] ?? ($arg4 ?? 'ext4');
+                } else {
+                    $fs = $parsedOptions['fs'] ?? ($arg3 ?? 'ext4');
+                    $size = $parsedOptions['size'] ?? ($arg4 ?? '100%FREE');
+                }
                 $confirm = $parsedOptions['confirm'] ?? ($extraArgs[5] ?? '');
                 if (!$disk || !$vg || !$lv) {
                     outError("Faltan parámetros. Uso: nas storage lvm <disco> <vg> <lv> [ext4|btrfs] [tamano] --confirm=SI-FORMATEAR", 1, null, $isJson);
                 }
-                $res = $svc->lvmCreate((string) $disk, (string) $vg, (string) $lv, (string) $fs, (string) $size, (string) $confirm);
+                $res = $svc->lvmCreate((string) $disk, (string) $vg, (string) $lv, (string) $size, (string) $fs, (string) $confirm);
                 if (empty($res['success'])) {
                     outError($res['error'] ?? 'Fallo al aprovisionar volumen LVM', 1, $res, $isJson);
                 }
@@ -413,7 +420,7 @@ switch ($module) {
                 break;
 
             case 'trim':
-                $res = $svc->startSsdTrim();
+                $res = $svc->runTrim();
                 if (empty($res['success'])) {
                     outError($res['error'] ?? 'Fallo al iniciar SSD TRIM', 1, $res, $isJson);
                 }
@@ -427,12 +434,12 @@ switch ($module) {
                 if (!$target) {
                     outError("Debes especificar el dispositivo o punto de montaje. Ejemplo: nas storage unmount /srv/nas", 1, null, $isJson);
                 }
-                $res = $svc->unmountDevice((string) $target);
-                if (empty($res['success'])) {
-                    outError($res['error'] ?? 'Fallo al desmontar el almacenamiento', 1, $res, $isJson);
+                $unmounted = $svc->unmountDevice((string) $target);
+                if (!$unmounted) {
+                    outError('Fallo al desmontar el almacenamiento', 1, null, $isJson);
                 }
                 AuditService::log('storage_unmount', (string) $target, 'SUCCESS');
-                outSuccess($res['message'] ?? 'Dispositivo desmontado con éxito', $res, $isJson);
+                outSuccess('Dispositivo desmontado con éxito', null, $isJson);
                 break;
 
             default:
@@ -638,9 +645,12 @@ switch ($module) {
                 }
 
                 $res = $svc->createTask([
+                    'id'            => $taskId,
                     'task_id'       => $taskId,
                     'proto'         => $proto,
+                    'ip'            => $target,
                     'target'        => $target,
+                    'share'         => $path,
                     'path'          => $path,
                     'cron'          => $cron,
                     'retention'     => $retention,
@@ -667,7 +677,9 @@ switch ($module) {
                 }
                 $res = $svc->testConnection([
                     'proto'    => $proto,
+                    'ip'       => $target,
                     'target'   => $target,
+                    'share'    => $path,
                     'path'     => $path,
                     'user'     => $parsedOptions['user'] ?? '',
                     'password' => $parsedOptions['password'] ?? '',
@@ -770,7 +782,7 @@ switch ($module) {
                     'size_bytes'    => 'TAMAÑO (BYTES)',
                     'deleted_by'    => 'ELIMINADO POR',
                     'deleted_at'    => 'FECHA ELIMINACIÓN',
-                ], $trash);
+                ], $trash['items'] ?? []);
                 break;
 
             case 'count':
