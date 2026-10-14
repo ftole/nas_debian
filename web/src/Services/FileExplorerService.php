@@ -969,8 +969,27 @@ class FileExplorerService
             return;
         }
 
+        $realTargetDir = realpath($targetDir);
+        if ($realTargetDir === false) {
+            http_response_code(404);
+            echo 'Directorio no encontrado.';
+            return;
+        }
+
+        $realBaseDir = realpath($this->baseDir);
+        if (trim($subpath, '/\\') === '' || ($realBaseDir !== false && $realTargetDir === $realBaseDir)) {
+            http_response_code(400);
+            echo 'La descarga comprimida de la raíz del almacenamiento (/srv/nas) no está permitida.';
+            return;
+        }
+
         $folderName = basename($targetDir);
         $zipFile = sys_get_temp_dir() . '/nas_export_' . uniqid() . '.zip';
+        register_shutdown_function(static function () use ($zipFile): void {
+            if (file_exists($zipFile)) {
+                @unlink($zipFile);
+            }
+        });
 
         $zip = new ZipArchive();
         if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
@@ -987,13 +1006,6 @@ class FileExplorerService
         $totalSize = 0;
         $maxZipSize = 500 * 1024 * 1024; // Límite de seguridad: 500 MB
         $addedEntries = 0;
-
-        $realTargetDir = realpath($targetDir);
-        if ($realTargetDir === false) {
-            http_response_code(404);
-            echo 'Directorio no encontrado.';
-            return;
-        }
 
         foreach ($files as $file) {
             if (!$file->isDir()) {
@@ -1101,10 +1113,15 @@ class FileExplorerService
 
     private function deleteDirectoryRecursive(string $dir): bool
     {
+        if (is_link($dir)) {
+            return @unlink($dir);
+        }
         $files = array_diff(scandir($dir) ?: [], ['.', '..']);
         foreach ($files as $file) {
             $path = $dir . '/' . $file;
-            if (is_dir($path)) {
+            if (is_link($path)) {
+                @unlink($path);
+            } elseif (is_dir($path)) {
                 $this->deleteDirectoryRecursive($path);
             } else {
                 @unlink($path);
