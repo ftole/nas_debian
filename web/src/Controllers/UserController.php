@@ -243,6 +243,11 @@ class UserController
             return;
         }
 
+        if (!$this->isAdminCaller() && $this->targetIsPrivileged($username)) {
+            Response::error('No tienes permisos para modificar grupos de cuentas administrativas.', 403);
+            return;
+        }
+
         $res = $action === 'add'
             ? $this->user->addUserToGroup($username, $group)
             : $this->user->removeUserFromGroup($username, $group);
