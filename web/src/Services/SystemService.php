@@ -291,8 +291,7 @@ class SystemService
         $lines = [];
 
         if (file_exists($path) && is_readable($path)) {
-            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+            $lines = $this->tailFileLines($path, max($limit * 3, 300), $query);
         } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
             $lines = [
                 '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|openat|ok|r|Balance_General_2026.xlsx',
@@ -442,8 +441,7 @@ class SystemService
         $lines = [];
 
         if (file_exists($path) && is_readable($path)) {
-            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+            $lines = $this->tailFileLines($path, max($limit * 3, 300), $query);
         } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
             $lines = [
                 '[2026-10-05 10:14:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {"role":"Administrador"}',
@@ -552,8 +550,7 @@ class SystemService
         $lines = [];
 
         if (file_exists($path) && is_readable($path)) {
-            $rawLines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-            $lines = array_reverse(array_slice($rawLines, -max($limit * 3, 300)));
+            $lines = $this->tailFileLines($path, max($limit * 3, 300), $query);
         } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
             $lines = [
                 '[2026-10-05 23:00:01] [win_contabilidad] [LOCK_ACQUIRED] [info] Bloqueo de ejecucion exclusivo adquirido',
@@ -777,6 +774,79 @@ class SystemService
         }
 
         return ['human' => $m, 'level' => 'info'];
+    }
+
+    /**
+     * Lee las últimas líneas de un archivo de forma eficiente mediante fseek hacia atrás
+     * en bloques de tamaño configurable ($bufferSize), minimizando el consumo de RAM (< 256 KB).
+     *
+     * @return array<string> Líneas en orden cronológico inverso (la más reciente primero)
+     */
+    private function tailFileLines(string $filepath, int $limit, ?string $query = null, int $bufferSize = 65536): array
+    {
+        if (!file_exists($filepath) || !is_readable($filepath)) {
+            return [];
+        }
+
+        $fp = @fopen($filepath, 'rb');
+        if (!$fp) {
+            return [];
+        }
+
+        $pos = @filesize($filepath);
+        if ($pos === false || $pos === 0) {
+            fclose($fp);
+            return [];
+        }
+
+        $lines = [];
+        $leftover = '';
+        $qLower = ($query !== null && trim($query) !== '') ? $this->toLower(trim($query)) : null;
+
+        while ($pos > 0 && count($lines) < $limit) {
+            $readSize = min($pos, $bufferSize);
+            $pos -= $readSize;
+            fseek($fp, $pos, SEEK_SET);
+            $chunk = fread($fp, $readSize);
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+
+            $chunk .= $leftover;
+            $chunkLines = explode("\n", $chunk);
+
+            if ($pos > 0) {
+                $leftover = array_shift($chunkLines);
+            } else {
+                $leftover = '';
+            }
+
+            for ($i = count($chunkLines) - 1; $i >= 0; $i--) {
+                $line = trim($chunkLines[$i], "\r\n");
+                if ($line === '') {
+                    continue;
+                }
+                if ($qLower !== null && !str_contains($this->toLower($line), $qLower)) {
+                    continue;
+                }
+                $lines[] = $line;
+                if (count($lines) >= $limit) {
+                    break;
+                }
+            }
+        }
+
+        if ($pos === 0 && $leftover !== '' && count($lines) < $limit) {
+            $line = trim($leftover, "\r\n");
+            if ($line !== '') {
+                if ($qLower === null || str_contains($this->toLower($line), $qLower)) {
+                    $lines[] = $line;
+                }
+            }
+        }
+
+        fclose($fp);
+        return $lines;
     }
 
     private function toLower(string $str): string
