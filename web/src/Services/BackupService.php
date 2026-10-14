@@ -574,12 +574,18 @@ class BackupService
 
     private function removeDirectoryRecursive(string $dir): void
     {
+        if (is_link($dir)) {
+            @unlink($dir);
+            return;
+        }
         $items = scandir($dir);
         if ($items === false) return;
         foreach ($items as $item) {
             if ($item === '.' || $item === '..') continue;
             $path = $dir . '/' . $item;
-            if (is_dir($path)) {
+            if (is_link($path)) {
+                @unlink($path);
+            } elseif (is_dir($path)) {
                 $this->removeDirectoryRecursive($path);
             } else {
                 @unlink($path);
