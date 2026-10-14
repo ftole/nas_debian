@@ -281,13 +281,13 @@ cleanup() {
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
-        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
         chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+        if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
     fi
     exit "$status"
 }
@@ -337,7 +337,7 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-a --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
@@ -351,15 +351,15 @@ fi
 log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
 fi
-btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
-btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true; fi
 log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 umount "$MOUNT_POINT" 2>/dev/null || true
@@ -373,7 +373,7 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando y eliminando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
-        btrfs property set "$old" ro false 2>/dev/null || true
+        if btrfs subvolume show "$old" >/dev/null 2>&1; then btrfs property set "$old" ro false 2>/dev/null || true; fi
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
         log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
@@ -550,13 +550,13 @@ cleanup() {
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
-        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
         chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+        if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
     fi
     exit "$status"
 }
@@ -589,7 +589,7 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
@@ -611,15 +611,15 @@ fi
 log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
 fi
-btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
-btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true; fi
 log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -630,7 +630,7 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
-        btrfs property set "$old" ro false 2>/dev/null || true
+        if btrfs subvolume show "$old" >/dev/null 2>&1; then btrfs property set "$old" ro false 2>/dev/null || true; fi
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
         log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
@@ -744,13 +744,13 @@ cleanup() {
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         echo "=== se descarta el snapshot parcial ===" >> "$LOG_FILE"
         log_backup_event "BACKUP_FAILED" "err" "Respaldo fallido; se descarta el snapshot parcial"
-        btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+        if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
         chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
         rm -rf "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
     fi
     if [ -n "${LAST_SNAPSHOT:-}" ] && [ -d "$LAST_SNAPSHOT" ]; then
         chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-        btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+        if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
     fi
     exit "$status"
 }
@@ -783,7 +783,7 @@ fi
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
 RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
-    btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
     RSYNC_OPTS+=("--link-dest=$LAST_SNAPSHOT")
     echo " -> Deduplicando con hardlinks contra: $(basename "$LAST_SNAPSHOT")" >> "$LOG_FILE"
@@ -798,15 +798,15 @@ fi
 log_backup_event "RSYNC_COMPLETED" "info" "Sincronizacion rsync finalizada correctamente"
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     chattr -R +i "$LAST_SNAPSHOT" 2>/dev/null || true
-    btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true
+    if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro true 2>/dev/null || true; fi
 fi
-btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro false 2>/dev/null || true; fi
 chattr -R -i "$FINAL_SNAPSHOT" 2>/dev/null || true
 rm -rf "$FINAL_SNAPSHOT"
 mv "$STAGE_SNAPSHOT" "$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
 chattr -R +i "$FINAL_SNAPSHOT" 2>/dev/null || true
-btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true
+if btrfs subvolume show "$FINAL_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$FINAL_SNAPSHOT" ro true 2>/dev/null || true; fi
 log_backup_event "SNAPSHOT_PROMOTED" "notice" "Snapshot promovido: $FINAL_SNAPSHOT"
 
 SNAPSHOT_COUNT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | wc -l)
@@ -817,7 +817,7 @@ if [ "$SNAPSHOT_COUNT" -gt "$RETENTION" ]; then
             continue
         fi
         echo " -> Rotando snapshot antiguo: $(basename "$old")" >> "$LOG_FILE"
-        btrfs property set "$old" ro false 2>/dev/null || true
+        if btrfs subvolume show "$old" >/dev/null 2>&1; then btrfs property set "$old" ro false 2>/dev/null || true; fi
         chattr -R -i "$old" 2>/dev/null || true
         rm -rf "$old"
         log_backup_event "ROTATION_PRUNED" "info" "Rotado snapshot antiguo: $(basename "$old")"
