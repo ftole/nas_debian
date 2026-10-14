@@ -1169,6 +1169,80 @@ assertTrue(file_exists($targetDir . '/important.txt'), 'BackupService::removeDir
 @rmdir($targetDir);
 @rmdir($tmpBase);
 
+// 9. SystemService::tailFileLines lectura eficiente en bloques y filtrado
+$tmpLargeLog = tempnam(sys_get_temp_dir(), 'nas_tail_test_');
+$logData = [];
+for ($i = 1; $i <= 300; $i++) {
+    $logData[] = "[2026-10-14 12:00:$i] [task_$i] [EVENT_$i] Mensaje de prueba linea $i " . ($i === 250 ? 'MARCADOR_ESPECIAL' : '');
+}
+file_put_contents($tmpLargeLog, implode("\n", $logData) . "\n");
+
+$sysRefl = new \ReflectionClass(SystemService::class);
+$tailMethod = $sysRefl->getMethod('tailFileLines');
+$tailMethod->setAccessible(true);
+$sysInst = new SystemService();
+
+$memBefore = memory_get_usage();
+$tailedLines = $tailMethod->invoke($sysInst, $tmpLargeLog, 20, null, 1024);
+$memAfter = memory_get_usage();
+$memDelta = $memAfter - $memBefore;
+
+assertTrue(is_array($tailedLines) && count($tailedLines) === 20, 'tailFileLines retorna exactamente el límite de líneas solicitadas');
+assertTrue(str_contains($tailedLines[0], 'linea 300'), 'tailFileLines retorna las líneas en orden cronológico inverso (la más reciente primero)');
+assertTrue(str_contains($tailedLines[19], 'linea 281'), 'tailFileLines preserva continuidad de las últimas líneas');
+assertTrue($memDelta < 262144, 'tailFileLines opera con consumo de memoria acotado (< 256 KB RAM)');
+
+$filteredTailed = $tailMethod->invoke($sysInst, $tmpLargeLog, 10, 'MARCADOR_ESPECIAL', 1024);
+assertTrue(count($filteredTailed) === 1 && str_contains($filteredTailed[0], 'MARCADOR_ESPECIAL'), 'tailFileLines filtra correctamente por query');
+
+@unlink($tmpLargeLog);
+
+// 10. BackupService::readTaskLog lectura de últimos 64 KB con fseek
+$tmpTaskLog = tempnam(sys_get_temp_dir(), 'nas_tasklog_test_');
+$chunk100k = str_repeat("LINEA_RELLENO_BACKUP_HISTORICO_1234567890\n", 2500); // ~100 KB
+$tailContent = "[2026-10-14 23:00:00] [INICIANDO BACKUP] Tarea iniciada\n[2026-10-14 23:00:15] BACKUP FINALIZADO CON ÉXITO\n";
+file_put_contents($tmpTaskLog, $chunk100k . $tailContent);
+
+$bkpSvc = new BackupService();
+$readChunk = $bkpSvc->readTaskLog($tmpTaskLog, 4096);
+assertTrue(strlen($readChunk) <= 4096, 'readTaskLog respeta el tamaño máximo en bytes especificado');
+assertTrue(str_contains($readChunk, 'BACKUP FINALIZADO CON ÉXITO'), 'readTaskLog incluye el segmento final del archivo');
+assertTrue($bkpSvc->classifyLatestRun($readChunk) === 'ok', 'classifyLatestRun clasifica como ok a partir de readTaskLog');
+
+@unlink($tmpTaskLog);
+
+// 11. SambaService::updateGlobalConfig y DomainService::syncSambaAdConfig
+$tmpSmbConf = tempnam(sys_get_temp_dir(), 'nas_smb_ad_');
+file_put_contents($tmpSmbConf, "[global]\n   workgroup = WORKGROUP\n   server role = standalone server\n   security = user\n");
+
+$sambaAd = new SambaService($tmpSmbConf);
+$updGlobalRes = $sambaAd->updateGlobalConfig(['netbios name' => 'SRV-TEST']);
+assertTrue($updGlobalRes['success'], 'SambaService::updateGlobalConfig actualiza directivas en [global]');
+
+$origDomainSmbPath = DomainService::$smbConfPath;
+DomainService::$smbConfPath = $tmpSmbConf;
+$domainSvc = new DomainService();
+
+// Unión al dominio
+$joinRes = $domainSvc->syncSambaAdConfig(true, 'corp.example.com');
+assertTrue($joinRes['success'], 'DomainService::syncSambaAdConfig aplica configuración de dominio');
+$joinedConf = file_get_contents($tmpSmbConf);
+assertTrue(str_contains($joinedConf, 'security = ads'), 'syncSambaAdConfig establece security = ads');
+assertTrue(str_contains($joinedConf, 'realm = CORP.EXAMPLE.COM'), 'syncSambaAdConfig establece realm en mayúsculas');
+assertTrue(str_contains($joinedConf, 'workgroup = CORP'), 'syncSambaAdConfig establece workgroup con el NetBIOS del dominio');
+assertTrue(!str_contains($joinedConf, 'server role'), 'syncSambaAdConfig elimina server role para evitar conflicto con ads');
+
+// Desvinculación del dominio
+$leaveRes = $domainSvc->syncSambaAdConfig(false);
+assertTrue($leaveRes['success'], 'DomainService::syncSambaAdConfig restaura configuración standalone');
+$leavedConf = file_get_contents($tmpSmbConf);
+assertTrue(str_contains($leavedConf, 'security = user'), 'syncSambaAdConfig restaura security = user al desvincularse');
+assertTrue(str_contains($leavedConf, 'server role = standalone server'), 'syncSambaAdConfig restaura server role = standalone server');
+assertTrue(!str_contains($leavedConf, 'realm ='), 'syncSambaAdConfig elimina la directiva realm al desvincularse');
+
+DomainService::$smbConfPath = $origDomainSmbPath;
+@unlink($tmpSmbConf);
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
