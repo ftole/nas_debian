@@ -251,6 +251,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           <span class="nav-badge" id="badge-users">...</span>
         </div>
 
+<?php if ($isAdmin): ?>
         <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-services"></use></svg>
@@ -258,6 +259,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           </div>
           <span class="nav-badge" id="badge-services">OK</span>
         </div>
+<?php endif; ?>
 
         <div class="nav-item <?= $activeView === 'diagnostics' ? 'active' : '' ?>" data-view="diagnostics">
           <div class="nav-item-left">
@@ -517,6 +519,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         </div>
       </section>
 
+<?php if ($isAdmin): ?>
       <!-- 3. ALMACENAMIENTO (STORAGE) -->
       <section id="view-storage" class="view-section <?= $activeView === 'storage' ? 'active' : '' ?>">
         <div class="page-head">
@@ -560,6 +563,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           </div>
         </div>
       </section>
+<?php endif; ?>
 
       <!-- 4. REDES (NETWORKING) -->
       <section id="view-networking" class="view-section <?= $activeView === 'networking' ? 'active' : '' ?>">
@@ -596,6 +600,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         </div>
       </section>
 
+<?php if ($isAdmin): ?>
       <!-- 5. SERVICIOS (SERVICES) -->
       <section id="view-services" class="view-section <?= $activeView === 'services' ? 'active' : '' ?>">
         <div class="page-head">
@@ -623,6 +628,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           </div>
         </div>
       </section>
+<?php endif; ?>
 
       <!-- EXPLORADOR DE ARCHIVOS (FILES) -->
       <section id="view-files" class="view-section <?= $activeView === 'files' ? 'active' : '' ?>">
@@ -775,6 +781,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         </div>
       </section>
 
+<?php if ($isAdmin): ?>
       <!-- TERMINAL WEB REAL -->
       <section id="view-terminal" class="view-section <?= $activeView === 'terminal' ? 'active' : '' ?>">
         <div class="page-head">
@@ -817,6 +824,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
       </section>
+<?php endif; ?>
 
       <!-- 7. REDES COMPARTIDAS (SHARES) -->
       <section id="view-shares" class="view-section <?= $activeView === 'shares' ? 'active' : '' ?>">
@@ -993,6 +1001,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         </div>
       </section>
 
+<?php if ($isAdmin): ?>
       <!-- 10. ACTUALIZACIONES (UPDATES) -->
       <section id="view-updates" class="view-section <?= $activeView === 'updates' ? 'active' : '' ?>">
         <div class="page-head">
@@ -1120,6 +1129,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
       </section>
+<?php endif; ?>
 
       <!-- 13. DIAGNÓSTICO EN VIVO (DIAGNOSTICS) -->
       <section id="view-diagnostics" class="view-section <?= $activeView === 'diagnostics' ? 'active' : '' ?>">
