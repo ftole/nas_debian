@@ -316,7 +316,8 @@ class SambaService
     }
 
     /**
-     * Agrega, actualiza o elimina directivas en la sección [global] de smb.conf.
+     * Agrega, actualiza o elimina directivas en la sección [global] de smb.conf de forma
+     * insensible a mayúsculas/minúsculas para evitar duplicados y conflictos de sintaxis.
      */
     public function updateGlobalConfig(array $setProps, array $removeKeys = []): array
     {
@@ -325,12 +326,24 @@ class SambaService
             $sections['global'] = [];
         }
 
-        foreach ($setProps as $k => $v) {
-            $sections['global'][$k] = $v;
+        $cleanRemove = array_map(fn($k) => strtolower(trim((string) $k)), $removeKeys);
+
+        // Eliminar claves solicitadas (comparación insensible a mayúsculas/minúsculas)
+        foreach (array_keys($sections['global']) as $existingKey) {
+            if (in_array(strtolower(trim((string) $existingKey)), $cleanRemove, true)) {
+                unset($sections['global'][$existingKey]);
+            }
         }
 
-        foreach ($removeKeys as $k) {
-            unset($sections['global'][$k]);
+        // Establecer o actualizar claves asegurando no duplicar por variaciones de formato/caja
+        foreach ($setProps as $k => $v) {
+            $kLower = strtolower(trim((string) $k));
+            foreach (array_keys($sections['global']) as $existingKey) {
+                if (strtolower(trim((string) $existingKey)) === $kLower) {
+                    unset($sections['global'][$existingKey]);
+                }
+            }
+            $sections['global'][$k] = $v;
         }
 
         return $this->saveSectionsToConf($sections);
