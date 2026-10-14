@@ -199,19 +199,6 @@ class SambaService
                 $allUsers = array_unique(array_merge($cleanGroups, [$wEntry]));
                 $shareProps['valid users'] = implode(' ', $allUsers);
                 $shareProps['write list'] = trim($wEntry . ' @grp_samba');
-
-                // Configurar ACLs POSIX para que los nuevos archivos hereden lectura al resto
-                if (!empty($wgClean)) {
-                    SystemService::sudo(['setfacl', '-R', '-m', "g:$wgClean:rwx", $path]);
-                    SystemService::sudo(['setfacl', '-R', '-d', '-m', "g:$wgClean:rwx", $path]);
-                }
-                foreach ($cleanGroups as $rg) {
-                    $rgClean = ltrim($rg, '@');
-                    if ($rgClean !== $wgClean) {
-                        SystemService::sudo(['setfacl', '-R', '-m', "g:$rgClean:r-x", $path]);
-                        SystemService::sudo(['setfacl', '-R', '-d', '-m', "g:$rgClean:r-x", $path]);
-                    }
-                }
                 break;
 
             case 3: // Solo Lectura Estricta
@@ -329,6 +316,27 @@ class SambaService
     }
 
     /**
+     * Agrega, actualiza o elimina directivas en la sección [global] de smb.conf.
+     */
+    public function updateGlobalConfig(array $setProps, array $removeKeys = []): array
+    {
+        $sections = $this->parseSmbConf();
+        if (!isset($sections['global'])) {
+            $sections['global'] = [];
+        }
+
+        foreach ($setProps as $k => $v) {
+            $sections['global'][$k] = $v;
+        }
+
+        foreach ($removeKeys as $k) {
+            unset($sections['global'][$k]);
+        }
+
+        return $this->saveSectionsToConf($sections);
+    }
+
+    /**
      * Escribe las secciones a un archivo temporal, comprueba sintaxis con testparm y
      * promueve atómicamente a /etc/samba/smb.conf.
      */
@@ -375,13 +383,24 @@ class SambaService
                 ];
             }
 
-            // Copiar a /etc/samba/smb.conf con sudo
-            $cpRes = SystemService::sudo(['cp', $tmpFile, $this->confPath]);
-            @unlink($tmpFile);
-
-            if ($cpRes['code'] !== 0) {
-                return ['success' => false, 'error' => 'Error al escribir en ' . $this->confPath . ': ' . $cpRes['stderr']];
+            // Si la ruta destino tiene permisos de escritura directos (ej. pruebas o tmp),
+            // usar copy directamente; de lo contrario invocar sudo cp.
+            if (is_writable($this->confPath) || (!file_exists($this->confPath) && is_writable(dirname($this->confPath)))) {
+                if (!@copy($tmpFile, $this->confPath)) {
+                    $cpRes = SystemService::sudo(['cp', $tmpFile, $this->confPath]);
+                    if ($cpRes['code'] !== 0) {
+                        @unlink($tmpFile);
+                        return ['success' => false, 'error' => 'Error al escribir en ' . $this->confPath . ': ' . $cpRes['stderr']];
+                    }
+                }
+            } else {
+                $cpRes = SystemService::sudo(['cp', $tmpFile, $this->confPath]);
+                if ($cpRes['code'] !== 0) {
+                    @unlink($tmpFile);
+                    return ['success' => false, 'error' => 'Error al escribir en ' . $this->confPath . ': ' . $cpRes['stderr']];
+                }
             }
+            @unlink($tmpFile);
 
             return ['success' => true];
         } finally {
@@ -627,19 +646,23 @@ class SambaService
         // El panel web accede por Samba; se concede a www-data para tareas internas.
         $levels['u:www-data'] = 'write';
 
-        $applied = 0;
+        $aclEntries = [];
         foreach ($levels as $token => $level) {
             $perm = ($level === 'write') ? 'rwx' : 'r-x';
             if (str_starts_with($token, '@')) {
-                $entry = 'g:' . ltrim($token, '@') . ':' . $perm;
+                $aclEntries[] = 'g:' . ltrim($token, '@') . ':' . $perm;
             } elseif (str_starts_with($token, 'u:')) {
-                $entry = $token . ':' . $perm;
+                $aclEntries[] = $token . ':' . $perm;
             } else {
-                $entry = 'u:' . $token . ':' . $perm;
+                $aclEntries[] = 'u:' . $token . ':' . $perm;
             }
-            SystemService::sudo(['setfacl', '-R', '-m', $entry, $path]);
-            SystemService::sudo(['setfacl', '-R', '-d', '-m', $entry, $path]);
-            $applied++;
+        }
+
+        $applied = count($aclEntries);
+        if ($applied > 0) {
+            $aclSpec = implode(',', $aclEntries);
+            SystemService::sudo(['setfacl', '-R', '-m', $aclSpec, $path]);
+            SystemService::sudo(['setfacl', '-R', '-d', '-m', $aclSpec, $path]);
         }
 
         // Permitir la travesía de /srv/nas a cualquier cuenta autenticada.
