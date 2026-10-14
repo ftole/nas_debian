@@ -138,7 +138,7 @@ class BackupService
      */
     public function createTask(array $data): array
     {
-        $taskId = strtolower(trim($data['id'] ?? ''));
+        $taskId = strtolower(trim($data['id'] ?? ($data['task_id'] ?? '')));
         $proto = strtolower(trim($data['proto'] ?? 'cifs'));
         $cronExpr = trim($data['cron'] ?? '0 23 * * *');
         $retention = max(1, (int) ($data['retention'] ?? 30));
@@ -165,8 +165,8 @@ class BackupService
         $runnerContent = '';
 
         if ($proto === 'cifs') {
-            $ip = trim($data['ip'] ?? '');
-            $share = trim($data['share'] ?? '');
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ''));
+            $share = trim($data['share'] ?? ($data['path'] ?? ''));
             $user = trim($data['user'] ?? 'Administrador');
             $pass = $data['password'] ?? '';
 
@@ -189,10 +189,10 @@ class BackupService
             }
             $runnerContent = $this->buildCifsRunner($taskId, $ip, $share, $credFile, $retention);
         } elseif ($proto === 'ssh') {
-            $ip = trim($data['ip'] ?? '');
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ''));
             $port = (int) ($data['port'] ?? 22);
             $user = trim($data['user'] ?? 'root');
-            $path = trim($data['path'] ?? '/');
+            $path = trim($data['path'] ?? ($data['share'] ?? '/'));
             $pass = $data['password'] ?? '';
 
             if (empty($ip) || empty($path)) {
@@ -205,7 +205,7 @@ class BackupService
             }
             $runnerContent = $this->buildSshRunner($taskId, $ip, $port, $user, $path, $credFile, $retention);
         } elseif ($proto === 'local') {
-            $path = trim($data['path'] ?? '/srv/nas/SISTEMAS');
+            $path = trim($data['path'] ?? ($data['source_path'] ?? ($data['share'] ?? '/srv/nas/SISTEMAS')));
             $runnerContent = $this->buildLocalRunner($taskId, $path, $retention);
         } else {
             return ['success' => false, 'error' => 'Protocolo de backup no soportado.'];
@@ -257,6 +257,9 @@ class BackupService
         if ($deleteBackups) {
             $dir = $this->bkpRoot . '/' . $taskId;
             if (is_dir($dir) && $dir !== $this->bkpRoot) {
+                if (DIRECTORY_SEPARATOR !== '\\') {
+                    SystemService::sudo(['chattr', '-R', '-i', $dir]);
+                }
                 if (is_writable($this->bkpRoot)) {
                     $this->removeDirectoryRecursive($dir);
                 } else {
