@@ -143,6 +143,30 @@ setup() {
     [[ "$output" =~ "Faltan parámetros obligatorios" ]]
 }
 
+@test "nas-cli storage trim --json retorna success en modo test" {
+    run php bin/nas-cli storage trim --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli storage scrub --json retorna success en modo test" {
+    run php bin/nas-cli storage scrub --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli storage subvol --json retorna listado valido" {
+    run php bin/nas-cli storage subvol --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli trash list --json retorna listado estructurado" {
+    run php bin/nas-cli trash list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
 @test "nas-cli comando no reconocido rechaza y muestra ayuda con codigo 0" {
     run php bin/nas-cli modulo_inexistente_xyz
     [ "$status" -eq 0 ]
