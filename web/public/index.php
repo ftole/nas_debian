@@ -75,8 +75,8 @@ $router->get('/api/auth/me', [AuthController::class, 'me']);
 $router->get('/', [DashboardController::class, 'index']);
 
 $modules = [
-    'dashboard', 'logs', 'storage', 'networking', 'services', 'terminal',
-    'shares', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
+    'dashboard', 'files', 'logs', 'storage', 'networking', 'services', 'terminal',
+    'shares', 'permissions', 'backups', 'users', 'diagnostics', 'updates', 'applications', 'domain'
 ];
 foreach ($modules as $mod) {
     $router->get('/' . $mod, function (Request $req) use ($mod): void {
