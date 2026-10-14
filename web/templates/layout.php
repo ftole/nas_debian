@@ -30,6 +30,9 @@ $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? '
 $role = (string) ($_SESSION['nas_user']['role'] ?? 'operator');
 $isSuper = !empty($_SESSION['nas_user']['is_superadmin']) || $role === 'superadmin';
 $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
+if (!$isAdmin && in_array($activeView, ['storage', 'services', 'terminal', 'domain', 'updates', 'applications'], true)) {
+    $activeView = 'dashboard';
+}
 $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? ($isAdmin ? 'Administrador' : 'Operador Web')), ENT_QUOTES, 'UTF-8');
 $serverRole = \App\Services\SystemService::getServerRole();
 $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
