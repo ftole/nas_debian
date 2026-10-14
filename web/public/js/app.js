@@ -1880,15 +1880,6 @@ async function confirmRebootServer() {
 // ==============================================================================
 // 13. Utilidades Generales
 // ==============================================================================
-function escapeHtml(str) {
-  if (typeof str !== 'string') return String(str ?? '');
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
 
 // ==============================================================================
 // 14. Módulos Adicionales: Redes, Terminal, Aplicaciones, Dominio y Diagnósticos
@@ -2479,7 +2470,16 @@ async function uploadFiles(files) {
                 reject(err);
               }
             } else {
-              reject(new Error(`Fallo HTTP ${xhr.status}: ${xhr.statusText}`));
+              let msg = `Fallo HTTP ${xhr.status}: ${xhr.statusText}`;
+              try {
+                const errResp = JSON.parse(xhr.responseText);
+                if (errResp.message || errResp.error) {
+                  msg = errResp.message || errResp.error;
+                }
+              } catch (e) {
+                // Conservar mensaje HTTP por defecto si no es JSON
+              }
+              reject(new Error(msg));
             }
           };
 
