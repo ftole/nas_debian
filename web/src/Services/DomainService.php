@@ -226,7 +226,8 @@ class DomainService
                 'workgroup' => $workgroup,
             ], ['server role']);
         } else {
-            $workgroup = SystemService::getWorkgroup();
+            $envWg = getenv('NAS_WORKGROUP');
+            $workgroup = ($envWg !== false && trim((string) $envWg) !== '') ? strtoupper(trim((string) $envWg)) : 'TEAM-JOFRATO';
             $res = $samba->updateGlobalConfig([
                 'server role' => 'standalone server',
                 'security' => 'user',
