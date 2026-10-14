@@ -134,6 +134,11 @@ class SambaService
             return ['success' => false, 'error' => 'El nombre del recurso debe tener entre 1 y 60 caracteres alfanuméricos.'];
         }
 
+        $lower = strtolower(rtrim($name, '$'));
+        if (in_array(strtolower($name), ['global', 'printers', 'print$'], true) || in_array($lower, ['global', 'printers'], true)) {
+            return ['success' => false, 'error' => "El nombre de recurso [$name] está reservado por el sistema."];
+        }
+
         if ($isHidden && !str_ends_with($name, '$')) {
             $name .= '$';
         }
@@ -393,6 +398,11 @@ class SambaService
      */
     public function updateShare(string $name, array $data): array
     {
+        $lower = strtolower(rtrim($name, '$'));
+        if (in_array(strtolower($name), ['global', 'printers', 'print$'], true) || in_array($lower, ['global', 'printers'], true)) {
+            return ['success' => false, 'error' => "La sección [$name] está protegida por el sistema y no puede modificarse como recurso compartido."];
+        }
+
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "Recurso [$name] actualizado (modo dev)."];
         }
@@ -405,7 +415,19 @@ class SambaService
         $props = $sections[$name];
         $scheme = (int) ($data['scheme'] ?? 0);
         $comment = trim((string) ($data['comment'] ?? ''));
-        $groups = $this->cleanGroupTokens((array) ($data['groups'] ?? []));
+
+        // Separar tokens de grupo (@grupo) de los usuarios explícitos (suelto)
+        $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+        $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+        $validUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@')));
+        $writeUsers = array_values(array_filter($write, fn($t) => !str_starts_with($t, '@')));
+
+        if (array_key_exists('groups', $data)) {
+            $groups = $this->cleanGroupTokens((array) $data['groups']);
+        } else {
+            // Preservar grupos existentes si no se suministran
+            $groups = array_values(array_filter($valid, fn($t) => str_starts_with($t, '@')));
+        }
         // Los administradores (grp_samba) conservan acceso a todos los recursos
         if (!in_array('@grp_samba', $groups, true)) {
             $groups[] = '@grp_samba';
@@ -413,12 +435,6 @@ class SambaService
         $writeGroup = ltrim(trim((string) ($data['write_group'] ?? '')), '@');
         $writeEntry = $writeGroup !== '' ? '@' . $writeGroup : '';
         $isHidden = !empty($data['hidden']);
-
-        // Separar tokens de grupo (@grupo) de los usuarios explícitos (suelto)
-        $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
-        $write = $this->splitTokens((string) ($props['write list'] ?? ''));
-        $validUsers = array_values(array_filter($valid, fn($t) => !str_starts_with($t, '@')));
-        $writeUsers = array_values(array_filter($write, fn($t) => !str_starts_with($t, '@')));
 
         if ($comment !== '') {
             $props['comment'] = $comment;
@@ -484,11 +500,17 @@ class SambaService
      */
     public function setAccess(string $share, string $kind, string $target, string $level): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
-            return ['success' => true, 'message' => "Acceso actualizado en [$share] (modo dev)."];
-        }
+        $level = match (strtolower(trim($level))) {
+            'ro' => 'read',
+            'rw' => 'write',
+            default => strtolower(trim($level)),
+        };
         if (!in_array($level, ['none', 'read', 'write'], true)) {
-            return ['success' => false, 'error' => 'Nivel de acceso inválido.'];
+            return ['success' => false, 'error' => 'Nivel de acceso inválido (use read/write/none o ro/rw).'];
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return ['success' => true, 'message' => "Acceso de [$target] en [$share] fijado a '$level' (modo dev)."];
         }
 
         $sections = $this->parseSmbConf();
@@ -538,6 +560,16 @@ class SambaService
         if (!$res['success']) {
             return $res;
         }
+
+        if ($level === 'none') {
+            $path = trim((string) ($props['path'] ?? ''));
+            if ($path !== '' && str_starts_with($path, '/srv/nas')) {
+                $aclEntry = str_starts_with($token, '@') ? ('g:' . ltrim($token, '@')) : ('u:' . $token);
+                SystemService::sudo(['setfacl', '-R', '-x', $aclEntry, $path]);
+                SystemService::sudo(['setfacl', '-R', '-d', '-x', $aclEntry, $path]);
+            }
+        }
+
         SystemService::sudo(['systemctl', 'reload', 'smbd']);
         $this->syncShareAcls($share);
 
