@@ -1239,9 +1239,56 @@ $leavedConf = file_get_contents($tmpSmbConf);
 assertTrue(str_contains($leavedConf, 'security = user'), 'syncSambaAdConfig restaura security = user al desvincularse');
 assertTrue(str_contains($leavedConf, 'server role = standalone server'), 'syncSambaAdConfig restaura server role = standalone server');
 assertTrue(!str_contains($leavedConf, 'realm ='), 'syncSambaAdConfig elimina la directiva realm al desvincularse');
+assertTrue(str_contains($leavedConf, 'workgroup = TEAM-JOFRATO'), 'syncSambaAdConfig restaura workgroup standalone por defecto');
 
 DomainService::$smbConfPath = $origDomainSmbPath;
 @unlink($tmpSmbConf);
+
+// 12. SambaService::updateGlobalConfig manejo insensible a mayúsculas y minúsculas
+$tmpMixedSmbConf = tempnam(sys_get_temp_dir(), 'nas_smb_case_');
+file_put_contents($tmpMixedSmbConf, "[global]\n   WorkGroup = MI-EMPRESA\n   Server Role = standalone server\n   Security = user\n");
+$sambaMixed = new SambaService($tmpMixedSmbConf);
+$resMixed = $sambaMixed->updateGlobalConfig(['security' => 'ads', 'realm' => 'EMPRESA.LOCAL', 'workgroup' => 'EMPRESA'], ['server role']);
+assertTrue($resMixed['success'], 'updateGlobalConfig procesa smb.conf con mayúsculas y minúsculas');
+$mixedOut = file_get_contents($tmpMixedSmbConf);
+assertTrue(!preg_match('/server role\s*=\s*standalone server/i', $mixedOut), 'updateGlobalConfig elimina Server Role insensible a mayúsculas');
+assertTrue(str_contains($mixedOut, 'security = ads'), 'updateGlobalConfig establece security = ads');
+assertTrue(!str_contains($mixedOut, 'Security = user'), 'updateGlobalConfig reemplaza Security = user sin duplicar directiva');
+@unlink($tmpMixedSmbConf);
+
+// 13. SystemService::parseAdminAuditLog y parseSambaAuditLog búsqueda por etiquetas traducidas
+$tmpAdminAudit = tempnam(sys_get_temp_dir(), 'nas_admin_test_');
+file_put_contents($tmpAdminAudit, "[2026-10-14 10:00:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {}\n[2026-10-14 10:01:00] [10.10.1.250] [sistemas] [user_create] [operador1] [SUCCESS] {}\n");
+$origAdminAuditPath = SystemService::$adminAuditPath;
+SystemService::$adminAuditPath = $tmpAdminAudit;
+$adminFound = $sysInst->parseAdminAuditLog(10, 'Inicio de sesión');
+assertTrue(count($adminFound) === 1 && $adminFound[0]['action'] === 'login_success', 'parseAdminAuditLog localiza eventos por etiqueta traducida Inicio de sesión');
+$adminFound2 = $sysInst->parseAdminAuditLog(10, 'Crear usuario');
+assertTrue(count($adminFound2) === 1 && $adminFound2[0]['action'] === 'user_create', 'parseAdminAuditLog localiza eventos por etiqueta Crear usuario');
+SystemService::$adminAuditPath = $origAdminAuditPath;
+@unlink($tmpAdminAudit);
+
+$tmpSambaAudit = tempnam(sys_get_temp_dir(), 'nas_samba_test_');
+file_put_contents($tmpSambaAudit, "2026-10-14T12:00:00-06:00 srv-nas smbd_audit[123]: sistemas|10.10.1.250|sis-pc|SISTEMAS|openat|ok|w|balance.xlsx\n");
+$origSambaAuditPath = SystemService::$sambaAuditPath;
+SystemService::$sambaAuditPath = $tmpSambaAudit;
+$sambaFound = $sysInst->parseSambaAuditLog(10, 'Escritura');
+assertTrue(count($sambaFound) === 1 && $sambaFound[0]['action'] === 'openat', 'parseSambaAuditLog localiza eventos por etiqueta Modificación / Escritura');
+SystemService::$sambaAuditPath = $origSambaAuditPath;
+@unlink($tmpSambaAudit);
+
+// 14. SystemService::tailFileLines acotación de memoria ante línea masiva sin newlines
+$tmpHugeLineFile = tempnam(sys_get_temp_dir(), 'nas_huge_line_');
+$hugeFp = fopen($tmpHugeLineFile, 'wb');
+for ($k = 0; $k < 10; $k++) {
+    fwrite($hugeFp, str_repeat("A", 65536)); // ~650 KB sin newlines
+}
+fclose($hugeFp);
+$memStart = memory_get_usage();
+$hugeTailed = $tailMethod->invoke($sysInst, $tmpHugeLineFile, 5, null, 65536);
+$memUsed = memory_get_usage() - $memStart;
+assertTrue($memUsed < 300000, 'tailFileLines no desborda memoria RAM (< 300 KB) ante líneas masivas corruptas sin newlines');
+@unlink($tmpHugeLineFile);
 
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
