@@ -386,14 +386,26 @@ class SambaService
 
             file_put_contents($tmpFile, $buffer);
 
-            // Validar con testparm -s
-            $tpRes = SystemService::runCommand(['testparm', '-s', $tmpFile]);
-            if ($tpRes['code'] !== 0) {
-                @unlink($tmpFile);
-                return [
-                    'success' => false,
-                    'error' => 'La configuración generada tiene errores de sintaxis en testparm: ' . ($tpRes['stderr'] ?: $tpRes['stdout']),
-                ];
+            // Validar con testparm -s si la herramienta está disponible en el sistema
+            $hasTestparm = false;
+            $pathDirs = explode(PATH_SEPARATOR, (string)(getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'));
+            foreach ($pathDirs as $dir) {
+                $binPath = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . 'testparm';
+                if (@is_file($binPath) && @is_executable($binPath)) {
+                    $hasTestparm = true;
+                    break;
+                }
+            }
+
+            if ($hasTestparm) {
+                $tpRes = SystemService::runCommand(['testparm', '-s', $tmpFile]);
+                if ($tpRes['code'] !== 0) {
+                    @unlink($tmpFile);
+                    return [
+                        'success' => false,
+                        'error' => 'La configuración generada tiene errores de sintaxis en testparm: ' . ($tpRes['stderr'] ?: $tpRes['stdout']),
+                    ];
+                }
             }
 
             // Si la ruta destino tiene permisos de escritura directos (ej. pruebas o tmp),
