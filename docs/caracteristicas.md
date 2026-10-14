@@ -52,7 +52,7 @@ El motor de respaldos trabaja de forma autónoma con una arquitectura pensada pa
 - **Staging Atómico (`.inprogress_*`) y Resistencia a Apagones:**  
   Ninguna copia se escribe directamente en el histórico. Se procesa en una carpeta oculta provisional. Si ocurre un corte de energía, una falla de red o se cancela la tarea, el manejador de señales (`trap cleanup EXIT TERM INT`) purga los datos incompletos. Únicamente las copias 100% íntegras se promueven atómicamente a `snapshot_YYYY-MM-DD_HHMMSS`.
 - **Compatibilidad con Orígenes Heterogéneos:**
-  - **Servidores Windows:** Conector CIFS SMB 3.1.1 en solo lectura (`ro,soft,timeo=30`) con análisis automático de cuentas locales y de dominio Active Directory (`DOMINIO\usuario`), almacenando credenciales bajo permisos `0600 root:root`.
+  - **Servidores Windows:** Conector CIFS SMB 3.1.1 en solo lectura (`ro,soft,echo_interval=15`) con análisis automático de cuentas locales y de dominio Active Directory (`DOMINIO\usuario`), almacenando credenciales bajo permisos `0600 root:root`.
   - **Servidores Linux:** Replicación mediante SSH y `rsync -aAXH --numeric-ids`, preservando con fidelidad absoluta los propietarios, permisos octales, enlaces duros, atributos extendidos y ACLs POSIX originales. Las firmas de host se validan con `StrictHostKeyChecking=accept-new` en un archivo aislado.
   - **Carpetas Locales:** Sincronización entre rutas internas del servidor a máxima velocidad de disco.
 - **Monitoreo Preventivo de Capacidad:**  
