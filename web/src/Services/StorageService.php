@@ -136,7 +136,7 @@ class StorageService
                 'mount' => $dev['mountpoint'] ?? '',
                 'fstype' => $dev['fstype'] ?? '',
                 'rotational' => ($dev['rota'] ?? true),
-                'protected' => ($dev['type'] ?? '') === 'disk' ? $this->isOsDisk($name) : false,
+                'protected' => $this->isOsDisk($name),
                 'in_use' => $this->deviceHasMount('/dev/' . $name),
             ];
         }
@@ -423,7 +423,8 @@ class StorageService
         $current = @file_get_contents('/etc/fstab') ?: '';
         $clean = preg_replace('/# BEGIN NAS_DEBIAN \/srv\/nas.*?# END NAS_DEBIAN \/srv\/nas\n?/s', '', $current) ?? $current;
         $ref = $uuid !== '' ? "UUID=$uuid" : $device;
-        $clean .= "\n# BEGIN NAS_DEBIAN /srv/nas\n$ref /srv/nas $fstype defaults,noatime 0 2\n# END NAS_DEBIAN /srv/nas\n";
+        $opts = ($fstype === 'btrfs') ? 'defaults,noatime,compress=zstd:3,space_cache=v2 0 0' : 'defaults,noatime 0 2';
+        $clean .= "\n# BEGIN NAS_DEBIAN /srv/nas\n$ref /srv/nas $fstype $opts\n# END NAS_DEBIAN /srv/nas\n";
         file_put_contents($fstabTmp, $clean);
         SystemService::sudo(['cp', $fstabTmp, '/etc/fstab']);
         @unlink($fstabTmp);
@@ -432,6 +433,73 @@ class StorageService
             return ['success' => false, 'error' => 'No se pudo montar /srv/nas: ' . ($mnt['stderr'] ?: $mnt['stdout'])];
         }
         return ['success' => true, 'message' => "Dispositivo $device formateado ($fstype) y montado en /srv/nas."];
+    }
+
+    /**
+     * Lista los subvolúmenes Btrfs dentro de /srv/nas.
+     *
+     * @return array<int,array{id:string,name:string,path:string}>
+     */
+    public function btrfsListSubvolumes(string $path = '/srv/nas'): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return [
+                ['id' => '256', 'name' => 'subvol_data', 'path' => rtrim($path, '/') . '/subvol_data'],
+            ];
+        }
+
+        $res = SystemService::sudo(['btrfs', 'subvolume', 'list', $path]);
+        if ($res['code'] !== 0) {
+            return [];
+        }
+
+        $subvols = [];
+        foreach (preg_split('/\r\n|\r|\n/', (string) $res['stdout']) as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            if (preg_match('/ID\s+(\d+)\s+.*?\s+path\s+(.+)$/i', $line, $m)) {
+                $subPath = trim($m[2]);
+                $subvols[] = [
+                    'id' => $m[1],
+                    'name' => basename($subPath),
+                    'path' => rtrim($path, '/') . '/' . $subPath,
+                ];
+            }
+        }
+
+        return $subvols;
+    }
+
+    /**
+     * Crea un subvolumen Btrfs dentro de la raíz o ruta indicada.
+     */
+    public function btrfsCreateSubvolume(string $name, string $parentPath = '/srv/nas'): array
+    {
+        if (!preg_match('/^[a-zA-Z0-9._-]{1,60}$/', $name)) {
+            return ['success' => false, 'error' => 'Nombre de subvolumen inválido (1-60 caracteres alfanuméricos, punto, guion o guion bajo).'];
+        }
+
+        $fullPath = rtrim($parentPath, '/') . '/' . $name;
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return ['success' => true, 'message' => "Subvolumen Btrfs '$name' creado con éxito (modo dev).", 'path' => $fullPath];
+        }
+
+        $res = SystemService::sudo(['btrfs', 'subvolume', 'create', $fullPath]);
+        if ($res['code'] !== 0) {
+            return ['success' => false, 'error' => 'No se pudo crear el subvolumen: ' . ($res['stderr'] ?: $res['stdout'])];
+        }
+
+        return ['success' => true, 'message' => "Subvolumen Btrfs '$name' creado con éxito en $fullPath.", 'path' => $fullPath];
+    }
+
+    /**
+     * Alias compatible hacia runTrim para ejecución de descarte de bloques SSD.
+     */
+    public function startSsdTrim(string $path = '/srv/nas'): array
+    {
+        return $this->runTrim($path);
     }
 
     /**
