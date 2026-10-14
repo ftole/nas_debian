@@ -13,6 +13,8 @@ use Throwable;
  */
 class DomainService
 {
+    public static string $smbConfPath = '/etc/samba/smb.conf';
+
     /**
      * Consulta el estado actual de pertenencia al dominio de Active Directory.
      */
@@ -114,6 +116,7 @@ class DomainService
 
         if (DIRECTORY_SEPARATOR === '\\') {
             $this->updateDomainDb($cleanDomain, strtoupper($cleanDomain), 'joined');
+            $this->syncSambaAdConfig(true, $cleanDomain);
             AuditService::log('domain_join', $cleanDomain, 'SUCCESS', ['user' => $cleanUser]);
             return [
                 'success' => true,
@@ -144,6 +147,9 @@ class DomainService
         // Reiniciar servicio SSSD para refrescar cachés de dominio
         SystemService::runCommand(['sudo', '-n', 'systemctl', 'restart', 'sssd']);
 
+        // Sincronizar parámetros de Active Directory en smb.conf y recargar smbd
+        $this->syncSambaAdConfig(true, $cleanDomain);
+
         $this->updateDomainDb($cleanDomain, strtoupper($cleanDomain), 'joined');
         AuditService::log('domain_join', $cleanDomain, 'SUCCESS', ['user' => $cleanUser]);
 
@@ -161,6 +167,7 @@ class DomainService
     {
         if (DIRECTORY_SEPARATOR === '\\') {
             $this->updateDomainDb('', '', 'standalone');
+            $this->syncSambaAdConfig(false);
             AuditService::log('domain_leave', $domain ?: 'active_directory', 'SUCCESS');
             return [
                 'success' => true,
@@ -183,6 +190,9 @@ class DomainService
 
         SystemService::runCommand(['sudo', '-n', 'systemctl', 'restart', 'sssd']);
 
+        // Restaurar Samba a modo autónomo (standalone server, security = user) y recargar smbd
+        $this->syncSambaAdConfig(false);
+
         $this->updateDomainDb('', '', 'standalone');
         AuditService::log('domain_leave', $domain ?: 'active_directory', 'SUCCESS');
 
@@ -190,6 +200,45 @@ class DomainService
             'success' => true,
             'message' => 'Servidor desvinculado con éxito de Active Directory.',
         ];
+    }
+
+    /**
+     * Sincroniza los parámetros de Active Directory en /etc/samba/smb.conf y recarga smbd.
+     * Al unirse: security = ads, realm = REALM, workgroup = WORKGROUP.
+     * Al desvincularse: server role = standalone server, security = user, remueve realm.
+     */
+    public function syncSambaAdConfig(bool $joined, ?string $domain = null): array
+    {
+        $confPath = self::$smbConfPath;
+        if (!file_exists($confPath)) {
+            return ['success' => true, 'message' => 'smb.conf no existe; omitiendo sincronización.'];
+        }
+
+        $samba = new SambaService($confPath);
+        if ($joined && !empty($domain)) {
+            $realm = strtoupper(trim($domain));
+            $parts = explode('.', $realm);
+            $workgroup = !empty($parts[0]) ? $parts[0] : $realm;
+
+            $res = $samba->updateGlobalConfig([
+                'security' => 'ads',
+                'realm' => $realm,
+                'workgroup' => $workgroup,
+            ], ['server role']);
+        } else {
+            $workgroup = SystemService::getWorkgroup();
+            $res = $samba->updateGlobalConfig([
+                'server role' => 'standalone server',
+                'security' => 'user',
+                'workgroup' => $workgroup,
+            ], ['realm']);
+        }
+
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            SystemService::sudo(['systemctl', 'reload', 'smbd']);
+        }
+
+        return $res;
     }
 
     private function parseRealmList(string $output): array
