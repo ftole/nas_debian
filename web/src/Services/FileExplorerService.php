@@ -976,7 +976,7 @@ class FileExplorerService
             return;
         }
 
-        $realBaseDir = realpath($this->baseDir);
+        $realBaseDir = realpath(self::getRootDir());
         if (trim($subpath, '/\\') === '' || ($realBaseDir !== false && $realTargetDir === $realBaseDir)) {
             http_response_code(400);
             echo 'La descarga comprimida de la raíz del almacenamiento (/srv/nas) no está permitida.';
