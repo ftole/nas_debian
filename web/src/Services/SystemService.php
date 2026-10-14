@@ -291,7 +291,39 @@ class SystemService
         $lines = [];
 
         if (file_exists($path) && is_readable($path)) {
-            $lines = $this->tailFileLines($path, max($limit * 3, 300), $query);
+            $rawQuery = $query;
+            if ($query !== null && trim($query) !== '') {
+                $qL = $this->toLower(trim($query));
+                $sambaSynonyms = [
+                    'escritura' => 'openat|open',
+                    'modificación' => 'openat|open',
+                    'modificacion' => 'openat|open',
+                    'lectura' => 'openat|open',
+                    'apertura' => 'openat|open',
+                    'eliminación' => 'unlinkat|unlink|rmdir',
+                    'eliminacion' => 'unlinkat|unlink|rmdir',
+                    'creación' => 'mkdirat|mkdir',
+                    'creacion' => 'mkdirat|mkdir',
+                    'renombrado' => 'renameat|rename',
+                    'conexión' => 'connect',
+                    'conexion' => 'connect',
+                    'desconexión' => 'disconnect',
+                    'desconexion' => 'disconnect',
+                    'success' => 'ok',
+                    'exit' => 'ok',
+                    'failed' => 'fail',
+                ];
+                $extraTerms = [];
+                foreach ($sambaSynonyms as $term => $rawTerm) {
+                    if (str_contains($qL, $term)) {
+                        $extraTerms[] = $rawTerm;
+                    }
+                }
+                if (!empty($extraTerms)) {
+                    $rawQuery = $query . '|' . implode('|', $extraTerms);
+                }
+            }
+            $lines = $this->tailFileLines($path, max($limit * 3, 300), $rawQuery);
         } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
             $lines = [
                 '2026-10-05T10:15:32-06:00 srv-nas smbd_audit[3412]: sistemas|10.10.1.250|sis-frank|SISTEMAS|openat|ok|r|Balance_General_2026.xlsx',
@@ -440,21 +472,6 @@ class SystemService
         $path = self::$adminAuditPath;
         $lines = [];
 
-        if (file_exists($path) && is_readable($path)) {
-            $lines = $this->tailFileLines($path, max($limit * 3, 300), $query);
-        } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
-            $lines = [
-                '[2026-10-05 10:14:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {"role":"Administrador"}',
-                '[2026-10-05 10:15:00] [10.10.1.250] [sistemas] [share_create] [PUBLICO] [SUCCESS] {"scheme":4,"comment":"Acceso general"}',
-                '[2026-10-05 10:20:00] [10.10.1.250] [sistemas] [user_create] [operador1] [SUCCESS] {"groups":["grp_operaciones"]}',
-                '[2026-10-05 10:25:00] [10.10.1.250] [sistemas] [backup_create] [win_contabilidad] [SUCCESS] {"proto":"cifs","cron":"0 23 * * *"}',
-                '[2026-10-05 10:30:00] [10.10.1.250] [sistemas] [service_manage] [smbd] [SUCCESS] {"action":"restart"}',
-            ];
-        }
-
-        $results = [];
-        $qLower = $query ? $this->toLower(trim($query)) : null;
-
         $actionLabels = [
             'login_success' => 'Inicio de sesión exitoso',
             'login_failure' => 'Fallo de autenticación',
@@ -481,6 +498,34 @@ class SystemService
             'dir_create' => 'Crear carpeta',
             'file_upload' => 'Subir archivo',
         ];
+
+        if (file_exists($path) && is_readable($path)) {
+            $rawQuery = $query;
+            if ($query !== null && trim($query) !== '') {
+                $qL = $this->toLower(trim($query));
+                $matchedActions = [];
+                foreach ($actionLabels as $actKey => $actLabel) {
+                    if (str_contains($this->toLower($actLabel), $qL)) {
+                        $matchedActions[] = $actKey;
+                    }
+                }
+                if (!empty($matchedActions)) {
+                    $rawQuery = $query . '|' . implode('|', $matchedActions);
+                }
+            }
+            $lines = $this->tailFileLines($path, max($limit * 3, 300), $rawQuery);
+        } elseif (DIRECTORY_SEPARATOR === '\\' || !file_exists($path)) {
+            $lines = [
+                '[2026-10-05 10:14:00] [10.10.1.250] [sistemas] [login_success] [sistemas] [SUCCESS] {"role":"Administrador"}',
+                '[2026-10-05 10:15:00] [10.10.1.250] [sistemas] [share_create] [PUBLICO] [SUCCESS] {"scheme":4,"comment":"Acceso general"}',
+                '[2026-10-05 10:20:00] [10.10.1.250] [sistemas] [user_create] [operador1] [SUCCESS] {"groups":["grp_operaciones"]}',
+                '[2026-10-05 10:25:00] [10.10.1.250] [sistemas] [backup_create] [win_contabilidad] [SUCCESS] {"proto":"cifs","cron":"0 23 * * *"}',
+                '[2026-10-05 10:30:00] [10.10.1.250] [sistemas] [service_manage] [smbd] [SUCCESS] {"action":"restart"}',
+            ];
+        }
+
+        $results = [];
+        $qLower = $query ? $this->toLower(trim($query)) : null;
 
         foreach ($lines as $line) {
             $trimmed = trim($line);
@@ -801,7 +846,16 @@ class SystemService
 
         $lines = [];
         $leftover = '';
-        $qLower = ($query !== null && trim($query) !== '') ? $this->toLower(trim($query)) : null;
+        $queryTerms = [];
+        if ($query !== null && trim($query) !== '') {
+            $parts = explode('|', $this->toLower(trim($query)));
+            foreach ($parts as $p) {
+                $p = trim($p);
+                if ($p !== '') {
+                    $queryTerms[] = $p;
+                }
+            }
+        }
 
         while ($pos > 0 && count($lines) < $limit) {
             $readSize = min($pos, $bufferSize);
@@ -817,6 +871,9 @@ class SystemService
 
             if ($pos > 0) {
                 $leftover = array_shift($chunkLines);
+                if (strlen($leftover) > 262144) {
+                    $leftover = substr($leftover, -65536);
+                }
             } else {
                 $leftover = '';
             }
@@ -826,8 +883,18 @@ class SystemService
                 if ($line === '') {
                     continue;
                 }
-                if ($qLower !== null && !str_contains($this->toLower($line), $qLower)) {
-                    continue;
+                if (!empty($queryTerms)) {
+                    $lineLower = $this->toLower($line);
+                    $matched = false;
+                    foreach ($queryTerms as $term) {
+                        if (str_contains($lineLower, $term)) {
+                            $matched = true;
+                            break;
+                        }
+                    }
+                    if (!$matched) {
+                        continue;
+                    }
                 }
                 $lines[] = $line;
                 if (count($lines) >= $limit) {
@@ -839,7 +906,18 @@ class SystemService
         if ($pos === 0 && $leftover !== '' && count($lines) < $limit) {
             $line = trim($leftover, "\r\n");
             if ($line !== '') {
-                if ($qLower === null || str_contains($this->toLower($line), $qLower)) {
+                $matched = true;
+                if (!empty($queryTerms)) {
+                    $lineLower = $this->toLower($line);
+                    $matched = false;
+                    foreach ($queryTerms as $term) {
+                        if (str_contains($lineLower, $term)) {
+                            $matched = true;
+                            break;
+                        }
+                    }
+                }
+                if ($matched) {
                     $lines[] = $line;
                 }
             }
