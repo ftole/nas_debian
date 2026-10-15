@@ -161,13 +161,15 @@ if [ -d "$INSTALL_DIR/.git" ]; then
             fi
         fi
     fi
-elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ] && [ -d "$SCRIPT_DIR/.git" ]; then
+elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
     rm -rf "$INSTALL_DIR"
-    if ! git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null; then
+    if [ -d "$SCRIPT_DIR/.git" ] && git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null; then
+        :
+    else
         cp -a "$SCRIPT_DIR" "$INSTALL_DIR"
         find "$INSTALL_DIR" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.bats" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
     fi
-    if cd "$INSTALL_DIR"; then
+    if [ -d "$INSTALL_DIR/.git" ] && cd "$INSTALL_DIR"; then
         git remote set-url origin "$REPO_URL" 2>/dev/null || true
         aplicar_politica_tags || exit 1
     fi
