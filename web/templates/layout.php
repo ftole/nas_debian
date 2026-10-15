@@ -436,14 +436,18 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                 <svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg>
                 <span>Dar de alta un usuario y sincronizar credenciales smbpasswd</span>
               </button>
+              <?php if ($serverRole !== 'ARCHIVOS'): ?>
               <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('backups'); openModal('modal-new-backup');">
                 <svg class="icon" style="color:var(--accent-success);"><use href="#icon-shield"></use></svg>
                 <span>Programar tarea de réplica remota (CIFS 3.1.1 o SSH Linux)</span>
               </button>
+              <?php endif; ?>
+              <?php if ($serverRole !== 'ARCHIVOS' && strtolower($fsType) !== 'ext4'): ?>
               <button class="btn btn-secondary" style="justify-content:flex-start;" onclick="switchView('storage'); runStorageScrub();">
                 <svg class="icon" style="color:var(--accent-warning);"><use href="#icon-refresh"></use></svg>
                 <span>Iniciar auditoría criptográfica BTRFS scrub contra Bit Rot</span>
               </button>
+              <?php endif; ?>
             </div>
           </div>
 
@@ -667,7 +671,9 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                 <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary);">Raíz:</label>
                 <select id="files-root-select" onchange="changeFilesRoot(this.value)" style="width:auto; padding:5px 10px;">
                   <option value="nas">Recursos Compartidos (/srv/nas)</option>
+                  <?php if ($serverRole !== 'ARCHIVOS'): ?>
                   <option value="backups">Repositorio de Backups (/srv/nas/BACKUPS_HISTORICOS)</option>
+                  <?php endif; ?>
                 </select>
               </div>
               <div class="file-breadcrumbs" id="files-breadcrumbs">
@@ -864,6 +870,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         </div>
       </section>
 
+<?php if ($serverRole !== 'ARCHIVOS'): ?>
       <!-- 8. CENTRAL DE RESPALDOS (BACKUPS) -->
       <section id="view-backups" class="view-section <?= $activeView === 'backups' ? 'active' : '' ?>">
         <div class="page-head">
@@ -899,6 +906,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
       </section>
+<?php endif; ?>
 
       <!-- 9. USUARIOS Y GRUPOS (USERS) -->
       <section id="view-users" class="view-section <?= $activeView === 'users' ? 'active' : '' ?>">
@@ -1304,6 +1312,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+<?php if ($serverRole !== 'ARCHIVOS'): ?>
   <!-- Modal: Nueva Tarea de Backup -->
   <div class="modal-backdrop" id="modal-new-backup">
     <div class="modal-dialog">
@@ -1367,6 +1376,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </div>
     </div>
   </div>
+<?php endif; ?>
 
   <!-- Modal: Gestión de Disco -->
   <div class="modal-backdrop" id="modal-storage-manage">
@@ -1724,6 +1734,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+<?php if ($serverRole !== 'ARCHIVOS'): ?>
   <!-- Modal: Registro de Tarea de Backup -->
   <div class="modal-backdrop" id="modal-backup-logs">
     <div class="modal-dialog" style="max-width:700px;">
@@ -1739,6 +1750,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </div>
     </div>
   </div>
+<?php endif; ?>
 
   <!-- Modal: Nueva Carpeta en Explorador -->
   <div class="modal-backdrop" id="modal-new-folder">
