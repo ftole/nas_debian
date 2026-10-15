@@ -6,18 +6,20 @@
 gestionar_grupos() {
     local OPC_GRP TABLA_GRUPOS NUEVO_GRP GRUPOS_ELIM MENU_ELIM GRP_BORRAR g
     local GRUPOS_REN MENU_REN GRP_REN_SEL NUEVO_NOMBRE
+    local GRUPOS_MBR GRP_MBR_SEL USERS_SISTEMA MBRS_ACTUALES NUEVOS_MBR NUEVOS_MBR_LIST u
     while true; do
         OPC_GRP=$(whiptail --title "$APP_TITLE" \
             --ok-button "< Seleccionar >" --cancel-button "< Volver >" \
-            --menu "GESTIÓN DE GRUPOS DE SEGURIDAD:" 17 68 5 \
+            --menu "GESTIÓN DE GRUPOS DE SEGURIDAD:" 18 68 6 \
             "1" "[*] Listar grupos existentes" \
             "2" "[+] Crear un nuevo grupo" \
             "3" "[R] Renombrar un grupo existente" \
-            "4" "[-] Eliminar un grupo existente" \
-            "5" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
+            "4" "[M] Administrar miembros de un grupo" \
+            "5" "[-] Eliminar un grupo existente" \
+            "6" "[<] Volver al Menú Principal" 3>&1 1>&2 2>&3)
 
         RET=$?
-        if [ $RET -ne 0 ] || [ "$OPC_GRP" == "5" ]; then
+        if [ $RET -ne 0 ] || [ "$OPC_GRP" == "6" ]; then
             break
         fi
 
@@ -121,6 +123,64 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                 ;;
 
             4)
+                GRUPOS_MBR=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort)
+                if [ -z "$GRUPOS_MBR" ]; then
+                    whiptail --title "Aviso" --ok-button "< Aceptar >" \
+                        --msgbox "No hay grupos de seguridad disponibles." 8 50
+                    continue
+                fi
+
+                local -a MENU_GRP_MBR=()
+                for g in $GRUPOS_MBR; do
+                    MENU_GRP_MBR+=("$g" "Grupo_Seguridad")
+                done
+
+                GRP_MBR_SEL=$(whiptail --title "Administrar Miembros" \
+                    --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                    --menu "Selecciona el grupo cuyos miembros deseas gestionar:" 16 68 6 \
+                    "${MENU_GRP_MBR[@]}" 3>&1 1>&2 2>&3)
+                RET=$?
+                if [ $RET -eq 0 ] && [ -n "$GRP_MBR_SEL" ]; then
+                    USERS_SISTEMA=$(awk -F: '$3 >= 1000 && $3 < 65534 && $1 != "nobody" {print $1}' /etc/passwd | sort)
+                    if [ -z "$USERS_SISTEMA" ]; then
+                        whiptail --title "Aviso" --ok-button "< Aceptar >" \
+                            --msgbox "No se encontraron usuarios del sistema disponibles." 8 55
+                        continue
+                    fi
+
+                    MBRS_ACTUALES=$(getent group "$GRP_MBR_SEL" | cut -d: -f4 | tr ',' ' ')
+
+                    local -a LISTA_MBR_OPC=()
+                    for u in $USERS_SISTEMA; do
+                        local STATUS="OFF"
+                        if echo " $MBRS_ACTUALES " | grep -qw "$u"; then STATUS="ON"; fi
+                        LISTA_MBR_OPC+=("$u" "Usuario" "$STATUS")
+                    done
+
+                    NUEVOS_MBR=$(whiptail --title "Miembros de $GRP_MBR_SEL" \
+                        --ok-button "< Guardar >" --cancel-button "< Cancelar >" \
+                        --checklist "Marca con ESPACIO los usuarios que pertenecerán a $GRP_MBR_SEL:" 18 72 8 \
+                        "${LISTA_MBR_OPC[@]}" 3>&1 1>&2 2>&3)
+                    RET=$?
+                    if [ $RET -eq 0 ]; then
+                        NUEVOS_MBR_LIST=$(echo "$NUEVOS_MBR" | tr -d '\"')
+                        for u in $NUEVOS_MBR_LIST; do
+                            if ! echo " $MBRS_ACTUALES " | grep -qw "$u"; then
+                                gpasswd -a "$u" "$GRP_MBR_SEL" 2>/dev/null || true
+                            fi
+                        done
+                        for u in $MBRS_ACTUALES; do
+                            if ! echo " $NUEVOS_MBR_LIST " | grep -qw "$u"; then
+                                gpasswd -d "$u" "$GRP_MBR_SEL" 2>/dev/null || true
+                            fi
+                        done
+                        whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
+                            --msgbox "✔ Miembros del grupo \"$GRP_MBR_SEL\" actualizados correctamente." 8 60
+                    fi
+                fi
+                ;;
+
+            5)
                 GRUPOS_ELIM=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort)
                 if [ -z "$GRUPOS_ELIM" ]; then
                     whiptail --title "Aviso" --ok-button "< Aceptar >" \
