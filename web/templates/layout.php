@@ -943,13 +943,14 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                     <th>Usuario</th>
                     <th>UID</th>
                     <th>Rol</th>
+                    <th>Grupos</th>
                     <th>Estado</th>
                     <th>Samba</th>
                     <th style="width:196px; text-align:right;">Acción</th>
                   </tr>
                 </thead>
                 <tbody id="users-table-body">
-                  <tr><td colspan="6" style="text-align:center;">Cargando usuarios...</td></tr>
+                  <tr><td colspan="7" style="text-align:center;">Cargando usuarios...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1422,7 +1423,8 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Nuevo Usuario -->
-  <div class="modal-backdrop" id="modal-new-user">    <div class="modal-dialog">
+  <div class="modal-backdrop" id="modal-new-user">
+    <div class="modal-dialog" style="max-width:540px;">
       <div class="modal-header">
         <h3>Dar de alta usuario</h3>
         <button class="modal-close" onclick="closeModal('modal-new-user')">&times;</button>
@@ -1439,7 +1441,52 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="form-group">
             <label for="user-pass">Contraseña (red Samba / web):</label>
-            <input type="password" id="user-pass" required minlength="6">
+            <div class="password-input-group">
+              <input type="password" id="user-pass" required minlength="6" placeholder="Contraseña segura...">
+              <button type="button" class="btn btn-secondary btn-icon" title="Generar contraseña segura" onclick="generateAndSetPassword('user-pass')">
+                <svg class="icon"><use href="#icon-refresh"></use></svg>
+              </button>
+              <button type="button" class="btn btn-secondary btn-icon" title="Mostrar/ocultar contraseña" onclick="togglePasswordVisibility('user-pass')">
+                <svg class="icon" id="user-pass-eye"><use href="#icon-eye"></use></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Rol y nivel de privilegios:</label>
+            <input type="hidden" id="user-role-val" value="standard">
+            <input type="checkbox" id="user-can-web" style="display:none;">
+            <input type="checkbox" id="user-is-admin" style="display:none;">
+            <input type="checkbox" id="user-is-superadmin" style="display:none;">
+            <div class="role-cards-grid" id="new-user-role-cards">
+              <div class="role-card active" data-role="standard" onclick="selectRoleCard('user', 'standard')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Empleado de Red</span>
+                  <span class="badge badge-gray">Estándar</span>
+                </div>
+                <div class="role-card-desc">Acceso exclusivo a carpetas compartidas Samba por departamento (sin acceso web ni sudo).</div>
+              </div>
+              <div class="role-card" data-role="operator" onclick="selectRoleCard('user', 'operator')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Operador Web</span>
+                  <span class="badge badge-blue">Operador</span>
+                </div>
+                <div class="role-card-desc">Gestión acotada del panel web (archivos, logs, servicios, diagnósticos) sin acceso root/sudo.</div>
+              </div>
+              <div class="role-card" data-role="admin" onclick="selectRoleCard('user', 'admin')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Administrador</span>
+                  <span class="badge badge-warn">Admin</span>
+                </div>
+                <div class="role-card-desc">Acceso total al servidor (root/sudo + panel completo + Samba + SSH).</div>
+              </div>
+              <div class="role-card <?= $isSuper ? '' : 'disabled' ?>" data-role="superadmin" onclick="<?= $isSuper ? "selectRoleCard('user', 'superadmin')" : '' ?>" style="<?= $isSuper ? '' : 'display:none;' ?>">
+                <div class="role-card-header">
+                  <span class="role-card-title">Superadministrador</span>
+                  <span class="badge badge-err">Superadmin</span>
+                </div>
+                <div class="role-card-desc">Control total e inmutable del NAS (sudo, Samba, gestión de administradores).</div>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>Grupos departamentales (acceso a recursos):</label>
@@ -1449,27 +1496,15 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="user-can-web">
-              <span>Acceso al panel web (rol operador: dashboard, archivos, logs, recursos, respaldos, usuarios, servicios, diagnóstico y red)</span>
-            </label>
-          </div>
-          <div class="form-group" id="user-admin-role-wrap">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="user-is-admin">
-              <span>Administrador (root/sudo + panel completo + SSH)</span>
-            </label>
-          </div>
-          <div class="form-group" id="user-superadmin-role-wrap" style="display:none;">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="user-is-superadmin">
-              <span><strong>Superadministrador</strong> (control total e inmutable)</span>
+              <input type="checkbox" id="user-samba-enabled" checked onchange="updateEffectiveAccessPreview(false)">
+              <span>Acceso a la red Samba (carpetas compartidas)</span>
             </label>
           </div>
           <div class="form-group">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="user-samba-enabled" checked>
-              <span>Acceso a la red Samba (carpetas compartidas)</span>
-            </label>
+            <label>Acceso efectivo a carpetas compartidas:</label>
+            <div id="user-effective-access-preview" class="access-preview-box">
+              <em style="color:var(--text-muted); font-size:12px;">Selecciona grupos departamentales para ver los permisos efectivos.</em>
+            </div>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-user')">Cancelar</button>
@@ -1505,7 +1540,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 
   <!-- Modal: Editar Usuario -->
   <div class="modal-backdrop" id="modal-edit-user">
-    <div class="modal-dialog">
+    <div class="modal-dialog" style="max-width:540px;">
       <div class="modal-header">
         <h3>Editar usuario</h3>
         <button class="modal-close" onclick="closeModal('modal-edit-user')">&times;</button>
@@ -1522,7 +1557,52 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="form-group">
             <label for="edit-user-pass">Nueva contraseña <small>(déjalo vacío para conservar la actual)</small>:</label>
-            <input type="password" id="edit-user-pass" placeholder="Contraseña nueva (mín. 6)" minlength="6">
+            <div class="password-input-group">
+              <input type="password" id="edit-user-pass" placeholder="Contraseña nueva (mín. 6)" minlength="6">
+              <button type="button" class="btn btn-secondary btn-icon" title="Generar contraseña segura" onclick="generateAndSetPassword('edit-user-pass')">
+                <svg class="icon"><use href="#icon-refresh"></use></svg>
+              </button>
+              <button type="button" class="btn btn-secondary btn-icon" title="Mostrar/ocultar contraseña" onclick="togglePasswordVisibility('edit-user-pass')">
+                <svg class="icon" id="edit-user-pass-eye"><use href="#icon-eye"></use></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Rol y nivel de privilegios:</label>
+            <input type="hidden" id="edit-user-role-val" value="standard">
+            <input type="checkbox" id="edit-user-can-web" style="display:none;">
+            <input type="checkbox" id="edit-user-is-admin" style="display:none;">
+            <input type="checkbox" id="edit-user-is-superadmin" style="display:none;">
+            <div class="role-cards-grid" id="edit-user-role-cards">
+              <div class="role-card active" data-role="standard" onclick="selectRoleCard('edit-user', 'standard')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Empleado de Red</span>
+                  <span class="badge badge-gray">Estándar</span>
+                </div>
+                <div class="role-card-desc">Acceso exclusivo a carpetas compartidas Samba por departamento (sin acceso web ni sudo).</div>
+              </div>
+              <div class="role-card" data-role="operator" onclick="selectRoleCard('edit-user', 'operator')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Operador Web</span>
+                  <span class="badge badge-blue">Operador</span>
+                </div>
+                <div class="role-card-desc">Gestión acotada del panel web (archivos, logs, servicios, diagnósticos) sin acceso root/sudo.</div>
+              </div>
+              <div class="role-card" data-role="admin" onclick="selectRoleCard('edit-user', 'admin')">
+                <div class="role-card-header">
+                  <span class="role-card-title">Administrador</span>
+                  <span class="badge badge-warn">Admin</span>
+                </div>
+                <div class="role-card-desc">Acceso total al servidor (root/sudo + panel completo + Samba + SSH).</div>
+              </div>
+              <div class="role-card <?= $isSuper ? '' : 'disabled' ?>" data-role="superadmin" onclick="<?= $isSuper ? "selectRoleCard('edit-user', 'superadmin')" : '' ?>" style="<?= $isSuper ? '' : 'display:none;' ?>">
+                <div class="role-card-header">
+                  <span class="role-card-title">Superadministrador</span>
+                  <span class="badge badge-err">Superadmin</span>
+                </div>
+                <div class="role-card-desc">Control total e inmutable del NAS (sudo, Samba, gestión de administradores).</div>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>Grupos departamentales (acceso a recursos):</label>
@@ -1532,27 +1612,15 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="edit-user-can-web">
-              <span>Acceso al panel web (rol operador)</span>
-            </label>
-          </div>
-          <div class="form-group" id="edit-user-admin-role-wrap">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="edit-user-is-admin">
-              <span>Administrador (root/sudo + panel completo + SSH)</span>
-            </label>
-          </div>
-          <div class="form-group" id="edit-user-superadmin-role-wrap" style="display:none;">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="edit-user-is-superadmin" disabled>
-              <span><strong>Superadministrador</strong> (control total e inmutable; no revocable)</span>
+              <input type="checkbox" id="edit-user-samba-enabled" onchange="updateEffectiveAccessPreview(true)">
+              <span>Acceso a la red Samba (carpetas compartidas)</span>
             </label>
           </div>
           <div class="form-group">
-            <label style="display:flex; align-items:center; gap:8px;">
-              <input type="checkbox" id="edit-user-samba-enabled">
-              <span>Acceso a la red Samba (carpetas compartidas)</span>
-            </label>
+            <label>Acceso efectivo a carpetas compartidas:</label>
+            <div id="edit-user-effective-access-preview" class="access-preview-box">
+              <em style="color:var(--text-muted); font-size:12px;">Selecciona grupos departamentales para ver los permisos efectivos.</em>
+            </div>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-user')">Cancelar</button>
@@ -1571,6 +1639,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <button class="modal-close" onclick="closeModal('modal-group-members')">&times;</button>
       </div>
       <div class="modal-body">
+        <div class="form-group">
+          <label for="group-member-search">Buscar miembro:</label>
+          <div class="search-box" style="width:100%;">
+            <svg class="icon"><use href="#icon-search"></use></svg>
+            <input type="text" id="group-member-search" placeholder="Filtrar por nombre..." oninput="filterGroupMembers()">
+          </div>
+        </div>
         <div class="form-group">
           <label>Miembros actuales:</label>
           <div id="group-members-list" style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; padding:6px; background:var(--bg-body); border-radius:4px;">
@@ -1613,6 +1688,38 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <button type="submit" class="btn btn-primary" id="btn-submit-rename-group">Renombrar</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Bienvenida y Ruta UNC de Usuario -->
+  <div class="modal-backdrop" id="modal-user-welcome">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon" style="color:var(--accent-success);"><use href="#icon-check-circle"></use></svg>
+          Usuario creado con éxito
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-user-welcome')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-top:0;">La cuenta ha sido dada de alta y sincronizada correctamente en Linux y Samba.</p>
+        <div class="form-group">
+          <label>Ruta de acceso en red (UNC para Windows):</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="welcome-unc-path" readonly style="font-family:var(--font-mono); font-weight:600; background:var(--bg-surface); flex:1;">
+            <button type="button" class="btn btn-secondary" onclick="copyUncPath()" title="Copiar al portapapeles">
+              <svg class="icon"><use href="#icon-file-text"></use></svg> Copiar
+            </button>
+          </div>
+          <small style="color:var(--text-muted); margin-top:4px; display:block;">Pega esta ruta en el Explorador de Archivos de Windows (Win + R) para acceder a los recursos compartidos.</small>
+        </div>
+        <div class="form-group" id="welcome-user-info" style="background:var(--bg-body); padding:10px; border-radius:6px; font-size:13px;">
+          <!-- Rellenado dinámicamente con usuario y rol -->
+        </div>
+        <div class="modal-footer" style="padding:0; margin-top:20px;">
+          <button type="button" class="btn btn-primary" onclick="closeModal('modal-user-welcome')">Aceptar</button>
+        </div>
       </div>
     </div>
   </div>
