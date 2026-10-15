@@ -509,6 +509,31 @@ switch ($module) {
                     outError("Faltan parámetros obligatorios. Uso: nas share create --name=<nombre> [--path=<ruta>] [--comment=<comentario>] [--scheme=1..4] [--hidden] [--read-only] [--guest-ok] [--groups=grp1,grp2] [--write-group=grp1]", 1, null, $isJson);
                 }
 
+                $currentRole = SystemService::getServerRole();
+                if ($currentRole === 'BACKUP') {
+                    $isGuest = $guestOk || ($scheme === 4);
+                    $isExplicitlyHidden = $hidden || str_ends_with((string) $name, '$');
+                    if ($isGuest || !$isExplicitlyHidden) {
+                        outError("En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.", 1, null, $isJson);
+                    }
+                    $disallowedGroups = [];
+                    foreach ($groups as $grp) {
+                        $grpClean = ltrim(trim($grp), '@');
+                        if ($grpClean !== '' && !in_array($grpClean, ['grp_samba', 'grp_backups'], true)) {
+                            $disallowedGroups[] = $grpClean;
+                        }
+                    }
+                    if ($writeGroup !== '') {
+                        $wClean = ltrim(trim($writeGroup), '@');
+                        if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
+                            $disallowedGroups[] = $wClean;
+                        }
+                    }
+                    if (!empty($disallowedGroups)) {
+                        outError("En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.", 1, null, $isJson);
+                    }
+                }
+
                 $res = $svc->createShare([
                     'name'        => $name,
                     'path'        => $path,
@@ -554,6 +579,16 @@ switch ($module) {
                     $updateData['write_list'] = array_filter(array_map('trim', explode(',', (string) $parsedOptions['write-list'])));
                 }
 
+                $currentRole = SystemService::getServerRole();
+                if ($currentRole === 'BACKUP') {
+                    $upScheme = isset($parsedOptions['scheme']) ? (int) $parsedOptions['scheme'] : 0;
+                    $upGuest = !empty($parsedOptions['guest-ok']) || (isset($parsedOptions['guest_ok']) && $parsedOptions['guest_ok']);
+                    $upBrowse = isset($parsedOptions['browseable']) ? ($parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true') : null;
+                    if ($upScheme === 4 || $upGuest || ($upBrowse === true && !str_ends_with((string) $name, '$'))) {
+                        outError("En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.", 1, null, $isJson);
+                    }
+                }
+
                 $res = $svc->updateShare((string) $name, $updateData);
                 if (empty($res['success'])) {
                     outError($res['error'] ?? 'Fallo al actualizar recurso compartido', 1, $res, $isJson);
@@ -570,6 +605,15 @@ switch ($module) {
                 if (!$name || !$target) {
                     outError("Uso: nas share access <recurso> <user|group> <nombre_destino> <ro|rw|none>", 1, null, $isJson);
                 }
+
+                $currentRole = SystemService::getServerRole();
+                if ($currentRole === 'BACKUP' && $kind === 'group' && $level !== 'none') {
+                    $gClean = ltrim(trim((string) $target), '@');
+                    if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                        outError("En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.", 1, null, $isJson);
+                    }
+                }
+
                 $res = $svc->setAccess((string) $name, (string) $kind, (string) $target, (string) $level);
                 if (empty($res['success'])) {
                     outError($res['error'] ?? 'Fallo al configurar nivel de acceso', 1, $res, $isJson);
