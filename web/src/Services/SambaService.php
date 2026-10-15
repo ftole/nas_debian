@@ -90,12 +90,25 @@ class SambaService
             if ($guestOk) {
                 $scheme = 4;
                 $schemeName = 'Acceso Público / Invitados';
+                $readOnly = false;
+            } elseif (!empty($writeList)) {
+                if (!empty($validUsers) && count($writeList) < count($validUsers)) {
+                    $scheme = 2;
+                    $schemeName = 'Solo Lectura General + Escritura Exclusiva';
+                    $readOnly = false;
+                } else {
+                    $scheme = 1;
+                    $schemeName = 'Lectura y Escritura por Grupo';
+                    $readOnly = false;
+                }
             } elseif ($readOnly) {
                 $scheme = 3;
                 $schemeName = 'Solo Lectura Estricta';
-            } elseif (!empty($writeList) && count($writeList) < count($validUsers)) {
-                $scheme = 2;
-                $schemeName = 'Solo Lectura General + Escritura Exclusiva';
+                $readOnly = true;
+            } else {
+                $scheme = 1;
+                $schemeName = 'Lectura y Escritura por Grupo';
+                $readOnly = false;
             }
 
             $shares[] = [
@@ -183,7 +196,7 @@ class SambaService
 
         switch ($scheme) {
             case 1: // Lectura y Escritura por Grupo
-                $shareProps['read only'] = 'yes';
+                $shareProps['read only'] = 'no';
                 $shareProps['guest ok'] = 'no';
                 if (!empty($cleanGroups)) {
                     $shareProps['valid users'] = implode(' ', $cleanGroups);
@@ -510,7 +523,7 @@ class SambaService
             $props['valid users'] = $this->joinTokens(array_merge($groupsWithWriter, $validUsers));
             $props['write list'] = $this->joinTokens(array_merge($writeEntry !== '' ? [$writeEntry] : [], $writeUsers, ['@grp_samba']));
         } else {
-            $props['read only'] = 'yes';
+            $props['read only'] = 'no';
             $props['guest ok'] = 'no';
             unset($props['public'], $props['guest only']);
             $props['valid users'] = $this->joinTokens(array_merge($groups, $validUsers));
