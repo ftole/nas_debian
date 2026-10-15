@@ -160,3 +160,17 @@ _extraer_bloque_audit() {
     [ "$status" -eq 0 ]
 }
 
+@test "deploy.sh y updater.sh configuran smb3 directory leases = no y change notify en smb.conf" {
+    run grep -q 'smb3 directory leases = no' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run grep -q 'kernel change notify = yes' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run grep -q 'change notify = yes' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run grep -q 'smb3 directory leases' src/core/updater.sh
+    [ "$status" -eq 0 ]
+}
+
