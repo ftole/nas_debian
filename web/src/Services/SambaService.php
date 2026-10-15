@@ -706,8 +706,23 @@ class SambaService
      */
     public function getAccessMap(): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
-            return [];
+        if (DIRECTORY_SEPARATOR === '\\' || !file_exists($this->confPath)) {
+            $mockShares = $this->listShares();
+            $map = [];
+            foreach ($mockShares as $s) {
+                $writeGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($s['write_list'] ?? [], fn($t) => str_starts_with($t, '@'))));
+                $writeUsers = array_values(array_filter($s['write_list'] ?? [], fn($t) => !str_starts_with($t, '@')));
+                $readGroups = array_values(array_map(fn($t) => ltrim($t, '@'), array_filter($s['valid_users'] ?? [], fn($t) => str_starts_with($t, '@') && !in_array($t, $s['write_list'] ?? [], true))));
+                $readUsers = array_values(array_filter($s['valid_users'] ?? [], fn($t) => !str_starts_with($t, '@') && !in_array($t, $s['write_list'] ?? [], true)));
+                $map[$s['name']] = [
+                    'read_groups' => $readGroups,
+                    'write_groups' => $writeGroups,
+                    'read_users' => $readUsers,
+                    'write_users' => $writeUsers,
+                    'guest_ok' => !empty($s['guest_ok']),
+                ];
+            }
+            return $map;
         }
 
         $sections = $this->parseSmbConf();
