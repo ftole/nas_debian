@@ -1348,6 +1348,39 @@ $outAssignSuper = ob_get_clean();
 $jsonAssignSuper = json_decode($outAssignSuper, true);
 assertTrue(isset($jsonAssignSuper['success']) && $jsonAssignSuper['success'] === false && str_contains($jsonAssignSuper['error'] ?? '', 'superadministrador'), 'UserController::assignGroups impide a administradores estándar alterar superadmin');
 
+// updateUser sobre superadmin por admin estándar
+$_POST = ['username' => 'administrador', 'full_name' => 'Intento Modificar', 'is_admin' => true];
+ob_start();
+$userCtrlTest->updateUser(new Request());
+$outUpdSuper = ob_get_clean();
+$jsonUpdSuper = json_decode($outUpdSuper, true);
+assertTrue(isset($jsonUpdSuper['success']) && $jsonUpdSuper['success'] === false && str_contains($jsonUpdSuper['error'] ?? '', 'superadministrador'), 'UserController::updateUser impide a administrador estándar alterar superadmin');
+
+// setPassword sobre superadmin por admin estándar
+$_POST = ['username' => 'administrador', 'password' => 'HackPass123!'];
+ob_start();
+$userCtrlTest->setPassword(new Request());
+$outPassSuper = ob_get_clean();
+$jsonPassSuper = json_decode($outPassSuper, true);
+assertTrue(isset($jsonPassSuper['success']) && $jsonPassSuper['success'] === false && str_contains($jsonPassSuper['error'] ?? '', 'superadministrador'), 'UserController::setPassword impide a administrador estándar cambiar clave de superadmin');
+
+// toggleUser sobre superadmin por admin estándar
+$_POST = ['username' => 'administrador', 'enabled' => false];
+ob_start();
+$userCtrlTest->toggleUser(new Request());
+$outTglSuper = ob_get_clean();
+$jsonTglSuper = json_decode($outTglSuper, true);
+assertTrue(isset($jsonTglSuper['success']) && $jsonTglSuper['success'] === false && str_contains($jsonTglSuper['error'] ?? '', 'superadministrador'), 'UserController::toggleUser impide a administrador estándar alterar estado de superadmin');
+
+// deleteUser sobre superadmin
+$_GET = ['username' => 'administrador'];
+ob_start();
+$userCtrlTest->deleteUser(new Request());
+$outDelSuper = ob_get_clean();
+$jsonDelSuper = json_decode($outDelSuper, true);
+assertTrue(isset($jsonDelSuper['success']) && $jsonDelSuper['success'] === false && str_contains($jsonDelSuper['error'] ?? '', 'superadministrador'), 'UserController::deleteUser impide eliminar cuenta de superadministrador');
+$_GET = [];
+
 if ($savedUserSession !== null) {
     $_SESSION['nas_user'] = $savedUserSession;
 } else {
