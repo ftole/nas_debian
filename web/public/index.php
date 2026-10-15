@@ -131,6 +131,7 @@ $router->post('/api/users/update', [UserController::class, 'updateUser']);
 $router->post('/api/users/password', [UserController::class, 'setPassword']);
 $router->post('/api/users/toggle', [UserController::class, 'toggleUser']);
 $router->post('/api/users/groups', [UserController::class, 'userGroups']);
+$router->post('/api/users/assign-groups', [UserController::class, 'assignGroups']);
 $router->post('/api/users/delete', [UserController::class, 'deleteUser']);
 $router->delete('/api/users/{username}', [UserController::class, 'deleteUser']);
 $router->get('/api/groups', [UserController::class, 'groups']);
