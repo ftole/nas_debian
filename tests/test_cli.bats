@@ -277,6 +277,10 @@ setup() {
     [ "$status" -eq 1 ]
     [[ "$output" =~ "recursos de respaldo ocultos" ]]
 
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=NO_DOLLAR --hidden --scheme=1 --groups=grp_samba --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "recursos de respaldo ocultos" ]]
+
     NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=PUB_TEST$ --scheme=4 --json
     [ "$status" -eq 1 ]
     [[ "$output" =~ "sin acceso público" ]]
@@ -289,5 +293,44 @@ setup() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ '"success": true' ]]
 }
+
+@test "nas-cli share update y access rechazan esquemas o grupos invalidos en rol BACKUP" {
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share update BKP_TEST$ --browseable=yes --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "recursos de respaldo ocultos" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share update BKP_TEST$ --browseable --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "recursos de respaldo ocultos" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share update BKP_TEST$ --scheme=4 --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "sin acceso público" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share update BKP_TEST$ --groups=grp_ventas --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "solo pueden ser accesibles por grp_samba o grp_backups" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share access BKP_TEST$ group grp_ventas rw --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "solo pueden ser accesibles por grp_samba o grp_backups" ]]
+}
+
+@test "nas-cli share create rechaza flag --browseable sin valor en rol BACKUP" {
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=VALID_BKP$ --browseable --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "recursos de respaldo ocultos" ]]
+}
+
+@test "nas-cli group rename protege grp_backups e impide renombrar hacia grp_backups" {
+    run php bin/nas-cli group rename grp_backups grp_hacked --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "no puede ser renombrado" ]]
+
+    run php bin/nas-cli group rename grp_marketing grp_backups --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "reservado por el sistema" ]]
+}
+
 
 
