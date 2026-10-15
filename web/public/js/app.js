@@ -525,7 +525,7 @@ async function populateShareGroupOptions() {
     }
 
     container.innerHTML = selectable.map(g => {
-      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin' || g.name === 'grp_backups';
       return `
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" name="share_group" value="${escapeHtml(g.name)}" ${g.name === 'grp_samba' ? 'checked' : ''}>
@@ -556,7 +556,7 @@ async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup)
     }
     const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
     container.innerHTML = groups.map(g => {
-      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+      const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin' || g.name === 'grp_backups';
       return `
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" name="edit_share_group" value="${escapeHtml(g.name)}" ${sel.includes(g.name) ? 'checked' : ''}>
@@ -580,7 +580,22 @@ async function openEditShare(name) {
   document.getElementById('edit-share-name').value = name;
   document.getElementById('edit-share-comment').value = s.comment || '';
   document.getElementById('edit-share-scheme').value = String(s.scheme || 1);
-  document.getElementById('edit-share-hidden').checked = !!s.hidden;
+  const hiddenInput = document.getElementById('edit-share-hidden');
+  if (hiddenInput) {
+    if (window.NAS_SERVER_ROLE === 'BACKUP') {
+      hiddenInput.checked = true;
+      hiddenInput.disabled = true;
+    } else {
+      hiddenInput.checked = !!s.hidden;
+      hiddenInput.disabled = false;
+    }
+  }
+  const schemeSelect = document.getElementById('edit-share-scheme');
+  if (schemeSelect && window.NAS_SERVER_ROLE === 'BACKUP') {
+    const opt4 = schemeSelect.querySelector('option[value="4"]');
+    if (opt4) opt4.style.display = 'none';
+    if (schemeSelect.value === '4') schemeSelect.value = '1';
+  }
 
   const groupTokens = (s.valid_users || []).filter(t => t.startsWith('@'));
   const writeToken = (s.write_list || [])[0] || '';
@@ -600,9 +615,13 @@ async function submitEditShare(event) {
   const name = document.getElementById('edit-share-name').value;
   const comment = document.getElementById('edit-share-comment').value;
   const scheme = parseInt(document.getElementById('edit-share-scheme').value, 10);
-  const hidden = document.getElementById('edit-share-hidden').checked;
+  let hidden = document.getElementById('edit-share-hidden').checked;
   const writeGroup = document.getElementById('edit-share-write-group').value;
   const groups = Array.from(document.querySelectorAll('input[name="edit_share_group"]:checked')).map(cb => cb.value);
+
+  if (window.NAS_SERVER_ROLE === 'BACKUP') {
+    hidden = true;
+  }
 
   const btn = document.getElementById('btn-submit-edit-share') || event.target.querySelector('button[type="submit"]');
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
@@ -1286,7 +1305,7 @@ async function loadUsersAndGroups() {
       const isAdminCaller = window.NAS_IS_ADMIN !== false;
 
       groupsTbody.innerHTML = _groupsData.map(g => {
-        const isSpecial = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+        const isSpecial = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin' || g.name === 'grp_backups';
         let canManageMembers = false;
         if (g.name === 'grp_superadmin') {
           canManageMembers = isSuperCaller;
@@ -1335,7 +1354,7 @@ function populateUserGroupOptions(groups) {
   }
 
   container.innerHTML = list.map(g => {
-    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin' || g.name === 'grp_backups';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
       <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}" ${special ? 'disabled' : ''} onchange="updateEffectiveAccessPreview(false)">
       <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
@@ -1396,7 +1415,7 @@ function openEditUser(username) {
   const checked = (u.groups || []).filter(g => g.startsWith('grp_'));
   const container = document.getElementById('edit-user-groups-list');
   container.innerHTML = _groupsData.map(g => {
-    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+    const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin' || g.name === 'grp_backups';
     const sel = (!special && checked.includes(g.name)) ? 'checked' : '';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
       <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel} ${special ? 'disabled' : ''} onchange="updateEffectiveAccessPreview(true)">
