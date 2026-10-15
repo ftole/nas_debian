@@ -149,6 +149,7 @@ class UserService
                 ['name' => 'grp_samba', 'gid' => 1050, 'members' => ['administrador', 'sistemas'], 'is_master' => true, 'is_special' => true],
                 ['name' => 'grp_superadmin', 'gid' => 1054, 'members' => ['administrador'], 'is_master' => false, 'is_special' => true],
                 ['name' => 'grp_web', 'gid' => 1053, 'members' => [], 'is_master' => false, 'is_special' => true],
+                ['name' => 'grp_backups', 'gid' => 1055, 'members' => [], 'is_master' => false, 'is_special' => true],
                 ['name' => 'grp_campana1', 'gid' => 1051, 'members' => ['operador_c1'], 'is_master' => false, 'is_special' => false],
                 ['name' => 'grp_contabilidad', 'gid' => 1052, 'members' => [], 'is_master' => false, 'is_special' => false],
             ];
@@ -169,7 +170,7 @@ class UserService
                             'gid' => $gid,
                             'members' => $members,
                             'is_master' => ($gname === 'grp_samba'),
-                            'is_special' => in_array($gname, ['grp_samba', 'grp_web', 'grp_superadmin'], true),
+                            'is_special' => in_array($gname, ['grp_samba', 'grp_web', 'grp_superadmin', 'grp_backups'], true),
                         ];
                     }
                 }
@@ -377,7 +378,7 @@ class UserService
     public function deleteGroup(string $groupName): array
     {
         $groupName = strtolower(trim($groupName));
-        if (in_array($groupName, ['grp_samba', 'grp_web', 'grp_superadmin'], true)) {
+        if (in_array($groupName, ['grp_samba', 'grp_web', 'grp_superadmin', 'grp_backups'], true)) {
             return ['success' => false, 'error' => "El grupo especial '$groupName' está protegido y no puede ser eliminado."];
         }
 
@@ -682,10 +683,10 @@ class UserService
         $old = strtolower(trim($old));
         $new = strtolower(trim($new));
 
-        if (in_array($old, ['grp_samba', 'grp_web', 'grp_superadmin'], true)) {
+        if ($this->isSpecialGroup($old)) {
             return ['success' => false, 'error' => "El grupo especial '$old' no puede ser renombrado."];
         }
-        if (in_array($new, ['grp_samba', 'grp_web', 'grp_superadmin'], true)) {
+        if ($this->isSpecialGroup($new)) {
             return ['success' => false, 'error' => "El nombre '$new' está reservado por el sistema."];
         }
         if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $old) || !preg_match('/^grp_[a-z0-9_-]{2,30}$/', $new)) {
@@ -764,7 +765,7 @@ class UserService
      */
     private function isSpecialGroup(string $group): bool
     {
-        return in_array(strtolower($group), ['grp_samba', 'grp_web', 'grp_superadmin'], true);
+        return in_array(strtolower($group), ['grp_samba', 'grp_web', 'grp_superadmin', 'grp_backups'], true);
     }
 
     /**
