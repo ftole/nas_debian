@@ -860,22 +860,37 @@ else
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Samba..."
-mkdir -p /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
-chmod 0750 /etc/backup-credentials 2>/dev/null || true
-chown root:www-data /etc/backup-credentials 2>/dev/null || true
+mkdir -p /srv/nas
+chown root:grp_samba /srv/nas
+chmod 2771 /srv/nas
+
+if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
+    mkdir -p /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
+    chmod 0750 /etc/backup-credentials 2>/dev/null || true
+    chown root:www-data /etc/backup-credentials 2>/dev/null || true
+    chown root:grp_samba /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+fi
+
 if [ "$KEEP_DATA" = true ]; then
-    chown root:grp_samba /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    chmod 2771 /srv/nas
-    chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+    if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
+        chown root:grp_samba /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP 2>/dev/null || true
+        chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP 2>/dev/null || true
+    fi
 else
-    chown root:grp_samba /srv/nas /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    chmod 2771 /srv/nas
-    chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-    # Los snapshots de BACKUPS_HISTORICOS son inmutables (chattr +i) y conservan sus
-    # propietarios originales: se excluyen de la normalización recursiva de permisos.
-    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -exec chown -h root:grp_samba {} +
-    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type d ! -type l -exec chmod 2770 {} +
-    find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type f ! -type l -exec chmod 660 {} +
+    if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
+        chown root:grp_samba /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP 2>/dev/null || true
+        chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP 2>/dev/null || true
+        # Los snapshots de BACKUPS_HISTORICOS son inmutables (chattr +i) y conservan sus
+        # propietarios originales: se excluyen de la normalización recursiva de permisos.
+        find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -exec chown -h root:grp_samba {} +
+        find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type d ! -type l -exec chmod 2770 {} +
+        find -P /srv/nas -mindepth 1 -path /srv/nas/BACKUPS_HISTORICOS -prune -o -type f ! -type l -exec chmod 660 {} +
+    else
+        find -P /srv/nas -mindepth 1 -exec chown -h root:grp_samba {} +
+        find -P /srv/nas -mindepth 1 -type d ! -type l -exec chmod 2770 {} +
+        find -P /srv/nas -mindepth 1 -type f ! -type l -exec chmod 660 {} +
+    fi
 fi
 
 # Red de seguridad del panel web: ACL explícita para www-data sobre la raíz de datos.
@@ -884,11 +899,13 @@ fi
 setfacl -m u:www-data:rwx /srv/nas 2>/dev/null || true
 
 # Bitácora maestra de respaldos y archivos de log de auditoría
-touch /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
-chmod 0664 /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
-setfacl -m u:www-data:rx /srv/nas/LOGS_BACKUP 2>/dev/null || true
-setfacl -d -m u:www-data:r /srv/nas/LOGS_BACKUP 2>/dev/null || true
-setfacl -m u:www-data:r /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
+    touch /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+    chmod 0664 /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+    setfacl -m u:www-data:rx /srv/nas/LOGS_BACKUP 2>/dev/null || true
+    setfacl -d -m u:www-data:r /srv/nas/LOGS_BACKUP 2>/dev/null || true
+    setfacl -m u:www-data:r /srv/nas/LOGS_BACKUP/backups_master.log 2>/dev/null || true
+fi
 
 touch /var/log/nas-admin.log 2>/dev/null || true
 chown www-data:adm /var/log/nas-admin.log 2>/dev/null || true
@@ -900,7 +917,8 @@ chown root:adm /var/log/samba/audit.log 2>/dev/null || true
 chmod 0640 /var/log/samba/audit.log 2>/dev/null || true
 
 # Rotación de logs de backup para evitar llenar el disco
-cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
+if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
+    cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
 /srv/nas/LOGS_BACKUP/*.log {
     weekly
     maxsize 10M
@@ -912,6 +930,7 @@ cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-backups
     copytruncate
 }
 LOGROTATE_EOF
+fi
 
 # Rotación de logs de auditoría administrativa
 cat << 'LOGROTATE_EOF' > /etc/logrotate.d/nas-admin
