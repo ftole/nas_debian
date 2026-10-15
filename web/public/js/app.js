@@ -513,7 +513,10 @@ async function populateShareGroupOptions() {
   try {
     const res = await apiFetch('/api/groups');
     AppState.groupsCache = res.data || [];
-    const selectable = AppState.groupsCache;
+    let selectable = AppState.groupsCache;
+    if (window.NAS_SERVER_ROLE === 'BACKUP') {
+      selectable = selectable.filter(g => g.name === 'grp_samba' || g.name === 'grp_backups');
+    }
 
     if (!selectable.length) {
       container.innerHTML = '<em style="color:var(--text-muted);">No hay grupos disponibles. Crea uno en “Usuarios y grupos”.</em>';
@@ -547,7 +550,10 @@ async function populateEditShareGroupOptions(selectedGroups, selectedWriteGroup)
 
   try {
     const res = await apiFetch('/api/groups');
-    const groups = res.data || [];
+    let groups = res.data || [];
+    if (window.NAS_SERVER_ROLE === 'BACKUP') {
+      groups = groups.filter(g => g.name === 'grp_samba' || g.name === 'grp_backups');
+    }
     const sel = (selectedGroups || []).map(g => String(g).replace('@', ''));
     container.innerHTML = groups.map(g => {
       const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
@@ -618,11 +624,18 @@ async function submitEditShare(event) {
 
 async function submitNewShare(event) {
   event.preventDefault();
-  const name = document.getElementById('share-name').value;
+  let name = document.getElementById('share-name').value;
   const comment = document.getElementById('share-comment').value;
   const scheme = parseInt(document.getElementById('share-scheme').value, 10);
-  const hidden = document.getElementById('share-hidden').checked;
+  let hidden = document.getElementById('share-hidden').checked;
   const writeGroup = document.getElementById('share-write-group').value;
+
+  if (window.NAS_SERVER_ROLE === 'BACKUP') {
+    hidden = true;
+    if (!name.endsWith('$')) {
+      name += '$';
+    }
+  }
 
   const selectedGroups = Array.from(document.querySelectorAll('input[name="share_group"]:checked'))
     .map(cb => cb.value);
