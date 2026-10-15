@@ -1029,6 +1029,200 @@ let _usersData = [];
 let _groupsData = [];
 let _usersFilter = 'all';
 let _activeGroup = '';
+const _expandedUserGroups = new Set();
+
+function toggleUserGroupsExpand(username) {
+  if (_expandedUserGroups.has(username)) {
+    _expandedUserGroups.delete(username);
+  } else {
+    _expandedUserGroups.add(username);
+  }
+  loadUsersAndGroups();
+}
+
+function renderUserGroupPills(username, groups) {
+  const allGroups = (groups || []).filter(g => g.startsWith('grp_') || ['sudo', 'adm'].includes(g));
+  if (!allGroups.length) {
+    return '<span style="color:var(--text-muted); font-size:12px;"><em>Sin grupos</em></span>';
+  }
+  const isExpanded = _expandedUserGroups.has(username);
+  if (allGroups.length <= 2 || isExpanded) {
+    const pills = allGroups.map(g => `<span class="tag-pill">${escapeHtml(g)}</span>`).join(' ');
+    if (isExpanded && allGroups.length > 2) {
+      return pills + ` <span class="tag-pill tag-pill-more" title="Ver menos" onclick="toggleUserGroupsExpand('${escapeHtml(username)}')">« Menos</span>`;
+    }
+    return pills;
+  }
+  const visible = allGroups.slice(0, 2).map(g => `<span class="tag-pill">${escapeHtml(g)}</span>`).join(' ');
+  const remaining = allGroups.length - 2;
+  return `${visible} <span class="tag-pill tag-pill-more" title="Ver ${remaining} grupos más" onclick="toggleUserGroupsExpand('${escapeHtml(username)}')">+${remaining} más</span>`;
+}
+
+function selectRoleCard(formPrefix, role) {
+  const containerId = formPrefix === 'user' ? 'new-user-role-cards' : 'edit-user-role-cards';
+  const container = document.getElementById(containerId);
+  if (container) {
+    container.querySelectorAll('.role-card').forEach(card => {
+      card.classList.toggle('active', card.dataset.role === role);
+    });
+  }
+
+  const roleInput = document.getElementById(`${formPrefix}-role-val`);
+  if (roleInput) {
+    roleInput.value = role;
+  }
+
+  const isSuper = role === 'superadmin';
+  const isAdmin = role === 'admin' || isSuper;
+  const canWeb = role === 'operator' || isAdmin;
+
+  const adminChk = document.getElementById(`${formPrefix}-is-admin`);
+  if (adminChk) adminChk.checked = isAdmin;
+
+  const webChk = document.getElementById(`${formPrefix}-can-web`);
+  if (webChk) webChk.checked = canWeb;
+
+  const superChk = document.getElementById(`${formPrefix}-is-superadmin`);
+  if (superChk) superChk.checked = isSuper;
+
+  updateEffectiveAccessPreview(formPrefix === 'edit-user');
+}
+
+function generateAndSetPassword(inputId) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*-_';
+  let pass = '';
+  const array = new Uint32Array(14);
+  window.crypto.getRandomValues(array);
+  for (let i = 0; i < 14; i++) {
+    pass += chars[array[i] % chars.length];
+  }
+  const el = document.getElementById(inputId);
+  if (el) {
+    el.value = pass;
+    el.type = 'text';
+    const eyeIcon = document.getElementById(`${inputId}-eye`);
+    if (eyeIcon) {
+      eyeIcon.innerHTML = '<use href="#icon-eye-off"></use>';
+    }
+    showToast('Contraseña segura generada.', 'info');
+  }
+}
+
+function togglePasswordVisibility(inputId) {
+  const el = document.getElementById(inputId);
+  const eyeIcon = document.getElementById(`${inputId}-eye`);
+  if (!el) return;
+  if (el.type === 'password') {
+    el.type = 'text';
+    if (eyeIcon) eyeIcon.innerHTML = '<use href="#icon-eye-off"></use>';
+  } else {
+    el.type = 'password';
+    if (eyeIcon) eyeIcon.innerHTML = '<use href="#icon-eye"></use>';
+  }
+}
+
+function copyUncPath() {
+  const input = document.getElementById('welcome-unc-path');
+  if (!input) return;
+  const val = input.value;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(val).then(() => {
+      showToast('Ruta UNC copiada al portapapeles.', 'success');
+    }).catch(() => {
+      input.select();
+      document.execCommand('copy');
+      showToast('Ruta UNC copiada al portapapeles.', 'success');
+    });
+  } else {
+    input.select();
+    document.execCommand('copy');
+    showToast('Ruta UNC copiada al portapapeles.', 'success');
+  }
+}
+
+function filterGroupMembers() {
+  const query = (document.getElementById('group-member-search')?.value || '').toLowerCase().trim();
+  const rows = document.querySelectorAll('#group-members-list > div');
+  rows.forEach(r => {
+    const text = r.textContent.toLowerCase();
+    r.style.display = (!query || text.includes(query)) ? 'flex' : 'none';
+  });
+}
+
+async function updateEffectiveAccessPreview(isEdit) {
+  const prefix = isEdit ? 'edit-user' : 'user';
+  const previewBox = document.getElementById(`${prefix}-effective-access-preview`);
+  if (!previewBox) return;
+
+  const sambaEnabled = document.getElementById(`${prefix}-samba-enabled`)?.checked ?? true;
+  if (!sambaEnabled) {
+    previewBox.innerHTML = '<em style="color:var(--text-muted); font-size:12px;">Acceso Samba desactivado (sin acceso a recursos de red).</em>';
+    return;
+  }
+
+  if (!_permData || !_permData.shares || !_permData.shares.length) {
+    try {
+      const res = await apiFetch('/api/shares/access');
+      _permData = res.data || { shares: [], groups: [], users: [] };
+    } catch (e) {
+      previewBox.innerHTML = '<em style="color:var(--text-muted); font-size:12px;">No se pudo cargar la lista de recursos compartidos.</em>';
+      return;
+    }
+  }
+
+  const shares = _permData.shares || [];
+  if (!shares.length) {
+    previewBox.innerHTML = '<em style="color:var(--text-muted); font-size:12px;">No hay recursos compartidos configurados en el servidor.</em>';
+    return;
+  }
+
+  const groupCheckboxes = document.querySelectorAll(`input[name="${isEdit ? 'edit_user_group' : 'user_group'}"]:checked`);
+  const selectedGroups = Array.from(groupCheckboxes).map(cb => cb.value);
+  const role = document.getElementById(`${prefix}-role-val`)?.value || 'standard';
+  const isAdmin = role === 'admin' || role === 'superadmin';
+
+  const groupRows = _permData.groups || [];
+  let html = '';
+
+  shares.forEach(share => {
+    let label = 'Sin acceso';
+    let badgeClass = 'badge-gray';
+
+    if (isAdmin) {
+      label = 'Lectura y escritura (Admin)';
+      badgeClass = 'badge-ok';
+    } else {
+      let level = 'none';
+      for (const gname of selectedGroups) {
+        const grow = groupRows.find(r => r.name === gname);
+        if (grow) {
+          const perm = grow[share];
+          if (perm === 'write') {
+            level = 'write';
+            break;
+          } else if (perm === 'read' && level !== 'write') {
+            level = 'read';
+          }
+        }
+      }
+      if (level === 'write') {
+        label = 'Lectura y escritura';
+        badgeClass = 'badge-ok';
+      } else if (level === 'read') {
+        label = 'Solo lectura';
+        badgeClass = 'badge-blue';
+      }
+    }
+
+    html += `
+      <div class="access-preview-item">
+        <span class="share-name"><svg class="icon icon-sm"><use href="#icon-folder"></use></svg> [${escapeHtml(share)}]</span>
+        <span class="badge ${badgeClass}">${label}</span>
+      </div>`;
+  });
+
+  previewBox.innerHTML = html;
+}
 
 async function loadUsersAndGroups() {
   const usersTbody = document.getElementById('users-table-body');
@@ -1059,6 +1253,7 @@ async function loadUsersAndGroups() {
           <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.full_name || '')}</div></td>
           <td>${u.uid}</td>
           <td>${rol}</td>
+          <td>${renderUserGroupPills(u.username, u.groups)}</td>
           <td>${netEnabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Suspendido</span>'}</td>
           <td>${u.is_samba ? '<span class="badge badge-ok">Sync</span>' : '<span class="badge badge-err">Sin SMB</span>'}</td>
           <td style="text-align:right; white-space:nowrap;">
@@ -1069,7 +1264,7 @@ async function loadUsersAndGroups() {
             ` : `<span class="badge badge-gray">${isProtected ? (u.is_superadmin ? 'Inmutable' : 'Protegida') : 'Solo lectura'}</span>`}
           </td>
         </tr>`;
-      }).join('') || '<tr><td colspan="6" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
+      }).join('') || '<tr><td colspan="7" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
       applyUsersFilters();
     }
 
@@ -1113,7 +1308,7 @@ function populateUserGroupOptions(groups) {
   container.innerHTML = list.map(g => {
     const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
-      <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}" ${special ? 'disabled' : ''}>
+      <input type="checkbox" name="user_group" value="${escapeHtml(g.name)}" ${special ? 'disabled' : ''} onchange="updateEffectiveAccessPreview(false)">
       <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
     </label>`;
   }).join('');
@@ -1145,14 +1340,29 @@ function openEditUser(username) {
   document.getElementById('edit-user-uname').value = username;
   document.getElementById('edit-user-fullname').value = u.full_name || '';
   document.getElementById('edit-user-pass').value = '';
-  document.getElementById('edit-user-is-admin').checked = !!u.is_admin;
-  document.getElementById('edit-user-can-web').checked = !!(u.can_web || u.is_admin);
   document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
-  const superChk = document.getElementById('edit-user-is-superadmin');
-  if (superChk) superChk.checked = !!u.is_superadmin;
-  // El superadministrador es inmutable: no se puede degradar desde el panel.
-  const adminChk = document.getElementById('edit-user-is-admin');
-  if (adminChk) adminChk.disabled = !!u.is_superadmin;
+
+  // Determinar rol
+  let userRole = 'standard';
+  if (u.is_superadmin) {
+    userRole = 'superadmin';
+  } else if (u.is_admin) {
+    userRole = 'admin';
+  } else if (u.can_web) {
+    userRole = 'operator';
+  }
+  selectRoleCard('edit-user', userRole);
+
+  const editCards = document.getElementById('edit-user-role-cards');
+  if (editCards) {
+    editCards.querySelectorAll('.role-card').forEach(card => {
+      if (u.is_superadmin) {
+        card.classList.toggle('disabled', card.dataset.role !== 'superadmin');
+      } else {
+        card.classList.remove('disabled');
+      }
+    });
+  }
 
   const checked = (u.groups || []).filter(g => g.startsWith('grp_'));
   const container = document.getElementById('edit-user-groups-list');
@@ -1160,10 +1370,12 @@ function openEditUser(username) {
     const special = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
     const sel = (!special && checked.includes(g.name)) ? 'checked' : '';
     return `<label style="display:flex; align-items:center; gap:8px; ${special ? 'opacity:0.65;' : ''}">
-      <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel} ${special ? 'disabled' : ''}>
+      <input type="checkbox" name="edit_user_group" value="${escapeHtml(g.name)}" ${sel} ${special ? 'disabled' : ''} onchange="updateEffectiveAccessPreview(true)">
       <span>${escapeHtml(g.name)}${special ? ' <span class="badge badge-gray">Especial</span>' : ''}</span>
     </label>`;
   }).join('');
+
+  updateEffectiveAccessPreview(true);
   openModal('modal-edit-user');
 }
 
@@ -1172,10 +1384,11 @@ async function submitUpdateUser(event) {
   const username = document.getElementById('edit-user-uname').value;
   const full_name = document.getElementById('edit-user-fullname').value;
   const password = document.getElementById('edit-user-pass').value;
-  const isAdmin = document.getElementById('edit-user-is-admin').checked;
-  const canWeb = document.getElementById('edit-user-can-web').checked;
+  const role = document.getElementById('edit-user-role-val')?.value || 'standard';
+  const isAdmin = role === 'admin' || role === 'superadmin';
+  const canWeb = role === 'operator' || isAdmin;
+  const isSuperadmin = role === 'superadmin';
   const sambaEnabled = document.getElementById('edit-user-samba-enabled').checked;
-  const isSuperadmin = document.getElementById('edit-user-is-superadmin')?.checked ?? false;
   const groups = Array.from(document.querySelectorAll('input[name="edit_user_group"]:checked')).map(cb => cb.value);
 
   const btn = document.getElementById('btn-submit-edit-user') || event.target.querySelector('button[type="submit"]');
@@ -1215,6 +1428,8 @@ async function toggleUser(username, enabled) {
 function openGroupMembers(group) {
   _activeGroup = group;
   document.getElementById('modal-group-members-title').textContent = 'Miembros del grupo ' + group;
+  const searchInput = document.getElementById('group-member-search');
+  if (searchInput) searchInput.value = '';
 
   const g = _groupsData.find(x => x.name === group);
   const members = g ? (g.members || []) : [];
@@ -1306,7 +1521,11 @@ async function openNewUser() {
       // Sin grupos disponibles
     }
   }
+  const form = document.getElementById('form-new-user');
+  if (form) form.reset();
+  selectRoleCard('user', 'standard');
   populateUserGroupOptions(_groupsData);
+  updateEffectiveAccessPreview(false);
   openModal('modal-new-user');
 }
 
@@ -1405,10 +1624,11 @@ async function submitNewUser(event) {
   const username = document.getElementById('user-uname').value;
   const full_name = document.getElementById('user-fullname').value;
   const password = document.getElementById('user-pass').value;
-  const isAdmin = document.getElementById('user-is-admin').checked;
-  const canWeb = document.getElementById('user-can-web').checked;
+  const role = document.getElementById('user-role-val')?.value || 'standard';
+  const isAdmin = role === 'admin' || role === 'superadmin';
+  const canWeb = role === 'operator' || isAdmin;
+  const isSuperadmin = role === 'superadmin';
   const sambaEnabled = document.getElementById('user-samba-enabled').checked;
-  const isSuperadmin = document.getElementById('user-is-superadmin')?.checked ?? false;
 
   const selectedGroups = Array.from(document.querySelectorAll('input[name="user_group"]:checked'))
     .map(cb => cb.value);
@@ -1437,6 +1657,28 @@ async function submitNewUser(event) {
     showToast(`Usuario [${username}] creado y sincronizado en Samba.`, 'success');
     closeModal('modal-new-user');
     document.getElementById('form-new-user').reset();
+
+    // Mostrar modal de bienvenida con ruta UNC
+    const serverHost = window.location.hostname || 'SRV-NAS';
+    const uncInput = document.getElementById('welcome-unc-path');
+    if (uncInput) {
+      uncInput.value = `\\\\${serverHost}`;
+    }
+    const infoEl = document.getElementById('welcome-user-info');
+    if (infoEl) {
+      const roleBadge = isSuperadmin
+        ? '<span class="badge badge-err">Superadministrador</span>'
+        : (isAdmin
+            ? '<span class="badge badge-warn">Administrador</span>'
+            : (canWeb ? '<span class="badge badge-blue">Operador Web</span>' : '<span class="badge badge-gray">Empleado de Red</span>'));
+      infoEl.innerHTML = `
+        <div style="margin-bottom:4px;"><strong>Usuario:</strong> ${escapeHtml(username)}</div>
+        <div style="margin-bottom:4px;"><strong>Nombre:</strong> ${escapeHtml(full_name || 'N/A')}</div>
+        <div><strong>Rol asignado:</strong> ${roleBadge}</div>
+      `;
+    }
+    openModal('modal-user-welcome');
+
     loadUsersAndGroups();
   } catch (e) {
     // Ya mostrado
