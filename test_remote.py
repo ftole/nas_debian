@@ -396,7 +396,7 @@ class SSHManager:
 
         # Crear archivo tar en memoria
         tar_buffer = io.BytesIO()
-        include_dirs = ["src", "web", "tests", "docs"]
+        include_dirs = ["src", "web", "tests", "docs", "bin"]
         include_files = [
             "install.sh", "README.md", "AGENTS.md", "LICENSE",
             ".env.example", ".flake8", "requirements-dev.txt",
@@ -621,7 +621,7 @@ def ensure_env_config(env_path: Optional[pathlib.Path] = None, allow_interactive
 # Módulos de Prueba Automatizada
 # -----------------------------------------------------------------------------
 
-def test_install_action(manager: SSHManager, role: str = "ARCHIVOS_BACKUP") -> bool:
+def test_install_action(manager: SSHManager, role: str = "BACKUP", disk: str = "/dev/sda") -> bool:
     """Acción 1: Sincroniza el repositorio y ejecuta el despliegue limpio de deploy.sh e install.sh."""
     log_step("1/7", "Prueba de Despliegue e Instalación Limpia (test install)")
 
@@ -648,12 +648,25 @@ def test_install_action(manager: SSHManager, role: str = "ARCHIVOS_BACKUP") -> b
     else:
         log_success("CLI 'nas' registrado en /usr/local/bin/nas.")
 
+    # Si se especificó /dev/sda, verificar si existe en el host o recurrir a LOCAL
+    if disk == "/dev/sda":
+        c_chk_disk, _, _ = manager.run_command("test -b /dev/sda", sudo=False, timeout=5)
+        if c_chk_disk != 0:
+            log_info("Dispositivo /dev/sda no detectado; utilizando almacenamiento LOCAL.")
+            disk = "LOCAL"
+
+    # Desmontar /srv/nas preventivamente para evitar bloqueos por almacenamiento en uso
+    manager.run_command("umount /srv/nas 2>/dev/null || true", sudo=True, timeout=10)
+
+    netbios_name = "SRV-BKP" if role == "BACKUP" else "SRV-NAS"
+
     # 3. Ejecutar deploy.sh con parámetros estándar
-    log_info(f"Ejecutando deploy.sh en servidor remoto (Rol: {role}, Disco: LOCAL)...")
+    log_info(f"Ejecutando deploy.sh en servidor remoto (Rol: {role}, Disco: {disk})...")
     deploy_cmd = (
         "cd /tmp/nas_debian_test && "
         f"printf '%s\\n' {shlex.quote(manager.root_password)} | "
-        f"bash src/core/deploy.sh LOCAL WORKGROUP SRV-NAS {shlex.quote(manager.user)} - {shlex.quote(role)} --force --confirm"
+        f"bash src/core/deploy.sh {shlex.quote(disk)} WORKGROUP {shlex.quote(netbios_name)} "
+        f"{shlex.quote(manager.user)} - {shlex.quote(role)} --force --confirm"
     )
 
     code, out, err = manager.run_command(deploy_cmd, sudo=True, timeout=300, stream=True)
@@ -711,6 +724,65 @@ def test_install_action(manager: SSHManager, role: str = "ARCHIVOS_BACKUP") -> b
         log_success("Binario CLI global /usr/local/bin/nas: VERIFICADO")
     else:
         log_warn("Binario CLI global /usr/local/bin/nas no presente.")
+
+    # 6. Validaciones específicas del rol
+    c_role, o_role, _ = manager.run_command("cat /etc/nas/role 2>/dev/null", sudo=True, timeout=5)
+    deployed_role = o_role.strip()
+    if deployed_role == role:
+        log_success(f"Persistencia de rol en /etc/nas/role verificada: {deployed_role}")
+    else:
+        log_error(f"Inconsistencia en /etc/nas/role: esperado '{role}', detectado '{deployed_role}'")
+        services_ok = False
+
+    if role == "BACKUP":
+        log_info("Validando configuración y políticas de Central de Respaldos (BACKUP)...")
+        if disk != "LOCAL":
+            _, o_fstype, _ = manager.run_command("findmnt -n -o FSTYPE /srv/nas 2>/dev/null", sudo=True, timeout=5)
+            fs_actual = o_fstype.strip()
+            if fs_actual == "btrfs":
+                log_success(f"Filesystem /srv/nas verificado: {fs_actual} (Btrfs activo)")
+            else:
+                log_error(f"Filesystem incorrecto para rol BACKUP: esperado 'btrfs', obtenido '{fs_actual}'")
+                services_ok = False
+
+            _, o_fopts, _ = manager.run_command("findmnt -n -o OPTIONS /srv/nas 2>/dev/null", sudo=True, timeout=5)
+            opts_actual = o_fopts.strip()
+            if "compress=zstd" in opts_actual or "space_cache" in opts_actual:
+                log_success(f"Opciones de montaje Btrfs con compresión verificadas: {opts_actual}")
+            else:
+                log_warn(f"Opciones de montaje detectadas: {opts_actual}")
+
+        c_scrub, o_scrub, _ = manager.run_command("cat /etc/cron.d/nas-btrfs-scrub 2>/dev/null", sudo=True, timeout=5)
+        if c_scrub == 0 and "btrfs scrub start -B /srv/nas" in o_scrub:
+            log_success("Tarea mensual de mantenimiento BTRFS scrub (/etc/cron.d/nas-btrfs-scrub): ACTIVA Y PROGRAMADA")
+        else:
+            log_info("Cron de scrub BTRFS no activo (normal si el fs no es btrfs dedicado).")
+
+        c_gbkp, _, _ = manager.run_command("getent group grp_backups", sudo=False, timeout=5)
+        if c_gbkp == 0:
+            log_success("Grupo de seguridad 'grp_backups': CREADO Y ACTIVO")
+        else:
+            log_warn("Grupo 'grp_backups' no detectado en el sistema.")
+
+        # Validar rechazo de recursos públicos o no ocultos en rol BACKUP mediante nas-cli
+        log_info("Verificando restricción de recursos públicos y grupos en rol BACKUP...")
+        c_rej_pub, _, _ = manager.run_command(
+            "nas share create --name=SHARE_PUBLICO --scheme=4 --json", sudo=True, timeout=10
+        )
+        if c_rej_pub != 0:
+            log_success("nas-cli rechazó recurso público (scheme 4) en rol BACKUP correctamente.")
+        else:
+            log_error("Fallo de seguridad: nas-cli aceptó un recurso público en rol BACKUP.")
+            services_ok = False
+
+        c_rej_vis, _, _ = manager.run_command(
+            "nas share create --name=SHARE_VISIBLE --json", sudo=True, timeout=10
+        )
+        if c_rej_vis != 0:
+            log_success("nas-cli rechazó recurso visible (sin sufijo $) en rol BACKUP correctamente.")
+        else:
+            log_error("Fallo de seguridad: nas-cli aceptó recurso visible en rol BACKUP.")
+            services_ok = False
 
     return services_ok
 
@@ -970,6 +1042,17 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
         except Exception as e_dash:
             log_warn(f"No se pudo leer el token CSRF del dashboard: {e_dash}")
 
+        if dash_body:
+            _, o_dash_role, _ = manager.run_command("cat /etc/nas/role 2>/dev/null || echo ARCHIVOS", sudo=False, timeout=5)
+            d_role = o_dash_role.strip()
+            if d_role in ["BACKUP", "ARCHIVOS_BACKUP"]:
+                if 'id="view-backups"' in dash_body:
+                    log_success("Dashboard Web: Vista de respaldos ('view-backups') presente en el DOM.")
+                if 'runStorageScrub' in dash_body:
+                    log_success("Dashboard Web: Botón BTRFS scrub activo y presente en el DOM.")
+                if 'modal-new-backup' in dash_body:
+                    log_success("Dashboard Web: Botón/modal de programación de respaldos presente en el DOM.")
+
         base_headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -977,13 +1060,42 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
             "Cookie": session_cookie,
             "User-Agent": "NAS-Debian-Tester/1.0",
         }
+
+        # Obtener rol para adaptar la prueba E2E
+        _, o_r, _ = manager.run_command("cat /etc/nas/role 2>/dev/null || echo ARCHIVOS", sudo=False, timeout=5)
+        active_role = o_r.strip()
+
+        if active_role == "BACKUP":
+            # Verificar rechazo de share público en API
+            try:
+                pub_payload = json.dumps({
+                    "name": "PUBLICO_TEST",
+                    "comment": "Prueba de rechazo publico",
+                    "scheme": 4,
+                    "hidden": False,
+                }).encode("utf-8")
+                req_pub = urllib.request.Request(
+                    f"https://{host_ip}:{https_port}/api/shares",
+                    data=pub_payload, headers=base_headers, method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req_pub, context=ssl_ctx, timeout=10) as r_pub:
+                        log_error(f"Fallo de seguridad: rol BACKUP aceptó recurso público con status {r_pub.status}")
+                except urllib.error.HTTPError as he_pub:
+                    if he_pub.code == 403:
+                        log_success("Seguridad de rol BACKUP verificada: API rechazó recurso público con HTTP 403.")
+            except Exception as e_pub:
+                log_warn(f"Aviso al validar restricción de recurso público: {e_pub}")
+
+        share_e2e = f"NAS_E2E_{int(time.time())}$" if active_role == "BACKUP" else f"NAS_E2E_{int(time.time())}"
+        is_hidden_e2e = (active_role == "BACKUP")
         try:
             create_payload = json.dumps({
                 "name": share_e2e,
                 "comment": "Recurso temporal de prueba E2E",
                 "scheme": 1,
                 "groups": ["grp_samba"],
-                "hidden": False,
+                "hidden": is_hidden_e2e,
             }).encode("utf-8")
             req_create = urllib.request.Request(
                 f"https://{host_ip}:{https_port}/api/shares",
@@ -992,7 +1104,7 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
             with urllib.request.urlopen(req_create, context=ssl_ctx, timeout=20) as rc:
                 body_create = rc.read().decode("utf-8", errors="replace")
             if '"success":true' in body_create:
-                log_success("Recurso temporal creado vía API: sudo de www-data operativo.")
+                log_success(f"Recurso temporal [{share_e2e}] creado vía API: sudo de www-data operativo.")
                 e2e_write_ok = True
             else:
                 log_error(f"Creación de recurso E2E no confirmada: {body_create[:200]}")
@@ -1004,7 +1116,7 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
             )
             try:
                 urllib.request.urlopen(req_del, context=ssl_ctx, timeout=20).read()
-                log_success("Recurso temporal E2E eliminado correctamente.")
+                log_success(f"Recurso temporal E2E [{share_e2e}] eliminado correctamente.")
             except Exception as e_del:
                 log_warn(f"No se pudo eliminar el recurso E2E {share_e2e}: {e_del}")
         except urllib.error.HTTPError as he:
@@ -1085,33 +1197,49 @@ def test_samba_action(manager: SSHManager) -> bool:
     log_info("Probando transferencia y permisos I/O a través del protocolo SMB...")
     stamp = int(time.time())
     probe_content = f"NAS_SAMBA_PROBE_SMB_{stamp}"
+
+    _, o_r_smb, _ = manager.run_command("cat /etc/nas/role 2>/dev/null || echo ARCHIVOS", sudo=False, timeout=5)
+    role_smb = o_r_smb.strip()
+
+    if role_smb == "BACKUP":
+        probe_share = f"SMB_PROBE_{stamp}$"
+        manager.run_command(
+            f"nas share create --name={shlex.quote(probe_share)} --scheme=1 --groups=grp_samba --json",
+            sudo=True, timeout=15,
+        )
+    else:
+        probe_share = "SISTEMAS"
+
     smb_probe_cmd = (
         f"mkdir -p /tmp/smb_probe && "
         f"echo {shlex.quote(probe_content)} > /tmp/smb_probe/probe.txt && "
-        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'put /tmp/smb_probe/probe.txt remote_probe.txt' 2>&1 && "
-        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'get remote_probe.txt /tmp/smb_probe/downloaded.txt' 2>&1 && "
-        f"smbclient //127.0.0.1/SISTEMAS -U '{manager.user}%{manager.password}' -c 'rm remote_probe.txt' 2>&1 && "
+        f"smbclient //127.0.0.1/{probe_share} -U '{manager.user}%{manager.password}' -c 'put /tmp/smb_probe/probe.txt remote_probe.txt' 2>&1 && "
+        f"smbclient //127.0.0.1/{probe_share} -U '{manager.user}%{manager.password}' -c 'get remote_probe.txt /tmp/smb_probe/downloaded.txt' 2>&1 && "
+        f"smbclient //127.0.0.1/{probe_share} -U '{manager.user}%{manager.password}' -c 'rm remote_probe.txt' 2>&1 && "
         f"grep -q {shlex.quote(probe_content)} /tmp/smb_probe/downloaded.txt && "
         f"rm -rf /tmp/smb_probe"
     )
     c_smb, o_smb, e_smb = manager.run_command(smb_probe_cmd, sudo=False, timeout=30)
     if c_smb == 0:
-        log_success("I/O sobre protocolo SMB verificado (subida, descarga, integridad y borrado exitoso).")
+        log_success(f"I/O sobre protocolo SMB verificado en [{probe_share}] (subida, descarga, integridad y borrado exitoso).")
     else:
-        log_warn(f"smbclient directo no completó transferencia SMB o recurso SISTEMAS requiere permisos adicionales: {e_smb or o_smb}")
-        # Fallback a prueba local en /srv/nas/SISTEMAS
+        log_warn(f"smbclient directo no completó transferencia SMB o recurso {probe_share} requiere permisos adicionales: {e_smb or o_smb}")
+        dir_name = probe_share.rstrip('$')
         io_local_cmd = (
-            f"mkdir -p /srv/nas/SISTEMAS && "
-            f"echo {shlex.quote(probe_content)} > /srv/nas/SISTEMAS/probe_local.txt && "
-            f"cat /srv/nas/SISTEMAS/probe_local.txt && "
-            f"rm -f /srv/nas/SISTEMAS/probe_local.txt"
+            f"mkdir -p /srv/nas/{dir_name} && "
+            f"echo {shlex.quote(probe_content)} > /srv/nas/{dir_name}/probe_local.txt && "
+            f"cat /srv/nas/{dir_name}/probe_local.txt && "
+            f"rm -f /srv/nas/{dir_name}/probe_local.txt"
         )
         c_io, o_io, e_io = manager.run_command(io_local_cmd, sudo=True, timeout=10)
         if c_io == 0 and probe_content in o_io:
-            log_success("I/O local en /srv/nas/SISTEMAS verificado exitosamente como respaldo.")
+            log_success(f"I/O local en /srv/nas/{dir_name} verificado exitosamente como respaldo.")
         else:
             log_error(f"Fallo en prueba de I/O en almacenamiento: {e_io}")
             all_ok = False
+
+    if role_smb == "BACKUP":
+        manager.run_command(f"nas share delete {shlex.quote(probe_share)} --delete-files --json", sudo=True, timeout=15)
 
     # 4. Validar configuración de full_audit en rsyslog y smb.conf
     log_info("Verificando configuración de full_audit en Samba y rsyslog...")
@@ -1228,7 +1356,7 @@ def test_backups_action(manager: SSHManager) -> bool:
     return all_ok
 
 
-def test_suite_total_action(manager: SSHManager, host_ip: str) -> bool:
+def test_suite_total_action(manager: SSHManager, host_ip: str, role: str = "BACKUP", disk: str = "/dev/sda") -> bool:
     """Acción 7: Batería completa end-to-end con resumen tabular de resultados."""
     print_banner()
     print(f"\n{Colors.WHITE}{Colors.BOLD}Iniciando Batería de Pruebas Completa End-to-End en {host_ip}...{Colors.RESET}\n")
@@ -1237,7 +1365,7 @@ def test_suite_total_action(manager: SSHManager, host_ip: str) -> bool:
     results: List[Tuple[str, bool, float]] = []
 
     tests = [
-        ("Despliegue e Instalación (test install)", lambda: test_install_action(manager)),
+        ("Despliegue e Instalación (test install)", lambda: test_install_action(manager, role=role, disk=disk)),
         ("Auditoría Web y Seguridad API (test web)", lambda: test_web_action(manager, host_ip)),
         ("Servicios Samba y Forense (test samba)", lambda: test_samba_action(manager)),
         ("Respaldos y Deduplicación (test backups)", lambda: test_backups_action(manager)),
@@ -1392,6 +1520,19 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--env-file", type=str, default="", help="Ruta alternativa al archivo .env")
     parser.add_argument("--non-interactive", action="store_true", help="No solicitar datos interactivamente si faltan")
+    parser.add_argument(
+        "--role",
+        type=str,
+        default="BACKUP",
+        choices=["ARCHIVOS", "BACKUP", "ARCHIVOS_BACKUP"],
+        help="Rol del servidor a desplegar y verificar (por defecto: BACKUP)",
+    )
+    parser.add_argument(
+        "--disk",
+        type=str,
+        default="/dev/sda",
+        help="Disco secundario a aprovisionar (o LOCAL, por defecto: /dev/sda)",
+    )
     return parser
 
 
@@ -1441,7 +1582,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ip = config.get("NAS_TEST_IP", "")
 
     if args.action == "install":
-        return 0 if test_install_action(manager) else 1
+        return 0 if test_install_action(manager, role=args.role, disk=args.disk) else 1
     elif args.action == "uninstall":
         return 0 if test_uninstall_action(manager) else 1
     elif args.action == "update":
@@ -1453,7 +1594,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif args.action == "backups":
         return 0 if test_backups_action(manager) else 1
     elif args.action == "suite":
-        return 0 if test_suite_total_action(manager, ip) else 1
+        return 0 if test_suite_total_action(manager, ip, role=args.role, disk=args.disk) else 1
     elif args.action == "console":
         manager.interactive_shell()
         return 0
