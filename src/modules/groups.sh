@@ -7,6 +7,7 @@ gestionar_grupos() {
     local OPC_GRP TABLA_GRUPOS NUEVO_GRP GRUPOS_ELIM MENU_ELIM GRP_BORRAR g
     local GRUPOS_REN MENU_REN GRP_REN_SEL NUEVO_NOMBRE
     local GRUPOS_MBR GRP_MBR_SEL USERS_SISTEMA MBRS_ACTUALES NUEVOS_MBR NUEVOS_MBR_LIST u
+    local CANONICAL_SUPER u_uid
     while true; do
         OPC_GRP=$(whiptail --title "$APP_TITLE" \
             --ok-button "< Seleccionar >" --cancel-button "< Volver >" \
@@ -164,16 +165,30 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                     RET=$?
                     if [ $RET -eq 0 ]; then
                         NUEVOS_MBR_LIST=$(echo "$NUEVOS_MBR" | tr -d '\"')
+                        CANONICAL_SUPER=""
+                        if [ -s /etc/nas/superadmin ]; then
+                            CANONICAL_SUPER=$(tr -d ' \n\r' < /etc/nas/superadmin 2>/dev/null)
+                        fi
                         for u in $NUEVOS_MBR_LIST; do
                             if ! echo " $MBRS_ACTUALES " | grep -qw "$u"; then
                                 gpasswd -a "$u" "$GRP_MBR_SEL" 2>/dev/null || true
                             fi
                         done
                         for u in $MBRS_ACTUALES; do
+                            u_uid=$(id -u "$u" 2>/dev/null || echo 0)
+                            if [ "$u_uid" -lt 1000 ] || [ "$u" == "www-data" ]; then
+                                continue
+                            fi
+                            if [ "$GRP_MBR_SEL" == "grp_superadmin" ] && [ -n "$CANONICAL_SUPER" ] && [ "$u" == "$CANONICAL_SUPER" ]; then
+                                continue
+                            fi
                             if ! echo " $NUEVOS_MBR_LIST " | grep -qw "$u"; then
                                 gpasswd -d "$u" "$GRP_MBR_SEL" 2>/dev/null || true
                             fi
                         done
+                        if [ "$GRP_MBR_SEL" == "grp_samba" ]; then
+                            gpasswd -a "www-data" "grp_samba" 2>/dev/null || true
+                        fi
                         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
                             --msgbox "✔ Miembros del grupo \"$GRP_MBR_SEL\" actualizados correctamente." 8 60
                     fi
