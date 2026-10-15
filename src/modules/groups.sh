@@ -80,7 +80,7 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                 ;;
 
             3)
-                GRUPOS_REN=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort)
+                GRUPOS_REN=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" && $1 != "grp_backups" {print $1}' /etc/group | sort)
                 if [ -z "$GRUPOS_REN" ]; then
                     whiptail --title "Aviso" --ok-button "< Aceptar >" \
                         --msgbox "No hay grupos personalizados disponibles para renombrar." 8 55
@@ -107,7 +107,7 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                         if [[ "$NUEVO_NOMBRE" != grp_* ]]; then
                             NUEVO_NOMBRE="grp_${NUEVO_NOMBRE}"
                         fi
-                        if [ "$NUEVO_NOMBRE" == "grp_superadmin" ] || [ "$NUEVO_NOMBRE" == "grp_samba" ] || [ "$NUEVO_NOMBRE" == "grp_web" ]; then
+                        if [ "$NUEVO_NOMBRE" == "grp_superadmin" ] || [ "$NUEVO_NOMBRE" == "grp_samba" ] || [ "$NUEVO_NOMBRE" == "grp_web" ] || [ "$NUEVO_NOMBRE" == "grp_backups" ]; then
                             whiptail --title "Error" --ok-button "< Aceptar >" \
                                 --msgbox "No puedes renombrar un grupo al nombre reservado $NUEVO_NOMBRE." 8 60
                             continue
@@ -196,7 +196,7 @@ print("└─{}─┴─{}─┴─{}─┘".format("─"*w_name, "─"*w_gid, "
                 ;;
 
             5)
-                GRUPOS_ELIM=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort)
+                GRUPOS_ELIM=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" && $1 != "grp_backups" {print $1}' /etc/group | sort)
                 if [ -z "$GRUPOS_ELIM" ]; then
                     whiptail --title "Aviso" --ok-button "< Aceptar >" \
                         --msgbox "No hay grupos personalizados disponibles para eliminar." 8 55
