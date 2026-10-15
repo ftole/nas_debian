@@ -4,11 +4,11 @@
 # ==============================================================================
 
 crear_usuario_guiado() {
-    local SERVER_IP USER_NAME FULL_NAME GRUPOS_DISP LISTA_OPCIONES GRUPOS_SELEC GRUPO_FINAL USER_PW SHELL_TYPE PERM_TXT STATUS g
+    local SERVER_IP USER_NAME FULL_NAME ROL_SELEC GRUPOS_DISP LISTA_OPCIONES GRUPOS_SELEC GRUPO_FINAL USER_PW SHELL_TYPE PERM_TXT STATUS g BASE_GRPS
     SERVER_IP=$(obtener_ip_local)
 
     # 1. Nombre de usuario
-    USER_NAME=$(whiptail --title "Paso 1 de 4: Nombre de Usuario" \
+    USER_NAME=$(whiptail --title "Paso 1 de 5: Nombre de Usuario" \
         --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
         --inputbox "Ingresa el identificador de usuario para la red (ej. carlos_m):" 10 65 3>&1 1>&2 2>&3)
     RET=$?
@@ -27,21 +27,25 @@ crear_usuario_guiado() {
     fi
 
     # 2. Nombre Real / Cargo / Descripción
-    FULL_NAME=$(whiptail --title "Paso 2 de 4: Nombre Real y Cargo" \
+    FULL_NAME=$(whiptail --title "Paso 2 de 5: Nombre Real y Cargo" \
         --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
         --inputbox "Nombre completo y departamento/cargo del empleado:" 10 65 "Empleado EAD" 3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -ne 0 ]; then return; fi
     FULL_NAME=${FULL_NAME:-"Empleado EAD"}
 
-    # 3. Selección de Grupos de Seguridad (grp_*)
-    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort -u)
+    # 3. Selección explícita de Rol y Nivel de Acceso
+    ROL_SELEC=$(whiptail --title "Paso 3 de 5: Rol y Nivel de Acceso" \
+        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+        --menu "Selecciona el rol de acceso para '$USER_NAME':" 16 74 3 \
+        "1" "Empleado de Red  (Acceso exclusivo a carpetas Samba, sin consola)" \
+        "2" "Operador Web    (Panel web: dashboard, archivos, logs, backups)" \
+        "3" "Administrador   (Control total: sudo, consola SSH, panel y Samba)" 3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -ne 0 ] || [ -z "$ROL_SELEC" ]; then return; fi
 
-    if [ -z "$GRUPOS_DISP" ]; then
-        whiptail --title "Sin Grupos de Seguridad" --ok-button "< Aceptar >" \
-            --msgbox "No hay grupos de seguridad creados.\nPor favor crea un grupo primero desde el menú [2] Gestión de Grupos." 10 65
-        return
-    fi
+    # 4. Selección de Grupos Departamentales (filtrando estrictamente grupos especiales)
+    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort -u)
 
     local -a LISTA_OPCIONES=()
     for g in $GRUPOS_DISP; do
@@ -50,48 +54,60 @@ crear_usuario_guiado() {
         LISTA_OPCIONES+=("$g" "Grupo_$g" "$STATUS")
     done
 
-    GRUPOS_SELEC=$(whiptail --title "Paso 3 de 4: Asignación de Grupos" \
-        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-        --checklist "Marca con la BARRA ESPACIADORA [X] los grupos a los que pertenecerá '$USER_NAME':" 18 74 8 \
-        "${LISTA_OPCIONES[@]}" 3>&1 1>&2 2>&3)
-
-    RET=$?
-    if [ $RET -ne 0 ] || [ -z "$GRUPOS_SELEC" ]; then
-        whiptail --title "Aviso" --ok-button "< Aceptar >" --msgbox "Debes seleccionar al menos un grupo para el usuario." 8 50
-        return
+    GRUPO_FINAL=""
+    if [ ${#LISTA_OPCIONES[@]} -gt 0 ]; then
+        GRUPOS_SELEC=$(whiptail --title "Paso 4 de 5: Grupos Departamentales" \
+            --ok-button "< Siguiente >" --cancel-button "< Omitir >" \
+            --checklist "Marca con la BARRA ESPACIADORA [X] los grupos departamentales para '$USER_NAME':" 18 74 8 \
+            "${LISTA_OPCIONES[@]}" 3>&1 1>&2 2>&3)
+        RET=$?
+        if [ $RET -eq 0 ] && [ -n "$GRUPOS_SELEC" ]; then
+            GRUPO_FINAL=$(echo "$GRUPOS_SELEC" | tr -d '\"' | tr ' ' ',')
+        fi
     fi
 
-    GRUPO_FINAL=$(echo "$GRUPOS_SELEC" | tr -d '\"' | tr ' ' ',')
-
-    # 4. Contraseña de red Samba
+    # 5. Contraseña
     while true; do
-        USER_PW=$(whiptail --title "Paso 4 de 4: Contraseña de Red Samba" \
+        USER_PW=$(whiptail --title "Paso 5 de 5: Contraseña de Acceso" \
             --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-            --passwordbox "Ingresa la contraseña de red Samba para $USER_NAME:" 10 65 3>&1 1>&2 2>&3)
+            --passwordbox "Ingresa la contraseña para $USER_NAME:" 10 65 3>&1 1>&2 2>&3)
         RET=$?
         if [ $RET -ne 0 ]; then return; fi
         if [ -n "$USER_PW" ]; then break; fi
         whiptail --title "Error" --ok-button "< Aceptar >" --msgbox "La contraseña no puede estar vacía." 8 45
     done
 
-    # Política de aislamiento de roles
-    if echo "$GRUPO_FINAL" | grep -qw "grp_superadmin"; then
-        SHELL_TYPE="/bin/bash"
-        PERM_TXT="Superadministrador Inmutable (Control total de sistema, web y red)"
-    elif echo "$GRUPO_FINAL" | grep -qw "grp_samba"; then
-        SHELL_TYPE="/bin/bash"
-        PERM_TXT="Administrador del Servidor (Acceso Panel Web + Consola SSH + Red)"
-    elif echo "$GRUPO_FINAL" | grep -qw "grp_web"; then
-        SHELL_TYPE="/usr/sbin/nologin"
-        PERM_TXT="Operador de Panel Web (Dashboard, Archivos, Backups, sin consola ni almacenamiento)"
-    else
-        SHELL_TYPE="/usr/sbin/nologin"
-        PERM_TXT="Empleado de Red (Acceso exclusivo a carpetas Samba, sin consola ni web)"
+    # Configuración según rol seleccionado
+    case "$ROL_SELEC" in
+        3)
+            SHELL_TYPE="/bin/bash"
+            PERM_TXT="Administrador del Servidor (Sudo + SSH + Panel Web + Samba)"
+            BASE_GRPS="sudo,adm,grp_samba"
+            ;;
+        2)
+            SHELL_TYPE="/usr/sbin/nologin"
+            PERM_TXT="Operador de Panel Web (Dashboard, Archivos, Backups, sin consola)"
+            BASE_GRPS="grp_web"
+            ;;
+        *)
+            SHELL_TYPE="/usr/sbin/nologin"
+            PERM_TXT="Empleado de Red (Acceso exclusivo a carpetas Samba, sin consola ni web)"
+            BASE_GRPS=""
+            ;;
+    esac
+
+    local ALL_GRPS="$BASE_GRPS"
+    if [ -n "$GRUPO_FINAL" ]; then
+        if [ -n "$ALL_GRPS" ]; then
+            ALL_GRPS="${ALL_GRPS},${GRUPO_FINAL}"
+        else
+            ALL_GRPS="$GRUPO_FINAL"
+        fi
     fi
 
     if (whiptail --title "Confirmar Registro de Usuario" \
         --yes-button "< Sí, Registrar Usuario >" --no-button "< Cancelar >" \
-        --yesno "¿Confirmas el registro del usuario con los siguientes datos?\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: $GRUPO_FINAL\n• Nivel de Acceso:  $PERM_TXT" 16 72); then
+        --yesno "¿Confirmas el registro del usuario con los siguientes datos?\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: ${ALL_GRPS:-"(ninguno)"}\n• Nivel de Acceso:  $PERM_TXT" 16 72); then
         
         if [ "$SHELL_TYPE" == "/bin/bash" ]; then
             adduser --disabled-password --gecos "$FULL_NAME" --shell "$SHELL_TYPE" "$USER_NAME" 2>/dev/null || useradd -c "$FULL_NAME" -s "$SHELL_TYPE" -m "$USER_NAME"
@@ -99,22 +115,22 @@ crear_usuario_guiado() {
             adduser --disabled-password --gecos "$FULL_NAME" --no-create-home --shell "$SHELL_TYPE" "$USER_NAME" 2>/dev/null || useradd -c "$FULL_NAME" -s "$SHELL_TYPE" -M "$USER_NAME"
         fi
 
-        IFS=',' read -ra GRPS <<< "$GRUPO_FINAL"
-        for g in "${GRPS[@]}"; do
-            groupadd -f "$g"
-        done
-
-        usermod -aG "$GRUPO_FINAL" "$USER_NAME"
+        if [ -n "$ALL_GRPS" ]; then
+            IFS=',' read -ra GRPS <<< "$ALL_GRPS"
+            for g in "${GRPS[@]}"; do
+                groupadd -f "$g"
+            done
+            usermod -aG "$ALL_GRPS" "$USER_NAME"
+        fi
         
         if [ "$SHELL_TYPE" == "/bin/bash" ]; then
-            usermod -aG sudo,adm "$USER_NAME"
             echo "${USER_NAME}:${USER_PW}" | chpasswd
         fi
 
         printf '%s\n%s\n' "$USER_PW" "$USER_PW" | smbpasswd -a -s "$USER_NAME"
 
         whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
-            --msgbox "✔ ¡Usuario Registrado con Éxito!\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: $GRUPO_FINAL\n• Acceso:           $PERM_TXT\n\nYa puede conectar desde la red a: \\\\${SERVER_IP}" 15 72
+            --msgbox "✔ ¡Usuario Registrado con Éxito!\n\n• Usuario:          $USER_NAME\n• Nombre / Cargo:   $FULL_NAME\n• Grupos Asignados: ${ALL_GRPS:-"(ninguno)"}\n• Acceso:           $PERM_TXT\n\nYa puede conectar desde la red a: \\\\${SERVER_IP}" 15 72
     fi
 }
 
@@ -290,7 +306,12 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     "${MENU_USERS[@]}" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -eq 0 ] && [ -n "$TARGET_USER" ]; then
-                    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort -u)
+                    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort -u)
+                    if [ -z "$GRUPOS_DISP" ]; then
+                        whiptail --title "Sin Grupos Departamentales" --ok-button "< Aceptar >" \
+                            --msgbox "No hay grupos departamentales creados.\nPuedes crear grupos desde la opción [7] del menú principal." 9 65
+                        continue
+                    fi
                     local -a LISTA_OPC=()
                     GRPS_ACTUALES=$(id -Gn "$TARGET_USER" 2>/dev/null)
                     for g in $GRUPOS_DISP; do
@@ -299,38 +320,22 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                         if echo "$GRPS_ACTUALES" | grep -qw "$g"; then STATUS="ON"; fi
                         LISTA_OPC+=("$g" "Grupo_$g" "$STATUS")
                     done
-                    NUEVOS_GRPS=$(whiptail --title "Modificar Grupos de $TARGET_USER" \
+                    NUEVOS_GRPS=$(whiptail --title "Modificar Grupos Departamentales de $TARGET_USER" \
                         --ok-button "< Guardar >" --cancel-button "< Cancelar >" \
-                        --checklist "Marca con ESPACIO los grupos asignados a $TARGET_USER:" 18 72 8 \
+                        --checklist "Marca con ESPACIO los grupos departamentales para $TARGET_USER:" 18 72 8 \
                         "${LISTA_OPC[@]}" 3>&1 1>&2 2>&3)
                     RET=$?
                     if [ $RET -eq 0 ]; then
                         NUEVOS_GRPS_CSV=$(echo "$NUEVOS_GRPS" | tr -d '\"' | tr ' ' ',')
+                        # Remover únicamente de grupos departamentales previos
+                        for g_prev in $GRUPOS_DISP; do
+                            gpasswd -d "$TARGET_USER" "$g_prev" 2>/dev/null || true
+                        done
                         if [ -n "$NUEVOS_GRPS_CSV" ]; then
-                            # Remover de grupos grp_* previos
-                            for g_prev in $GRUPOS_DISP; do
-                                gpasswd -d "$TARGET_USER" "$g_prev" 2>/dev/null || true
-                            done
                             usermod -aG "$NUEVOS_GRPS_CSV" "$TARGET_USER"
-                            
-                            # Ajustar shell y home según pertenezca a grp_samba
-                            if echo "$NUEVOS_GRPS_CSV" | grep -qw "grp_samba"; then
-                                usermod -s /bin/bash -aG sudo,adm "$TARGET_USER"
-                                if [ ! -d "/home/$TARGET_USER" ]; then
-                                    mkdir -p "/home/$TARGET_USER"
-                                    cp -r /etc/skel/. "/home/$TARGET_USER/" 2>/dev/null || true
-                                    chown -R "$TARGET_USER:$TARGET_USER" "/home/$TARGET_USER"
-                                    chmod 700 "/home/$TARGET_USER"
-                                fi
-                            else
-                                usermod -s /usr/sbin/nologin "$TARGET_USER"
-                                gpasswd -d "$TARGET_USER" sudo 2>/dev/null || true
-                                gpasswd -d "$TARGET_USER" adm 2>/dev/null || true
-                            fi
-                            
-                            whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
-                                --msgbox "✔ Grupos actualizados para $TARGET_USER:\n$NUEVOS_GRPS_CSV" 9 60
                         fi
+                        whiptail --title "$APP_TITLE" --ok-button "< Aceptar >" \
+                            --msgbox "✔ Grupos departamentales actualizados para $TARGET_USER:\n${NUEVOS_GRPS_CSV:-"(sin grupos departamentales)"}" 9 60
                     fi
                 fi
                 ;;
