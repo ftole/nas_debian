@@ -1100,7 +1100,7 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
         active_role = o_r.strip()
 
         if active_role == "BACKUP":
-            # Verificar rechazo de share público en API
+            # 1. Verificar rechazo de share público en API
             try:
                 pub_payload = json.dumps({
                     "name": "PUBLICO_TEST",
@@ -1118,8 +1118,57 @@ def test_web_action(manager: SSHManager, host_ip: str, http_port: int = 80, http
                 except urllib.error.HTTPError as he_pub:
                     if he_pub.code == 403:
                         log_success("Seguridad de rol BACKUP verificada: API rechazó recurso público con HTTP 403.")
+                    else:
+                        log_error(f"Fallo de seguridad: API retornó HTTP {he_pub.code} en vez de 403 para recurso público")
             except Exception as e_pub:
                 log_warn(f"Aviso al validar restricción de recurso público: {e_pub}")
+
+            # 2. Verificar rechazo de share sin sufijo $ en API
+            try:
+                vis_payload = json.dumps({
+                    "name": "SIN_DOLLAR_TEST",
+                    "comment": "Prueba sin sufijo dolar",
+                    "scheme": 1,
+                    "hidden": False,
+                }).encode("utf-8")
+                req_vis = urllib.request.Request(
+                    f"https://{host_ip}:{https_port}/api/shares",
+                    data=vis_payload, headers=base_headers, method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req_vis, context=ssl_ctx, timeout=10) as r_vis:
+                        log_error(f"Fallo de seguridad: rol BACKUP aceptó recurso sin sufijo $ con status {r_vis.status}")
+                except urllib.error.HTTPError as he_vis:
+                    if he_vis.code == 403:
+                        log_success("Seguridad de rol BACKUP verificada: API rechazó recurso sin sufijo $ con HTTP 403.")
+                    else:
+                        log_error(f"Fallo de seguridad: API retornó HTTP {he_vis.code} en vez de 403 para recurso sin sufijo $")
+            except Exception as e_vis:
+                log_warn(f"Aviso al validar restricción de sufijo $: {e_vis}")
+
+            # 3. Verificar rechazo de grupo no autorizado en API
+            try:
+                grp_payload = json.dumps({
+                    "name": "BADGRP_TEST$",
+                    "comment": "Prueba grupo no autorizado",
+                    "scheme": 1,
+                    "groups": ["grp_no_autorizado"],
+                    "hidden": True,
+                }).encode("utf-8")
+                req_grp = urllib.request.Request(
+                    f"https://{host_ip}:{https_port}/api/shares",
+                    data=grp_payload, headers=base_headers, method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req_grp, context=ssl_ctx, timeout=10) as r_grp:
+                        log_error(f"Fallo de seguridad: rol BACKUP aceptó grupo no autorizado con status {r_grp.status}")
+                except urllib.error.HTTPError as he_grp:
+                    if he_grp.code == 403:
+                        log_success("Seguridad de rol BACKUP verificada: API rechazó grupo no autorizado con HTTP 403.")
+                    else:
+                        log_error(f"Fallo de seguridad: API retornó HTTP {he_grp.code} en vez de 403 para grupo no autorizado")
+            except Exception as e_grp:
+                log_warn(f"Aviso al validar restricción de grupo: {e_grp}")
 
         share_e2e = f"NAS_E2E_{int(time.time())}$" if active_role == "BACKUP" else f"NAS_E2E_{int(time.time())}"
         is_hidden_e2e = (active_role == "BACKUP")
@@ -1405,6 +1454,7 @@ def test_suite_total_action(manager: SSHManager, host_ip: str, role: str = "BACK
         ("Respaldos y Deduplicación (test backups)", lambda: test_backups_action(manager)),
         ("Actualizador y Rollback (test update)", lambda: test_update_action(manager)),
         ("Desinstalación y Limpieza (test uninstall)", lambda: test_uninstall_action(manager)),
+        ("Re-Despliegue y Activación Final", lambda: test_install_action(manager, role=role, disk=disk)),
     ]
 
     for name, func in tests:
