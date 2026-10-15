@@ -1144,7 +1144,7 @@ function filterGroupMembers() {
   const query = (document.getElementById('group-member-search')?.value || '').toLowerCase().trim();
   const rows = document.querySelectorAll('#group-members-list > div');
   rows.forEach(r => {
-    const text = r.textContent.toLowerCase();
+    const text = (r.getAttribute('data-username') || r.querySelector('.member-name')?.textContent || r.textContent).toLowerCase();
     r.style.display = (!query || text.includes(query)) ? 'flex' : 'none';
   });
 }
@@ -1269,19 +1269,35 @@ async function loadUsersAndGroups() {
     }
 
     if (groupsTbody) {
+      const isSuperCaller = !!window.NAS_IS_SUPER;
+      const isAdminCaller = window.NAS_IS_ADMIN !== false;
+
       groupsTbody.innerHTML = _groupsData.map(g => {
         const isSpecial = !!g.is_special || g.name === 'grp_samba' || g.name === 'grp_web' || g.name === 'grp_superadmin';
+        let canManageMembers = false;
+        if (g.name === 'grp_superadmin') {
+          canManageMembers = isSuperCaller;
+        } else if (isSpecial) {
+          canManageMembers = isAdminCaller;
+        } else {
+          canManageMembers = isAdminCaller;
+        }
+
         return `
         <tr>
           <td><strong>${escapeHtml(g.name)}</strong></td>
           <td>${g.gid}</td>
           <td>${(g.members || []).map(m => `<span class="tag-pill">${escapeHtml(m)}</span>`).join(' ') || '<em>Sin miembros</em>'}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${isSpecial ? '<span class="badge badge-gray">Especial</span>' : `
+            ${isSpecial ? '<span class="badge badge-gray" style="margin-right:6px;">Especial</span>' : ''}
+            ${canManageMembers ? `
               <button class="btn btn-secondary btn-sm" title="Miembros" onclick="openGroupMembers('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-users"></use></svg></button>
+            ` : ''}
+            ${!isSpecial && isAdminCaller ? `
               <button class="btn btn-secondary btn-sm" title="Renombrar" onclick="openRenameGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
               <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" title="Eliminar" onclick="deleteGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-trash"></use></svg></button>
-            `}
+            ` : ''}
+            ${!canManageMembers && (!isAdminCaller || isSpecial) && !isSpecial ? '<span class="badge badge-gray">Solo lectura</span>' : ''}
           </td>
         </tr>
       `;
@@ -1436,14 +1452,14 @@ function openGroupMembers(group) {
   const list = document.getElementById('group-members-list');
   list.innerHTML = members.length
     ? members.map(m => `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px; background:var(--bg-surface); border-radius:6px;">
-          <span>${escapeHtml(m)}</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px; background:var(--bg-surface); border-radius:6px;" data-username="${escapeHtml(m)}">
+          <span class="member-name">${escapeHtml(m)}</span>
           <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="removeGroupMember('${escapeHtml(m)}')">Quitar</button>
         </div>`).join('')
     : '<em style="color:var(--text-muted);">Sin miembros</em>';
 
   const sel = document.getElementById('group-member-user');
-  const available = _usersData.filter(u => !members.includes(u.username) && !PROTECTED_USERS.includes(u.username));
+  const available = _usersData.filter(u => !members.includes(u.username) && u.username !== 'root');
   sel.innerHTML = available.length
     ? available.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.username)}</option>`).join('')
     : '<option value="">(sin usuarios disponibles)</option>';
