@@ -39,6 +39,7 @@ require_once __DIR__ . '/../web/src/Controllers/DomainController.php';
 
 use App\Core\AuthMiddleware;
 use App\Core\Request;
+use App\Core\Response;
 use App\Core\Router;
 use App\Services\AuditService;
 use App\Services\AuthService;
@@ -1517,8 +1518,17 @@ $sambaBkpService = new SambaService($tmpBkpConf);
 $rejVisible = $sambaBkpService->createShare(['name' => 'VISIBLE_SHARE', 'scheme' => 1, 'groups' => ['grp_samba']]);
 assertTrue(!$rejVisible['success'], 'SambaService::createShare en rol BACKUP rechaza recurso visible sin sufijo $');
 
+$rejVisibleFalse = $sambaBkpService->createShare(['name' => 'NO_DOLLAR', 'scheme' => 1, 'groups' => ['grp_samba'], 'hidden' => false]);
+assertTrue(!$rejVisibleFalse['success'], 'SambaService::createShare en rol BACKUP rechaza recurso explícito con hidden=false');
+
+$okHiddenNorm = $sambaBkpService->createShare(['name' => 'AUTO_DOLLAR', 'scheme' => 1, 'groups' => ['grp_samba'], 'hidden' => true]);
+assertTrue($okHiddenNorm['success'], 'SambaService::createShare en rol BACKUP normaliza a sufijo $ cuando hidden=true');
+
 $rejPublic = $sambaBkpService->createShare(['name' => 'PUBLIC_TEST$', 'scheme' => 4]);
 assertTrue(!$rejPublic['success'], 'SambaService::createShare en rol BACKUP rechaza recurso público (scheme 4)');
+
+$rejBrowseable = $sambaBkpService->createShare(['name' => 'BROWSE_TEST$', 'scheme' => 1, 'browseable' => 'yes']);
+assertTrue(!$rejBrowseable['success'], 'SambaService::createShare en rol BACKUP rechaza browseable=yes');
 
 $rejGroup = $sambaBkpService->createShare(['name' => 'GRP_TEST$', 'scheme' => 1, 'groups' => ['grp_contabilidad']]);
 assertTrue(!$rejGroup['success'], 'SambaService::createShare en rol BACKUP rechaza grupo no autorizado grp_contabilidad');
@@ -1528,6 +1538,55 @@ assertTrue(!$rejAccess['success'], 'SambaService::setAccess en rol BACKUP rechaz
 
 $okBkpShare = $sambaBkpService->createShare(['name' => 'BACKUPS_WIN$', 'scheme' => 1, 'groups' => ['grp_backups']]);
 assertTrue($okBkpShare['success'], 'SambaService::createShare en rol BACKUP acepta recurso oculto con grp_backups');
+
+$rejUpdatePublic = $sambaBkpService->updateShare('TEST$', ['scheme' => 4]);
+assertTrue(!$rejUpdatePublic['success'], 'SambaService::updateShare en rol BACKUP rechaza scheme=4');
+
+$rejUpdateBrowse = $sambaBkpService->updateShare('TEST$', ['browseable' => 'yes']);
+assertTrue(!$rejUpdateBrowse['success'], 'SambaService::updateShare en rol BACKUP rechaza browseable=yes');
+
+$rejBrowseBool = $sambaBkpService->createShare(['name' => 'BROWSE_BOOL$', 'scheme' => 1, 'browseable' => true]);
+assertTrue(!$rejBrowseBool['success'], 'SambaService::createShare en rol BACKUP rechaza browseable=true (booleano)');
+
+$rejUpdateBrowseBool = $sambaBkpService->updateShare('TEST$', ['browseable' => true]);
+assertTrue(!$rejUpdateBrowseBool['success'], 'SambaService::updateShare en rol BACKUP rechaza browseable=true (booleano)');
+
+$rejUpdateBadGrp = $sambaBkpService->updateShare('TEST$', ['groups' => ['grp_marketing']]);
+assertTrue(!$rejUpdateBadGrp['success'], 'SambaService::updateShare en rol BACKUP rechaza grupos ajenos en updateShare');
+
+// Protección del grupo especial grp_backups
+$userSvc = new UserService();
+$rejDelGrp = $userSvc->deleteGroup('grp_backups');
+assertTrue(!$rejDelGrp['success'], 'UserService::deleteGroup protege grp_backups contra eliminación accidental');
+
+$rejRenBkp = $userSvc->renameGroup('grp_backups', 'grp_x');
+assertTrue(!$rejRenBkp['success'], 'UserService::renameGroup protege grp_backups contra renombrado');
+
+$rejRenToBkp = $userSvc->renameGroup('grp_marketing', 'grp_backups');
+assertTrue(!$rejRenToBkp['success'], 'UserService::renameGroup impide renombrar hacia grp_backups');
+
+$groupsList = $userSvc->listGroups();
+$hasBkpSpecial = false;
+foreach ($groupsList as $grp) {
+    if ($grp['name'] === 'grp_backups' && !empty($grp['is_special'])) {
+        $hasBkpSpecial = true;
+        break;
+    }
+}
+assertTrue($hasBkpSpecial, 'UserService::listGroups clasifica grp_backups como grupo especial de sistema');
+
+// SambaController::update y HTTP 403
+$_SESSION['nas_user'] = ['username' => 'sistemas', 'is_admin' => true, 'role' => 'admin'];
+$sambaCtrlBkp = new \App\Controllers\SambaController();
+unset($_SERVER['CONTENT_TYPE']);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = ['name' => 'BKP_E2E$', 'scheme' => 1, 'groups' => ['grp_contabilidad']];
+$reqUpdBad = new Request();
+ob_start();
+$sambaCtrlBkp->update($reqUpdBad);
+$respUpdBad = ob_get_clean();
+$jsonUpdBad = json_decode($respUpdBad, true);
+assertTrue(isset($jsonUpdBad['error']) && Response::getStatusCode() === 403, 'SambaController::update rechaza grupos no autorizados con HTTP 403');
 
 @unlink($tmpBkpConf);
 
