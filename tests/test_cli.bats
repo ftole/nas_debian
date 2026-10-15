@@ -172,3 +172,40 @@ setup() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Módulos y comandos disponibles" ]]
 }
+
+@test "nas-cli user show sin usuario rechaza con codigo 1" {
+    run php bin/nas-cli user show
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas user show <usuario>" ]]
+}
+
+@test "nas-cli user shares sin usuario rechaza con codigo 1" {
+    run php bin/nas-cli user shares
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas user shares <usuario>" ]]
+}
+
+@test "nas-cli user assign sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli user assign
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas user assign <usuario> <grp1,grp2...>" ]]
+}
+
+@test "nas-cli group members sin grupo rechaza con codigo 1" {
+    run php bin/nas-cli group members
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas group members <grupo>" ]]
+}
+
+@test "nas-cli group add-member sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli group add-member
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas group add-member <grupo> <usuario1,usuario2...>" ]]
+}
+
+@test "nas-cli group remove-member sin parametros rechaza con codigo 1" {
+    run php bin/nas-cli group remove-member
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Uso: nas group remove-member <grupo> <usuario1,usuario2...>" ]]
+}
+
