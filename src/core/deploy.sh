@@ -815,18 +815,7 @@ groupadd -f grp_superadmin
 # El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_samba).
 usermod -aG systemd-journal,adm,grp_samba www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_samba."
 
-# 1. Crear las cuentas administrativas base del sistema SIN contraseña por defecto.
-#    Estas cuentas quedan bloqueadas hasta que el operador les asigne una clave.
-for _cuenta in sistemas administrador; do
-    if ! id "$_cuenta" &>/dev/null; then
-        adduser --disabled-password --gecos "" "$_cuenta"
-    fi
-    usermod -aG sudo,adm,grp_samba "$_cuenta"
-    echo "$_cuenta ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
-    chmod 0440 "/etc/sudoers.d/90-${_cuenta//[^A-Za-z0-9_-]/_}"
-done
-
-# 2. Configurar la cuenta superadministradora designada para este despliegue.
+# 1. Configurar la cuenta superadministradora designada para este despliegue ($ADMIN_USER).
 #    Es una cuenta existente o recién creada con control TOTAL e inmutable del panel.
 if ! id "$ADMIN_USER" &>/dev/null; then
     adduser --disabled-password --gecos "" "$ADMIN_USER"
@@ -845,7 +834,7 @@ printf '%s\n' "$SERVER_ROLE" > /etc/nas/role
 chmod 0644 /etc/nas/role
 chown root:root /etc/nas/role 2>/dev/null || true
 
-# 3. Asignar contraseña: la suministrada por el operador o una aleatoria fuerte generada aquí.
+# 2. Asignar contraseña: la suministrada por el operador o una aleatoria fuerte generada aquí.
 CLAVE_GENERADA=false
 if [ -z "$ADMIN_PASS" ]; then
     ADMIN_PASS=$(openssl rand -base64 18 2>/dev/null | tr -d '\n')
@@ -861,14 +850,6 @@ if printf '%s\n' "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd; then
 else
     advertir "No se pudo asignar la contraseña Linux a $ADMIN_USER (chpasswd rechazó la clave; revisa la política de complejidad)."
 fi
-
-# 4. Bloquear las credenciales de las cuentas base que no hayan sido designadas.
-for _cuenta in sistemas administrador; do
-    if [ "$_cuenta" != "$ADMIN_USER" ]; then
-        usermod -L "$_cuenta" 2>/dev/null || true
-        smbpasswd -d -s "$_cuenta" 2>/dev/null || true
-    fi
-done
 
 if [ "$CLAVE_GENERADA" = true ]; then
     echo "  [!] Contraseña generada para '$ADMIN_USER': $ADMIN_PASS"
