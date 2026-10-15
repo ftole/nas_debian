@@ -45,7 +45,7 @@ crear_usuario_guiado() {
     if [ $RET -ne 0 ] || [ -z "$ROL_SELEC" ]; then return; fi
 
     # 4. Selección de Grupos Departamentales (filtrando estrictamente grupos especiales)
-    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort -u)
+    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" && $1 != "grp_backups" {print $1}' /etc/group | sort -u)
 
     local -a LISTA_OPCIONES=()
     for g in $GRUPOS_DISP; do
@@ -306,7 +306,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                     "${MENU_USERS[@]}" 3>&1 1>&2 2>&3)
                 RET=$?
                 if [ $RET -eq 0 ] && [ -n "$TARGET_USER" ]; then
-                    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" {print $1}' /etc/group | sort -u)
+                    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ && $1 != "grp_samba" && $1 != "grp_web" && $1 != "grp_superadmin" && $1 != "grp_backups" {print $1}' /etc/group | sort -u)
                     if [ -z "$GRUPOS_DISP" ]; then
                         whiptail --title "Sin Grupos Departamentales" --ok-button "< Aceptar >" \
                             --msgbox "No hay grupos departamentales creados.\nPuedes crear grupos desde la opción [7] del menú principal." 9 65
