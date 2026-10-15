@@ -9,8 +9,16 @@ namespace App\Core;
  */
 class Response
 {
+    public static int $lastStatusCode = 200;
+
+    public static function getStatusCode(): int
+    {
+        return self::$lastStatusCode;
+    }
+
     public static function json(array $data, int $statusCode = 200): void
     {
+        self::$lastStatusCode = $statusCode;
         if (!headers_sent()) {
             http_response_code($statusCode);
             header('Content-Type: application/json; charset=utf-8');
