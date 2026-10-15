@@ -1388,6 +1388,50 @@ if ($savedUserSession !== null) {
 }
 $_POST = [];
 
+// 26. Pruebas de permisos dinámicos en FileExplorerService y default ACLs en recursos públicos
+$testStorageRoot = sys_get_temp_dir() . '/nas_storage_root_' . bin2hex(random_bytes(3));
+@mkdir($testStorageRoot, 0777, true);
+FileExplorerService::setRootDir($testStorageRoot);
+
+$testExpDir = $testStorageRoot . '/carpeta_publica';
+@mkdir($testExpDir, 0777, true);
+@chmod($testExpDir, 0777);
+
+$tmpUploadSrc = tempnam(sys_get_temp_dir(), 'nas_up_src_');
+file_put_contents($tmpUploadSrc, 'CONTENIDO_PRUEBA_SUBIDA_WEB');
+
+$fakeFiles = [
+    'name' => ['documento_publico.txt'],
+    'type' => ['text/plain'],
+    'tmp_name' => [$tmpUploadSrc],
+    'error' => [UPLOAD_ERR_OK],
+    'size' => [filesize($tmpUploadSrc)],
+];
+
+$fileExpInst = new FileExplorerService();
+$upResPub = $fileExpInst->uploadFiles('carpeta_publica', $fakeFiles);
+assertTrue($upResPub['success'], 'FileExplorerService::uploadFiles sube archivo a subdirectorio');
+
+$destFile = $testExpDir . '/documento_publico.txt';
+if (file_exists($destFile)) {
+    $fMode = @fileperms($destFile) & 0777;
+    assertTrue(($fMode & 0666) === 0666, 'FileExplorerService asigna permisos abiertos 0666 en directorios públicos');
+    @unlink($destFile);
+}
+
+@unlink($tmpUploadSrc);
+@rmdir($testExpDir);
+@rmdir($testStorageRoot);
+FileExplorerService::setRootDir(null);
+
+// SambaService default ACLs en guest share
+$tmpGuestConf = tempnam(sys_get_temp_dir(), 'nas_guest_smb_');
+file_put_contents($tmpGuestConf, "[global]\n   workgroup = TEST\n[PUBLICO]\n   path = /srv/nas/PUBLICO\n   guest ok = yes\n   read only = no\n");
+$sambaGuest = new SambaService($tmpGuestConf);
+$syncGuestRes = $sambaGuest->syncShareAcls('PUBLICO');
+assertTrue($syncGuestRes['success'], 'SambaService::syncShareAcls procesa correctamente recursos públicos guest ok');
+@unlink($tmpGuestConf);
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
