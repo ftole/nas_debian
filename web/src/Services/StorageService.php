@@ -46,6 +46,8 @@ class StorageService
             $fsRes = SystemService::runCommand(['findmnt', '-n', '-o', 'FSTYPE', $path]);
             if ($fsRes['code'] === 0 && !empty($fsRes['stdout'])) {
                 $fsType = strtolower(trim($fsRes['stdout']));
+            } elseif (SystemService::getServerRole() === 'BACKUP') {
+                $fsType = 'btrfs';
             }
 
             // Detección de HDD vs SSD
