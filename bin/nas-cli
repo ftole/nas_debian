@@ -111,11 +111,14 @@ function outSuccess(string $message, ?array $data = null, bool $isJson = false):
 function outError(string $message, int $code = 1, ?array $data = null, bool $isJson = false): void
 {
     if ($isJson) {
-        echo json_encode([
+        $payload = [
             'success' => false,
             'error' => $message,
-            'data' => $data ?? [],
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+        ];
+        if ($data !== null) {
+            $payload['data'] = $data;
+        }
+        echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
         exit($code);
     }
     fwrite(STDERR, CliTheme::RED . "✖ Error: " . CliTheme::RESET . $message . PHP_EOL);
@@ -626,6 +629,10 @@ switch ($module) {
     // -------------------------------------------------------------------------
     case 'backup':
     case 'bkp':
+        $currentRole = SystemService::getServerRole();
+        if ($currentRole === 'ARCHIVOS') {
+            outError('El módulo de respaldos no está disponible en el rol ARCHIVOS.', 1, null, $isJson);
+        }
         $svc = new BackupService();
         switch ($action) {
             case 'index':
