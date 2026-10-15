@@ -84,6 +84,11 @@ class UserController
             return;
         }
 
+        if ($this->targetIsSuperadmin($username)) {
+            Response::error('La cuenta de un superadministrador no puede ser eliminada.', 403);
+            return;
+        }
+
         $res = $this->user->deleteUser($username);
         if (!$res['success']) {
             AuditService::log('user_delete', $username, 'FAILED', ['error' => $res['error'] ?? '']);
@@ -171,6 +176,10 @@ class UserController
             $isAdmin = false;
             $isSuperadmin = false;
         }
+        if (!$this->isSuperCaller() && $this->targetIsSuperadmin($username)) {
+            Response::error('Solo un superadministrador puede modificar la cuenta de un superadministrador.', 403);
+            return;
+        }
         if ($isSuperadmin && !$this->isSuperCaller()) {
             Response::error('Solo un superadministrador puede otorgar el rol de superadministrador.', 403);
             return;
@@ -203,6 +212,11 @@ class UserController
             return;
         }
 
+        if (!$this->isSuperCaller() && $this->targetIsSuperadmin($username)) {
+            Response::error('Solo un superadministrador puede cambiar la contraseña de un superadministrador.', 403);
+            return;
+        }
+
         $res = $this->user->setPassword($username, $password);
         if (!$res['success']) {
             AuditService::log('user_password', $username, 'FAILED', ['error' => $res['error'] ?? '']);
@@ -230,6 +244,11 @@ class UserController
             return;
         }
 
+        if (!$this->isSuperCaller() && $this->targetIsSuperadmin($username)) {
+            Response::error('Solo un superadministrador puede cambiar el estado de un superadministrador.', 403);
+            return;
+        }
+
         $res = $this->user->setEnabled($username, $enabled);
         if (!$res['success']) {
             AuditService::log('user_toggle', $username, 'FAILED', ['enabled' => $enabled, 'error' => $res['error'] ?? '']);
@@ -254,7 +273,7 @@ class UserController
         }
 
         if (!$this->isAdminCaller()) {
-            Response::error('No tienes permisos para modificar grupos de cuentas administrativas.', 403);
+            Response::error('No tienes permisos para modificar grupos de usuarios.', 403);
             return;
         }
 
@@ -294,7 +313,7 @@ class UserController
         }
 
         if (!$this->isAdminCaller()) {
-            Response::error('No tienes permisos para modificar grupos de cuentas administrativas.', 403);
+            Response::error('No tienes permisos para modificar grupos de usuarios.', 403);
             return;
         }
 
