@@ -481,13 +481,17 @@ with open("/etc/samba/smb.conf", "r", encoding="utf-8") as f:
                     RET=$?
                     [ $RET -ne 0 ] && continue
 
-                    NUEVO_GUEST=$(whiptail --title "Acceso de Invitados" \
-                        --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
-                        --menu "¿Permitir acceso a invitados sin contraseña?" 12 55 2 \
-                        "no"  "Requiere credenciales" \
-                        "yes" "Permite invitados (guest ok)" 3>&1 1>&2 2>&3)
-                    RET=$?
-                    [ $RET -ne 0 ] && continue
+                    if [ "$ROL_ACTUAL" == "BACKUP" ]; then
+                        NUEVO_GUEST="no"
+                    else
+                        NUEVO_GUEST=$(whiptail --title "Acceso de Invitados" \
+                            --ok-button "< Siguiente >" --cancel-button "< Cancelar >" \
+                            --menu "¿Permitir acceso a invitados sin contraseña?" 12 55 2 \
+                            "no"  "Requiere credenciales" \
+                            "yes" "Permite invitados (guest ok)" 3>&1 1>&2 2>&3)
+                        RET=$?
+                        [ $RET -ne 0 ] && continue
+                    fi
 
                     OUT=$($CLI_RUNNER share update "$EDIT_SHARE" --comment="$NUEVO_COM" --read-only="$NUEVO_RO" --guest-ok="$NUEVO_GUEST" 2>&1 || true)
                     whiptail --title "Resultado de Actualización" --ok-button "< Aceptar >" \
