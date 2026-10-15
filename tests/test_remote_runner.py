@@ -255,20 +255,56 @@ def test_test_install_action_success() -> None:
 
     with mock.patch.object(manager, "sync_project_files", return_value=(True, "OK")):
         with mock.patch.object(manager, "run_command") as mock_run:
-            # cli nas (0), deploy.sh (0), smbd, wsdd2, nginx, php-fpm (active),
-            # sqlite (0), srv/nas (0), binario nas (0)
             mock_run.side_effect = [
-                (0, "", ""),
-                (0, "Despliegue finalizado\n", ""),
-                (0, "active\n", ""),
-                (0, "active\n", ""),
-                (0, "active\n", ""),
-                (0, "active\n", ""),
-                (0, "", ""),
-                (0, "", ""),
-                (0, "", ""),
+                (0, "", ""),                                      # install_cli
+                (0, "", ""),                                      # test -b /dev/sda
+                (0, "", ""),                                      # umount /srv/nas
+                (0, "Despliegue finalizado\n", ""),               # deploy.sh
+                (0, "active\n", ""),                              # smbd
+                (0, "active\n", ""),                              # wsdd2
+                (0, "active\n", ""),                              # nginx
+                (0, "active\n", ""),                              # php-fpm
+                (0, "", ""),                                      # sqlite
+                (0, "", ""),                                      # /srv/nas
+                (0, "", ""),                                      # /usr/local/bin/nas
+                (0, "BACKUP\n", ""),                              # /etc/nas/role
+                (0, "btrfs\n", ""),                               # findmnt FSTYPE
+                (0, "rw,compress=zstd:3,space_cache=v2\n", ""),   # findmnt OPTIONS
+                (0, "0 2 1 * * root btrfs scrub start -B /srv/nas\n", ""),  # scrub cron
+                (0, "grp_backups:x:1001:\n", ""),                 # grp_backups
+                (1, "Rechazo scheme 4", ""),                      # rechazo publico
+                (1, "Rechazo sin $", ""),                         # rechazo visible
             ]
-            result = test_remote.test_install_action(manager)
+            result = test_remote.test_install_action(manager, role="BACKUP", disk="/dev/sda")
+            assert result is True
+
+
+def test_test_install_action_archivos_local_success() -> None:
+    config = {
+        "NAS_TEST_IP": "10.10.1.2",
+        "NAS_TEST_PORT": 22,
+        "NAS_TEST_USER": "sistemas",
+        "NAS_TEST_PASSWORD": "pass",
+        "NAS_ROOT_PASSWORD": "pass",
+    }
+    manager = test_remote.SSHManager(config)
+
+    with mock.patch.object(manager, "sync_project_files", return_value=(True, "OK")):
+        with mock.patch.object(manager, "run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "", ""),                          # install_cli
+                (0, "", ""),                          # umount /srv/nas
+                (0, "Despliegue finalizado\n", ""),   # deploy.sh
+                (0, "active\n", ""),                  # smbd
+                (0, "active\n", ""),                  # wsdd2
+                (0, "active\n", ""),                  # nginx
+                (0, "active\n", ""),                  # php-fpm
+                (0, "", ""),                          # sqlite
+                (0, "", ""),                          # /srv/nas
+                (0, "", ""),                          # /usr/local/bin/nas
+                (0, "ARCHIVOS\n", ""),                # /etc/nas/role
+            ]
+            result = test_remote.test_install_action(manager, role="ARCHIVOS", disk="LOCAL")
             assert result is True
 
 
