@@ -1290,6 +1290,71 @@ $memUsed = memory_get_usage() - $memStart;
 assertTrue($memUsed < 300000, 'tailFileLines no desborda memoria RAM (< 300 KB) ante líneas masivas corruptas sin newlines');
 @unlink($tmpHugeLineFile);
 
+// 15. Pruebas de UserService y UserController para gestión avanzada de miembros y grupos
+$savedUserSession = $_SESSION['nas_user'] ?? null;
+
+// UserService::addGroupMember y removeGroupMember (modo test)
+$userSvcTest = new UserService();
+$addMemRes = $userSvcTest->addGroupMember('grp_contabilidad', 'usuario_test');
+assertTrue($addMemRes['success'], 'UserService::addGroupMember añade miembro a grupo departamental');
+
+$remMemRes = $userSvcTest->removeGroupMember('grp_contabilidad', 'usuario_test');
+assertTrue($remMemRes['success'], 'UserService::removeGroupMember remueve miembro de grupo departamental');
+
+// UserService::assignUserGroups (modo test)
+$assignRes = $userSvcTest->assignUserGroups('usuario_test', ['grp_ventas', 'grp_marketing']);
+assertTrue($assignRes['success'], 'UserService::assignUserGroups asigna lista de grupos departamentales');
+
+// RBAC: Superadministrador puede gestionar miembros de grp_superadmin
+$_SESSION['nas_user'] = ['username' => 'superadmin', 'role' => 'superadmin', 'is_superadmin' => true, 'is_admin' => true];
+$superAddRes = $userSvcTest->addGroupMember('grp_superadmin', 'otro_admin');
+assertTrue($superAddRes['success'], 'Superadministrador puede añadir miembros a grp_superadmin');
+
+// RBAC: Superadministrador no puede removerse a sí mismo de grp_superadmin
+$superSelfRem = $userSvcTest->removeGroupMember('grp_superadmin', 'superadmin');
+$selfRemErr = $superSelfRem['error'] ?? $superSelfRem['message'] ?? '';
+assertTrue(!$superSelfRem['success'] && str_contains($selfRemErr, 'propia cuenta'), 'Superadministrador no puede removerse a sí mismo de grp_superadmin');
+
+// RBAC: Administrador estándar no puede tocar grp_superadmin
+$_SESSION['nas_user'] = ['username' => 'admin_estandar', 'role' => 'admin', 'is_admin' => true, 'is_superadmin' => false];
+$adminTouchSuper = $userSvcTest->addGroupMember('grp_superadmin', 'otro_user');
+$adminTouchErr = $adminTouchSuper['error'] ?? $adminTouchSuper['message'] ?? '';
+assertTrue(!$adminTouchSuper['success'] && str_contains($adminTouchErr, 'superadministrador'), 'Administrador estándar no puede gestionar miembros de grp_superadmin');
+
+// RBAC: Operador web es bloqueado de gestionar miembros
+$_SESSION['nas_user'] = ['username' => 'operador_web', 'role' => 'operator', 'is_admin' => false];
+$operTouchGroup = $userSvcTest->addGroupMember('grp_contabilidad', 'otro_user');
+$operTouchErr = $operTouchGroup['error'] ?? $operTouchGroup['message'] ?? '';
+assertTrue(!$operTouchGroup['success'] && str_contains($operTouchErr, 'privilegios'), 'Operador web no puede gestionar miembros de grupos');
+
+// UserController::assignGroups validación de permisos y superadmin
+$userCtrlTest = new \App\Controllers\UserController();
+$_POST = ['username' => 'usuario_test', 'groups' => ['grp_contabilidad']];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+
+// Con sesión operador -> 403 / success false
+ob_start();
+$userCtrlTest->assignGroups(new Request());
+$outAssignOper = ob_get_clean();
+$jsonAssignOper = json_decode($outAssignOper, true);
+assertTrue(isset($jsonAssignOper['success']) && $jsonAssignOper['success'] === false && str_contains($jsonAssignOper['error'] ?? '', 'No tienes permisos'), 'UserController::assignGroups bloquea operadores');
+
+// Con sesión admin intentando alterar un superadmin -> 403 / success false
+$_SESSION['nas_user'] = ['username' => 'admin_estandar', 'role' => 'admin', 'is_admin' => true, 'is_superadmin' => false];
+$_POST = ['username' => 'administrador', 'groups' => ['grp_samba']];
+ob_start();
+$userCtrlTest->assignGroups(new Request());
+$outAssignSuper = ob_get_clean();
+$jsonAssignSuper = json_decode($outAssignSuper, true);
+assertTrue(isset($jsonAssignSuper['success']) && $jsonAssignSuper['success'] === false && str_contains($jsonAssignSuper['error'] ?? '', 'superadministrador'), 'UserController::assignGroups impide a administradores estándar alterar superadmin');
+
+if ($savedUserSession !== null) {
+    $_SESSION['nas_user'] = $savedUserSession;
+} else {
+    unset($_SESSION['nas_user']);
+}
+$_POST = [];
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
