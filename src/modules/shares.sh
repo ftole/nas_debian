@@ -229,7 +229,7 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort -u)
                 if [ "$TIPO_PERM" != "4" ] && [ -z "$GRUPOS_DISP" ]; then
                     whiptail --title "Sin Grupos" --ok-button "< Aceptar >" \
-                        --msgbox "No hay grupos de seguridad creados.\nCrea primero un grupo desde la opción [2] del menú principal." 9 65
+                        --msgbox "No hay grupos de seguridad creados.\nCrea primero un grupo desde la opción [7] del menú principal." 9 65
                     continue
                 fi
 
