@@ -272,4 +272,22 @@ setup() {
     [[ "$output" =~ '"success": true' ]]
 }
 
+@test "nas-cli share create rechaza recursos publicos, visibles o grupos no permitidos en rol BACKUP" {
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=VISIBLE_TEST --scheme=1 --groups=grp_samba --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "recursos de respaldo ocultos" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=PUB_TEST$ --scheme=4 --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "sin acceso público" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=BADGRP$ --scheme=1 --groups=grp_ventas --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "solo pueden ser accesibles por grp_samba o grp_backups" ]]
+
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli share create --name=VALID_BKP$ --scheme=1 --groups=grp_backups --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
 
