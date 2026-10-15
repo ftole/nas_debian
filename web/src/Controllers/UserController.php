@@ -97,6 +97,11 @@ class UserController
 
     public function createGroup(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('No tienes permisos para crear grupos.', 403);
+            return;
+        }
+
         $data = $request->getBody();
         $groupName = trim($data['name'] ?? '');
 
@@ -118,6 +123,11 @@ class UserController
 
     public function deleteGroup(Request $request, array $params = []): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('No tienes permisos para eliminar grupos.', 403);
+            return;
+        }
+
         $groupName = $params['name'] ?? $request->get('name');
         if (empty($groupName)) {
             Response::error('Nombre de grupo no especificado.');
@@ -243,8 +253,18 @@ class UserController
             return;
         }
 
-        if (!$this->isAdminCaller() && $this->targetIsPrivileged($username)) {
+        if (!$this->isAdminCaller()) {
             Response::error('No tienes permisos para modificar grupos de cuentas administrativas.', 403);
+            return;
+        }
+
+        if ($group === 'grp_superadmin' && !$this->isSuperCaller()) {
+            Response::error('Solo un superadministrador puede alterar el grupo grp_superadmin.', 403);
+            return;
+        }
+
+        if (!$this->isSuperCaller() && $this->targetIsSuperadmin($username)) {
+            Response::error('Solo un superadministrador puede modificar la cuenta de un superadministrador.', 403);
             return;
         }
 
@@ -262,8 +282,45 @@ class UserController
         Response::success(null, $res['message'] ?? 'Membresía actualizada.');
     }
 
+    public function assignGroups(Request $request): void
+    {
+        $data = $request->getBody();
+        $username = trim($data['username'] ?? '');
+        $groups = (array) ($data['groups'] ?? []);
+
+        if (empty($username)) {
+            Response::error('El nombre de usuario es obligatorio.');
+            return;
+        }
+
+        if (!$this->isAdminCaller()) {
+            Response::error('No tienes permisos para modificar grupos de cuentas administrativas.', 403);
+            return;
+        }
+
+        if (!$this->isSuperCaller() && $this->targetIsSuperadmin($username)) {
+            Response::error('Solo un superadministrador puede modificar grupos de un superadministrador.', 403);
+            return;
+        }
+
+        $res = $this->user->assignUserGroups($username, $groups);
+        if (!$res['success']) {
+            AuditService::log('user_assign_groups', $username, 'FAILED', ['groups' => $groups, 'error' => $res['error'] ?? '']);
+            Response::error($res['error'] ?? 'Error al asignar grupos.');
+            return;
+        }
+
+        AuditService::log('user_assign_groups', $username, 'SUCCESS', ['groups' => $groups]);
+        Response::success(null, $res['message'] ?? 'Grupos asignados con éxito.');
+    }
+
     public function rename(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('No tienes permisos para renombrar grupos.', 403);
+            return;
+        }
+
         $data = $request->getBody();
         $old = trim($data['old'] ?? '');
         $new = trim($data['new'] ?? '');
@@ -307,6 +364,17 @@ class UserController
         foreach ($this->user->listUsers() as $row) {
             if (strtolower((string) ($row['username'] ?? '')) === $target) {
                 return !empty($row['is_admin']) || !empty($row['is_superadmin']);
+            }
+        }
+        return false;
+    }
+
+    private function targetIsSuperadmin(string $username): bool
+    {
+        $target = strtolower(trim($username));
+        foreach ($this->user->listUsers() as $row) {
+            if (strtolower((string) ($row['username'] ?? '')) === $target) {
+                return !empty($row['is_superadmin']);
             }
         }
         return false;
