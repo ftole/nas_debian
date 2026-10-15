@@ -1498,6 +1498,39 @@ assertTrue(strpos($htmlBackup, 'id="view-backups"') !== false, 'layout.php en ro
 assertTrue(strpos($htmlBackup, 'Iniciar auditoría criptográfica BTRFS scrub') !== false, 'layout.php en rol ARCHIVOS_BACKUP con btrfs renderiza botón de acción rápida de BTRFS scrub');
 assertTrue(strpos($htmlBackup, 'value="backups"') !== false, 'layout.php en rol ARCHIVOS_BACKUP renderiza opción backups en explorador');
 
+// Pruebas específicas de rol BACKUP puro (Central de Respaldos)
+ob_start();
+putenv('NAS_SERVER_ROLE=BACKUP');
+include dirname(__DIR__) . '/web/templates/layout.php';
+$htmlPureBackup = ob_get_clean();
+
+assertTrue(strpos($htmlPureBackup, 'id="view-backups"') !== false, 'layout.php en rol BACKUP renderiza view-backups en el DOM');
+assertTrue(strpos($htmlPureBackup, 'modal-new-backup') !== false, 'layout.php en rol BACKUP renderiza modal-new-backup en el DOM');
+assertTrue(strpos($htmlPureBackup, 'Iniciar auditoría criptográfica BTRFS scrub') !== false, 'layout.php en rol BACKUP con btrfs renderiza botón de acción rápida de BTRFS scrub');
+assertTrue(strpos($htmlPureBackup, 'value="backups"') !== false, 'layout.php en rol BACKUP renderiza opción backups en explorador');
+
+// Pruebas de restricciones de seguridad SambaService en rol BACKUP
+$tmpBkpConf = tempnam(sys_get_temp_dir(), 'nas_bkp_smb_');
+file_put_contents($tmpBkpConf, "[global]\n   workgroup = TEAM-JOFRATO\n[TEST$]\n   path = /srv/nas/TEST\n");
+$sambaBkpService = new SambaService($tmpBkpConf);
+
+$rejVisible = $sambaBkpService->createShare(['name' => 'VISIBLE_SHARE', 'scheme' => 1, 'groups' => ['grp_samba']]);
+assertTrue(!$rejVisible['success'], 'SambaService::createShare en rol BACKUP rechaza recurso visible sin sufijo $');
+
+$rejPublic = $sambaBkpService->createShare(['name' => 'PUBLIC_TEST$', 'scheme' => 4]);
+assertTrue(!$rejPublic['success'], 'SambaService::createShare en rol BACKUP rechaza recurso público (scheme 4)');
+
+$rejGroup = $sambaBkpService->createShare(['name' => 'GRP_TEST$', 'scheme' => 1, 'groups' => ['grp_contabilidad']]);
+assertTrue(!$rejGroup['success'], 'SambaService::createShare en rol BACKUP rechaza grupo no autorizado grp_contabilidad');
+
+$rejAccess = $sambaBkpService->setAccess('TEST$', 'group', 'grp_contabilidad', 'read');
+assertTrue(!$rejAccess['success'], 'SambaService::setAccess en rol BACKUP rechaza asociar grupos ajenos a grp_samba/grp_backups');
+
+$okBkpShare = $sambaBkpService->createShare(['name' => 'BACKUPS_WIN$', 'scheme' => 1, 'groups' => ['grp_backups']]);
+assertTrue($okBkpShare['success'], 'SambaService::createShare en rol BACKUP acepta recurso oculto con grp_backups');
+
+@unlink($tmpBkpConf);
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
