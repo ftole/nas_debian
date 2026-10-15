@@ -218,6 +218,17 @@ _hook_post_actualizacion() {
         fi
         rm -f "$tmp_nginx" 2>/dev/null || true
     fi
+
+    # 6. Sincronizar directivas de notificación y leasing de Samba si faltan
+    local smb_conf="${SMB_CONF_PATH:-/etc/samba/smb.conf}"
+    if [ -f "$smb_conf" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$smb_conf" ]; }; then
+        if ! grep -qi "smb3 directory leases" "$smb_conf"; then
+            sed -i '/\[global\]/a \   smb3 directory leases = no\n   kernel change notify = yes\n   change notify = yes' "$smb_conf" 2>/dev/null || true
+            if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+                systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
+            fi
+        fi
+    fi
 }
 
 actualizar_desde_git() {
