@@ -647,7 +647,8 @@ class SambaService
         $guestOk = (strtolower((string) ($props['guest ok'] ?? 'no')) === 'yes');
         if ($guestOk) {
             SystemService::sudo(['chmod', '2777', $path]);
-            SystemService::sudo(['setfacl', '-m', 'u:www-data:rwx', $path]);
+            SystemService::sudo(['setfacl', '-m', 'u:www-data:rwx,u:nobody:rwx', $path]);
+            SystemService::sudo(['setfacl', '-d', '-m', 'u:www-data:rwx,u:nobody:rwx,g::rwx,o::rwx', $path]);
             return ['success' => true, 'message' => "Recurso público [$name]: permisos abiertos aplicados."];
         }
 
