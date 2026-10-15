@@ -257,9 +257,14 @@ class FileExplorerService
             }
 
             if ($moved) {
-                @chmod($destination, 0660);
-                // Si existe el grupo corporativo grp_samba, asignarlo
-                if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                $dirPerms = @fileperms($targetDir);
+                $fileMode = ($dirPerms !== false && ($dirPerms & 0007) === 0007) ? 0666 : 0660;
+                @chmod($destination, $fileMode);
+
+                $targetGid = @filegroup($targetDir);
+                if ($targetGid !== false && function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                    @chgrp($destination, $targetGid);
+                } elseif (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
                     @chgrp($destination, 'grp_samba');
                 }
 
@@ -310,11 +315,16 @@ class FileExplorerService
             return ['success' => false, 'error' => 'Ya existe un archivo o carpeta con ese nombre.'];
         }
 
-        if (!@mkdir($target, 02770, true)) {
+        $parentPerms = @fileperms($parent);
+        $dirMode = ($parentPerms !== false && ($parentPerms & 0007) === 0007) ? 02777 : 02770;
+        if (!@mkdir($target, $dirMode, true)) {
             return ['success' => false, 'error' => 'No se pudo crear la carpeta en el sistema de archivos.'];
         }
 
-        if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+        $parentGid = @filegroup($parent);
+        if ($parentGid !== false && function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+            @chgrp($target, $parentGid);
+        } elseif (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
             @chgrp($target, 'grp_samba');
         }
 
@@ -783,13 +793,19 @@ class FileExplorerService
             return ['success' => false, 'error' => 'No se puede guardar sobre la raíz del almacenamiento.'];
         }
 
-        $parent = dirname($target);
-        if (!is_dir($parent)) {
-            if (!@mkdir($parent, 02770, true)) {
+        $parentDir = dirname($target);
+        if (!is_dir($parentDir)) {
+            $grandParent = dirname($parentDir);
+            $grandPerms = @fileperms($grandParent);
+            $parentMode = ($grandPerms !== false && ($grandPerms & 0007) === 0007) ? 02777 : 02770;
+            if (!@mkdir($parentDir, $parentMode, true)) {
                 return ['success' => false, 'error' => 'No se pudo crear la carpeta contenedora.'];
             }
-            if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
-                @chgrp($parent, 'grp_samba');
+            $grandGid = @filegroup($grandParent);
+            if ($grandGid !== false && function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                @chgrp($parentDir, $grandGid);
+            } elseif (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                @chgrp($parentDir, 'grp_samba');
             }
         }
 
@@ -798,8 +814,13 @@ class FileExplorerService
             return ['success' => false, 'error' => 'No se pudo guardar el archivo. Verifique permisos de escritura.'];
         }
 
-        @chmod($target, 0660);
-        if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+        $parentPerms = @fileperms($parentDir);
+        $fileMode = ($parentPerms !== false && ($parentPerms & 0007) === 0007) ? 0666 : 0660;
+        @chmod($target, $fileMode);
+        $parentGid = @filegroup($parentDir);
+        if ($parentGid !== false && function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+            @chgrp($target, $parentGid);
+        } elseif (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
             @chgrp($target, 'grp_samba');
         }
 
