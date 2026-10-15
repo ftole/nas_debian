@@ -512,10 +512,11 @@ switch ($module) {
                 $currentRole = SystemService::getServerRole();
                 if ($currentRole === 'BACKUP') {
                     $isGuest = $guestOk || ($scheme === 4);
-                    $isExplicitlyHidden = $hidden || str_ends_with((string) $name, '$');
-                    if ($isGuest || !$isExplicitlyHidden) {
+                    $isBrowseable = isset($parsedOptions['browseable']) && ($parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true' || $parsedOptions['browseable'] === true);
+                    if ($isGuest || !str_ends_with((string) $name, '$') || $isBrowseable) {
                         outError("En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.", 1, null, $isJson);
                     }
+                    $hidden = true;
                     $disallowedGroups = [];
                     foreach ($groups as $grp) {
                         $grpClean = ltrim(trim($grp), '@');
@@ -564,13 +565,13 @@ switch ($module) {
                     $updateData['comment'] = (string) $parsedOptions['comment'];
                 }
                 if (isset($parsedOptions['browseable'])) {
-                    $updateData['browseable'] = $parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true';
+                    $updateData['browseable'] = $parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true' || $parsedOptions['browseable'] === true;
                 }
                 if (isset($parsedOptions['read-only'])) {
-                    $updateData['read_only'] = $parsedOptions['read-only'] === 'yes' || $parsedOptions['read-only'] === 'true';
+                    $updateData['read_only'] = $parsedOptions['read-only'] === 'yes' || $parsedOptions['read-only'] === 'true' || $parsedOptions['read-only'] === true;
                 }
                 if (isset($parsedOptions['guest-ok'])) {
-                    $updateData['guest_ok'] = $parsedOptions['guest-ok'] === 'yes' || $parsedOptions['guest-ok'] === 'true';
+                    $updateData['guest_ok'] = $parsedOptions['guest-ok'] === 'yes' || $parsedOptions['guest-ok'] === 'true' || $parsedOptions['guest-ok'] === true;
                 }
                 if (isset($parsedOptions['valid-users'])) {
                     $updateData['valid_users'] = array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])));
@@ -583,10 +584,42 @@ switch ($module) {
                 if ($currentRole === 'BACKUP') {
                     $upScheme = isset($parsedOptions['scheme']) ? (int) $parsedOptions['scheme'] : 0;
                     $upGuest = !empty($parsedOptions['guest-ok']) || (isset($parsedOptions['guest_ok']) && $parsedOptions['guest_ok']);
-                    $upBrowse = isset($parsedOptions['browseable']) ? ($parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true') : null;
-                    if ($upScheme === 4 || $upGuest || ($upBrowse === true && !str_ends_with((string) $name, '$'))) {
+                    $upBrowse = isset($parsedOptions['browseable']) ? ($parsedOptions['browseable'] === 'yes' || $parsedOptions['browseable'] === 'true' || $parsedOptions['browseable'] === true) : null;
+                    if ($upScheme === 4 || $upGuest || !str_ends_with((string) $name, '$') || ($upBrowse === true)) {
                         outError("En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.", 1, null, $isJson);
                     }
+                    if (isset($parsedOptions['groups'])) {
+                        $rawG = array_filter(array_map('trim', explode(',', (string) $parsedOptions['groups'])));
+                        foreach ($rawG as $rg) {
+                            $rgClean = ltrim($rg, '@');
+                            if ($rgClean !== '' && !in_array($rgClean, ['grp_samba', 'grp_backups'], true)) {
+                                outError("En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.", 1, null, $isJson);
+                            }
+                        }
+                    }
+                    if (isset($parsedOptions['valid-users'])) {
+                        $rawV = array_filter(array_map('trim', explode(',', (string) $parsedOptions['valid-users'])));
+                        foreach ($rawV as $rv) {
+                            if (str_starts_with($rv, '@')) {
+                                $rvClean = ltrim($rv, '@');
+                                if (!in_array($rvClean, ['grp_samba', 'grp_backups'], true)) {
+                                    outError("En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.", 1, null, $isJson);
+                                }
+                            }
+                        }
+                    }
+                    if (isset($parsedOptions['write-list'])) {
+                        $rawW = array_filter(array_map('trim', explode(',', (string) $parsedOptions['write-list'])));
+                        foreach ($rawW as $rw) {
+                            if (str_starts_with($rw, '@')) {
+                                $rwClean = ltrim($rw, '@');
+                                if (!in_array($rwClean, ['grp_samba', 'grp_backups'], true)) {
+                                    outError("En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.", 1, null, $isJson);
+                                }
+                            }
+                        }
+                    }
+                    $updateData['browseable'] = false;
                 }
 
                 $res = $svc->updateShare((string) $name, $updateData);
