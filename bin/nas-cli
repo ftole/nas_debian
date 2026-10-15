@@ -156,9 +156,22 @@ function renderKeyValues(array $kv, bool $toStderr = false): void
     }
 }
 
+function stripAnsi(string $str): string
+{
+    return preg_replace('/\033\[[0-9;]*m/', '', $str) ?? $str;
+}
+
 function safeStrWidth(string $str): int
 {
-    return function_exists('mb_strwidth') ? mb_strwidth($str) : strlen($str);
+    $clean = stripAnsi($str);
+    return function_exists('mb_strwidth') ? mb_strwidth($clean) : strlen($clean);
+}
+
+function ansiPad(string $str, int $targetWidth): string
+{
+    $visibleWidth = safeStrWidth($str);
+    $spacesNeeded = max(0, $targetWidth - $visibleWidth);
+    return $str . str_repeat(' ', $spacesNeeded);
 }
 
 function renderTable(array $headers, array $rows): void
@@ -190,7 +203,7 @@ function renderTable(array $headers, array $rows): void
     $separatorLine = " ";
     foreach ($headers as $colKey => $colLabel) {
         $w = $colWidths[$colKey] + 2;
-        $headerLine .= CliTheme::BOLD . CliTheme::CYAN . str_pad((string) $colLabel, $w) . CliTheme::RESET;
+        $headerLine .= CliTheme::BOLD . CliTheme::CYAN . ansiPad((string) $colLabel, $w) . CliTheme::RESET;
         $separatorLine .= str_repeat("─", $w);
     }
     echo $headerLine . PHP_EOL;
@@ -207,7 +220,7 @@ function renderTable(array $headers, array $rows): void
             } elseif (is_bool($val)) {
                 $val = $val ? 'Sí' : 'No';
             }
-            $rowLine .= str_pad((string) $val, $w);
+            $rowLine .= ansiPad((string) $val, $w);
         }
         echo $rowLine . PHP_EOL;
     }
@@ -976,8 +989,122 @@ switch ($module) {
                 outSuccess($res['message'] ?? 'Usuario removido del grupo exitosamente', $res, $isJson);
                 break;
 
+            case 'assign':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                $groupsStr = $extraArgs[1] ?? ($parsedOptions['groups'] ?? '');
+                if (!$username) {
+                    outError("Uso: nas user assign <usuario> <grp1,grp2...>", 1, null, $isJson);
+                }
+                $groupsList = array_values(array_filter(array_map('trim', explode(',', (string) $groupsStr))));
+                $res = $svc->assignUserGroups((string) $username, $groupsList);
+                if (empty($res['success'])) {
+                    outError($res['error'] ?? 'Fallo al asignar grupos', 1, $res, $isJson);
+                }
+                AuditService::log('user_assign_groups', (string) $username, 'SUCCESS', ['groups' => $groupsList]);
+                outSuccess($res['message'] ?? 'Grupos asignados correctamente al usuario', $res, $isJson);
+                break;
+
+            case 'show':
+            case 'info':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                if (!$username) {
+                    outError("Uso: nas user show <usuario>", 1, null, $isJson);
+                }
+                $target = null;
+                foreach ($svc->listUsers() as $u) {
+                    if (strtolower((string) $u['username']) === strtolower((string) $username)) {
+                        $target = $u;
+                        break;
+                    }
+                }
+                if ($target === null) {
+                    outError("Usuario '$username' no encontrado", 1, null, $isJson);
+                }
+                $roleLabel = !empty($target['is_superadmin'])
+                    ? 'Superadministrador'
+                    : (!empty($target['is_admin'])
+                        ? 'Administrador'
+                        : (!empty($target['can_web']) ? 'Operador Web' : 'Empleado de Red'));
+                $userData = [
+                    'username'      => $target['username'],
+                    'uid'           => $target['uid'],
+                    'full_name'     => $target['full_name'] ?: '(no especificado)',
+                    'role'          => $roleLabel,
+                    'enabled'       => !empty($target['samba_enabled'] ?? $target['enabled']) ? 'Activo' : 'Suspendido',
+                    'is_samba'      => !empty($target['is_samba']) ? 'Sincronizado' : 'Sin Samba',
+                    'shell'         => $target['shell'] ?? '/usr/sbin/nologin',
+                    'home'          => $target['home'] ?? '-',
+                    'groups'        => implode(', ', $target['groups'] ?? []),
+                ];
+                if ($isJson) {
+                    outData($userData, true);
+                }
+                echo CliTheme::BOLD . "=== FICHA DE USUARIO: {$target['username']} ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues($userData);
+                exit(0);
+
+            case 'shares':
+            case 'access':
+                $username = $extraArgs[0] ?? ($parsedOptions['username'] ?? null);
+                if (!$username) {
+                    outError("Uso: nas user shares <usuario>", 1, null, $isJson);
+                }
+                $target = null;
+                foreach ($svc->listUsers() as $u) {
+                    if (strtolower((string) $u['username']) === strtolower((string) $username)) {
+                        $target = $u;
+                        break;
+                    }
+                }
+                if ($target === null) {
+                    outError("Usuario '$username' no encontrado", 1, null, $isJson);
+                }
+                $sambaSvc = new SambaService();
+                $map = $sambaSvc->getAccessMap();
+                $uname = strtolower((string) $target['username']);
+                $ugroups = $target['groups'] ?? [];
+                $isAdmin = !empty($target['is_admin']) || !empty($target['is_superadmin']) || in_array('grp_samba', $ugroups, true);
+
+                $sharesAccess = [];
+                foreach ($map as $sName => $props) {
+                    $isWrite = $isAdmin
+                        || in_array($uname, array_map('strtolower', $props['write_users'] ?? []), true)
+                        || count(array_intersect($ugroups, $props['write_groups'] ?? [])) > 0;
+                    $isRead = $isWrite
+                        || in_array($uname, array_map('strtolower', $props['read_users'] ?? []), true)
+                        || count(array_intersect($ugroups, $props['read_groups'] ?? [])) > 0;
+
+                    $permLabel = $isWrite ? 'Lectura y Escritura' : ($isRead ? 'Solo Lectura' : 'Sin Acceso');
+                    $permColored = $isWrite
+                        ? (CliTheme::GREEN . 'Lectura y Escritura' . CliTheme::RESET)
+                        : ($isRead ? (CliTheme::YELLOW . 'Solo Lectura' . CliTheme::RESET) : (CliTheme::GRAY . 'Sin Acceso' . CliTheme::RESET));
+                    $origin = $isAdmin ? 'Administrador (grp_samba)' : ($isWrite || $isRead ? 'Grupo Departamental' : '-');
+
+                    $sharesAccess[] = [
+                        'share'          => $sName,
+                        'access'         => $permLabel,
+                        'access_colored' => $permColored,
+                        'origin'         => $origin,
+                    ];
+                }
+                if ($isJson) {
+                    $jsonOut = array_map(fn($r) => [
+                        'share'  => $r['share'],
+                        'access' => $r['access'],
+                        'origin' => $r['origin'],
+                    ], $sharesAccess);
+                    outData($jsonOut, true);
+                }
+                echo CliTheme::BOLD . "=== ACCESO A RECURSOS COMPARTIDOS: {$target['username']} ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'share'          => 'RECURSO',
+                    'access_colored' => 'ACCESO EFECTIVO',
+                    'origin'         => 'ORIGEN DE PERMISOS',
+                ], $sharesAccess);
+                exit(0);
+
             default:
-                outError("Acción de usuario no reconocida: $action. Acciones disponibles: list, create, update, passwd, toggle, delete, add-group, remove-group", 1, null, $isJson);
+                outError("Acción de usuario no reconocida: $action. Acciones disponibles: list, create, update, passwd, toggle, delete, add-group, remove-group, assign, show, shares", 1, null, $isJson);
         }
         break;
 
@@ -1000,6 +1127,95 @@ switch ($module) {
                     'gid'     => 'GID',
                     'members' => 'MIEMBROS',
                 ], $groups);
+                break;
+
+            case 'members':
+                $group = $extraArgs[0] ?? ($parsedOptions['name'] ?? null);
+                if (!$group) {
+                    outError("Uso: nas group members <grupo>", 1, null, $isJson);
+                }
+                $group = strtolower(trim((string) $group));
+                $allGroups = $svc->listGroups();
+                $targetGroup = null;
+                foreach ($allGroups as $g) {
+                    if (strtolower((string) $g['name']) === $group) {
+                        $targetGroup = $g;
+                        break;
+                    }
+                }
+                if ($targetGroup === null) {
+                    outError("Grupo '$group' no encontrado", 1, null, $isJson);
+                }
+                $userMap = [];
+                foreach ($svc->listUsers() as $u) {
+                    $userMap[strtolower((string) $u['username'])] = $u;
+                }
+                $membersData = [];
+                foreach ($targetGroup['members'] as $m) {
+                    $uInfo = $userMap[strtolower((string) $m)] ?? null;
+                    $membersData[] = [
+                        'username'  => $m,
+                        'uid'       => $uInfo['uid'] ?? '-',
+                        'full_name' => $uInfo['full_name'] ?? '-',
+                    ];
+                }
+                if ($isJson) {
+                    outData($membersData, true);
+                }
+                echo CliTheme::BOLD . "=== MIEMBROS DEL GRUPO $group ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'username'  => 'USUARIO',
+                    'uid'       => 'UID',
+                    'full_name' => 'NOMBRE COMPLETO',
+                ], $membersData);
+                break;
+
+            case 'add-member':
+                $group = $extraArgs[0] ?? ($parsedOptions['group'] ?? null);
+                $usersStr = $extraArgs[1] ?? ($parsedOptions['users'] ?? null);
+                if (!$group || !$usersStr) {
+                    outError("Uso: nas group add-member <grupo> <usuario1,usuario2...>", 1, null, $isJson);
+                }
+                $users = array_values(array_filter(array_map('trim', explode(',', (string) $usersStr))));
+                $errors = [];
+                $successCount = 0;
+                foreach ($users as $u) {
+                    $res = $svc->addGroupMember((string) $group, $u);
+                    if (empty($res['success'])) {
+                        $errors[] = "$u: " . ($res['error'] ?? 'error');
+                    } else {
+                        $successCount++;
+                    }
+                }
+                if (!empty($errors) && $successCount === 0) {
+                    outError("Fallo al añadir miembros a $group: " . implode('; ', $errors), 1, ['errors' => $errors], $isJson);
+                }
+                AuditService::log('group_add_member', "$group:" . implode(',', $users), 'SUCCESS');
+                outSuccess("Se añadieron $successCount usuario(s) al grupo $group" . (!empty($errors) ? " (Avisos: " . implode('; ', $errors) . ")" : ""), ['added' => $users, 'errors' => $errors], $isJson);
+                break;
+
+            case 'remove-member':
+                $group = $extraArgs[0] ?? ($parsedOptions['group'] ?? null);
+                $usersStr = $extraArgs[1] ?? ($parsedOptions['users'] ?? null);
+                if (!$group || !$usersStr) {
+                    outError("Uso: nas group remove-member <grupo> <usuario1,usuario2...>", 1, null, $isJson);
+                }
+                $users = array_values(array_filter(array_map('trim', explode(',', (string) $usersStr))));
+                $errors = [];
+                $successCount = 0;
+                foreach ($users as $u) {
+                    $res = $svc->removeGroupMember((string) $group, $u);
+                    if (empty($res['success'])) {
+                        $errors[] = "$u: " . ($res['error'] ?? 'error');
+                    } else {
+                        $successCount++;
+                    }
+                }
+                if (!empty($errors) && $successCount === 0) {
+                    outError("Fallo al remover miembros de $group: " . implode('; ', $errors), 1, ['errors' => $errors], $isJson);
+                }
+                AuditService::log('group_remove_member', "$group:" . implode(',', $users), 'SUCCESS');
+                outSuccess("Se removieron $successCount usuario(s) del grupo $group" . (!empty($errors) ? " (Avisos: " . implode('; ', $errors) . ")" : ""), ['removed' => $users, 'errors' => $errors], $isJson);
                 break;
 
             case 'create':
@@ -1043,7 +1259,7 @@ switch ($module) {
                 break;
 
             default:
-                outError("Acción de grupo no reconocida: $action. Acciones disponibles: list, create, rename, delete", 1, null, $isJson);
+                outError("Acción de grupo no reconocida: $action. Acciones disponibles: list, create, rename, delete, members, add-member, remove-member", 1, null, $isJson);
         }
         break;
 
@@ -1336,9 +1552,9 @@ switch ($module) {
         echo "  " . CliTheme::GREEN . "trash" . CliTheme::RESET . "       Papelera de reciclaje segura en /srv/nas/.trash con base SQLite." . PHP_EOL;
         echo "              list | count | restore | delete | empty" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "user" . CliTheme::RESET . "        Usuarios de Linux y Samba, roles superadmin/operador y credenciales." . PHP_EOL;
-        echo "              list | create | update | passwd | toggle | delete | add-group | remove-group" . PHP_EOL;
+        echo "              list | create | update | passwd | toggle | delete | add-group | remove-group | assign | show | shares" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "group" . CliTheme::RESET . "       Grupos departamentales de seguridad y permisos POSIX." . PHP_EOL;
-        echo "              list | create | rename | delete" . PHP_EOL;
+        echo "              list | create | rename | delete | members | add-member | remove-member" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "domain" . CliTheme::RESET . "      Integración nativa con Directorio Activo (realmd / SSSD / Kerberos)." . PHP_EOL;
         echo "              status | discover | join | leave" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "log" . CliTheme::RESET . "         Auditoría unificada: Samba full_audit, eventos admin, backups y journald." . PHP_EOL;
