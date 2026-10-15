@@ -1432,6 +1432,72 @@ $syncGuestRes = $sambaGuest->syncShareAcls('PUBLICO');
 assertTrue($syncGuestRes['success'], 'SambaService::syncShareAcls procesa correctamente recursos públicos guest ok');
 @unlink($tmpGuestConf);
 
+// Pruebas de detección de esquemas en SambaService (Hallazgo 1)
+$tmpSchemeConf = tempnam(sys_get_temp_dir(), 'nas_scheme_smb_');
+file_put_contents($tmpSchemeConf, <<<CONF
+[global]
+   workgroup = TEAM-JOFRATO
+[VENTAS]
+   path = /srv/nas/VENTAS
+   read only = yes
+   valid users = @grp_ventas @grp_samba
+   write list = @grp_ventas @grp_samba
+[CONTABILIDAD]
+   path = /srv/nas/CONTABILIDAD
+   read only = yes
+   valid users = @grp_contabilidad @grp_auditores
+   write list = @grp_contabilidad
+[HISTORICO]
+   path = /srv/nas/HISTORICO
+   read only = yes
+   valid users = @grp_consulta
+CONF
+);
+$sambaScheme = new SambaService($tmpSchemeConf);
+$schemeShares = $sambaScheme->listShares();
+$sharesByName = [];
+foreach ($schemeShares as $s) {
+    $sharesByName[$s['name']] = $s;
+}
+
+assertTrue(isset($sharesByName['VENTAS']), 'SambaService::listShares incluye recurso VENTAS');
+assertTrue(($sharesByName['VENTAS']['scheme'] ?? 0) === 1, 'Recurso con write_list coincidente se clasifica como Esquema 1');
+assertTrue(($sharesByName['VENTAS']['read_only'] ?? true) === false, 'Recurso Esquema 1 tiene read_only = false');
+
+assertTrue(isset($sharesByName['CONTABILIDAD']), 'SambaService::listShares incluye recurso CONTABILIDAD');
+assertTrue(($sharesByName['CONTABILIDAD']['scheme'] ?? 0) === 2, 'Recurso con write_list menor a valid_users se clasifica como Esquema 2');
+assertTrue(($sharesByName['CONTABILIDAD']['read_only'] ?? true) === false, 'Recurso Esquema 2 tiene read_only = false');
+
+assertTrue(isset($sharesByName['HISTORICO']), 'SambaService::listShares incluye recurso HISTORICO');
+assertTrue(($sharesByName['HISTORICO']['scheme'] ?? 0) === 3, 'Recurso con read only y sin write_list se clasifica como Esquema 3');
+assertTrue(($sharesByName['HISTORICO']['read_only'] ?? false) === true, 'Recurso Esquema 3 tiene read_only = true');
+@unlink($tmpSchemeConf);
+
+// Pruebas de filtrado de DOM según rol y filesystem en layout.php (Hallazgo 2)
+ob_start();
+$metrics = ['hostname' => 'SRV-TEST', 'uptime' => '1d', 'kernel' => '6.12', 'cpu_model' => 'x86_64', 'cpu_usage_pct' => 10, 'ram_total_gb' => 16, 'ram_used_gb' => 4, 'ram_usage_pct' => 25];
+$storage = ['filesystem' => 'ext4', 'total_gb' => 1000, 'used_gb' => 200, 'usage_percent' => 20, 'device_type' => 'Disco'];
+$services = [];
+$activeView = 'dashboard';
+putenv('NAS_SERVER_ROLE=ARCHIVOS');
+include dirname(__DIR__) . '/web/templates/layout.php';
+$htmlArchivos = ob_get_clean();
+
+assertTrue(strpos($htmlArchivos, 'id="view-backups"') === false, 'layout.php en rol ARCHIVOS no renderiza view-backups en el DOM');
+assertTrue(strpos($htmlArchivos, 'modal-new-backup') === false, 'layout.php en rol ARCHIVOS no renderiza modal-new-backup en el DOM');
+assertTrue(strpos($htmlArchivos, 'Iniciar auditoría criptográfica BTRFS scrub') === false, 'layout.php en rol ARCHIVOS y ext4 no renderiza botón de acción rápida de BTRFS scrub');
+assertTrue(strpos($htmlArchivos, 'value="backups"') === false, 'layout.php en rol ARCHIVOS no renderiza opción backups en explorador');
+
+ob_start();
+$storage = ['filesystem' => 'btrfs', 'total_gb' => 1000, 'used_gb' => 200, 'usage_percent' => 20, 'device_type' => 'Disco'];
+putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
+include dirname(__DIR__) . '/web/templates/layout.php';
+$htmlBackup = ob_get_clean();
+
+assertTrue(strpos($htmlBackup, 'id="view-backups"') !== false, 'layout.php en rol ARCHIVOS_BACKUP renderiza view-backups');
+assertTrue(strpos($htmlBackup, 'Iniciar auditoría criptográfica BTRFS scrub') !== false, 'layout.php en rol ARCHIVOS_BACKUP con btrfs renderiza botón de acción rápida de BTRFS scrub');
+assertTrue(strpos($htmlBackup, 'value="backups"') !== false, 'layout.php en rol ARCHIVOS_BACKUP renderiza opción backups en explorador');
+
 // Restaurar rol por defecto
 putenv('NAS_SERVER_ROLE=ARCHIVOS_BACKUP');
 
