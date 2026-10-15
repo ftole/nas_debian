@@ -42,8 +42,9 @@ class SambaController
         if ($serverRole === 'BACKUP') {
             $scheme = (int) ($data['scheme'] ?? 1);
             $guestOk = !empty($data['guest_ok']);
-            $hidden = !empty($data['hidden']) || str_ends_with($name, '$');
-            if ($scheme === 4 || $guestOk || !$hidden) {
+            $isExplicitlyHidden = !empty($data['hidden']) || str_ends_with($name, '$');
+            $isBrowseable = isset($data['browseable']) && ($data['browseable'] === 'yes' || $data['browseable'] === true || $data['browseable'] === 'true');
+            if ($scheme === 4 || $guestOk || !$isExplicitlyHidden || (isset($data['hidden']) && !$data['hidden']) || $isBrowseable) {
                 Response::error('En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.', 403);
                 return;
             }
@@ -68,7 +69,8 @@ class SambaController
         $res = $this->samba->createShare($data);
         if (!$res['success']) {
             AuditService::log('share_create', $name, 'FAILED', ['error' => $res['error'] ?? '']);
-            Response::error($res['error'] ?? 'Error al crear recurso compartido.');
+            $code = str_contains($res['error'] ?? '', 'rol Central de Backup') ? 403 : 400;
+            Response::error($res['error'] ?? 'Error al crear recurso compartido.', $code);
             return;
         }
 
@@ -110,10 +112,60 @@ class SambaController
             return;
         }
 
+        $serverRole = \App\Services\SystemService::getServerRole();
+        if ($serverRole === 'BACKUP') {
+            $schemeVal = (int) ($data['scheme'] ?? 0);
+            $guestOkVal = !empty($data['guest_ok']) || !empty($data['guest-ok']);
+            $isBrowseable = isset($data['browseable']) ? ($data['browseable'] === 'yes' || $data['browseable'] === true || $data['browseable'] === 'true') : null;
+            if ($schemeVal === 4 || $guestOkVal || !str_ends_with($name, '$') || (isset($data['hidden']) && !$data['hidden']) || ($isBrowseable === true)) {
+                Response::error('En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.', 403);
+                return;
+            }
+            if (array_key_exists('groups', $data)) {
+                foreach ((array) $data['groups'] as $g) {
+                    $gClean = ltrim(trim($g), '@');
+                    if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                        Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                        return;
+                    }
+                }
+            }
+            if (array_key_exists('valid_users', $data)) {
+                foreach ((array) $data['valid_users'] as $g) {
+                    if (str_starts_with(trim($g), '@')) {
+                        $gClean = ltrim(trim($g), '@');
+                        if (!in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                            Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                            return;
+                        }
+                    }
+                }
+            }
+            if (array_key_exists('write_list', $data)) {
+                foreach ((array) $data['write_list'] as $g) {
+                    if (str_starts_with(trim($g), '@')) {
+                        $gClean = ltrim(trim($g), '@');
+                        if (!in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                            Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                            return;
+                        }
+                    }
+                }
+            }
+            if (!empty($data['write_group'])) {
+                $wClean = ltrim(trim($data['write_group']), '@');
+                if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
+                    Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                    return;
+                }
+            }
+        }
+
         $res = $this->samba->updateShare($name, $data);
         if (!$res['success']) {
             AuditService::log('share_update', $name, 'FAILED', ['error' => $res['error'] ?? '']);
-            Response::error($res['error'] ?? 'Error al actualizar el recurso compartido.');
+            $code = str_contains($res['error'] ?? '', 'rol Central de Backup') ? 403 : 400;
+            Response::error($res['error'] ?? 'Error al actualizar el recurso compartido.', $code);
             return;
         }
 
@@ -134,10 +186,20 @@ class SambaController
             return;
         }
 
+        $serverRole = \App\Services\SystemService::getServerRole();
+        if ($serverRole === 'BACKUP' && $kind === 'group' && $level !== 'none') {
+            $gClean = ltrim(trim($target), '@');
+            if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                return;
+            }
+        }
+
         $res = $this->samba->setAccess($share, $kind, $target, $level);
         if (!$res['success']) {
             AuditService::log('share_access', $share, 'FAILED', ['kind' => $kind, 'target' => $target, 'level' => $level, 'error' => $res['error'] ?? '']);
-            Response::error($res['error'] ?? 'Error al actualizar el acceso.');
+            $code = str_contains($res['error'] ?? '', 'rol Central de Backup') ? 403 : 400;
+            Response::error($res['error'] ?? 'Error al actualizar el acceso.', $code);
             return;
         }
 
