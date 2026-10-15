@@ -143,6 +143,32 @@ setup() {
     [[ "$output" =~ "Faltan parámetros obligatorios" ]]
 }
 
+@test "nas-cli backup rechaza operaciones en rol ARCHIVOS con error estructurado" {
+    NAS_SERVER_ROLE=ARCHIVOS run php bin/nas-cli backup list
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "El módulo de respaldos no está disponible en el rol ARCHIVOS." ]]
+
+    NAS_SERVER_ROLE=ARCHIVOS run php bin/nas-cli backup list --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ '"success": false' ]]
+    [[ "$output" =~ '"error": "El módulo de respaldos no está disponible en el rol ARCHIVOS."' ]]
+
+    NAS_SERVER_ROLE=ARCHIVOS run php bin/nas-cli backup create --json --id=tarea1 --proto=cifs --target=10.10.1.50 --path=C$
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ '"success": false' ]]
+    [[ "$output" =~ '"error": "El módulo de respaldos no está disponible en el rol ARCHIVOS."' ]]
+}
+
+@test "nas-cli backup list --json opera exitosamente en roles con soporte de backup" {
+    NAS_SERVER_ROLE=BACKUP run php bin/nas-cli backup list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+
+    NAS_SERVER_ROLE=ARCHIVOS_BACKUP run php bin/nas-cli backup list --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
 @test "nas-cli storage trim --json retorna success en modo test" {
     run php bin/nas-cli storage trim --json
     [ "$status" -eq 0 ]
