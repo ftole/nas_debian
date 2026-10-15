@@ -610,14 +610,6 @@ class SambaService
             return ['success' => false, 'error' => 'Nivel de acceso inválido (use read/write/none o ro/rw).'];
         }
 
-        $serverRole = SystemService::getServerRole();
-        if ($serverRole === 'BACKUP' && $kind === 'group' && $level !== 'none') {
-            $gClean = ltrim(trim($target), '@');
-            if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
-                return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
-            }
-        }
-
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "Acceso de [$target] en [$share] fijado a '$level' (modo dev)."];
         }
@@ -625,6 +617,14 @@ class SambaService
         $sections = $this->parseSmbConf();
         if (!isset($sections[$share])) {
             return ['success' => false, 'error' => "El recurso [$share] no existe en smb.conf."];
+        }
+
+        $serverRole = SystemService::getServerRole();
+        if ($serverRole === 'BACKUP' && $kind === 'group' && $level !== 'none') {
+            $gClean = ltrim(trim($target), '@');
+            if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+            }
         }
 
         $target = trim($target);
