@@ -163,8 +163,13 @@ class SambaService
         $serverRole = SystemService::getServerRole();
         if ($serverRole === 'BACKUP') {
             $isExplicitlyHidden = $isHidden || str_ends_with($name, '$');
-            if ($isGuest || $scheme === 4 || !$isExplicitlyHidden) {
+            $isBrowseable = isset($data['browseable']) && ($data['browseable'] === 'yes' || $data['browseable'] === true || $data['browseable'] === 'true');
+            if ($isGuest || $scheme === 4 || !$isExplicitlyHidden || (isset($data['hidden']) && !$data['hidden']) || $isBrowseable) {
                 return ['success' => false, 'error' => 'En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.'];
+            }
+            $isHidden = true;
+            if (!str_ends_with($name, '$')) {
+                $name .= '$';
             }
             foreach ($groups as $g) {
                 $gClean = ltrim(trim($g), '@');
@@ -482,10 +487,10 @@ class SambaService
 
         $serverRole = SystemService::getServerRole();
         if ($serverRole === 'BACKUP') {
-            $isExplicitlyHidden = !empty($data['hidden']) || str_ends_with($name, '$');
             $schemeVal = (int) ($data['scheme'] ?? 0);
-            $guestOkVal = !empty($data['guest_ok']);
-            if ($schemeVal === 4 || $guestOkVal || (isset($data['hidden']) && !$data['hidden'] && !str_ends_with($name, '$'))) {
+            $guestOkVal = !empty($data['guest_ok']) || !empty($data['guest-ok']);
+            $isBrowseable = isset($data['browseable']) ? ($data['browseable'] === 'yes' || $data['browseable'] === true || $data['browseable'] === 'true') : null;
+            if ($schemeVal === 4 || $guestOkVal || !str_ends_with($name, '$') || (isset($data['hidden']) && !$data['hidden']) || ($isBrowseable === true)) {
                 return ['success' => false, 'error' => 'En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.'];
             }
             if (array_key_exists('groups', $data)) {
@@ -496,12 +501,29 @@ class SambaService
                     }
                 }
             }
+            if (array_key_exists('valid_users', $data)) {
+                foreach ((array) $data['valid_users'] as $g) {
+                    $gClean = ltrim(trim($g), '@');
+                    if (str_starts_with(trim($g), '@') && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                        return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                    }
+                }
+            }
+            if (array_key_exists('write_list', $data)) {
+                foreach ((array) $data['write_list'] as $g) {
+                    $gClean = ltrim(trim($g), '@');
+                    if (str_starts_with(trim($g), '@') && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                        return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                    }
+                }
+            }
             if (!empty($data['write_group'])) {
                 $wClean = ltrim(trim($data['write_group']), '@');
                 if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
                     return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
                 }
             }
+            $data['hidden'] = true;
         }
 
         if (DIRECTORY_SEPARATOR === '\\') {
@@ -624,6 +646,18 @@ class SambaService
             $gClean = ltrim(trim($target), '@');
             if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
                 return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+            }
+        }
+        if ($serverRole === 'BACKUP' && $kind === 'user' && $level !== 'none') {
+            $userClean = trim($target);
+            if (DIRECTORY_SEPARATOR !== '\\' && function_exists('posix_getpwnam') && getenv('APP_ENV') !== 'testing') {
+                $grpRes = SystemService::runCommand(['id', '-Gn', $userClean]);
+                if ($grpRes['code'] === 0) {
+                    $userGroups = preg_split('/\s+/', trim($grpRes['stdout']));
+                    if (!in_array('grp_samba', $userGroups, true) && !in_array('grp_backups', $userGroups, true)) {
+                        return ['success' => false, 'error' => 'En el rol Central de Backup los usuarios solo pueden acceder si pertenecen a grp_samba o grp_backups.'];
+                    }
+                }
             }
         }
 
