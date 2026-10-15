@@ -990,6 +990,11 @@ cat << SMBCONF > /etc/samba/smb.conf
    aio read size = 16384
    aio write size = 16384
 
+   # Notificación reactiva en tiempo real para escrituras locales (Web y CLI)
+   smb3 directory leases = no
+   kernel change notify = yes
+   change notify = yes
+
    log file = /var/log/samba/log.%m
    max log size = 1000
    logging = file
