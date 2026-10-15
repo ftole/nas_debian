@@ -47,6 +47,22 @@ class SambaController
                 Response::error('En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.', 403);
                 return;
             }
+            $groups = $data['groups'] ?? [];
+            foreach ($groups as $g) {
+                $gClean = ltrim(trim($g), '@');
+                if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                    Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                    return;
+                }
+            }
+            $writeGroup = trim($data['write_group'] ?? '');
+            if ($writeGroup !== '') {
+                $wClean = ltrim($writeGroup, '@');
+                if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
+                    Response::error('En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.', 403);
+                    return;
+                }
+            }
         }
 
         $res = $this->samba->createShare($data);
