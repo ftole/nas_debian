@@ -450,6 +450,8 @@ else
 0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
 CRON_SCRUB
         chmod 644 /etc/cron.d/nas-btrfs-scrub
+    elif [ "$SERVER_ROLE" == "ARCHIVOS" ]; then
+        rm -f /etc/cron.d/nas-btrfs-scrub 2>/dev/null || true
     fi
 fi
 
@@ -812,6 +814,10 @@ groupadd -f grp_samba
 groupadd -f grp_web
 # Grupo de superadministradores: control total e inmutable del panel.
 groupadd -f grp_superadmin
+# Grupo para respaldos corporativos
+if [ "$SERVER_ROLE" == "BACKUP" ] || [ "$SERVER_ROLE" == "ARCHIVOS_BACKUP" ]; then
+    groupadd -f grp_backups
+fi
 # El usuario del panel web necesita acceso de lectura/escritura a /srv/nas (2770 root:grp_samba).
 usermod -aG systemd-journal,adm,grp_samba www-data 2>/dev/null || advertir "No se pudo añadir www-data al grupo grp_samba."
 
