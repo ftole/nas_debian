@@ -185,7 +185,7 @@ class TerminalService
             $cwdToken
         );
 
-        $procCwd = is_dir($cleanCwd) ? $cleanCwd : (is_dir(self::DEFAULT_CWD) ? self::DEFAULT_CWD : (is_dir('/tmp') ? '/tmp' : '/'));
+        $procCwd = (is_dir($cleanCwd) && is_readable($cleanCwd)) ? $cleanCwd : ((is_dir(self::DEFAULT_CWD) && is_readable(self::DEFAULT_CWD)) ? self::DEFAULT_CWD : (is_dir('/tmp') ? '/tmp' : '/'));
         $process = @proc_open(['/bin/bash', '-c', $bashScript], $descriptors, $pipes, $procCwd, $env);
         if (!is_resource($process)) {
             $failRes = [
