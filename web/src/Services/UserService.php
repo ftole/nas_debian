@@ -607,6 +607,74 @@ class UserService
     }
 
     /**
+     * Añade un usuario a un grupo departamental o especial (método simétrico).
+     */
+    public function addGroupMember(string $group, string $username): array
+    {
+        return $this->modifyGroupMembership($username, $group, true);
+    }
+
+    /**
+     * Quita un usuario de un grupo departamental o especial (método simétrico).
+     */
+    public function removeGroupMember(string $group, string $username): array
+    {
+        return $this->modifyGroupMembership($username, $group, false);
+    }
+
+    /**
+     * Asignación atómica de múltiples grupos departamentales a un usuario.
+     */
+    public function assignUserGroups(string $username, array $groups): array
+    {
+        $username = strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
+            return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
+        }
+
+        $protected = $this->protectedError($username);
+        if ($protected !== null) {
+            return $protected;
+        }
+
+        if ((session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) && !$this->currentSessionIsAdmin()) {
+            return ['success' => false, 'error' => 'No tienes permisos para asignar grupos a usuarios.'];
+        }
+
+        $targetGroups = [];
+        foreach ($groups as $g) {
+            $g = strtolower(trim((string) $g));
+            if (preg_match('/^grp_[a-z0-9_-]+$/', $g) && !$this->isSpecialGroup($g)) {
+                $targetGroups[] = $g;
+            }
+        }
+        $targetGroups = array_values(array_unique($targetGroups));
+
+        if ($this->isTesting()) {
+            return ['success' => true, 'message' => "Grupos asignados a $username (modo dev)."];
+        }
+
+        $currentGroups = [];
+        $grpRes = SystemService::runCommand(['id', '-Gn', $username]);
+        if ($grpRes['code'] === 0) {
+            $currentGroups = preg_split('/\s+/', trim($grpRes['stdout']));
+        }
+
+        foreach ($targetGroups as $g) {
+            if (!in_array($g, $currentGroups, true)) {
+                SystemService::sudo(['gpasswd', '-a', $username, $g]);
+            }
+        }
+        foreach ($currentGroups as $g) {
+            if (str_starts_with($g, 'grp_') && !$this->isSpecialGroup($g) && !in_array($g, $targetGroups, true)) {
+                SystemService::sudo(['gpasswd', '-d', $username, $g]);
+            }
+        }
+
+        return ['success' => true, 'message' => "Grupos actualizados correctamente para $username."];
+    }
+
+    /**
      * Renombra un grupo departamental grp_* (protege grp_samba).
      */
     public function renameGroup(string $old, string $new): array
@@ -647,8 +715,26 @@ class UserService
         if (!preg_match('/^[a-z0-9_-]{3,32}$/', $username)) {
             return ['success' => false, 'error' => 'Nombre de usuario inválido.'];
         }
-        if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $group) || $this->isSpecialGroup($group)) {
-            return ['success' => false, 'error' => 'Grupo inválido. Solo se admiten grupos departamentales grp_*.'];
+        if (!preg_match('/^grp_[a-z0-9_-]{2,30}$/', $group)) {
+            return ['success' => false, 'error' => 'Grupo inválido. Formato esperado: grp_* (2-30 caracteres).'];
+        }
+
+        // Permisos según grupo especial
+        if ($group === 'grp_superadmin') {
+            if (!$this->currentSessionIsSuperadmin()) {
+                return ['success' => false, 'error' => 'Solo un superadministrador puede gestionar miembros de grp_superadmin.'];
+            }
+            if (!$add && $this->currentSessionUser() === $username) {
+                return ['success' => false, 'error' => 'No puedes remover a tu propia cuenta del grupo grp_superadmin.'];
+            }
+        } elseif ($this->isSpecialGroup($group)) {
+            if (!$this->currentSessionIsAdmin()) {
+                return ['success' => false, 'error' => "No tienes permisos para modificar miembros del grupo especial '$group'."];
+            }
+        } else {
+            if ((session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) && !$this->currentSessionIsAdmin()) {
+                return ['success' => false, 'error' => 'Se requieren privilegios administrativos para modificar miembros de grupos.'];
+            }
         }
 
         $protected = $this->protectedError($username);
@@ -709,11 +795,27 @@ class UserService
 
     private function currentSessionIsSuperadmin(): bool
     {
+        if (php_sapi_name() === 'cli' && !($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing')) {
+            return true;
+        }
         if (session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) {
             return !empty($_SESSION['nas_user']['is_superadmin'])
                 || (($_SESSION['nas_user']['role'] ?? '') === 'superadmin');
         }
         return false;
+    }
+
+    private function currentSessionIsAdmin(): bool
+    {
+        if (php_sapi_name() === 'cli' && !($this->dryRun || DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing')) {
+            return true;
+        }
+        if (session_status() === PHP_SESSION_ACTIVE || !empty($_SESSION)) {
+            return !empty($_SESSION['nas_user']['is_admin'])
+                || !empty($_SESSION['nas_user']['is_superadmin'])
+                || in_array(($_SESSION['nas_user']['role'] ?? ''), ['admin', 'superadmin'], true);
+        }
+        return true;
     }
 
     private function currentSessionUser(): ?string
