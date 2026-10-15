@@ -174,3 +174,14 @@ _extraer_bloque_audit() {
     [ "$status" -eq 0 ]
 }
 
+@test "deploy.sh crea rutas de backups e historial condicionalmente segun el rol" {
+    run grep -q 'if \[ "$SERVER_ROLE" != "ARCHIVOS" \]; then' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+
+    run awk '/if \[ "\$SERVER_ROLE" != "ARCHIVOS" \]; then/,/fi/' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "BACKUPS_HISTORICOS" ]]
+    [[ "$output" =~ "LOGS_BACKUP" ]]
+    [[ "$output" =~ "backup-credentials" ]]
+}
+
