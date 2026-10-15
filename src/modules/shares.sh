@@ -226,7 +226,11 @@ print("└─{}─┴─{}─┴─{}─┴─{}─┴─{}─┘".format("─"*
                 RET=$?
                 if [ $RET -ne 0 ] || [ -z "$TIPO_PERM" ]; then continue; fi
 
-                GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort -u)
+                if [ "$ROL_ACTUAL" == "BACKUP" ]; then
+                    GRUPOS_DISP=$(awk -F: '$1 ~ /^(grp_samba|grp_backups)$/ {print $1}' /etc/group | sort -u)
+                else
+                    GRUPOS_DISP=$(awk -F: '$1 ~ /^grp_/ {print $1}' /etc/group | sort -u)
+                fi
                 if [ "$TIPO_PERM" != "4" ] && [ -z "$GRUPOS_DISP" ]; then
                     whiptail --title "Sin Grupos" --ok-button "< Aceptar >" \
                         --msgbox "No hay grupos de seguridad creados.\nCrea primero un grupo desde la opción [7] del menú principal." 9 65
