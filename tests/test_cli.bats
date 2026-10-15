@@ -209,3 +209,41 @@ setup() {
     [[ "$output" =~ "Uso: nas group remove-member <grupo> <usuario1,usuario2...>" ]]
 }
 
+@test "nas-cli user show --json retorna ficha estructurada del usuario" {
+    run php bin/nas-cli user show sistemas --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"username": "sistemas"' ]]
+    [[ "$output" =~ '"role"' ]]
+}
+
+@test "nas-cli user shares --json retorna mapa de accesos Samba" {
+    run php bin/nas-cli user shares sistemas --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli group members --json lista integrantes de un grupo" {
+    run php bin/nas-cli group members grp_superadmin --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"username"' ]]
+}
+
+@test "nas-cli user assign en modo testing asigna grupos exitosamente" {
+    run php bin/nas-cli user assign usuario_test grp_marketing --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+@test "nas-cli group add-member y remove-member en modo testing operan exitosamente" {
+    run php bin/nas-cli group add-member grp_marketing usuario_test --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+
+    run php bin/nas-cli group remove-member grp_marketing usuario_test --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+
