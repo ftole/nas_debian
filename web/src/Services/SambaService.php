@@ -160,6 +160,26 @@ class SambaService
         $subfolder = rtrim($name, '$');
         $path = '/srv/nas/' . $subfolder;
 
+        $serverRole = SystemService::getServerRole();
+        if ($serverRole === 'BACKUP') {
+            $isExplicitlyHidden = $isHidden || str_ends_with($name, '$');
+            if ($isGuest || $scheme === 4 || !$isExplicitlyHidden) {
+                return ['success' => false, 'error' => 'En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.'];
+            }
+            foreach ($groups as $g) {
+                $gClean = ltrim(trim($g), '@');
+                if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                    return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                }
+            }
+            if ($writeGroup !== '') {
+                $wClean = ltrim(trim($writeGroup), '@');
+                if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
+                    return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                }
+            }
+        }
+
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Recurso [$name] creado correctamente (modo dev)."];
         }
@@ -460,6 +480,30 @@ class SambaService
             return ['success' => false, 'error' => "La sección [$name] está protegida por el sistema y no puede modificarse como recurso compartido."];
         }
 
+        $serverRole = SystemService::getServerRole();
+        if ($serverRole === 'BACKUP') {
+            $isExplicitlyHidden = !empty($data['hidden']) || str_ends_with($name, '$');
+            $schemeVal = (int) ($data['scheme'] ?? 0);
+            $guestOkVal = !empty($data['guest_ok']);
+            if ($schemeVal === 4 || $guestOkVal || (isset($data['hidden']) && !$data['hidden'] && !str_ends_with($name, '$'))) {
+                return ['success' => false, 'error' => 'En el rol Central de Backup solo se permiten recursos de respaldo ocultos ($) sin acceso público.'];
+            }
+            if (array_key_exists('groups', $data)) {
+                foreach ((array) $data['groups'] as $g) {
+                    $gClean = ltrim(trim($g), '@');
+                    if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                        return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                    }
+                }
+            }
+            if (!empty($data['write_group'])) {
+                $wClean = ltrim(trim($data['write_group']), '@');
+                if ($wClean !== '' && !in_array($wClean, ['grp_samba', 'grp_backups'], true)) {
+                    return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+                }
+            }
+        }
+
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "Recurso [$name] actualizado (modo dev)."];
         }
@@ -564,6 +608,14 @@ class SambaService
         };
         if (!in_array($level, ['none', 'read', 'write'], true)) {
             return ['success' => false, 'error' => 'Nivel de acceso inválido (use read/write/none o ro/rw).'];
+        }
+
+        $serverRole = SystemService::getServerRole();
+        if ($serverRole === 'BACKUP' && $kind === 'group' && $level !== 'none') {
+            $gClean = ltrim(trim($target), '@');
+            if ($gClean !== '' && !in_array($gClean, ['grp_samba', 'grp_backups'], true)) {
+                return ['success' => false, 'error' => 'En el rol Central de Backup los recursos solo pueden ser accesibles por grp_samba o grp_backups.'];
+            }
         }
 
         if (DIRECTORY_SEPARATOR === '\\') {
