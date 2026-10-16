@@ -1729,7 +1729,7 @@ unset($_SERVER['HTTP_ORIGIN'], $_SERVER['HTTP_HOST']);
 // 28. Validaciones Adicionales de Remediación Técnica (Audit nas-debian_d219)
 // ==============================================================================
 
-// SSRF & BackupService: Bloqueo de orígenes de red peligrosos (vuln-0017)
+// SSRF & BackupService: Bloqueo de orígenes de red peligrosos y formatos bracketed/opciones (vuln-0017)
 $bkSvcAudit = new BackupService();
 $resSsrfLoopback = $bkSvcAudit->createTask([
     'id' => 'bkp_ssrf_loop',
@@ -1752,6 +1752,13 @@ $resSsrfLinkLocal = $bkSvcAudit->createTask([
     'schedule' => '0 2 * * *',
 ]);
 assertTrue(!$resSsrfLinkLocal['success'], 'BackupService::createTask bloquea origen link-local 169.254.10.20 (vuln-0017)');
+
+assertTrue($bkSvcAudit->validateOriginHost('[::1]') !== null, 'BackupService::validateOriginHost bloquea IPv6 en corchetes [::1]');
+assertTrue($bkSvcAudit->validateOriginHost('[127.0.0.1]') !== null, 'BackupService::validateOriginHost bloquea IPv4 en corchetes [127.0.0.1]');
+assertTrue($bkSvcAudit->validateOriginHost('[::ffff:127.0.0.1]') !== null, 'BackupService::validateOriginHost bloquea IPv4 mapeada en IPv6 [::ffff:127.0.0.1]');
+assertTrue($bkSvcAudit->validateOriginHost('localhost6') !== null, 'BackupService::validateOriginHost bloquea alias localhost6');
+assertTrue($bkSvcAudit->validateOriginHost('-oProxyCommand=calc') !== null, 'BackupService::validateOriginHost rechaza hosts con guion inicial');
+assertTrue($bkSvcAudit->validateOriginHost('10.10.1.50') === null, 'BackupService::validateOriginHost autoriza IP de red local valida');
 
 // Gap CIFS: Sanitización y rechazo de contraseñas con \r o \n
 $resCifsNl = $bkSvcAudit->createTask([
@@ -1779,7 +1786,7 @@ $resSshDash = $bkSvcAudit->createTask([
 assertTrue(!$resSshDash['success'] && (str_contains($resSshDash['error'] ?? '', 'guión') || str_contains($resSshDash['error'] ?? '', 'guion')),
     'BackupService::createTask rechaza usuario SSH con guion inicial (vuln-0014)');
 
-// vuln-0015: Confinar origen de respaldo local dentro de /srv/nas
+// vuln-0015: Confinar origen de respaldo local dentro de /srv/nas y prevenir recursión
 $resLocalEsc = $bkSvcAudit->createTask([
     'id' => 'bkp_local_esc',
     'source_type' => 'local',
@@ -1787,6 +1794,7 @@ $resLocalEsc = $bkSvcAudit->createTask([
     'schedule' => '0 2 * * *',
 ]);
 assertTrue(!$resLocalEsc['success'], 'BackupService::createTask confina origen local dentro de /srv/nas (vuln-0015)');
+assertTrue(!$bkSvcAudit->isAllowedLocalPath('/srv/nas/BACKUPS_HISTORICOS'), 'BackupService::isAllowedLocalPath bloquea usar el repositorio de backups como origen (previene recursion)');
 
 // vuln-0013: AuthService::clearFailedAttempts retrocompatible y con username
 $authSvcTest = new AuthService();
@@ -1816,6 +1824,25 @@ $guestResp = json_decode($rawGuestResp, true);
 assertTrue(is_array($guestResp) && empty($guestResp['success']) && str_contains($guestResp['error'] ?? '', 'administrador'),
     'SambaController::create restringe Esquema 4 (invitados) ante rol operador con 403 (vuln-0012)');
 
+$_POST = [
+    'name' => 'PUBLICO_GUEST_DASH',
+    'path' => '/srv/nas/PUBLICO_GUEST_DASH',
+    'guest-ok' => true,
+];
+$reqGuestDash = new Request();
+ob_start();
+$sambaCtrlAudit->create($reqGuestDash);
+$rawGuestDash = ob_get_clean();
+$guestDashResp = json_decode($rawGuestDash, true);
+assertTrue(is_array($guestDashResp) && empty($guestDashResp['success']) && str_contains($guestDashResp['error'] ?? '', 'administrador'),
+    'SambaController::create restringe guest-ok ante rol operador con 403');
+
+// vuln-0010: StorageService detecta particiones LVM en disco padre
+StorageService::$mockPvs = "  /dev/sdb2  vg_nas lvm2 a-- <200.00g <50.00g\n";
+$storeTestAudit = new StorageService();
+assertTrue($storeTestAudit->deviceInUseCritical('/dev/sdb'), 'StorageService::deviceInUseCritical detecta disco padre /dev/sdb con particion LVM /dev/sdb2');
+StorageService::$mockPvs = null;
+
 // vuln-0007 / vuln-0008: TerminalService cliente y normalización destructiva
 $termSvcAudit = new TerminalService();
 $termSvcAudit->setClientId('sess-test-999');
@@ -1829,6 +1856,15 @@ assertTrue($cmdBlockedByQuotes['exit_code'] === 126, 'TerminalService detecta co
 
 $cmdBlockedByNull = $termSvcAudit->execute("mkfs.ext4\0 /dev/sdb1");
 assertTrue($cmdBlockedByNull['exit_code'] === 126, 'TerminalService detecta comando destructivo con caracteres nulos (vuln-0008)');
+
+$cmdBlockedChained = $termSvcAudit->execute('rm -rf /; echo done');
+assertTrue($cmdBlockedChained['exit_code'] === 126, 'TerminalService bloquea rm en raiz encadenado con punto y coma');
+
+$cmdBlockedSubshell = $termSvcAudit->execute('echo $(rm -rf /)');
+assertTrue($cmdBlockedSubshell['exit_code'] === 126, 'TerminalService bloquea rm en raiz dentro de subshell $()');
+
+$cmdBlockedPipe = $termSvcAudit->execute('rm -rf /| cat');
+assertTrue($cmdBlockedPipe['exit_code'] === 126, 'TerminalService bloquea rm en raiz con pipe |');
 
 // vuln-0001 / vuln-0002: SheetJS versión >= 0.20.2
 $vendorXlsxPath = __DIR__ . '/../web/public/js/vendor/xlsx.full.min.js';
