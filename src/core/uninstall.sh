@@ -125,6 +125,7 @@ else
     rm -f /usr/local/sbin/nas-terminal
     rm -f /usr/local/sbin/nas-chpasswd
     rm -f /usr/local/sbin/nas-user-gecos
+    rm -f /usr/local/sbin/nas-admin-manage
     rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
     rm -f /usr/bin/lastb
     if command -v dpkg-divert &>/dev/null; then
