@@ -29,6 +29,14 @@ class SystemController
 
     public function manageService(Request $request): void
     {
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isAdmin = !empty($_SESSION['nas_user']['is_admin'])
+            || in_array($role, ['admin', 'superadmin'], true);
+        if (!$isAdmin) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $data = $request->getBody();
         $service = trim($data['service'] ?? '');
         $action = trim($data['action'] ?? 'restart');
@@ -62,6 +70,14 @@ class SystemController
 
     public function reboot(Request $request): void
     {
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isAdmin = !empty($_SESSION['nas_user']['is_admin'])
+            || in_array($role, ['admin', 'superadmin'], true);
+        if (!$isAdmin) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $res = $this->system->rebootServer();
         if ($res['code'] !== 0) {
             AuditService::log('server_reboot', 'sistema', 'FAILED', ['error' => $res['stderr'] ?: $res['stdout']]);
