@@ -151,6 +151,18 @@ class BackupService
             return ['success' => false, 'error' => 'Expresión cron no válida (debe tener exactamente 5 campos).'];
         }
 
+        // Los orígenes se interpolan en runners Bash que se ejecutan como root (cron / sudo):
+        // se rechaza cualquier caracter que permita romper el literal o encadenar comandos.
+        foreach (['ip', 'target', 'share', 'path', 'source_path', 'user'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            $val = (string) $data[$field];
+            if (preg_match('/[^A-Za-z0-9._:@\/\\\\ -]/', $val) === 1) {
+                return ['success' => false, 'error' => "El campo '$field' contiene caracteres no permitidos."];
+            }
+        }
+
         // Crear directorios de soporte
         $this->ensureDirectory($this->credDir);
         $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
@@ -671,13 +683,18 @@ class BackupService
 
     private function buildCifsRunner(string $task, string $ip, string $share, string $cred, int $retention): string
     {
+        $escTask = escapeshellarg($task);
+        $escIp = escapeshellarg($ip);
+        $escShare = escapeshellarg($share);
+        $escCred = escapeshellarg($cred);
+
         return <<<BASH
 #!/bin/bash
 set -e
-TASK="$task"
-SRC_IP="$ip"
-SRC_SHARE="$share"
-CRED_FILE="$cred"
+TASK=$escTask
+SRC_IP=$escIp
+SRC_SHARE=$escShare
+CRED_FILE=$escCred
 MOUNT_POINT="\${MOUNT_ROOT:-/mnt/backup_sources}/\$TASK"
 BKP_DIR="{$this->bkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
@@ -753,7 +770,7 @@ else
 fi
 
 LAST_SNAPSHOT=\$(find "\$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=60 --delete)
 if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "\$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "\$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "\$LAST_SNAPSHOT" 2>/dev/null || true
@@ -800,15 +817,21 @@ BASH;
 
     private function buildSshRunner(string $task, string $ip, int $port, string $user, string $path, string $cred, int $retention): string
     {
+        $escTask = escapeshellarg($task);
+        $escIp = escapeshellarg($ip);
+        $escUser = escapeshellarg($user);
+        $escPath = escapeshellarg($path);
+        $escCred = escapeshellarg($cred);
+
         return <<<BASH
 #!/bin/bash
 set -e
-TASK="$task"
-SRC_IP="$ip"
+TASK=$escTask
+SRC_IP=$escIp
 SRC_PORT=$port
-SRC_USER="$user"
-SRC_PATH="$path"
-CRED_FILE="$cred"
+SRC_USER=$escUser
+SRC_PATH=$escPath
+CRED_FILE=$escCred
 BKP_DIR="{$this->bkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
 MASTER_LOG="{$this->logRoot}/backups_master.log"
@@ -874,7 +897,7 @@ if [[ "\$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "\$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; 
 fi
 
 LAST_SNAPSHOT=\$(find "\$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids -v -z --timeout=60 --delete)
 if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "\$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "\$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "\$LAST_SNAPSHOT" 2>/dev/null || true
@@ -923,11 +946,14 @@ BASH;
 
     private function buildLocalRunner(string $task, string $path, int $retention): string
     {
+        $escTask = escapeshellarg($task);
+        $escPath = escapeshellarg($path);
+
         return <<<BASH
 #!/bin/bash
 set -e
-TASK="$task"
-SRC_PATH="$path"
+TASK=$escTask
+SRC_PATH=$escPath
 BKP_DIR="{$this->bkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
 MASTER_LOG="{$this->logRoot}/backups_master.log"
@@ -993,7 +1019,7 @@ if [[ "\$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "\$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; 
 fi
 
 LAST_SNAPSHOT=\$(find "\$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=60 --delete)
 if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "\$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "\$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "\$LAST_SNAPSHOT" 2>/dev/null || true
