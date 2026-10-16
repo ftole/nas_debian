@@ -40,7 +40,7 @@ class SambaController
         // Solo los administradores pueden publicar recursos de acceso público/invitados (guest).
         $role = (string) ($_SESSION['nas_user']['role'] ?? '');
         $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
-        if (!$isAdmin && ((int) ($data['scheme'] ?? 1) === 4 || !empty($data['guest_ok']))) {
+        if (!$isAdmin && ((int) ($data['scheme'] ?? 1) === 4 || !empty($data['guest_ok']) || !empty($data['guest-ok']) || !empty($data['public']))) {
             Response::error('Solo un administrador puede crear recursos de acceso público/invitados.', 403);
             return;
         }
@@ -123,7 +123,7 @@ class SambaController
         // Solo los administradores pueden convertir un recurso en acceso público/invitados (guest).
         $role = (string) ($_SESSION['nas_user']['role'] ?? '');
         $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
-        if (!$isAdmin && ((int) ($data['scheme'] ?? 0) === 4 || !empty($data['guest_ok']) || !empty($data['guest-ok']))) {
+        if (!$isAdmin && ((int) ($data['scheme'] ?? 0) === 4 || !empty($data['guest_ok']) || !empty($data['guest-ok']) || !empty($data['public']))) {
             Response::error('Solo un administrador puede publicar recursos de acceso público/invitados.', 403);
             return;
         }
