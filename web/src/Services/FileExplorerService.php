@@ -83,13 +83,13 @@ class FileExplorerService
                     return null;
                 }
             }
-            if ($realParent !== false && $realRoot !== false && (str_starts_with($realParent, $realRoot) || $realParent === $realRoot)) {
+            if ($realParent !== false && $realRoot !== false && ($realParent === $realRoot || str_starts_with($realParent, $realRoot . DIRECTORY_SEPARATOR))) {
                 return $candidate;
             }
             return null;
         }
 
-        if ($realRoot !== false && (str_starts_with($realCandidate, $realRoot) || $realCandidate === $realRoot)) {
+        if ($realRoot !== false && ($realCandidate === $realRoot || str_starts_with($realCandidate, $realRoot . DIRECTORY_SEPARATOR))) {
             return $realCandidate;
         }
 
@@ -1065,7 +1065,22 @@ class FileExplorerService
                     continue;
                 }
 
-                $relativePath = str_replace('\\', '/', substr($filePath, strlen($realTargetDir) + 1));
+                // Nombre de entrada seguro para el archivo comprimido (prevención de Zip Slip).
+                // Neutralizar separadores de Windows/Linux y descartar componentes de escape (..)
+                $entryParts = [];
+                $rawRelative = substr($filePath, strlen($realTargetDir) + 1);
+                $rawParts = explode(DIRECTORY_SEPARATOR, $rawRelative);
+                foreach ($rawParts as $part) {
+                    $part = str_replace(['\\', '/'], '_', $part);
+                    if ($part === '' || $part === '.' || $part === '..') {
+                        continue;
+                    }
+                    $entryParts[] = $part;
+                }
+                if ($entryParts === []) {
+                    continue;
+                }
+                $relativePath = implode('/', $entryParts);
                 $totalSize += $file->getSize();
 
                 if ($totalSize > $maxZipSize) {
