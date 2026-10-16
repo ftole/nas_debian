@@ -895,4 +895,27 @@ class SambaService
         $comment = rtrim(trim($comment), '\\');
         return trim($comment);
     }
+
+    /**
+     * Reemplaza de forma segura un bloque de sección en el contenido de smb.conf,
+     * utilizando preg_replace_callback para preservar intactos los caracteres '$' y '\'
+     * en recursos compartidos ocultos (terminados en '$').
+     */
+    public function replaceSectionInContent(string $content, string $name, string $replacement): string
+    {
+        $escapedName = preg_quote($name, '#');
+        $pattern = '#(\[' . $escapedName . '\](?:(?!\[).)*)#s';
+        if (preg_match($pattern, $content)) {
+            return (string) preg_replace_callback($pattern, fn() => $replacement, $content);
+        }
+        return rtrim($content) . "\n\n" . $replacement . "\n";
+    }
+
+    /**
+     * Escapa caracteres especiales de reemplazo regex ('$' y '\') para bloques de recursos Samba.
+     */
+    public static function escapeReplacementBlock(string $block): string
+    {
+        return addcslashes($block, '\\$');
+    }
 }
