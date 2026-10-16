@@ -132,4 +132,107 @@ setup() {
     rm -rf "$tmp_dir"
 }
 
+@test "_normalizar_remoto rechaza esquema HTTP inseguro (vuln-0003)" {
+    run _normalizar_remoto "http://github.com/ftole/nas_debian.git"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+
+    run _normalizar_remoto "http://github.com/ftole/nas_debian"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
+
+@test "nas-chpasswd extraido rechaza root, usuarios invalidos y cuentas del sistema (vuln-0006)" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_chp="$tmp_dir/nas-chpasswd"
+
+    awk '
+        /^cat << '\''NAS_CHPASSWD_EOF'\'' > \/usr\/local\/sbin\/nas-chpasswd$/ { capture=1; next }
+        capture && /^NAS_CHPASSWD_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_chp"
+    chmod +x "$tmp_chp"
+
+    run bash -c "echo 'root:pass123' | '$tmp_chp'"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "no se permite modificar contraseñas de cuentas protegidas o root" ]]
+
+    run bash -c "echo 'bad;user:pass123' | '$tmp_chp'"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "no se permite modificar contraseñas de cuentas protegidas o root" ]]
+
+    run bash -c "echo 'daemon:pass123' | '$tmp_chp'"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "el usuario no existe o es una cuenta de sistema" ]]
+
+    rm -rf "$tmp_dir"
+}
+
+@test "_hook_post_actualizacion extrae la definicion de nas-user-gecos desde deploy.sh" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_gecos="$tmp_dir/nas-user-gecos"
+
+    awk '
+        /^cat << '\''NAS_GECOS_EOF'\'' > \/usr\/local\/sbin\/nas-user-gecos$/ { capture=1; next }
+        capture && /^NAS_GECOS_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_gecos"
+
+    [ -s "$tmp_gecos" ]
+    run grep -q 'nas-user-gecos: cuenta protegida o invalida' "$tmp_gecos"
+    [ "$status" -eq 0 ]
+    rm -rf "$tmp_dir"
+}
+
+@test "_hook_post_actualizacion despliega nas-user-gecos de forma segura en ruta configurable" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_gecos="$tmp_dir/bin/nas-user-gecos"
+    mkdir -p "$(dirname "$fake_gecos")"
+
+    NAS_GECOS_DEST="$fake_gecos" \
+    run _hook_post_actualizacion
+
+    [ "$status" -eq 0 ]
+    [ -s "$fake_gecos" ]
+    [ -x "$fake_gecos" ]
+    run grep -q '/usr/sbin/usermod -c' "$fake_gecos"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp_dir"
+}
+
+@test "nas-user-gecos extraido valida argumentos y rechaza root o cuentas invalidas (vuln-0011)" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_gecos="$tmp_dir/nas-user-gecos"
+
+    awk '
+        /^cat << '\''NAS_GECOS_EOF'\'' > \/usr\/local\/sbin\/nas-user-gecos$/ { capture=1; next }
+        capture && /^NAS_GECOS_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_gecos"
+    chmod +x "$tmp_gecos"
+
+    run bash "$tmp_gecos"
+    [ "$status" -ne 0 ]
+
+    run bash "$tmp_gecos" "root" "Super Root"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "cuenta protegida o invalida" ]]
+
+    run bash "$tmp_gecos" "user;id" "Injected Name"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "cuenta protegida o invalida" ]]
+
+    run bash "$tmp_gecos" "daemon" "Daemon User"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "el usuario no existe o es una cuenta de sistema" ]]
+
+    rm -rf "$tmp_dir"
+}
+
+
 
