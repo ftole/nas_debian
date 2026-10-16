@@ -71,6 +71,11 @@ class FileExplorerService
 
         // Si el archivo/directorio aún no existe (ej. upload o mkdir), validamos el directorio padre
         if ($realCandidate === false) {
+            // Rechazar destinos que sean enlaces simbólicos, incluidos los colgantes: de lo
+            // contrario operaciones de escritura seguirían el enlace y escaparían de la raíz.
+            if (is_link($candidate)) {
+                return null;
+            }
             $parent = dirname($candidate);
             $realParent = realpath($parent);
             if ($realTrash !== false && $realParent !== false) {
@@ -246,6 +251,10 @@ class FileExplorerService
             }
 
             $destination = $targetDir . '/' . $cleanName;
+            if (is_link($destination)) {
+                $failed[] = ['name' => $origName, 'error' => 'Destino inválido: no se permite sobreescribir enlaces simbólicos.'];
+                continue;
+            }
 
             // Mover archivo
             $moved = false;
@@ -784,8 +793,9 @@ class FileExplorerService
     public function saveFileContent(string $subpath, string $content): array
     {
         $target = $this->resolveSafePath($subpath);
-        if ($target === null || is_dir($target)) {
-            return ['success' => false, 'error' => 'Ruta de archivo inválida o es un directorio.'];
+        $rawTarget = self::getRootDir() . '/' . ltrim(str_replace('\\', '/', $subpath), '/');
+        if ($target === null || is_dir($target) || is_link($target) || is_link($rawTarget)) {
+            return ['success' => false, 'error' => 'Ruta de archivo inválida o no permitida.'];
         }
 
         $rootDir = self::getRootDir();
