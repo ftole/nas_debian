@@ -2019,6 +2019,70 @@ assertTrue(!$secCheck, 'AuthMiddleware bloquea peticiones mutantes con Sec-Fetch
 unset($_SERVER['HTTP_SEC_FETCH_SITE']);
 $_SERVER['REQUEST_METHOD'] = 'GET';
 
+// 11) AuthService::verifyCredentials y mitigación de timing attack con eliminación de auth_verify_cache
+$authRemed = new AuthService();
+$_SESSION['auth_verify_cache'] = 'dummy_cached_token';
+$verifyFake = $authRemed->verifyCredentials('non_existent_user_123', 'wrong_pass');
+assertTrue(!$verifyFake, 'AuthService::verifyCredentials rechaza usuario inexistente');
+assertTrue(!isset($_SESSION['auth_verify_cache']), 'AuthService::verifyCredentials purga $_SESSION[auth_verify_cache]');
+
+// 12) AuthService: rate limiting por clave login_user:<username>
+$testLimUser = 'rate_test_user_' . bin2hex(random_bytes(4));
+for ($i = 0; $i < AuthService::MAX_FAILED_ATTEMPTS; $i++) {
+    $authRemed->recordFailedAttempt('192.0.2.1', $testLimUser);
+}
+assertTrue($authRemed->isRateLimited('198.51.100.99', $testLimUser), 'AuthService::isRateLimited bloquea por clave login_user tras superar intentos');
+$authRemed->clearFailedAttempts('192.0.2.1', $testLimUser);
+assertTrue(!$authRemed->isRateLimited('198.51.100.99', $testLimUser), 'AuthService::clearFailedAttempts limpia rate limit de login_user');
+
+// 13) BackupService: isAllowedRemoteHost bloquea las IPs del propio servidor NAS
+$bkpRemed = new BackupService();
+$localIps = $bkpRemed->getLocalServerIps();
+assertTrue(count($localIps) >= 1, 'BackupService::getLocalServerIps detecta IPs locales del NAS');
+foreach ($localIps as $lip) {
+    assertTrue(!$bkpRemed->isAllowedRemoteHost($lip), "BackupService::isAllowedRemoteHost bloquea IP propia del servidor NAS ($lip)");
+}
+
+// 14) BackupService: operador restringido estrictamente a lista preautorizada
+$unauthHost = '198.51.100.222';
+assertTrue(!$bkpRemed->isAllowedRemoteHost($unauthHost, 'operator'), 'BackupService::isAllowedRemoteHost restringe operador ante hosts no autorizados');
+$authHostTest = '198.51.100.' . random_int(100, 200);
+$bkpRemed->addAllowedBackupHost($authHostTest);
+assertTrue($bkpRemed->isAllowedRemoteHost($authHostTest, 'operator'), 'BackupService autoriza host previamente registrado para operador');
+
+// 15) BackupService: validateLocalSubfolder y updateTask
+$_SESSION['nas_user']['role'] = 'operator';
+$_SESSION['nas_user']['groups'] = ['grp_marketing'];
+$subfolderErr = $bkpRemed->validateLocalSubfolder('BACKUPS_WINDOWS$/sub', 'operator');
+assertTrue($subfolderErr !== null && str_contains($subfolderErr, 'Acceso denegado'), 'BackupService::validateLocalSubfolder bloquea subcarpeta en share sin permisos para operador');
+
+$updScriptBad = $bkpRemed->updateTask('task_test', ['post_script' => 'echo pwn']);
+assertTrue(!$updScriptBad['success'] && str_contains($updScriptBad['error'] ?? '', 'scripts personalizados'), 'BackupService::updateTask prohíbe a operador modificar scripts');
+unset($_SESSION['nas_user']);
+
+// 16) SambaService::replaceSectionInContent preserva intactos $ y \ en shares ocultos
+$origSmb = "[global]\n   workgroup = WORKGROUP\n\n[BACKUPS_WINDOWS$]\n   path = /srv/nas/BACKUPS\n   read only = no\n";
+$newBlock = "[BACKUPS_WINDOWS$]\n   path = /srv/nas/BACKUPS_MOD\n   comment = Share con barra \\ y simbolo $\n   read only = yes\n";
+$replacedSmb = $sambaRemed->replaceSectionInContent($origSmb, 'BACKUPS_WINDOWS$', $newBlock);
+assertTrue(str_contains($replacedSmb, '[BACKUPS_WINDOWS$]'), 'SambaService::replaceSectionInContent preserva corchetes y signo $ en share oculto');
+assertTrue(str_contains($replacedSmb, 'simbolo $'), 'SambaService::replaceSectionInContent preserva caracter $ en directivas');
+assertTrue(str_contains($replacedSmb, 'barra \\'), 'SambaService::replaceSectionInContent preserva barra invertida \\');
+
+// 17) TerminalService: bloquea variable como comando, decodificadores con pipe y eval $()
+$cmdVarCmd = $termRemed->execute('c=fdisk; $c /dev/sda');
+assertTrue($cmdVarCmd['exit_code'] === 126, 'TerminalService bloquea ejecución donde el comando es una variable ($c /dev/sda)');
+
+$cmdEvalSub = $termRemed->execute('eval $(echo cm0gLXJmIC8= | base64 -d)');
+assertTrue($cmdEvalSub['exit_code'] === 126, 'TerminalService bloquea combinación de eval con decodificador base64 y sustitución');
+
+$cmdPipeSh = $termRemed->execute('echo bWtmcy5leHQ0IC9kZXYvc2Rh | base64 -d | sh');
+assertTrue($cmdPipeSh['exit_code'] === 126, 'TerminalService bloquea decodificador base64 canalizado a intérprete sh');
+
+// 18) UserService::updateUser revoca privilegios a admin creado con adm/grp_samba sin requerir sudo
+$userTestRemed = new UserService();
+$updDemote = $userTestRemed->updateUser('admin_demo', null, 'Usuario Demo', ['grp_general'], false, true, true, false);
+assertTrue($updDemote['success'], 'UserService::updateUser permite revocar privilegios administrativos');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
