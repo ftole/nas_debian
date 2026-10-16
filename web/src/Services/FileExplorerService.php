@@ -1069,12 +1069,14 @@ class FileExplorerService
                 // Neutralizar separadores de Windows/Linux y descartar componentes de escape (..)
                 $entryParts = [];
                 $rawRelative = substr($filePath, strlen($realTargetDir) + 1);
-                $rawParts = explode(DIRECTORY_SEPARATOR, $rawRelative);
+                $normalized = str_replace('\\', '/', $rawRelative);
+                $rawParts = explode('/', $normalized);
                 foreach ($rawParts as $part) {
-                    $part = str_replace(['\\', '/'], '_', $part);
+                    $part = trim($part);
                     if ($part === '' || $part === '.' || $part === '..') {
                         continue;
                     }
+                    $part = str_replace(["\0", "\r", "\n", ':', '\\', '/'], '_', $part);
                     $entryParts[] = $part;
                 }
                 if ($entryParts === []) {
