@@ -984,18 +984,39 @@ class SystemService
                 $logs[] = [
                     'timestamp' => $m[1],
                     'unit' => trim($m[2]),
-                    'message' => trim($m[3]),
+                    'message' => $this->redactJournalSecrets(trim($m[3])),
                 ];
             } else {
                 $logs[] = [
                     'timestamp' => '',
                     'unit' => 'system',
-                    'message' => $trimmed,
+                    'message' => $this->redactJournalSecrets($trimmed),
                 ];
             }
         }
 
         return $logs;
+    }
+
+    /**
+     * Elimina credenciales presentes en la línea de comandos registrada por sudo antes de
+     * exponerla por la API (por ejemplo `printf 'usuario:clave' | nas-chpasswd` o
+     * `--password=...`), evitando que las bitácoras del sistema se conviertan en un almacén
+     * de secretos legible por cualquier usuario autenticado.
+     */
+    private function redactJournalSecrets(string $message): string
+    {
+        // Flags explícitos de contraseña en la línea de comandos
+        $message = (string) preg_replace('/(--password[= ])\S+/i', '$1[REDACTADO]', $message);
+
+        // Cargas útiles usuario:clave canalizadas a helpers de contraseñas del sistema
+        $message = (string) preg_replace(
+            '/((?:printf|echo)\s+\\\\?[\'"]?)[^\s|]+(\\\\?[\'"]?\s*\|\s*(?:sudo\s+-n\s+)?(?:\S*\/)?(?:nas-chpasswd|chpasswd|smbpasswd))/i',
+            '$1[REDACTADO]$2',
+            $message
+        );
+
+        return $message;
     }
 
     /**
