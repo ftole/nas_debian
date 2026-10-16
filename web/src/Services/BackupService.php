@@ -438,6 +438,10 @@ class BackupService
             return 'El host de origen no puede estar vacío.';
         }
 
+        if (str_starts_with($host, '-')) {
+            return 'El host de origen no puede iniciar con guión (-).';
+        }
+
         $allowedEnv = getenv('NAS_BACKUP_ALLOWED_ORIGINS');
         if ($allowedEnv !== false && trim($allowedEnv) !== '') {
             $allowedOrigins = array_filter(array_map('trim', explode(',', $allowedEnv)));
@@ -447,27 +451,44 @@ class BackupService
             return null;
         }
 
-        $lower = strtolower($host);
-        if ($lower === 'localhost' || $lower === '0.0.0.0') {
+        $cleanHost = trim($host, '[]');
+        $lower = strtolower($cleanHost);
+        $blockedNames = ['localhost', '0.0.0.0', 'localhost6', 'ip6-localhost', 'ip6-loopback', '::1', '::'];
+        if (in_array($lower, $blockedNames, true)) {
             return "El origen de red '$host' está bloqueado por motivos de seguridad.";
         }
 
-        $ipToTest = filter_var($host, FILTER_VALIDATE_IP) ? $host : null;
-        if ($ipToTest === null) {
-            $resolved = @gethostbyname($host);
-            if ($resolved !== $host && filter_var($resolved, FILTER_VALIDATE_IP)) {
-                $ipToTest = $resolved;
+        $ipsToTest = [];
+        if (filter_var($cleanHost, FILTER_VALIDATE_IP)) {
+            $ipsToTest[] = $cleanHost;
+        } else {
+            $resolved = @gethostbyname($cleanHost);
+            if ($resolved !== $cleanHost && filter_var($resolved, FILTER_VALIDATE_IP)) {
+                $ipsToTest[] = $resolved;
+            }
+            if (function_exists('dns_get_record')) {
+                $records = @dns_get_record($cleanHost, DNS_A | DNS_AAAA) ?: [];
+                foreach ($records as $r) {
+                    if (!empty($r['ip']) && filter_var($r['ip'], FILTER_VALIDATE_IP)) {
+                        $ipsToTest[] = $r['ip'];
+                    }
+                    if (!empty($r['ipv6']) && filter_var($r['ipv6'], FILTER_VALIDATE_IP)) {
+                        $ipsToTest[] = $r['ipv6'];
+                    }
+                }
             }
         }
 
-        if ($ipToTest !== null && $this->isDangerousIp($ipToTest)) {
-            return "El origen de red '$host' ($ipToTest) es una dirección restringida (loopback/link-local/multicast).";
+        foreach (array_unique($ipsToTest) as $ipToTest) {
+            if ($this->isDangerousIp($ipToTest)) {
+                return "El origen de red '$host' ($ipToTest) es una dirección restringida (loopback/link-local/multicast).";
+            }
         }
 
         return null;
     }
 
-    private function isDangerousIp(string $ip): bool
+    public function isDangerousIp(string $ip): bool
     {
         $bin = @inet_pton($ip);
         if ($bin === false) {
@@ -492,7 +513,7 @@ class BackupService
             $b1 = ord($bin[1]);
             if ($b0 === 0xfe && ($b1 & 0xc0) === 0x80) return true; // fe80::/10 Link-local
             if ($b0 === 0xff) return true; // ff00::/8 Multicast
-            if (str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+            if (str_starts_with($bin, str_repeat(chr(0), 10) . chr(0xff) . chr(0xff))) {
                 $ipv4Part = inet_ntop(substr($bin, 12));
                 if ($ipv4Part !== false) {
                     return $this->isDangerousIp($ipv4Part);
@@ -505,11 +526,19 @@ class BackupService
 
     /**
      * Valida que una ruta local exista y esté contenida estrictamente en la raíz de almacenamiento permitida.
+     * Excluye el directorio de repositorios de respaldo para evitar recursión destructiva.
      */
     public function isAllowedLocalPath(string $path): bool
     {
         $realPath = realpath($path);
         if ($realPath === false) {
+            return false;
+        }
+
+        // El repositorio de copias de seguridad no debe utilizarse recursivamente como origen
+        $bkpRoot = $this->bkpRoot;
+        $realBkp = realpath($bkpRoot) ?: $bkpRoot;
+        if ($realPath === $realBkp || str_starts_with($realPath, rtrim($realBkp, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR)) {
             return false;
         }
 
