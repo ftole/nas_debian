@@ -89,6 +89,10 @@ _extraer_bloque_sudoers() {
     run grep -q '/usr/local/sbin/nas-chpasswd' "$tmp"
     [ "$status" -eq 0 ]
 
+    # No debe permitir gpasswd sobre sudo o adm directamente
+    run grep -Eq 'gpasswd[[:space:]]+-[ad][[:space:]]+.*[[:space:]]+(sudo|adm)\b' "$tmp"
+    [ "$status" -ne 0 ]
+
     # No debe copiar archivos desde /tmp hacia /etc
     run grep -Eq 'cp[[:space:]]+/tmp/' "$tmp"
     [ "$status" -ne 0 ]
@@ -111,6 +115,20 @@ _extraer_bloque_sudoers() {
     [ -s "$tmp" ]
 
     run grep -q '/usr/local/sbin/nas-user-gecos \[a-zA-Z0-9_.-]\*' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
+@test "el fragmento sudoers autoriza nas-admin-manage de forma acotada (vuln-0003)" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q '/usr/local/sbin/nas-admin-manage add \[a-zA-Z0-9_.-]\*' "$tmp"
+    [ "$status" -eq 0 ]
+    run grep -q '/usr/local/sbin/nas-admin-manage remove \[a-zA-Z0-9_.-]\*' "$tmp"
     [ "$status" -eq 0 ]
 
     rm -f "$tmp"
