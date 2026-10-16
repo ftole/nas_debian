@@ -104,3 +104,21 @@ _extraer_bloque_sudoers() {
     rm -f "$tmp"
 }
 
+@test "el fragmento sudoers autoriza nas-user-gecos de forma acotada (vuln-0011)" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q '/usr/local/sbin/nas-user-gecos \[a-zA-Z0-9_.-]\*' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
+@test "deploy.sh configura firma SMB obligatoria para mitigar NTLM relay (vuln-0004)" {
+    run grep -q 'server signing = mandatory' src/core/deploy.sh
+    [ "$status" -eq 0 ]
+}
+
+
