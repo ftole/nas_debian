@@ -263,7 +263,11 @@ setup() {
     [ "$status" -eq 0 ]
     [ -s "$fake_admin" ]
     [ -x "$fake_admin" ]
-    run grep -q '/usr/bin/gpasswd -a "\$TARGET_USER" sudo' "$fake_admin"
+    run grep -q '/usr/bin/gpasswd -a "\$TARGET_USER" adm' "$fake_admin"
+    [ "$status" -eq 0 ]
+    run grep -q '/usr/bin/gpasswd -a "\$TARGET_USER" grp_samba' "$fake_admin"
+    [ "$status" -eq 0 ]
+    run grep -q '/usr/bin/passwd -l "\$TARGET_USER"' "$fake_admin"
     [ "$status" -eq 0 ]
 
     rm -rf "$tmp_dir"
@@ -302,6 +306,35 @@ setup() {
     run bash "$tmp_admin" "add" "daemon"
     [ "$status" -ne 0 ]
     [[ "$output" =~ "el usuario no existe o es una cuenta de sistema" ]]
+    rm -rf "$tmp_dir"
+}
+
+@test "updater exige tags firmados por defecto salvo anulacion explicita" {
+    run bash -c 'source src/core/updater.sh; echo "REQUIRE=$NAS_REQUIRE_SIGNED_TAGS"'
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "REQUIRE=true" ]]
+
+    run bash -c 'NAS_ALLOW_UNSIGNED_UPDATES=true source src/core/updater.sh; echo "REQUIRE=$NAS_REQUIRE_SIGNED_TAGS"'
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "REQUIRE=false" ]]
+}
+
+@test "_hook_post_actualizacion reafirma server signing = mandatory en smb.conf" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_smb="$tmp_dir/smb.conf"
+    cat << 'EOF' > "$fake_smb"
+[global]
+   workgroup = WORKGROUP
+   server signing = auto
+EOF
+
+    SMB_CONF_PATH="$fake_smb" \
+    run _hook_post_actualizacion
+
+    [ "$status" -eq 0 ]
+    run grep -qi 'server signing = mandatory' "$fake_smb"
+    [ "$status" -eq 0 ]
 
     rm -rf "$tmp_dir"
 }
