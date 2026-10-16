@@ -115,7 +115,7 @@ class AuthController
             exit;
         }
 
-        $this->auth->clearFailedAttempts($clientIp);
+        $this->auth->clearFailedAttempts($clientIp, $username);
 
         // Proteger contra Session Fixation
         session_regenerate_id(true);
