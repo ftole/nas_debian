@@ -609,7 +609,9 @@ class BackupService
             return $w !== false;
         }
 
-        $tmp = tempnam(sys_get_temp_dir(), 'nas_tmp_');
+        $stagingDir = '/var/lib/nas/staging';
+        $tmpDir = (is_dir($stagingDir) && is_writable($stagingDir)) ? $stagingDir : sys_get_temp_dir();
+        $tmp = tempnam($tmpDir, 'nas_');
         if ($tmp !== false) {
             file_put_contents($tmp, $content);
             chmod($tmp, $mode);
