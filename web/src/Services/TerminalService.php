@@ -136,10 +136,20 @@ class TerminalService
         $analysis = (string) preg_replace('/#.*$/m', '', $normalized);
         $unquoted = str_replace(["'", '"', '\\'], '', $analysis);
 
+        // Mitigar evasión por expansión de shell ($IFS, variables, sustitución $(), backticks, base64)
+        $deobfuscated = str_replace(['$IFS', '${IFS}'], ' ', $unquoted);
+        $hasCmdSub = preg_match('/\$\(|`/', $unquoted) === 1;
+        $hasVarExp = preg_match('/\$\{?[A-Za-z_]/', $unquoted) === 1;
+        $mentionsTool = preg_match($deviceTools, $unquoted) === 1;
+        $usesSudo = preg_match('/\bsudo\b/i', $unquoted) === 1;
+
         if (((preg_match($deviceTools, $unquoted) === 1 && str_contains($unquoted, '/dev/'))
             || preg_match($rmOnRoot, $unquoted) === 1
+            || preg_match($rmOnRoot, $deobfuscated) === 1
             || (preg_match($deviceTools, $analysis) === 1 && str_contains($analysis, '/dev/'))
-            || preg_match($rmOnRoot, $analysis) === 1)) {
+            || preg_match($rmOnRoot, $analysis) === 1
+            || ($hasCmdSub && ($mentionsTool || $usesSudo || str_contains($unquoted, '/dev')))
+            || ($hasVarExp && ($mentionsTool || $usesSudo)))) {
             $denyRes = [
                 'success' => true,
                 'output' => "Acceso denegado: Comando destructivo de sistema no permitido en la consola web.\n",
