@@ -31,6 +31,7 @@ class AuthController
     public function showLogin(Request $request): void
     {
         AuthMiddleware::initSession();
+        unset($_SESSION['auth_verify_cache']);
 
         if (!empty($_SESSION['nas_user'])) {
             header('Location: /');
@@ -58,6 +59,7 @@ class AuthController
     public function login(Request $request): void
     {
         AuthMiddleware::initSession();
+        unset($_SESSION['auth_verify_cache']);
 
         $username = (string) $request->get('username', '');
         $safeUsername = trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', $username));
