@@ -234,5 +234,77 @@ setup() {
     rm -rf "$tmp_dir"
 }
 
+@test "_hook_post_actualizacion extrae la definicion de nas-admin-manage desde deploy.sh" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_admin="$tmp_dir/nas-admin-manage"
+
+    awk '
+        /^cat << '\''NAS_ADMIN_MANAGE_EOF'\'' > \/usr\/local\/sbin\/nas-admin-manage$/ { capture=1; next }
+        capture && /^NAS_ADMIN_MANAGE_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_admin"
+
+    [ -s "$tmp_admin" ]
+    run grep -q 'nas-admin-manage: cuenta protegida o invalida' "$tmp_admin"
+    [ "$status" -eq 0 ]
+    rm -rf "$tmp_dir"
+}
+
+@test "_hook_post_actualizacion despliega nas-admin-manage de forma segura en ruta configurable" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_admin="$tmp_dir/bin/nas-admin-manage"
+    mkdir -p "$(dirname "$fake_admin")"
+
+    NAS_ADMIN_MANAGE_DEST="$fake_admin" \
+    run _hook_post_actualizacion
+
+    [ "$status" -eq 0 ]
+    [ -s "$fake_admin" ]
+    [ -x "$fake_admin" ]
+    run grep -q '/usr/bin/gpasswd -a "\$TARGET_USER" sudo' "$fake_admin"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp_dir"
+}
+
+@test "nas-admin-manage extraido valida argumentos, rechaza root y protege superadmin (vuln-0003)" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_admin="$tmp_dir/nas-admin-manage"
+
+    awk '
+        /^cat << '\''NAS_ADMIN_MANAGE_EOF'\'' > \/usr\/local\/sbin\/nas-admin-manage$/ { capture=1; next }
+        capture && /^NAS_ADMIN_MANAGE_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_admin"
+    chmod +x "$tmp_admin"
+
+    # Argumentos incorrectos
+    run bash "$tmp_admin"
+    [ "$status" -ne 0 ]
+
+    run bash "$tmp_admin" "invalid_action" "user1"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "accion invalida" ]]
+
+    # Usuario root o inválido
+    run bash "$tmp_admin" "add" "root"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "cuenta protegida o invalida" ]]
+
+    run bash "$tmp_admin" "add" "user;id"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "cuenta protegida o invalida" ]]
+
+    # Cuenta de sistema
+    run bash "$tmp_admin" "add" "daemon"
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "el usuario no existe o es una cuenta de sistema" ]]
+
+    rm -rf "$tmp_dir"
+}
+
 
 
