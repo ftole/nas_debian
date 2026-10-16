@@ -505,7 +505,9 @@ class StorageService
         SystemService::sudo(['umount', '/srv/nas']);
         SystemService::sudo(['mkdir', '-p', '/srv/nas']);
         $uuid = trim(SystemService::sudo(['blkid', '-s', 'UUID', '-o', 'value', $device])['stdout'] ?? '');
-        $fstabTmp = '/tmp/nas_fstab_' . bin2hex(random_bytes(4));
+        $stagingDir = '/var/lib/nas/staging';
+        $stagingBase = (is_dir($stagingDir) && is_writable($stagingDir)) ? $stagingDir : sys_get_temp_dir();
+        $fstabTmp = $stagingBase . '/nas_fstab_' . bin2hex(random_bytes(4));
         $current = @file_get_contents('/etc/fstab') ?: '';
         $clean = preg_replace('/# BEGIN NAS_DEBIAN \/srv\/nas.*?# END NAS_DEBIAN \/srv\/nas\n?/s', '', $current) ?? $current;
         $ref = $uuid !== '' ? "UUID=$uuid" : $device;
