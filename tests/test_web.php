@@ -1599,7 +1599,57 @@ SystemService::$adminAuditPath = $origAdminPath;
 SystemService::$backupAuditPath = $origBackupPath;
 @unlink($tempSamba);
 @unlink($tempAdmin);
-@unlink($tempBackup);
+// ==============================================================================
+// 27. Pruebas de Mitigación de Vulnerabilidades Pentest (vuln-0001 a vuln-0014)
+// ==============================================================================
+
+// vuln-0001: SambaService sanitiza saltos de línea en comentarios y directivas
+$tmpSambaTestConf = sys_get_temp_dir() . '/smb_test_' . bin2hex(random_bytes(3)) . '.conf';
+$sambaSvcTest = new SambaService($tmpSambaTestConf);
+$resUpdConf = $sambaSvcTest->updateGlobalConfig([
+    'server string' => "NAS Principal\nroot preexec = /bin/sh -c 'id > /tmp/pwn'",
+]);
+assertTrue($resUpdConf['success'], 'SambaService::updateGlobalConfig procesa directivas');
+$confContent = (string) @file_get_contents($tmpSambaTestConf);
+assertTrue(!str_contains($confContent, "\nroot preexec"),
+    'SambaService sanitiza saltos de línea en directivas previniendo inyección en smb.conf (vuln-0001)');
+@unlink($tmpSambaTestConf);
+
+// vuln-0002: BackupService sanitiza campos en tareas
+$bkSvcTest = new BackupService();
+$resBadTask = $bkSvcTest->createTask([
+    'id' => 'test; rm -rf /',
+    'source_type' => 'windows',
+    'source_ip' => '10.10.1.50',
+    'source_share' => 'share',
+    'username' => 'user',
+    'password' => 'pass',
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resBadTask['success'], 'BackupService::createTask rechaza ID con inyección de comandos (vuln-0002)');
+
+// vuln-0012: FileExplorerService rechaza escapes y enlaces simbólicos
+$feSvc = new FileExplorerService();
+$resSafeTraversal = $feSvc->resolveSafePath('../etc/shadow');
+assertTrue($resSafeTraversal === null, 'FileExplorerService::resolveSafePath bloquea path traversal (vuln-0012)');
+$resSafeRoot = $feSvc->resolveSafePath('/etc/passwd');
+assertTrue($resSafeRoot === null, 'FileExplorerService::resolveSafePath bloquea rutas fuera de /srv/nas (vuln-0012)');
+
+// vuln-0008/0009: TerminalService bloquea comandos destructivos
+$termSvc = new TerminalService();
+$cmdBlock1 = $termSvc->execute('mkfs.ext4 /dev/sdb1');
+assertTrue($cmdBlock1['exit_code'] === 126, 'TerminalService bloquea mkfs sobre dispositivos de bloque (vuln-0009)');
+$cmdBlock2 = $termSvc->execute('dd if=/dev/zero of=/dev/sda bs=1M');
+assertTrue($cmdBlock2['exit_code'] === 126, 'TerminalService bloquea dd sobre dispositivos de bloque (vuln-0009)');
+$cmdBlock3 = $termSvc->execute('rm -rf /');
+assertTrue($cmdBlock3['exit_code'] === 126, 'TerminalService bloquea rm recursivo en la raíz / (vuln-0009)');
+$cmdSafe = $termSvc->execute('ls -la /srv/nas');
+assertTrue($cmdSafe['exit_code'] === 0, 'TerminalService permite comandos seguros no destructivos');
+
+// vuln-0013: StorageService valida dispositivos de bloque
+$storeTest = new StorageService();
+$badFmtDev = $storeTest->formatAndMount('/dev/../etc/shadow', 'ext4', 'SI-FORMATEAR');
+assertTrue(!$badFmtDev['success'], 'StorageService::formatAndMount rechaza rutas que no sean dispositivos válidos (vuln-0013)');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
