@@ -27,7 +27,7 @@ class AuthMiddleware
                     'domain' => '',
                     'secure' => $isHttps,
                     'httponly' => true,
-                    'samesite' => 'Lax',
+                    'samesite' => 'Strict',
                 ]);
             }
 
@@ -190,6 +190,26 @@ class AuthMiddleware
 
         // Validación estricta de CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
         if (in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
+            // Sec-Fetch-Site: si el navegador lo envía, exigir que sea 'same-origin' o 'none'
+            $secFetchSite = $request->getHeader('Sec-Fetch-Site');
+            if ($secFetchSite !== null && $secFetchSite !== '' && !in_array(strtolower($secFetchSite), ['same-origin', 'none'], true)) {
+                if (getenv('APP_ENV') !== 'testing') {
+                    \App\Services\AuditService::log('csrf_sec_fetch_denied', $path, 'FAILED', ['sec_fetch_site' => $secFetchSite, 'method' => $method]);
+                }
+                if ($request->isJson()) {
+                    Response::error('Origen de la solicitud no permitido (Sec-Fetch-Site).', 403);
+                } else {
+                    if (!headers_sent()) {
+                        http_response_code(403);
+                    }
+                    echo '<h1>403 - Origen de la solicitud no permitido</h1>';
+                    if (getenv('APP_ENV') !== 'testing') {
+                        exit;
+                    }
+                }
+                return false;
+            }
+
             // Toda petición mutante debe proceder del mismo origen (bloquea login-CSRF).
             if (!self::verifySameOrigin($request)) {
                 if (getenv('APP_ENV') !== 'testing') {
