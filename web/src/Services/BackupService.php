@@ -157,13 +157,22 @@ class BackupService
             return ['success' => false, 'error' => 'Expresión cron no válida (debe tener exactamente 5 campos).'];
         }
 
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isOperator = ($role === 'operator');
+        if ($isOperator && (!empty($data['script']) || !empty($data['pre_script']) || !empty($data['post_script']))) {
+            return ['success' => false, 'error' => 'Operación no permitida: el rol operador no puede configurar scripts personalizados de respaldo.'];
+        }
+
         // Los orígenes se interpolan en runners Bash que se ejecutan como root (cron / sudo):
         // se rechaza cualquier caracter que permita romper el literal o encadenar comandos.
-        foreach (['ip', 'target', 'share', 'path', 'source_path', 'user', 'username', 'source_ip', 'source_share', 'source_user'] as $field) {
+        foreach (['ip', 'target', 'share', 'path', 'source_path', 'user', 'username', 'source_ip', 'source_share', 'source_user', 'local_subfolder'] as $field) {
             if (!array_key_exists($field, $data)) {
                 continue;
             }
             $val = (string) $data[$field];
+            if ($field === 'local_subfolder' && (str_contains($val, '..') || str_starts_with($val, '/') || str_starts_with($val, '\\'))) {
+                return ['success' => false, 'error' => "El subdirectorio local '$val' no es válido o contiene secuencias prohibidas."];
+            }
             if (preg_match('/[^A-Za-z0-9._:@\/\\\\ -]/', $val) === 1) {
                 return ['success' => false, 'error' => "El campo '$field' contiene caracteres no permitidos."];
             }
@@ -479,6 +488,14 @@ class BackupService
             }
         }
 
+        // Fail-closed: si el host no se resuelve a ninguna IP verificable (por ejemplo
+        // formas numéricas no canónicas como 0x7f000001 que PHP no interpreta pero el
+        // resolutor del sistema sí), se rechaza para evitar un diferencial
+        // validación/conexión explotable como SSRF.
+        if ($ipsToTest === []) {
+            return "El origen de red '$host' no pudo resolverse a una dirección IP verificable; se rechaza por seguridad.";
+        }
+
         foreach (array_unique($ipsToTest) as $ipToTest) {
             if ($this->isDangerousIp($ipToTest)) {
                 return "El origen de red '$host' ($ipToTest) es una dirección restringida (loopback/link-local/multicast).";
@@ -486,6 +503,30 @@ class BackupService
         }
 
         return null;
+    }
+
+    /**
+     * Valida si un host remoto está permitido según la política y el rol de usuario.
+     */
+    public function isAllowedRemoteHost(string $host, ?string $role = null): bool
+    {
+        if ($this->validateOriginHost($host) !== null) {
+            return false;
+        }
+        if ($role === null) {
+            $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        }
+        if ($role === 'operator') {
+            $allowedFile = '/etc/nas/allowed_backup_hosts.conf';
+            if (file_exists($allowedFile)) {
+                $lines = file($allowedFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                $cleanLines = array_filter(array_map('trim', $lines));
+                if (!in_array($host, $cleanLines, true)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public function isDangerousIp(string $ip): bool
