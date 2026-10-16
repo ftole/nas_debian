@@ -139,11 +139,49 @@ class StorageService
                 'fstype' => $dev['fstype'] ?? '',
                 'rotational' => ($dev['rota'] ?? true),
                 'protected' => $this->isOsDisk($name),
-                'in_use' => $this->deviceHasMount('/dev/' . $name),
+                'in_use' => $this->deviceHasMount('/dev/' . $name) || $this->deviceInUseCritical('/dev/' . $name),
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Indica si un disco contiene metadatos de volumen activo (PV de LVM o miembro de RAID md).
+     * Estos discos no deben formatearse ni provisionarse aunque se solicite desmontarlos.
+     */
+    public function deviceInUseCritical(string $device): bool
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return false;
+        }
+
+        $real = realpath($device);
+        if ($real === false || !str_starts_with($real, '/dev/')) {
+            return false;
+        }
+
+        // Miembro de arreglo RAID (md): el nombre del kernel aparece en /proc/mdstat.
+        $kernelNames = SystemService::runCommand(['lsblk', '-ln', '-o', 'NAME', $real])['stdout'] ?? '';
+        if (is_readable('/proc/mdstat')) {
+            $mdstat = (string) file_get_contents('/proc/mdstat');
+            foreach (preg_split('/\s+/', trim((string) $kernelNames)) as $kernelName) {
+                if ($kernelName !== '' && preg_match('/\b' . preg_quote($kernelName, '/') . '\b/', $mdstat)) {
+                    return true;
+                }
+            }
+        }
+
+        // Physical Volume de LVM activo ('sudo pvs' ya está autorizado para www-data).
+        $pvs = SystemService::sudo(['pvs'])['stdout'] ?? '';
+        foreach (preg_split('/\r\n|\r|\n/', (string) $pvs) as $line) {
+            $cols = preg_split('/\s+/', trim($line));
+            if (!empty($cols[0]) && str_starts_with($cols[0], '/dev/') && realpath($cols[0]) === $real) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -256,6 +294,28 @@ class StorageService
     }
 
     /**
+     * Resuelve la ruta canónica de un dispositivo y verifica que sea un disco o
+     * partición de bloque presente en el inventario del sistema (lsblk).
+     *
+     * @return string|null Ruta canónica /dev/... o null si no es un disco válido.
+     */
+    private function resolveBlockDevice(string $device): ?string
+    {
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return $device;
+        }
+        $real = realpath($device);
+        if ($real === false || !str_starts_with($real, '/dev/') || @filetype($real) !== 'block') {
+            return null;
+        }
+        $type = trim(SystemService::runCommand(['lsblk', '-nd', '-o', 'TYPE', $real])['stdout'] ?? '');
+        if (!in_array($type, ['disk', 'part'], true)) {
+            return null;
+        }
+        return $real;
+    }
+
+    /**
      * Determina si un disco aloja el sistema operativo (o pertenece a su árbol físico).
      */
     public function isOsDisk(string $name): bool
@@ -297,6 +357,11 @@ class StorageService
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $device)) {
             return ['success' => false, 'error' => 'Dispositivo inválido.'];
         }
+        $resolvedDevice = $this->resolveBlockDevice($device);
+        if ($resolvedDevice === null) {
+            return ['success' => false, 'error' => 'El dispositivo no corresponde a un disco o partición de bloque reconocido por el sistema.'];
+        }
+        $device = $resolvedDevice;
         if (!in_array($fstype, ['ext4', 'btrfs'], true)) {
             return ['success' => false, 'error' => 'Sistema de archivos no soportado (ext4|btrfs).'];
         }
@@ -308,6 +373,9 @@ class StorageService
         if ($this->isOsDisk($name)) {
             return ['success' => false, 'error' => 'Operación prohibida: es el disco del sistema operativo.'];
         }
+        if ($this->deviceInUseCritical($device)) {
+            return ['success' => false, 'error' => 'Operación prohibida: el disco contiene un volumen LVM o un miembro de RAID activo.'];
+        }
 
         if ($this->deviceHasMount($device)) {
             if (!$unmount) {
@@ -318,7 +386,7 @@ class StorageService
             }
         }
 
-        $type = trim(SystemService::runCommand(['lsblk', '-no', 'TYPE', $device])['stdout'] ?? '');
+        $type = trim(SystemService::runCommand(['lsblk', '-nd', '-o', 'TYPE', $device])['stdout'] ?? '');
         $target = $device;
         if ($type === 'disk') {
             SystemService::sudo(['parted', '-s', $device, 'mklabel', 'gpt', 'mkpart', 'primary', '0%', '100%']);
@@ -355,9 +423,17 @@ class StorageService
         if ($this->isOsDisk(basename($disk))) {
             return ['success' => false, 'error' => 'Operación prohibida sobre el disco del sistema.'];
         }
+        if ($this->deviceInUseCritical($disk)) {
+            return ['success' => false, 'error' => 'Operación prohibida: el disco contiene un volumen LVM o un miembro de RAID activo.'];
+        }
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "LVM simulado ($vg/$lv) (modo dev)."];
         }
+        $resolvedDisk = $this->resolveBlockDevice($disk);
+        if ($resolvedDisk === null) {
+            return ['success' => false, 'error' => 'El disco no corresponde a un dispositivo de bloque reconocido por el sistema.'];
+        }
+        $disk = $resolvedDisk;
         if ($this->deviceHasMount($disk)) {
             if (!$unmount) {
                 return ['success' => false, 'error' => 'El disco (o una de sus particiones) está montado; habilita la opción de desmontar para continuar.'];
@@ -406,6 +482,11 @@ class StorageService
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return ['success' => true, 'message' => "Subvolumen Btrfs $subvol simulado (modo dev)."];
         }
+        $resolvedBtrfsDevice = $this->resolveBlockDevice($device);
+        if ($resolvedBtrfsDevice === null) {
+            return ['success' => false, 'error' => 'El dispositivo no corresponde a un disco o partición de bloque reconocido por el sistema.'];
+        }
+        $device = $resolvedBtrfsDevice;
         $mountPoint = '/mnt/nas-btrfs-tmp';
         SystemService::sudo(['mkdir', '-p', $mountPoint]);
         if (SystemService::sudo(['mount', $device, $mountPoint])['code'] !== 0) {
