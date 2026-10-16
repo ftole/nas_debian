@@ -16,6 +16,7 @@ class BackupService
     public string $credDir = '/etc/backup-credentials';
     public string $bkpRoot = '/srv/nas/BACKUPS_HISTORICOS';
     public string $logRoot = '/srv/nas/LOGS_BACKUP';
+    public string $storageRoot = '/srv/nas';
 
     /**
      * Lista todas las tareas de backup programadas leyendo los runners en /usr/local/bin/backup_*.sh.
@@ -139,7 +140,12 @@ class BackupService
     public function createTask(array $data): array
     {
         $taskId = strtolower(trim($data['id'] ?? ($data['task_id'] ?? '')));
-        $proto = strtolower(trim($data['proto'] ?? 'cifs'));
+        $proto = strtolower(trim($data['proto'] ?? ($data['source_type'] ?? 'cifs')));
+        if ($proto === 'linux') {
+            $proto = 'ssh';
+        } elseif ($proto === 'windows') {
+            $proto = 'cifs';
+        }
         $cronExpr = trim($data['cron'] ?? '0 23 * * *');
         $retention = max(1, (int) ($data['retention'] ?? 30));
 
@@ -163,28 +169,35 @@ class BackupService
             }
         }
 
-        // Crear directorios de soporte
-        $this->ensureDirectory($this->credDir);
-        $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
-        $this->ensureDirectory($this->logRoot);
-        $this->ensureDirectory($this->binDir);
-        $this->ensureDirectory($this->cronDir);
-
-        $credFile = $this->credDir . '/' . $taskId . '.cred';
-        $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
-        $cronFile = $this->cronDir . '/backup_' . $taskId;
-
-        $runnerContent = '';
-
         if ($proto === 'cifs') {
-            $ip = trim($data['ip'] ?? ($data['target'] ?? ''));
-            $share = trim($data['share'] ?? ($data['path'] ?? ''));
-            $user = trim($data['user'] ?? 'Administrador');
-            $pass = $data['password'] ?? '';
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
+            $share = trim($data['share'] ?? ($data['path'] ?? ($data['source_share'] ?? '')));
+            $user = trim($data['user'] ?? ($data['source_user'] ?? ($data['username'] ?? 'Administrador')));
+            $pass = (string) ($data['password'] ?? '');
 
             if (empty($ip) || empty($share)) {
                 return ['success' => false, 'error' => 'La IP del servidor Windows y el recurso compartido son obligatorios.'];
             }
+
+            if (str_contains($pass, "\r") || str_contains($pass, "\n")) {
+                return ['success' => false, 'error' => 'La contraseña no puede contener saltos de línea.'];
+            }
+
+            $originErr = $this->validateOriginHost($ip);
+            if ($originErr !== null) {
+                return ['success' => false, 'error' => $originErr];
+            }
+
+            // Crear directorios de soporte
+            $this->ensureDirectory($this->credDir);
+            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($this->logRoot);
+            $this->ensureDirectory($this->binDir);
+            $this->ensureDirectory($this->cronDir);
+
+            $credFile = $this->credDir . '/' . $taskId . '.cred';
+            $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
+            $cronFile = $this->cronDir . '/backup_' . $taskId;
 
             // Guardar credenciales 0600
             $credContent = '';
@@ -201,15 +214,39 @@ class BackupService
             }
             $runnerContent = $this->buildCifsRunner($taskId, $ip, $share, $credFile, $retention);
         } elseif ($proto === 'ssh') {
-            $ip = trim($data['ip'] ?? ($data['target'] ?? ''));
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $port = (int) ($data['port'] ?? 22);
-            $user = trim($data['user'] ?? 'root');
-            $path = trim($data['path'] ?? ($data['share'] ?? '/'));
-            $pass = $data['password'] ?? '';
+            $user = trim($data['user'] ?? ($data['source_user'] ?? ($data['username'] ?? 'root')));
+            $path = trim($data['path'] ?? ($data['share'] ?? ($data['source_path'] ?? '/')));
+            $pass = (string) ($data['password'] ?? '');
 
             if (empty($ip) || empty($path)) {
                 return ['success' => false, 'error' => 'La IP y la ruta del servidor Linux son obligatorias.'];
             }
+
+            if (str_starts_with($user, '-')) {
+                return ['success' => false, 'error' => 'El usuario no puede iniciar con guión (-).'];
+            }
+
+            if (str_contains($pass, "\r") || str_contains($pass, "\n")) {
+                return ['success' => false, 'error' => 'La contraseña no puede contener saltos de línea.'];
+            }
+
+            $originErr = $this->validateOriginHost($ip);
+            if ($originErr !== null) {
+                return ['success' => false, 'error' => $originErr];
+            }
+
+            // Crear directorios de soporte
+            $this->ensureDirectory($this->credDir);
+            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($this->logRoot);
+            $this->ensureDirectory($this->binDir);
+            $this->ensureDirectory($this->cronDir);
+
+            $credFile = $this->credDir . '/' . $taskId . '.cred';
+            $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
+            $cronFile = $this->cronDir . '/backup_' . $taskId;
 
             $wCred = $this->writeFileSecure($credFile, $pass . "\n", 0600);
             if (!$wCred) {
@@ -218,7 +255,23 @@ class BackupService
             $runnerContent = $this->buildSshRunner($taskId, $ip, $port, $user, $path, $credFile, $retention);
         } elseif ($proto === 'local') {
             $path = trim($data['path'] ?? ($data['source_path'] ?? ($data['share'] ?? '/srv/nas/SISTEMAS')));
-            $runnerContent = $this->buildLocalRunner($taskId, $path, $retention);
+            if (!$this->isAllowedLocalPath($path)) {
+                $storageRoot = getenv('NAS_STORAGE_ROOT') ?: $this->storageRoot;
+                return ['success' => false, 'error' => "La ruta local debe estar dentro de $storageRoot."];
+            }
+            $realPath = realpath($path) ?: $path;
+
+            // Crear directorios de soporte
+            $this->ensureDirectory($this->credDir);
+            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($this->logRoot);
+            $this->ensureDirectory($this->binDir);
+            $this->ensureDirectory($this->cronDir);
+
+            $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
+            $cronFile = $this->cronDir . '/backup_' . $taskId;
+
+            $runnerContent = $this->buildLocalRunner($taskId, $realPath, $retention);
         } else {
             return ['success' => false, 'error' => 'Protocolo de backup no soportado.'];
         }
@@ -375,23 +428,132 @@ class BackupService
     }
 
     /**
+     * Valida si un host de origen es seguro. Bloquea loopback, link-local y multicast,
+     * permitiendo whitelist opcional si NAS_BACKUP_ALLOWED_ORIGINS está definido.
+     */
+    public function validateOriginHost(string $host): ?string
+    {
+        $host = trim($host);
+        if ($host === '') {
+            return 'El host de origen no puede estar vacío.';
+        }
+
+        $allowedEnv = getenv('NAS_BACKUP_ALLOWED_ORIGINS');
+        if ($allowedEnv !== false && trim($allowedEnv) !== '') {
+            $allowedOrigins = array_filter(array_map('trim', explode(',', $allowedEnv)));
+            if (!in_array($host, $allowedOrigins, true)) {
+                return "El host de origen '$host' no está autorizado. Declárelo en NAS_BACKUP_ALLOWED_ORIGINS.";
+            }
+            return null;
+        }
+
+        $lower = strtolower($host);
+        if ($lower === 'localhost' || $lower === '0.0.0.0') {
+            return "El origen de red '$host' está bloqueado por motivos de seguridad.";
+        }
+
+        $ipToTest = filter_var($host, FILTER_VALIDATE_IP) ? $host : null;
+        if ($ipToTest === null) {
+            $resolved = @gethostbyname($host);
+            if ($resolved !== $host && filter_var($resolved, FILTER_VALIDATE_IP)) {
+                $ipToTest = $resolved;
+            }
+        }
+
+        if ($ipToTest !== null && $this->isDangerousIp($ipToTest)) {
+            return "El origen de red '$host' ($ipToTest) es una dirección restringida (loopback/link-local/multicast).";
+        }
+
+        return null;
+    }
+
+    private function isDangerousIp(string $ip): bool
+    {
+        $bin = @inet_pton($ip);
+        if ($bin === false) {
+            return false;
+        }
+        // IPv4 (4 bytes)
+        if (strlen($bin) === 4) {
+            $b0 = ord($bin[0]);
+            $b1 = ord($bin[1]);
+            if ($b0 === 0) return true; // 0.0.0.0/8
+            if ($b0 === 127) return true; // 127.0.0.0/8 Loopback
+            if ($b0 === 169 && $b1 === 254) return true; // 169.254.0.0/16 Link-local
+            if ($b0 >= 224 && $b0 <= 239) return true; // 224.0.0.0/4 Multicast
+            if ($b0 >= 240) return true; // 240.0.0.0/4 Reserved
+            return false;
+        }
+        // IPv6 (16 bytes)
+        if (strlen($bin) === 16) {
+            if ($bin === str_repeat("\0", 16)) return true; // ::
+            if ($bin === (str_repeat("\0", 15) . "\1")) return true; // ::1
+            $b0 = ord($bin[0]);
+            $b1 = ord($bin[1]);
+            if ($b0 === 0xfe && ($b1 & 0xc0) === 0x80) return true; // fe80::/10 Link-local
+            if ($b0 === 0xff) return true; // ff00::/8 Multicast
+            if (str_starts_with($bin, str_repeat("\0", 10) . "\xff\xff")) {
+                $ipv4Part = inet_ntop(substr($bin, 12));
+                if ($ipv4Part !== false) {
+                    return $this->isDangerousIp($ipv4Part);
+                }
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * Valida que una ruta local exista y esté contenida estrictamente en la raíz de almacenamiento permitida.
+     */
+    public function isAllowedLocalPath(string $path): bool
+    {
+        $realPath = realpath($path);
+        if ($realPath === false) {
+            return false;
+        }
+
+        $allowedRoots = [
+            getenv('NAS_STORAGE_ROOT') ?: $this->storageRoot,
+            $this->storageRoot,
+            dirname($this->bkpRoot),
+        ];
+
+        foreach ($allowedRoots as $root) {
+            $realRoot = realpath($root);
+            if ($realRoot !== false) {
+                if ($realPath === $realRoot || str_starts_with($realPath, rtrim($realRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Prueba la conexión al origen de la tarea (CIFS/SMB, SSH o Local) sin crear la tarea.
      */
     public function testConnection(array $data): array
     {
         $proto = strtolower(trim($data['proto'] ?? 'cifs'));
 
-        if ($this->isDev()) {
-            return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
-        }
-
         if ($proto === 'cifs') {
-            $ip = trim($data['ip'] ?? '');
-            $share = trim($data['share'] ?? '');
-            $user = trim($data['user'] ?? '');
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
+            $share = trim($data['share'] ?? ($data['path'] ?? ($data['source_share'] ?? '')));
+            $user = trim($data['user'] ?? ($data['source_user'] ?? ''));
             $pass = (string) ($data['password'] ?? '');
             if ($ip === '' || $share === '') {
                 return ['success' => false, 'error' => 'IP y recurso compartido son obligatorios.'];
+            }
+            if (str_contains($pass, "\r") || str_contains($pass, "\n")) {
+                return ['success' => false, 'error' => 'La contraseña no puede contener saltos de línea.'];
+            }
+            $originErr = $this->validateOriginHost($ip);
+            if ($originErr !== null) {
+                return ['success' => false, 'error' => $originErr];
+            }
+            if ($this->isDev()) {
+                return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
             }
             $res = SystemService::runCommand(
                 ['smbclient', '//' . $ip . '/' . $share, '-U', $user, '-c', 'exit'], $pass . "\n", 15);
@@ -403,12 +565,28 @@ class BackupService
         }
 
         if ($proto === 'ssh') {
-            $ip = trim($data['ip'] ?? '');
+            $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $port = (int) ($data['port'] ?? 22);
-            $user = trim($data['user'] ?? 'root');
+            $user = trim($data['user'] ?? ($data['source_user'] ?? 'root'));
             $pass = (string) ($data['password'] ?? '');
             if ($ip === '') {
                 return ['success' => false, 'error' => 'La IP del servidor Linux es obligatoria.'];
+            }
+            if (str_starts_with($user, '-') || !preg_match('/^[A-Za-z0-9_.-]{1,32}$/', $user)) {
+                return ['success' => false, 'error' => 'Usuario SSH no válido.'];
+            }
+            if (!preg_match('/^[A-Za-z0-9_.:-]{1,255}$/', $ip)) {
+                return ['success' => false, 'error' => 'Host o IP SSH no válido.'];
+            }
+            if (str_contains($pass, "\r") || str_contains($pass, "\n")) {
+                return ['success' => false, 'error' => 'La contraseña no puede contener saltos de línea.'];
+            }
+            $originErr = $this->validateOriginHost($ip);
+            if ($originErr !== null) {
+                return ['success' => false, 'error' => $originErr];
+            }
+            if ($this->isDev()) {
+                return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
             }
             $tmp = @tempnam(sys_get_temp_dir(), 'nas_ssh_');
             if ($tmp === false) {
@@ -418,7 +596,7 @@ class BackupService
             @chmod($tmp, 0600);
             $res = SystemService::runCommand(
                 ['sshpass', '-f', $tmp, 'ssh', '-p', (string) $port, '-o', 'StrictHostKeyChecking=accept-new',
-                 '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8', $user . '@' . $ip, 'echo NAS_OK'], null, 20);
+                 '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8', '-l', $user, '--', $ip, 'echo', 'NAS_OK'], null, 20);
             @unlink($tmp);
             if ($res['code'] === 0 && str_contains($res['stdout'], 'NAS_OK')) {
                 return ['success' => true, 'message' => "Conexión SSH correcta a $user@$ip:$port."];
@@ -427,15 +605,23 @@ class BackupService
         }
 
         if ($proto === 'local') {
-            $path = trim($data['path'] ?? '');
+            $path = trim($data['path'] ?? ($data['source_path'] ?? ($data['share'] ?? '')));
             if ($path === '') {
                 return ['success' => false, 'error' => 'La ruta local es obligatoria.'];
             }
-            $res = SystemService::runCommand(['test', '-d', $path]);
-            if ($res['code'] === 0) {
-                return ['success' => true, 'message' => "Ruta local accesible: $path."];
+            if (!$this->isAllowedLocalPath($path)) {
+                $storageRoot = getenv('NAS_STORAGE_ROOT') ?: $this->storageRoot;
+                return ['success' => false, 'error' => "La ruta local debe estar dentro de $storageRoot."];
             }
-            return ['success' => false, 'error' => "La ruta local no existe o no es accesible: $path."];
+            $realPath = realpath($path) ?: $path;
+            if ($this->isDev()) {
+                return ['success' => true, 'message' => "Ruta local accesible: $realPath."];
+            }
+            $res = SystemService::runCommand(['test', '-d', $realPath]);
+            if ($res['code'] === 0) {
+                return ['success' => true, 'message' => "Ruta local accesible: $realPath."];
+            }
+            return ['success' => false, 'error' => "La ruta local no existe o no es accesible: $realPath."];
         }
 
         return ['success' => false, 'error' => 'Protocolo no soportado para prueba.'];
