@@ -53,6 +53,8 @@ use App\Services\SystemService;
 use App\Services\TerminalService;
 use App\Services\UserService;
 use App\Controllers\AuthController;
+use App\Controllers\SystemController;
+use App\Controllers\TerminalController;
 
 $passed = 0;
 $failed = 0;
@@ -1650,6 +1652,78 @@ assertTrue($cmdSafe['exit_code'] === 0, 'TerminalService permite comandos seguro
 $storeTest = new StorageService();
 $badFmtDev = $storeTest->formatAndMount('/dev/../etc/shadow', 'ext4', 'SI-FORMATEAR');
 assertTrue(!$badFmtDev['success'], 'StorageService::formatAndMount rechaza rutas que no sean dispositivos válidos (vuln-0013)');
+if (DIRECTORY_SEPARATOR !== '\\') {
+    $charFmtNull = $storeTest->formatAndMount('/dev/null', 'ext4', 'SI-FORMATEAR');
+    assertTrue(!$charFmtNull['success'] && str_contains($charFmtNull['error'], 'no corresponde a un disco'),
+        'StorageService::formatAndMount rechaza dispositivo de caracteres /dev/null (vuln-0013)');
+    $charFmtZero = $storeTest->formatAndMount('/dev/zero', 'ext4', 'SI-FORMATEAR');
+    assertTrue(!$charFmtZero['success'] && str_contains($charFmtZero['error'], 'no corresponde a un disco'),
+        'StorageService::formatAndMount rechaza dispositivo de caracteres /dev/zero (vuln-0013)');
+}
+
+// vuln-0014: StorageService detecta volúmenes LVM activos y miembros RAID
+$tmpMdstat = sys_get_temp_dir() . '/mock_mdstat_' . bin2hex(random_bytes(3));
+file_put_contents($tmpMdstat, "Personalities : [raid1]\nmd0 : active raid1 sdb1[1] sda1[0]\n      104320 blocks [2/2] [UU]\n");
+StorageService::$mdstatPath = $tmpMdstat;
+$isRaidInUse = $storeTest->deviceInUseCritical('/dev/sda1');
+$isCleanInUse = $storeTest->deviceInUseCritical('/dev/sdz1');
+StorageService::$mdstatPath = '/proc/mdstat';
+@unlink($tmpMdstat);
+assertTrue($isRaidInUse, 'StorageService::deviceInUseCritical detecta miembro de RAID activo en mdstat (vuln-0014)');
+assertTrue(!$isCleanInUse, 'StorageService::deviceInUseCritical no marca disco limpio fuera de RAID (vuln-0014)');
+
+StorageService::$mockPvs = "  /dev/sdb2  vg_nas lvm2 a-- <200.00g <50.00g\n";
+$isLvmInUse = $storeTest->deviceInUseCritical('/dev/sdb2');
+$isLvmClean = $storeTest->deviceInUseCritical('/dev/sdd1');
+StorageService::$mockPvs = null;
+assertTrue($isLvmInUse, 'StorageService::deviceInUseCritical detecta volumen fisico LVM activo (vuln-0014)');
+assertTrue(!$isLvmClean, 'StorageService::deviceInUseCritical no marca disco limpio fuera de LVM (vuln-0014)');
+
+// vuln-0010: TerminalService aísla historial por usuario
+DatabaseService::query('DELETE FROM terminal_history WHERE username IN (:u1, :u2)', ['u1' => 'alice', 'u2' => 'bob']);
+DatabaseService::insert('terminal_history', ['command' => 'echo ALICE_SECRET', 'username' => 'alice', 'cwd' => '/srv/nas', 'exit_code' => 0]);
+DatabaseService::insert('terminal_history', ['command' => 'echo BOB_PUBLIC', 'username' => 'bob', 'cwd' => '/srv/nas', 'exit_code' => 0]);
+$_SESSION['nas_user'] = ['username' => 'bob', 'role' => 'admin', 'is_admin' => true];
+$bobHistory = $termSvc->getHistory(10);
+$bobCommands = array_column($bobHistory, 'command');
+assertTrue(in_array('echo BOB_PUBLIC', $bobCommands, true), 'TerminalService::getHistory incluye comandos del usuario autenticado (vuln-0010)');
+assertTrue(!in_array('echo ALICE_SECRET', $bobCommands, true), 'TerminalService::getHistory NO expone comandos de otros usuarios (vuln-0010)');
+DatabaseService::query('DELETE FROM terminal_history WHERE username IN (:u1, :u2)', ['u1' => 'alice', 'u2' => 'bob']);
+
+// vuln-0005: SystemController restringe manageService ante rol operador
+$_SESSION['nas_user'] = ['username' => 'operador1', 'role' => 'operator', 'is_admin' => false];
+$sysCtrl = new SystemController();
+$_SERVER['CONTENT_TYPE'] = 'application/json';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$reqOperatorManage = new Request();
+ob_start();
+$sysCtrl->manageService($reqOperatorManage);
+$rawOpResp = ob_get_clean();
+$opResp = json_decode($rawOpResp, true);
+assertTrue(is_array($opResp) && empty($opResp['success']) && str_contains($opResp['error'] ?? '', 'administrador'),
+    'SystemController::manageService responde 403 / error ante llamadas de operador (vuln-0005)');
+
+// vuln-0008: TerminalController restringe terminal ante rol operador
+$termCtrl = new TerminalController($termSvc);
+ob_start();
+$termCtrl->exec($reqOperatorManage);
+$rawOpTerm = ob_get_clean();
+$opTermResp = json_decode($rawOpTerm, true);
+assertTrue(is_array($opTermResp) && empty($opTermResp['success']) && str_contains($opTermResp['error'] ?? '', 'administrador'),
+    'TerminalController::exec responde 403 / error ante llamadas de operador (vuln-0008)');
+
+// vuln-0007: AuthMiddleware::verifySameOrigin valida puertos y orígenes no permitidos
+$_SERVER['HTTP_HOST'] = '10.10.1.222:8443';
+$_SERVER['HTTP_ORIGIN'] = 'https://10.10.1.222:8443';
+$reqSameOriginPort = new Request();
+assertTrue(AuthMiddleware::verifySameOrigin($reqSameOriginPort), 'verifySameOrigin acepta origen y puerto coincidentes');
+$_SERVER['HTTP_ORIGIN'] = 'http://10.10.1.222:9000';
+$reqDiffPort = new Request();
+assertTrue(!AuthMiddleware::verifySameOrigin($reqDiffPort), 'verifySameOrigin rechaza origen con puerto diferente (vuln-0007)');
+$_SERVER['HTTP_ORIGIN'] = 'null';
+$reqNullOrigin = new Request();
+assertTrue(!AuthMiddleware::verifySameOrigin($reqNullOrigin), 'verifySameOrigin rechaza Origin: null (vuln-0007)');
+unset($_SERVER['HTTP_ORIGIN'], $_SERVER['HTTP_HOST']);
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
