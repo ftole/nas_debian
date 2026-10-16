@@ -27,6 +27,7 @@ class BackupService
     public string $bkpRoot = '/srv/nas/BACKUPS_HISTORICOS';
     public string $logRoot = '/srv/nas/LOGS_BACKUP';
     public string $storageRoot = '/srv/nas';
+    public ?SambaService $sambaService = null;
 
     /**
      * Lista todas las tareas de backup programadas leyendo los runners en /usr/local/bin/backup_*.sh.
@@ -711,7 +712,10 @@ class BackupService
 
         if ($role === 'operator') {
             $firstSegment = explode('/', str_replace('\\', '/', $subfolder))[0];
-            $samba = new SambaService();
+            if (str_ends_with($firstSegment, '$') || str_starts_with(strtoupper($firstSegment), 'BACKUPS') || str_starts_with(strtoupper($firstSegment), 'LOGS')) {
+                return "Acceso denegado: el rol operador no tiene permisos sobre la carpeta compartida '$firstSegment'.";
+            }
+            $samba = $this->sambaService ?? new SambaService();
             $shares = $samba->listShares();
             foreach ($shares as $sh) {
                 if (strcasecmp((string) ($sh['name'] ?? ''), $firstSegment) === 0) {
@@ -731,6 +735,7 @@ class BackupService
                             return "Acceso denegado: el rol operador no tiene permisos sobre la carpeta compartida '$firstSegment'.";
                         }
                     }
+                    break;
                 }
             }
         }
