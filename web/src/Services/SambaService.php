@@ -134,11 +134,11 @@ class SambaService
      */
     public function createShare(array $data): array
     {
-        $name = trim($data['name'] ?? '');
-        $comment = trim($data['comment'] ?? '');
+        $name = str_replace(["\r", "\n"], '', trim((string) ($data['name'] ?? '')));
+        $comment = str_replace(["\r", "\n"], ' ', trim((string) ($data['comment'] ?? '')));
         $scheme = (int) ($data['scheme'] ?? 1);
-        $groups = $data['groups'] ?? [];
-        $writeGroup = trim($data['write_group'] ?? '');
+        $groups = (array) ($data['groups'] ?? []);
+        $writeGroup = str_replace(["\r", "\n"], '', trim((string) ($data['write_group'] ?? '')));
         $isGuest = ($scheme === 4) || !empty($data['guest_ok']);
         $isHidden = !empty($data['hidden']);
 
@@ -399,9 +399,14 @@ class SambaService
         $buffer .= "# ==============================================================================\n\n";
 
         foreach ($sections as $sectionName => $props) {
-            $buffer .= "[$sectionName]\n";
+            // smb.conf es sensible a saltos de linea: ningun nombre de seccion, clave
+            // o valor puede contener CR/LF para evitar inyeccion de directivas arbitrarias.
+            $cleanSection = str_replace(["\r", "\n"], '', (string) $sectionName);
+            $buffer .= "[$cleanSection]\n";
             foreach ($props as $key => $val) {
-                $buffer .= "   $key = $val\n";
+                $cleanKey = str_replace(["\r", "\n"], '', (string) $key);
+                $cleanVal = str_replace(["\r", "\n"], '', (string) $val);
+                $buffer .= "   $cleanKey = $cleanVal\n";
             }
             $buffer .= "\n";
         }
@@ -537,7 +542,7 @@ class SambaService
 
         $props = $sections[$name];
         $scheme = (int) ($data['scheme'] ?? 0);
-        $comment = trim((string) ($data['comment'] ?? ''));
+        $comment = str_replace(["\r", "\n"], ' ', trim((string) ($data['comment'] ?? '')));
 
         // Separar tokens de grupo (@grupo) de los usuarios explícitos (suelto)
         $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
@@ -555,7 +560,7 @@ class SambaService
         if (!in_array('@grp_samba', $groups, true)) {
             $groups[] = '@grp_samba';
         }
-        $writeGroup = ltrim(trim((string) ($data['write_group'] ?? '')), '@');
+        $writeGroup = str_replace(["\r", "\n"], '', ltrim(trim((string) ($data['write_group'] ?? '')), '@'));
         $writeEntry = $writeGroup !== '' ? '@' . $writeGroup : '';
         $isHidden = !empty($data['hidden']);
 
