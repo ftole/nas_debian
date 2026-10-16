@@ -220,7 +220,8 @@ class UserService
 
         // 3. Contraseña Linux solo para administradores/superadministradores (los usuarios de red/us web usan Samba)
         if ($isPrivileged) {
-            $chRes = SystemService::sudo(['chpasswd'], "$username:$password\n");
+            $chCmd = file_exists('/usr/local/sbin/nas-chpasswd') ? ['/usr/local/sbin/nas-chpasswd'] : ['chpasswd'];
+            $chRes = SystemService::sudo($chCmd, "$username:$password\n");
             if ($chRes['code'] !== 0) {
                 SystemService::sudo(['userdel', '-r', $username]);
                 return ['success' => false, 'error' => 'Error al asignar contraseña en Linux.'];
@@ -254,8 +255,8 @@ class UserService
                 $validGroups[] = $grp;
             }
         }
-        if (!empty($validGroups)) {
-            SystemService::sudo(['usermod', '-aG', implode(',', array_unique($validGroups)), $username]);
+        foreach (array_unique($validGroups) as $vGroup) {
+            SystemService::sudo(['gpasswd', '-a', $username, $vGroup]);
         }
 
         // 6. Política de shell: bash para admin/superadmin, nologin para el resto
@@ -423,7 +424,8 @@ class UserService
             return ['success' => true, 'message' => "Contraseña de $username actualizada (modo dev)."];
         }
 
-        $ch = SystemService::sudo(['chpasswd'], "$username:$password\n");
+        $chCmd = file_exists('/usr/local/sbin/nas-chpasswd') ? ['/usr/local/sbin/nas-chpasswd'] : ['chpasswd'];
+        $ch = SystemService::sudo($chCmd, "$username:$password\n");
         if ($ch['code'] !== 0) {
             return ['success' => false, 'error' => 'No se pudo asignar la contraseña Linux: ' . ($ch['stderr'] ?: $ch['stdout'])];
         }
@@ -569,7 +571,9 @@ class UserService
         // Rol administrador (root/sudo) y política de shell
         if ($isPrivileged) {
             if (!in_array('sudo', $currentGroups, true)) {
-                SystemService::sudo(['usermod', '-aG', 'sudo,adm,grp_samba', $username]);
+                SystemService::sudo(['gpasswd', '-a', $username, 'sudo']);
+                SystemService::sudo(['gpasswd', '-a', $username, 'adm']);
+                SystemService::sudo(['gpasswd', '-a', $username, 'grp_samba']);
             }
             SystemService::sudo(['usermod', '-s', '/bin/bash', $username]);
         } else {
