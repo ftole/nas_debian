@@ -432,14 +432,36 @@ class UserService
             return ['success' => true, 'message' => "Contraseña de $username actualizada (modo dev)."];
         }
 
-        $chCmd = file_exists('/usr/local/sbin/nas-chpasswd') ? ['/usr/local/sbin/nas-chpasswd'] : ['chpasswd'];
-        $ch = SystemService::sudo($chCmd, "$username:$password\n");
-        if ($ch['code'] !== 0) {
-            return ['success' => false, 'error' => 'No se pudo asignar la contraseña Linux: ' . ($ch['stderr'] ?: $ch['stdout'])];
-        }
+        // Sincronizar en Samba primero
         $smb = SystemService::sudo(['smbpasswd', '-a', '-s', $username], "$password\n$password\n");
         if ($smb['code'] !== 0) {
             error_log("Aviso: no se pudo sincronizar $username en smbpasswd: " . $smb['stderr']);
+        }
+
+        // Determinar si la cuenta tiene grupos privilegiados o es superadmin
+        $userGroups = [];
+        $grpRes = SystemService::runCommand(['id', '-Gn', $username]);
+        if ($grpRes['code'] === 0) {
+            $userGroups = preg_split('/\s+/', trim((string) $grpRes['stdout'])) ?: [];
+        }
+
+        $privilegedGroups = ['sudo', 'adm', 'grp_samba', 'grp_superadmin'];
+        $hasPrivilegedGroup = false;
+        foreach ($privilegedGroups as $pg) {
+            if (in_array($pg, $userGroups, true)) {
+                $hasPrivilegedGroup = true;
+                break;
+            }
+        }
+        $isSuper = $this->isSuperadminUser($username, $userGroups);
+
+        // nas-chpasswd se invoca exclusivamente para cuentas estándar (no privilegiadas y no superadmin)
+        if (!$hasPrivilegedGroup && !$isSuper) {
+            $chCmd = file_exists('/usr/local/sbin/nas-chpasswd') ? ['/usr/local/sbin/nas-chpasswd'] : ['chpasswd'];
+            $ch = SystemService::sudo($chCmd, "$username:$password\n");
+            if ($ch['code'] !== 0) {
+                return ['success' => false, 'error' => 'No se pudo asignar la contraseña Linux: ' . ($ch['stderr'] ?: $ch['stdout'])];
+            }
         }
 
         return ['success' => true, 'message' => "Contraseña de $username actualizada y sincronizada en Samba."];
