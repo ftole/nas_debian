@@ -22,8 +22,12 @@ EXPECTED_BRANCH="${NAS_UPDATE_BRANCH:-main}"
 NAS_UPDATE_SIGNER="${NAS_UPDATE_SIGNER:-}"
 
 # Exigir que la actualización provenga de un tag firmado (recomendado en producción).
-# Con "true", si no existe un tag con firma válida, la actualización se cancela.
-NAS_REQUIRE_SIGNED_TAGS="${NAS_REQUIRE_SIGNED_TAGS:-false}"
+# Por defecto es "true". Se desactiva únicamente si se define NAS_ALLOW_UNSIGNED_UPDATES=true.
+if [ "${NAS_ALLOW_UNSIGNED_UPDATES:-false}" = "true" ] || [ "${NAS_ALLOW_UNSIGNED_UPDATES:-0}" = "1" ]; then
+    NAS_REQUIRE_SIGNED_TAGS="${NAS_REQUIRE_SIGNED_TAGS:-false}"
+else
+    NAS_REQUIRE_SIGNED_TAGS="${NAS_REQUIRE_SIGNED_TAGS:-true}"
+fi
 
 # Normaliza la URL del remoto a la forma "propietario/repositorio" validando
 # estrictamente que el host sea github.com (HTTPS o SSH).
@@ -281,14 +285,23 @@ _hook_post_actualizacion() {
         rm -f "$tmp_nginx" 2>/dev/null || true
     fi
 
-    # 6. Sincronizar directivas de notificación y leasing de Samba si faltan
+    # 6. Sincronizar directivas de notificación, leasing y seguridad de Samba si faltan
     local smb_conf="${SMB_CONF_PATH:-/etc/samba/smb.conf}"
     if [ -f "$smb_conf" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$smb_conf" ]; }; then
         if ! grep -qi "smb3 directory leases" "$smb_conf"; then
             sed -i '/\[global\]/a \   smb3 directory leases = no\n   kernel change notify = yes\n   change notify = yes' "$smb_conf" 2>/dev/null || true
-            if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-                systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
-            fi
+        fi
+        # Reafirmar el endurecimiento SMB del despliegue (firma obligatoria). Sin este
+        # paso, las instalaciones anteriores a la correccion conservan "server signing = auto".
+        if grep -qiE '^[[:space:]]*server signing[[:space:]]*=' "$smb_conf"; then
+            sed -i -E 's|^[[:space:]]*server signing[[:space:]]*=.*|   server signing = mandatory|I' "$smb_conf" 2>/dev/null || true
+        else
+            sed -i '/\[global\]/a \   server signing = mandatory' "$smb_conf" 2>/dev/null || true
+        fi
+        if command -v testparm >/dev/null 2>&1 && ! testparm -s "$smb_conf" >/dev/null 2>&1; then
+            echo "[!] smb.conf no supera testparm; se omite la recarga de Samba." >&2
+        elif command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
         fi
     fi
 }
@@ -377,7 +390,7 @@ actualizar_desde_git() {
         CANDIDATE_TAG="$LATEST_TAG"
         REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
         VERIFICADO="sí ($LATEST_TAG)"
-    elif [ -n "$NAS_UPDATE_SIGNER" ] || [ "$NAS_REQUIRE_SIGNED_TAGS" == "true" ]; then
+    elif [ -n "$NAS_UPDATE_SIGNER" ] || [ "$NAS_REQUIRE_SIGNED_TAGS" = "true" ]; then
         _aviso "No se encontró una versión firmada válida. Actualización cancelada por seguridad."
         return 1
     fi
@@ -460,6 +473,7 @@ actualizar_desde_git() {
         return 1
     fi
     find "$PROJECT_ROOT" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
+    chmod -R go-w "$PROJECT_ROOT" 2>/dev/null || true
 
     # 7. Validaciones posteriores a la actualización.
     fallos=0
@@ -474,6 +488,7 @@ actualizar_desde_git() {
         echo -e "${C_RED}[X] La actualización introdujo errores; restaurando la versión anterior...${C_RESET}"
         git reset --hard "$CURRENT_REV" >/dev/null 2>&1
         find "$PROJECT_ROOT" -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
+        chmod -R go-w "$PROJECT_ROOT" 2>/dev/null || true
         _aviso "La actualización falló la validación y se restauró la versión anterior.\n\nRollback manual: git reset --hard $CURRENT_REV\nCopia de seguridad: $BACKUP_DIR"
         return 1
     fi
