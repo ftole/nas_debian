@@ -619,6 +619,33 @@ TARGET_USER="$(id -un)"
 ACTION="${1:-}"; shift || true
 SESSION="nas-web-term-${TARGET_USER}"
 
+CLIENT_ID="${NAS_CLIENT_ID:-${CLIENT_ID:-}}"
+case "$ACTION" in
+    start)
+        COLS="${1:-200}"
+        ROWS="${2:-50}"
+        if [ -n "${3:-}" ]; then CLIENT_ID="$3"; fi
+        ;;
+    keys|raw)
+        if [ -n "${2:-}" ]; then CLIENT_ID="$2"; fi
+        ;;
+    capture|kill)
+        if [ -n "${1:-}" ]; then CLIENT_ID="$1"; fi
+        ;;
+    resize)
+        COLS="${1:-200}"
+        ROWS="${2:-50}"
+        if [ -n "${3:-}" ]; then CLIENT_ID="$3"; fi
+        ;;
+esac
+
+if [ -n "$CLIENT_ID" ]; then
+    CLEAN_CLIENT="$(printf '%s' "$CLIENT_ID" | tr -cd 'a-zA-Z0-9_-' | cut -c1-32)"
+    if [ -n "$CLEAN_CLIENT" ]; then
+        SESSION="${SESSION}-${CLEAN_CLIENT}"
+    fi
+fi
+
 run_as() {
     "$@"
 }
@@ -731,6 +758,55 @@ NAS_GECOS_EOF
 chmod 0755 /usr/local/sbin/nas-user-gecos
 chown root:root /usr/local/sbin/nas-user-gecos
 
+# 4e. Helper seguro para gestión de privilegios administrativos sudo/adm (UID >= 1000)
+cat << 'NAS_ADMIN_MANAGE_EOF' > /usr/local/sbin/nas-admin-manage
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+    echo "uso: nas-admin-manage <add|remove> <usuario>" >&2
+    exit 2
+fi
+
+ACTION="$1"
+TARGET_USER="$2"
+
+if [ "$ACTION" != "add" ] && [ "$ACTION" != "remove" ]; then
+    echo "nas-admin-manage: accion invalida (use 'add' o 'remove')" >&2
+    exit 2
+fi
+
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ] || [[ "$TARGET_USER" =~ [^a-zA-Z0-9_.-] ]]; then
+    echo "nas-admin-manage: cuenta protegida o invalida" >&2
+    exit 1
+fi
+
+TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || true)
+if [ -z "$TARGET_UID" ] || [ "$TARGET_UID" -lt 1000 ] || [ "$TARGET_UID" -ge 65534 ]; then
+    echo "nas-admin-manage: el usuario no existe o es una cuenta de sistema (UID < 1000)" >&2
+    exit 1
+fi
+
+# Proteger superadministrador contra remoción de privilegios
+if [ -f /etc/nas/superadmin ]; then
+    SUPERADMIN="$(head -n 1 /etc/nas/superadmin 2>/dev/null | tr -d '[:space:]' || true)"
+    if [ "$TARGET_USER" = "$SUPERADMIN" ] && [ "$ACTION" = "remove" ]; then
+        echo "nas-admin-manage: no se permite revocar privilegios al superadministrador del sistema" >&2
+        exit 1
+    fi
+fi
+
+if [ "$ACTION" = "add" ]; then
+    /usr/bin/gpasswd -a "$TARGET_USER" sudo
+    /usr/bin/gpasswd -a "$TARGET_USER" adm
+elif [ "$ACTION" = "remove" ]; then
+    /usr/bin/gpasswd -d "$TARGET_USER" sudo 2>/dev/null || true
+    /usr/bin/gpasswd -d "$TARGET_USER" adm 2>/dev/null || true
+fi
+NAS_ADMIN_MANAGE_EOF
+chmod 0750 /usr/local/sbin/nas-admin-manage
+chown root:root /usr/local/sbin/nas-admin-manage
+
 # 5. Configurar sudoers para www-data con permisos acotados y seguros
 cat << SUDOERS_EOF > /etc/sudoers.d/nas-web
 Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \\
@@ -783,8 +859,7 @@ Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/s
     /usr/local/sbin/nas-user-gecos [a-zA-Z0-9_.-]*, /usr/local/sbin/nas-user-gecos [a-zA-Z0-9_.-]* *, \\
     /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
-    /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* adm, \\
-    /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* adm, \\
+    /usr/local/sbin/nas-admin-manage add [a-zA-Z0-9_.-]*, /usr/local/sbin/nas-admin-manage remove [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbpasswd -d -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -e -s [a-zA-Z0-9_.-]*
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
     /usr/bin/btrfs scrub status /srv/nas*, /bin/btrfs scrub status /srv/nas*, \\
