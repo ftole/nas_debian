@@ -2053,8 +2053,11 @@ assertTrue($bkpRemed->isAllowedRemoteHost($authHostTest, 'operator'), 'BackupSer
 // 15) BackupService: validateLocalSubfolder y updateTask
 $_SESSION['nas_user']['role'] = 'operator';
 $_SESSION['nas_user']['groups'] = ['grp_marketing'];
+$bkpRemed->sambaService = new SambaService('/nonexistent/smb.conf');
 $subfolderErr = $bkpRemed->validateLocalSubfolder('BACKUPS_WINDOWS$/sub', 'operator');
 assertTrue($subfolderErr !== null && str_contains($subfolderErr, 'Acceso denegado'), 'BackupService::validateLocalSubfolder bloquea subcarpeta en share sin permisos para operador');
+$subfolderShareErr = $bkpRemed->validateLocalSubfolder('SISTEMAS/sub', 'operator');
+assertTrue($subfolderShareErr !== null && str_contains($subfolderShareErr, 'Acceso denegado'), 'BackupService::validateLocalSubfolder bloquea share de Samba sin membresia de grupo para operador');
 
 $updScriptBad = $bkpRemed->updateTask('task_test', ['post_script' => 'echo pwn']);
 assertTrue(!$updScriptBad['success'] && str_contains($updScriptBad['error'] ?? '', 'scripts personalizados'), 'BackupService::updateTask prohíbe a operador modificar scripts');
