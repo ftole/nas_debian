@@ -97,3 +97,39 @@ setup() {
     rm -rf "$tmp_dir"
 }
 
+@test "_hook_post_actualizacion extrae la definicion de nas-chpasswd desde deploy.sh" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local tmp_chp="$tmp_dir/nas-chpasswd"
+
+    awk '
+        /^cat << '\''NAS_CHPASSWD_EOF'\'' > \/usr\/local\/sbin\/nas-chpasswd$/ { capture=1; next }
+        capture && /^NAS_CHPASSWD_EOF$/ { capture=0; exit }
+        capture { print }
+    ' src/core/deploy.sh > "$tmp_chp"
+
+    [ -s "$tmp_chp" ]
+    run grep -q 'no se permite modificar contraseñas de cuentas protegidas o root' "$tmp_chp"
+    [ "$status" -eq 0 ]
+    rm -rf "$tmp_dir"
+}
+
+@test "_hook_post_actualizacion despliega nas-chpasswd de forma segura en ruta configurable" {
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_chp="$tmp_dir/bin/nas-chpasswd"
+    mkdir -p "$(dirname "$fake_chp")"
+
+    NAS_CHPASSWD_DEST="$fake_chp" \
+    run _hook_post_actualizacion
+
+    [ "$status" -eq 0 ]
+    [ -s "$fake_chp" ]
+    [ -x "$fake_chp" ]
+    run grep -q '/usr/sbin/chpasswd' "$fake_chp"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp_dir"
+}
+
+
