@@ -122,9 +122,18 @@ class TerminalService
             return $warnRes;
         }
 
-        // 4. Filtro preventivo de seguridad contra comandos destructivos del SO
-        if (preg_match('/rm\s+(-[a-zA-Z]*r[a-zA-Z]*f\s+|-[a-zA-Z]*f[a-zA-Z]*r\s+)\s*\/($|\s)/', $command) ||
-            preg_match('/mkfs\s+.*(\/dev\/sd[a-z]|\/dev\/nvme[0-9]n[0-9]p?)[1-9]?/', $command) && !str_contains($command, '--help')) {
+        // 4. Filtro preventivo reforzado contra comandos destructivos del SO: cubre las
+        //    utilidades de formateo/borrado sobre dispositivos de bloque (mkfs y todas
+        //    sus variantes, wipefs, shred, blkdiscard, fdisk, sfdisk, parted, pvcreate,
+        //    vgcreate, lvcreate, mkswap, dd) en cualquier forma de invocacion, incluido
+        //    sudo, y los borrados recursivos sobre rutas raiz. Las operaciones de
+        //    almacenamiento legitimas deben ejecutarse por la ruta controlada de
+        //    StorageService (isOsDisk + confirmacion SI-FORMATEAR).
+        $deviceTools = '/\b(mkfs(\.\w+)?|wipefs|shred|blkdiscard|fdisk|sfdisk|parted|pvcreate|vgcreate|lvcreate|mkswap|dd)\b/';
+        $targetsDevice = '#/dev/[a-zA-Z0-9/_.-]+#i';
+        $rmOnRoot = '/\brm\s+(-{1,2}[a-zA-Z]+\s+)*\/(\s|$|\*)/';
+        if (((preg_match($deviceTools, $command) === 1 && preg_match($targetsDevice, $command) === 1) && !str_contains($command, '--help'))
+            || preg_match($rmOnRoot, $command) === 1) {
             $denyRes = [
                 'success' => true,
                 'output' => "Acceso denegado: Comando destructivo de sistema no permitido en la consola web.\n",
@@ -308,11 +317,7 @@ class TerminalService
      */
     public function startSession(int $cols = 200, int $rows = 50): array
     {
-        $user = $this->safeUser($this->sessionUser());
-        if ($user === null) {
-            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
-        }
-        return $this->runHelper([$user, 'start', (string) $cols, (string) $rows]);
+        return $this->runHelper(['start', (string) $cols, (string) $rows]);
     }
 
     /**
@@ -321,21 +326,16 @@ class TerminalService
      */
     public function send(string $data): array
     {
-        $user = $this->safeUser($this->sessionUser());
-        if ($user === null) {
-            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
-        }
-
         $special = ['CTRL_C', 'CTRL_D', 'ENTER', 'TAB'];
         $isSpecial = in_array($data, $special, true);
 
-        $res = $this->runHelper([$user, 'keys', $data]);
+        $res = $this->runHelper(['keys', $data]);
 
         if ($res['success'] && !$isSpecial && trim($data) !== '') {
             try {
                 DatabaseService::insert('terminal_history', [
                     'command' => $data,
-                    'username' => $user,
+                    'username' => $this->sessionUser(),
                     'cwd' => self::DEFAULT_CWD,
                     'exit_code' => 0,
                 ]);
@@ -351,29 +351,17 @@ class TerminalService
      */
     public function capture(): array
     {
-        $user = $this->safeUser($this->sessionUser());
-        if ($user === null) {
-            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
-        }
-        return $this->runHelper([$user, 'capture']);
+        return $this->runHelper(['capture']);
     }
 
     public function resizeSession(int $cols, int $rows): array
     {
-        $user = $this->safeUser($this->sessionUser());
-        if ($user === null) {
-            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
-        }
-        return $this->runHelper([$user, 'resize', (string) $cols, (string) $rows]);
+        return $this->runHelper(['resize', (string) $cols, (string) $rows]);
     }
 
     public function killSession(): array
     {
-        $user = $this->safeUser($this->sessionUser());
-        if ($user === null) {
-            return ['success' => false, 'error' => 'Usuario de sesión no válido.', 'output' => ''];
-        }
-        return $this->runHelper([$user, 'kill']);
+        return $this->runHelper(['kill']);
     }
 
     private function runHelper(array $args): array
@@ -386,8 +374,8 @@ class TerminalService
             ];
         }
 
-        // La terminal solo es aplicable a usuarios locales (los de dominio no tienen shell local).
-        $cmd = array_merge(['/usr/bin/sudo', '-n', self::PTY_HELPER], $args);
+        // El helper se invoca directamente como el usuario web sin sudo
+        $cmd = array_merge([self::PTY_HELPER], $args);
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
@@ -600,8 +588,8 @@ class TerminalService
     {
         try {
             return DatabaseService::query(
-                'SELECT command, executed_at, username, cwd, exit_code FROM terminal_history ORDER BY id DESC LIMIT :lim',
-                ['lim' => $limit]
+                'SELECT command, executed_at, username, cwd, exit_code FROM terminal_history WHERE username = :user ORDER BY id DESC LIMIT :lim',
+                ['user' => $this->sessionUser(), 'lim' => $limit]
             );
         } catch (Throwable) {
             return [];
