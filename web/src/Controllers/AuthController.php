@@ -63,6 +63,18 @@ class AuthController
         $password = (string) $request->get('password', '');
         $clientIp = $request->getClientIp();
 
+        if (!AuthMiddleware::verifySameOrigin($request)) {
+            $err = 'Origen de la solicitud no permitido.';
+            AuditService::log('login_origin_denied', $username ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
+            if ($request->isJson()) {
+                Response::error($err, 403);
+                return;
+            }
+            $_SESSION['login_error'] = $err;
+            header('Location: /login');
+            exit;
+        }
+
         if ($this->auth->isRateLimited($clientIp)) {
             $err = 'Demasiados intentos fallidos. Por favor espera 5 minutos antes de volver a intentar.';
             AuditService::log('login_rate_limited', $username ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
