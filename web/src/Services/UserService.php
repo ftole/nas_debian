@@ -215,7 +215,10 @@ class UserService
 
         // 2. Nombre real / cargo (gecos)
         if ($fullName !== '') {
-            SystemService::sudo(['usermod', '-c', $fullName, $username]);
+            $gecosCmd = file_exists('/usr/local/sbin/nas-user-gecos')
+                ? ['/usr/local/sbin/nas-user-gecos', $username, $fullName]
+                : ['usermod', '-c', $fullName, $username];
+            SystemService::sudo($gecosCmd);
         }
 
         // 3. Contraseña Linux solo para administradores/superadministradores (los usuarios de red/us web usan Samba)
@@ -538,7 +541,10 @@ class UserService
         }
 
         if ($fullName !== '') {
-            SystemService::sudo(['usermod', '-c', $fullName, $username]);
+            $gecosCmd = file_exists('/usr/local/sbin/nas-user-gecos')
+                ? ['/usr/local/sbin/nas-user-gecos', $username, $fullName]
+                : ['usermod', '-c', $fullName, $username];
+            SystemService::sudo($gecosCmd);
         }
 
         // Grupos departamentales (los grupos especiales se gestionan por flags)
