@@ -188,6 +188,25 @@ _hook_post_actualizacion() {
         rm -f "$tmp_gecos" 2>/dev/null || true
     fi
 
+    local admin_dest="${NAS_ADMIN_MANAGE_DEST:-/usr/local/sbin/nas-admin-manage}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_ADMIN_MANAGE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local tmp_admin
+        tmp_admin="$(mktemp 2>/dev/null || echo "/tmp/nas-admin-manage.$$")"
+        if awk '
+            /^cat << '\''NAS_ADMIN_MANAGE_EOF'\'' > \/usr\/local\/sbin\/nas-admin-manage$/ { capture=1; next }
+            capture && /^NAS_ADMIN_MANAGE_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_admin" 2>/dev/null && [ -s "$tmp_admin" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$admin_dest")" ]; then
+                mkdir -p "$(dirname "$admin_dest")" 2>/dev/null || true
+                cp -f "$tmp_admin" "$admin_dest" 2>/dev/null || true
+                chmod 0750 "$admin_dest" 2>/dev/null || true
+                chown root:root "$admin_dest" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$tmp_admin" 2>/dev/null || true
+    fi
+
     if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/lib/nas" ]; then
         mkdir -p /var/lib/nas/staging 2>/dev/null || true
         chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
