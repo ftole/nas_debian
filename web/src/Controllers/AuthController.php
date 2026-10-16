@@ -60,12 +60,13 @@ class AuthController
         AuthMiddleware::initSession();
 
         $username = (string) $request->get('username', '');
+        $safeUsername = trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', $username));
         $password = (string) $request->get('password', '');
         $clientIp = $request->getClientIp();
 
         if (!AuthMiddleware::verifySameOrigin($request)) {
             $err = 'Origen de la solicitud no permitido.';
-            AuditService::log('login_origin_denied', $username ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
+            AuditService::log('login_origin_denied', $safeUsername ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
             if ($request->isJson()) {
                 Response::error($err, 403);
                 return;
@@ -75,9 +76,9 @@ class AuthController
             exit;
         }
 
-        if ($this->auth->isRateLimited($clientIp)) {
+        if ($this->auth->isRateLimited($clientIp, $safeUsername)) {
             $err = 'Demasiados intentos fallidos. Por favor espera 5 minutos antes de volver a intentar.';
-            AuditService::log('login_rate_limited', $username ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
+            AuditService::log('login_rate_limited', $safeUsername ?: 'desconocido', 'FAILED', ['ip' => $clientIp]);
             if ($request->isJson()) {
                 Response::error($err, 429);
                 return;
@@ -89,8 +90,8 @@ class AuthController
 
         if (trim($username) === '' || trim($password) === '') {
             $err = 'Por favor ingresa tu usuario y contraseña.';
-            $this->auth->recordFailedAttempt($clientIp, $username ?: 'desconocido');
-            AuditService::log('login_failure', $username ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos']);
+            $this->auth->recordFailedAttempt($clientIp, $safeUsername ?: 'desconocido');
+            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos']);
             if ($request->isJson()) {
                 Response::error($err, 400);
                 return;
@@ -104,8 +105,8 @@ class AuthController
 
         if (!$res['success']) {
             $err = $res['error'] ?? 'Usuario o contraseña incorrectos.';
-            $this->auth->recordFailedAttempt($clientIp, $username);
-            AuditService::log('login_failure', $username, 'FAILED', ['error' => $err]);
+            $this->auth->recordFailedAttempt($clientIp, $safeUsername ?: 'desconocido');
+            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => $err]);
             if ($request->isJson()) {
                 Response::error($err, 401);
                 return;
@@ -115,12 +116,12 @@ class AuthController
             exit;
         }
 
-        $this->auth->clearFailedAttempts($clientIp, $username);
+        $this->auth->clearFailedAttempts($clientIp, $safeUsername);
 
         // Proteger contra Session Fixation
         session_regenerate_id(true);
         $_SESSION['nas_user'] = $res['user'];
-        AuditService::log('login_success', $username, 'SUCCESS', ['role' => $res['user']['role'] ?? 'Administrador']);
+        AuditService::log('login_success', $safeUsername, 'SUCCESS', ['role' => $res['user']['role'] ?? 'Administrador']);
 
         if ($request->isJson()) {
             Response::success($res['user'], 'Sesión iniciada con éxito.');
