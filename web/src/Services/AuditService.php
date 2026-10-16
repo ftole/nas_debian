@@ -42,9 +42,14 @@ class AuditService
     public static function log(string $action, string $target, string $status, array $details = []): void
     {
         $timestamp = date('Y-m-d H:i:s');
-        $ip = self::resolveClientIp();
-        $user = self::resolveCurrentUser();
-        $statusUpper = strtoupper($status);
+        // Neutraliza CR/LF y otros caracteres de control para impedir la
+        // inyección o falsificación de líneas en la bitácora de auditoría.
+        $clean = static fn (mixed $value): string => trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string) $value));
+        $ip = $clean(self::resolveClientIp());
+        $user = $clean(self::resolveCurrentUser());
+        $action = $clean($action);
+        $target = $clean($target);
+        $statusUpper = strtoupper($clean($status));
         $detailsJson = !empty($details) ? json_encode($details, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : '{}';
 
         $line = sprintf(
