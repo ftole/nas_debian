@@ -153,7 +153,7 @@ class BackupService
 
         // Los orígenes se interpolan en runners Bash que se ejecutan como root (cron / sudo):
         // se rechaza cualquier caracter que permita romper el literal o encadenar comandos.
-        foreach (['ip', 'target', 'share', 'path', 'source_path', 'user'] as $field) {
+        foreach (['ip', 'target', 'share', 'path', 'source_path', 'user', 'username', 'source_ip', 'source_share', 'source_user'] as $field) {
             if (!array_key_exists($field, $data)) {
                 continue;
             }
