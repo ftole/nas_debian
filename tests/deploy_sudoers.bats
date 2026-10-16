@@ -62,3 +62,45 @@ _extraer_bloque_sudoers() {
 
     rm -f "$tmp"
 }
+
+@test "el fragmento sudoers no contiene comodines inseguros ni alias obsoletos (vuln-0006 vuln-0008 vuln-0011)" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    # NAS_TERMINAL no debe existir en sudoers (el helper corre directamente sin sudo)
+    run grep -q 'NAS_TERMINAL' "$tmp"
+    [ "$status" -ne 0 ]
+
+    # No debe contener chattr * sin anclar
+    run grep -Eq 'chattr[[:space:]]+\*' "$tmp"
+    [ "$status" -ne 0 ]
+
+    # No debe contener usermod -aG * ni usermod -c *
+    run grep -Eq 'usermod[[:space:]]+-aG[[:space:]]+\*' "$tmp"
+    [ "$status" -ne 0 ]
+    run grep -Eq 'usermod[[:space:]]+-c[[:space:]]+\*' "$tmp"
+    [ "$status" -ne 0 ]
+
+    # No debe permitir /usr/sbin/chpasswd irrestricto
+    run grep -Eq '/usr/sbin/chpasswd\b' "$tmp"
+    [ "$status" -ne 0 ]
+    run grep -q '/usr/local/sbin/nas-chpasswd' "$tmp"
+    [ "$status" -eq 0 ]
+
+    # No debe copiar archivos desde /tmp hacia /etc
+    run grep -Eq 'cp[[:space:]]+/tmp/' "$tmp"
+    [ "$status" -ne 0 ]
+    run grep -q '/var/lib/nas/staging/' "$tmp"
+    [ "$status" -eq 0 ]
+
+    # lvcreate no debe tener comodin libre
+    run grep -Eq 'lvcreate[[:space:]]+\*' "$tmp"
+    [ "$status" -ne 0 ]
+    run grep -q 'lvcreate -y -l' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
