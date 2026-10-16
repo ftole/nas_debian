@@ -64,6 +64,15 @@ class SystemController
         $query = $request->getQuery('q');
         $qStr = (is_string($query) && trim($query) !== '') ? trim($query) : null;
 
+        // journald expone la línea de comandos completa de sudo y la telemetría de
+        // autenticación: esas fuentes quedan restringidas al rol administrador.
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
+        if (!$isAdmin && in_array($source, ['system', 'all'], true)) {
+            Response::error('Acceso denegado: las bitácoras del sistema requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $logs = $this->system->getLogs($source, $limit, $qStr);
         Response::success($logs);
     }
