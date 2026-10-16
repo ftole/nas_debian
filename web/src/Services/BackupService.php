@@ -4,6 +4,16 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+if (!class_exists(__NAMESPACE__ . '\\SystemService')) {
+    require_once __DIR__ . '/SystemService.php';
+}
+if (!class_exists(__NAMESPACE__ . '\\DatabaseService')) {
+    require_once __DIR__ . '/DatabaseService.php';
+}
+if (!class_exists(__NAMESPACE__ . '\\SambaService')) {
+    require_once __DIR__ . '/SambaService.php';
+}
+
 /**
  * Servicio de Central de Respaldos Multiplataforma (CIFS 3.1.1 / SSH Linux / Local),
  * deduplicación superior al 85% por Hardlinks (rsync --link-dest), staging atómico
@@ -170,8 +180,11 @@ class BackupService
                 continue;
             }
             $val = (string) $data[$field];
-            if ($field === 'local_subfolder' && (str_contains($val, '..') || str_starts_with($val, '/') || str_starts_with($val, '\\'))) {
-                return ['success' => false, 'error' => "El subdirectorio local '$val' no es válido o contiene secuencias prohibidas."];
+            if ($field === 'local_subfolder') {
+                $subErr = $this->validateLocalSubfolder($val, $role);
+                if ($subErr !== null) {
+                    return ['success' => false, 'error' => $subErr];
+                }
             }
             if (preg_match('/[^A-Za-z0-9._:@\/\\\\ -]/', $val) === 1) {
                 return ['success' => false, 'error' => "El campo '$field' contiene caracteres no permitidos."];
@@ -195,6 +208,10 @@ class BackupService
             $originErr = $this->validateOriginHost($ip);
             if ($originErr !== null) {
                 return ['success' => false, 'error' => $originErr];
+            }
+
+            if (!$this->isAllowedRemoteHost($ip, $role)) {
+                return ['success' => false, 'error' => "El host de origen '$ip' no está autorizado para este rol."];
             }
 
             // Crear directorios de soporte
@@ -244,6 +261,10 @@ class BackupService
             $originErr = $this->validateOriginHost($ip);
             if ($originErr !== null) {
                 return ['success' => false, 'error' => $originErr];
+            }
+
+            if (!$this->isAllowedRemoteHost($ip, $role)) {
+                return ['success' => false, 'error' => "El host de origen '$ip' no está autorizado para este rol."];
             }
 
             // Crear directorios de soporte
@@ -506,27 +527,249 @@ class BackupService
     }
 
     /**
+     * Obtiene las direcciones IP asignadas localmente al propio servidor NAS.
+     *
+     * @return array<string>
+     */
+    public function getLocalServerIps(): array
+    {
+        $ips = ['127.0.0.1', '::1'];
+        if (!empty($_SERVER['SERVER_ADDR']) && filter_var($_SERVER['SERVER_ADDR'], FILTER_VALIDATE_IP)) {
+            $ips[] = $_SERVER['SERVER_ADDR'];
+        }
+        if (!empty($_SERVER['LOCAL_ADDR']) && filter_var($_SERVER['LOCAL_ADDR'], FILTER_VALIDATE_IP)) {
+            $ips[] = $_SERVER['LOCAL_ADDR'];
+        }
+        $hostname = gethostname();
+        if ($hostname !== false) {
+            $hostIps = @gethostbynamel($hostname);
+            if (is_array($hostIps)) {
+                foreach ($hostIps as $hIp) {
+                    if (filter_var($hIp, FILTER_VALIDATE_IP)) {
+                        $ips[] = $hIp;
+                    }
+                }
+            }
+        }
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            $res = SystemService::runCommand(['hostname', '-I']);
+            if ($res['code'] === 0 && !empty($res['stdout'])) {
+                foreach (preg_split('/\s+/', trim((string) $res['stdout'])) ?: [] as $ip) {
+                    if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                        $ips[] = $ip;
+                    }
+                }
+            }
+        }
+        return array_values(array_unique(array_filter($ips)));
+    }
+
+    /**
+     * Retorna la lista consolidada de hosts de respaldo preautorizados (/etc/nas/allowed_backup_hosts.conf y SQLite).
+     *
+     * @return array<string>
+     */
+    public function getAllowedBackupHosts(): array
+    {
+        $hosts = [];
+        $allowedFile = '/etc/nas/allowed_backup_hosts.conf';
+        if (file_exists($allowedFile)) {
+            $lines = file($allowedFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line !== '' && !str_starts_with($line, '#')) {
+                    $hosts[] = $line;
+                }
+            }
+        }
+
+        try {
+            $rows = DatabaseService::query("SELECT host FROM allowed_backup_hosts");
+            foreach ($rows as $r) {
+                if (!empty($r['host'])) {
+                    $hosts[] = trim((string) $r['host']);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Tabla no presente o base no inicializada
+        }
+
+        return array_values(array_unique(array_filter($hosts)));
+    }
+
+    /**
+     * Registra un host autorizado para respaldos en /etc/nas/allowed_backup_hosts.conf y SQLite (admin/superadmin).
+     */
+    public function addAllowedBackupHost(string $host): array
+    {
+        $host = trim($host);
+        if ($host === '') {
+            return ['success' => false, 'error' => 'El host no puede estar vacío.'];
+        }
+        if ($this->validateOriginHost($host) !== null) {
+            return ['success' => false, 'error' => 'El host especificado no es una dirección válida o segura.'];
+        }
+
+        $allowedFile = '/etc/nas/allowed_backup_hosts.conf';
+        $dir = dirname($allowedFile);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $existing = $this->getAllowedBackupHosts();
+        if (!in_array($host, $existing, true)) {
+            @file_put_contents($allowedFile, $host . "\n", FILE_APPEND | LOCK_EX);
+            try {
+                DatabaseService::execute("CREATE TABLE IF NOT EXISTS allowed_backup_hosts (id INTEGER PRIMARY KEY AUTOINCREMENT, host TEXT UNIQUE, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+                DatabaseService::insert('allowed_backup_hosts', ['host' => $host]);
+            } catch (\Throwable $e) {
+                // Silencioso
+            }
+        }
+
+        return ['success' => true, 'message' => "Host '$host' registrado exitosamente."];
+    }
+
+    /**
      * Valida si un host remoto está permitido según la política y el rol de usuario.
+     * Bloquea loopback, link-local y las IPs del propio servidor NAS.
      */
     public function isAllowedRemoteHost(string $host, ?string $role = null): bool
     {
         if ($this->validateOriginHost($host) !== null) {
             return false;
         }
+
+        // Bloquear las IPs del propio servidor NAS (además de loopback y link-local)
+        $cleanHost = trim($host, '[]');
+        $resolvedIps = [];
+        if (filter_var($cleanHost, FILTER_VALIDATE_IP)) {
+            $resolvedIps[] = $cleanHost;
+        } else {
+            $resolved = @gethostbyname($cleanHost);
+            if ($resolved !== $cleanHost && filter_var($resolved, FILTER_VALIDATE_IP)) {
+                $resolvedIps[] = $resolved;
+            }
+        }
+
+        $localIps = $this->getLocalServerIps();
+        foreach ($resolvedIps as $rIp) {
+            if (in_array($rIp, $localIps, true)) {
+                return false;
+            }
+        }
+
         if ($role === null) {
             $role = (string) ($_SESSION['nas_user']['role'] ?? '');
         }
+
+        $preauthorized = $this->getAllowedBackupHosts();
+
         if ($role === 'operator') {
-            $allowedFile = '/etc/nas/allowed_backup_hosts.conf';
-            if (file_exists($allowedFile)) {
-                $lines = file($allowedFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-                $cleanLines = array_filter(array_map('trim', $lines));
-                if (!in_array($host, $cleanLines, true)) {
+            // El rol operador se restringe estrictamente a la lista preautorizada
+            if ($preauthorized === []) {
+                return false;
+            }
+            if (!in_array($host, $preauthorized, true) && !in_array($cleanHost, $preauthorized, true)) {
+                $matched = false;
+                foreach ($resolvedIps as $rIp) {
+                    if (in_array($rIp, $preauthorized, true)) {
+                        $matched = true;
+                        break;
+                    }
+                }
+                if (!$matched) {
                     return false;
                 }
             }
         }
+
         return true;
+    }
+
+    /**
+     * Valida que un subdirectorio local no apunte a rutas prohibidas ni a carpetas
+     * compartidas sobre las que el operador carezca de permisos.
+     */
+    public function validateLocalSubfolder(string $subfolder, ?string $role = null): ?string
+    {
+        $subfolder = trim($subfolder);
+        if ($subfolder === '') {
+            return null;
+        }
+
+        if (str_contains($subfolder, '..') || str_starts_with($subfolder, '/') || str_starts_with($subfolder, '\\')) {
+            return "El subdirectorio local '$subfolder' no es válido o contiene secuencias prohibidas.";
+        }
+
+        if (str_starts_with($subfolder, '.trash') || $subfolder === '.trash') {
+            return "El acceso al repositorio de papelera de reciclaje está restringido.";
+        }
+
+        if ($role === null) {
+            $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        }
+
+        if ($role === 'operator') {
+            $firstSegment = explode('/', str_replace('\\', '/', $subfolder))[0];
+            $samba = new SambaService();
+            $shares = $samba->listShares();
+            foreach ($shares as $sh) {
+                if (strcasecmp((string) ($sh['name'] ?? ''), $firstSegment) === 0) {
+                    $scheme = (int) ($sh['scheme'] ?? 1);
+                    if ($scheme !== 4) {
+                        $userGroups = (array) ($_SESSION['nas_user']['groups'] ?? []);
+                        $validUsers = (array) ($sh['valid_users'] ?? []);
+                        $hasAccess = false;
+                        foreach ($validUsers as $vu) {
+                            $vuClean = ltrim((string) $vu, '@');
+                            if (in_array($vuClean, $userGroups, true)) {
+                                $hasAccess = true;
+                                break;
+                            }
+                        }
+                        if (!$hasAccess) {
+                            return "Acceso denegado: el rol operador no tiene permisos sobre la carpeta compartida '$firstSegment'.";
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Actualiza una tarea de respaldo existente validando permisos y parámetros de seguridad.
+     */
+    public function updateTask(string $taskId, array $data): array
+    {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return ['success' => false, 'error' => 'Identificador de tarea inválido.'];
+        }
+
+        $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
+        if (!file_exists($runnerFile) && !$this->isDev()) {
+            return ['success' => false, 'error' => "La tarea de respaldo [$taskId] no existe."];
+        }
+
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isOperator = ($role === 'operator');
+        if ($isOperator && (!empty($data['script']) || !empty($data['pre_script']) || !empty($data['post_script']))) {
+            return ['success' => false, 'error' => 'Operación no permitida: el rol operador no puede configurar o modificar scripts personalizados de respaldo.'];
+        }
+
+        if (!empty($data['local_subfolder'])) {
+            $subErr = $this->validateLocalSubfolder((string) $data['local_subfolder'], $role);
+            if ($subErr !== null) {
+                return ['success' => false, 'error' => $subErr];
+            }
+        }
+
+        $data['id'] = $taskId;
+        $data['task_id'] = $taskId;
+
+        return $this->createTask($data);
     }
 
     public function isDangerousIp(string $ip): bool
@@ -622,6 +865,9 @@ class BackupService
             if ($originErr !== null) {
                 return ['success' => false, 'error' => $originErr];
             }
+            if (!$this->isAllowedRemoteHost($ip)) {
+                return ['success' => false, 'error' => "El host de origen '$ip' no está autorizado."];
+            }
             if ($this->isDev()) {
                 return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
             }
@@ -654,6 +900,9 @@ class BackupService
             $originErr = $this->validateOriginHost($ip);
             if ($originErr !== null) {
                 return ['success' => false, 'error' => $originErr];
+            }
+            if (!$this->isAllowedRemoteHost($ip)) {
+                return ['success' => false, 'error' => "El host de origen '$ip' no está autorizado."];
             }
             if ($this->isDev()) {
                 return ['success' => true, 'message' => 'Conexión de prueba correcta (modo dev).'];
