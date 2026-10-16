@@ -135,7 +135,7 @@ class SambaService
     public function createShare(array $data): array
     {
         $name = str_replace(["\r", "\n"], '', trim((string) ($data['name'] ?? '')));
-        $comment = str_replace(["\r", "\n"], ' ', trim((string) ($data['comment'] ?? '')));
+        $comment = $this->sanitizeComment((string) ($data['comment'] ?? ''));
         $scheme = (int) ($data['scheme'] ?? 1);
         $groups = (array) ($data['groups'] ?? []);
         $writeGroup = str_replace(["\r", "\n"], '', trim((string) ($data['write_group'] ?? '')));
@@ -147,8 +147,9 @@ class SambaService
             return ['success' => false, 'error' => 'El nombre del recurso debe tener entre 1 y 60 caracteres alfanuméricos.'];
         }
 
+        $reserved = ['global', 'homes', 'printers', 'print$', 'ipc$', 'netlogon', 'sysvol'];
         $lower = strtolower(rtrim($name, '$'));
-        if (in_array(strtolower($name), ['global', 'printers', 'print$'], true) || in_array($lower, ['global', 'printers'], true)) {
+        if (in_array(strtolower($name), $reserved, true) || in_array($lower, $reserved, true)) {
             return ['success' => false, 'error' => "El nombre de recurso [$name] está reservado por el sistema."];
         }
 
@@ -278,8 +279,10 @@ class SambaService
      */
     public function deleteShare(string $name, bool $deleteFiles = false): array
     {
+        $reserved = ['global', 'homes', 'printers', 'print$', 'ipc$', 'netlogon', 'sysvol'];
         $lower = strtolower($name);
-        if (in_array($lower, ['global', 'printers', 'print$'], true)) {
+        $lowerClean = strtolower(rtrim($name, '$'));
+        if (in_array($lower, $reserved, true) || in_array($lowerClean, $reserved, true)) {
             return ['success' => false, 'error' => "La sección [$name] está protegida por el sistema."];
         }
 
@@ -487,8 +490,9 @@ class SambaService
      */
     public function updateShare(string $name, array $data): array
     {
+        $reserved = ['global', 'homes', 'printers', 'print$', 'ipc$', 'netlogon', 'sysvol'];
         $lower = strtolower(rtrim($name, '$'));
-        if (in_array(strtolower($name), ['global', 'printers', 'print$'], true) || in_array($lower, ['global', 'printers'], true)) {
+        if (in_array(strtolower($name), $reserved, true) || in_array($lower, $reserved, true)) {
             return ['success' => false, 'error' => "La sección [$name] está protegida por el sistema y no puede modificarse como recurso compartido."];
         }
 
@@ -544,7 +548,7 @@ class SambaService
 
         $props = $sections[$name];
         $scheme = (int) ($data['scheme'] ?? 0);
-        $comment = str_replace(["\r", "\n"], ' ', trim((string) ($data['comment'] ?? '')));
+        $comment = $this->sanitizeComment((string) ($data['comment'] ?? ''));
 
         // Separar tokens de grupo (@grupo) de los usuarios explícitos (suelto)
         $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
@@ -878,5 +882,17 @@ class SambaService
             }
         }
         return array_values(array_unique($out));
+    }
+
+    /**
+     * Sanitiza el comentario de un recurso para evitar inyección en archivos INI (smb.conf).
+     * Neutraliza caracteres de control, delimitadores de comentario (; y #), inicio de sección ([)
+     * y barras invertidas finales que actúan como continuación de línea en Samba.
+     */
+    private function sanitizeComment(string $comment): string
+    {
+        $comment = preg_replace('/[\x00-\x1F\x7F;#[\]]+/', ' ', $comment) ?? '';
+        $comment = rtrim(trim($comment), '\\');
+        return trim($comment);
     }
 }
