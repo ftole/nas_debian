@@ -492,10 +492,11 @@ php_admin_value[max_input_time] = 300
 php_admin_value[memory_limit] = 512M
 PHP_POOL_EOF
 
-# 2. Directorio persistente para base de datos SQLite nativa
-mkdir -p /var/lib/nas
+# 2. Directorio persistente para base de datos SQLite nativa y staging seguro
+mkdir -p /var/lib/nas/staging
 chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
 chmod 0770 /var/lib/nas 2>/dev/null || true
+chmod 0700 /var/lib/nas/staging 2>/dev/null || true
 
 # 3. Desplegar aplicación web MVC en /var/www/nas-web
 mkdir -p /var/www/nas-web
@@ -599,32 +600,27 @@ NGINX_EOF
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 
-# 4b. Helper de terminal web: ejecuta tmux como el usuario autenticado (patrón Cockpit)
+# 4b. Helper de terminal web: ejecuta tmux directamente como el usuario autenticado (sin sudo)
 cat << 'NAS_TERM_EOF' > /usr/local/sbin/nas-terminal
 #!/bin/bash
 set -euo pipefail
 
-if [ "$#" -lt 2 ]; then
-    echo "uso: nas-terminal <usuario> <accion> [args...]" >&2
+if [ "$#" -lt 1 ]; then
+    echo "uso: nas-terminal <accion> [args...]" >&2
     exit 2
 fi
 
-TARGET_USER="$1"; shift
-ACTION="$1"; shift || true
+if [ "$(id -u)" -eq 0 ]; then
+    echo "el helper de terminal no debe ejecutarse con privilegios de root" >&2
+    exit 1
+fi
+
+TARGET_USER="$(id -un)"
+ACTION="${1:-}"; shift || true
 SESSION="nas-web-term-${TARGET_USER}"
 
-if ! id "$TARGET_USER" >/dev/null 2>&1; then
-    echo "usuario invalido" >&2
-    exit 1
-fi
-
-if ! id -Gn "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qxE 'grp_samba|grp_superadmin'; then
-    echo "el usuario no tiene acceso web" >&2
-    exit 1
-fi
-
 run_as() {
-    runuser -u "$TARGET_USER" -- "$@"
+    "$@"
 }
 
 case "$ACTION" in
@@ -673,6 +669,34 @@ NAS_TERM_EOF
 chmod 0755 /usr/local/sbin/nas-terminal
 chown root:root /usr/local/sbin/nas-terminal
 
+# 4c. Helper seguro de contraseñas de usuarios Linux (restringido a UID >= 1000 y no root)
+cat << 'NAS_CHPASSWD_EOF' > /usr/local/sbin/nas-chpasswd
+#!/bin/bash
+set -euo pipefail
+
+# Leer una sola linea user:pass de stdin
+IFS=: read -r TARGET_USER PASSWORD || {
+    echo "nas-chpasswd: error leyendo credenciales de stdin" >&2
+    exit 1
+}
+
+# Sanitizar y validar usuario
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+    echo "nas-chpasswd: no se permite modificar contraseñas de cuentas protegidas o root" >&2
+    exit 1
+fi
+
+TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || true)
+if [ -z "$TARGET_UID" ] || [ "$TARGET_UID" -lt 1000 ] || [ "$TARGET_UID" -ge 65534 ]; then
+    echo "nas-chpasswd: el usuario no existe o es una cuenta de sistema (UID < 1000)" >&2
+    exit 1
+fi
+
+printf '%s:%s\n' "$TARGET_USER" "$PASSWORD" | /usr/sbin/chpasswd
+NAS_CHPASSWD_EOF
+chmod 0755 /usr/local/sbin/nas-chpasswd
+chown root:root /usr/local/sbin/nas-chpasswd
+
 # 5. Configurar sudoers para www-data con permisos acotados y seguros
 cat << SUDOERS_EOF > /etc/sudoers.d/nas-web
 Cmnd_Alias NAS_SERVICES = /bin/systemctl reload smbd, /usr/bin/systemctl reload smbd, \\
@@ -716,13 +740,15 @@ Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstat
     /usr/bin/smbpasswd -a -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -x [a-zA-Z0-9_.-]*, \\
     /usr/bin/smbclient //127.0.0.1/IPC$ -U [a-zA-Z0-9_.-]* -c exit
 Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/sbin/userdel -r [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/usermod -aG * [a-zA-Z0-9_.-]*, /usr/sbin/usermod -L [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -L [a-zA-Z0-9_.-]*, \\
     /usr/sbin/usermod -U [a-zA-Z0-9_.-]*, /usr/sbin/usermod -s /bin/bash [a-zA-Z0-9_.-]*, \\
-    /usr/sbin/usermod -s /usr/sbin/nologin [a-zA-Z0-9_.-]*, /usr/sbin/usermod -c * [a-zA-Z0-9_.-]*, \\
+    /usr/sbin/usermod -s /usr/sbin/nologin [a-zA-Z0-9_.-]*, \\
     /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupadd -f grp_[a-zA-Z0-9_.-]*, \\
-    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/sbin/chpasswd, \\
+    /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
+    /usr/local/sbin/nas-chpasswd, \\
     /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
+    /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* adm, \\
     /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* adm, \\
     /usr/bin/smbpasswd -d -s [a-zA-Z0-9_.-]*, /usr/bin/smbpasswd -e -s [a-zA-Z0-9_.-]*
 Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub start /srv/nas*, \\
@@ -735,20 +761,22 @@ Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs scrub start /srv/nas*, /bin/btrfs scrub 
     /usr/bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
     /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /sbin/pvcreate * /dev/[a-zA-Z0-9/]*, \\
     /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, /sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/lvcreate *, /sbin/lvcreate *, /usr/sbin/pvs, /sbin/pvs, /usr/sbin/vgs, /sbin/vgs, /usr/sbin/lvs, /sbin/lvs, \\
+    /usr/sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \\
+    /usr/sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \\
+    /usr/sbin/pvs, /sbin/pvs, /usr/sbin/vgs, /sbin/vgs, /usr/sbin/lvs, /sbin/lvs, \\
     /usr/sbin/blkid *, /sbin/blkid *, \\
     /usr/bin/btrfs subvolume create /mnt/nas-btrfs-tmp/*, \\
     /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \\
     /bin/mkdir -p /srv/nas, /usr/bin/mkdir -p /srv/nas, \\
-    /bin/mount /dev/[a-zA-Z0-9/]* *, /usr/bin/mount /dev/[a-zA-Z0-9/]* *, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
+    /bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, /usr/bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
     /bin/umount /srv/nas*, /usr/bin/umount /srv/nas*, /bin/umount -l /srv/nas*, /usr/bin/umount -l /srv/nas*, \\
     /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, /bin/umount -l /mnt/nas-btrfs-tmp, /usr/bin/umount -l /mnt/nas-btrfs-tmp, \\
     /bin/umount /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount /dev/[a-zA-Z0-9/_-]*, /bin/umount -l /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount -l /dev/[a-zA-Z0-9/_-]*, \\
-    /bin/cp /tmp/nas_fstab_* /etc/fstab, /usr/bin/cp /tmp/nas_fstab_* /etc/fstab
+    /bin/cp /var/lib/nas/staging/nas_fstab_* /etc/fstab, /usr/bin/cp /var/lib/nas/staging/nas_fstab_* /etc/fstab
 Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /tmp/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
-    /bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /tmp/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/cp /tmp/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/cp /tmp/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
+    /bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
+    /bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
+    /bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
     /bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
     /bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
@@ -761,8 +789,8 @@ Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
     /bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
     /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
     /bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
-    /bin/chattr *, /usr/bin/chattr *
-Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /tmp/smbconf_* /etc/samba/smb.conf, \\
+    /bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
+Cmnd_Alias NAS_CONF = /bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, \\
     /bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/mkdir -p /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chown root\:grp_samba /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/chmod 2770 /srv/nas/[a-zA-Z0-9_.-]*, \\
@@ -772,9 +800,8 @@ Cmnd_Alias NAS_CONF = /bin/cp /tmp/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /t
     /usr/bin/setfacl -m u\:www-data\:rwx /srv/nas/[a-zA-Z0-9_.-]*, /bin/setfacl -m u\:www-data\:rwx /srv/nas/[a-zA-Z0-9_.-]*, \\
     /bin/chmod o+x /srv/nas, /usr/bin/chmod o+x /srv/nas, \\
     /bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*, /usr/bin/rm -rf /srv/nas/[a-zA-Z0-9_.-]*
-Cmnd_Alias NAS_TERMINAL = /usr/local/sbin/nas-terminal *
 
-www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN, NAS_TERMINAL
+www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
 SUDOERS_EOF
 if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
     # Un fragmento inválido rompería sudo de forma global: se descarta y se avisa.
@@ -995,7 +1022,7 @@ cat << SMBCONF > /etc/samba/smb.conf
    map to guest = Bad User
    server min protocol = SMB2_02
    server smb encrypt = desired
-   server signing = auto
+   server signing = mandatory
    dns proxy = no
 
    # Optimizaciones de Rendimiento y Red (Office +100 usuarios)
