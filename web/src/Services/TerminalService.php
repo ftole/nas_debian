@@ -130,7 +130,7 @@ class TerminalService
         //    almacenamiento legitimas deben ejecutarse por la ruta controlada de
         //    StorageService (isOsDisk + confirmacion SI-FORMATEAR).
         $deviceTools = '/\b(mkfs(\.\w+)?|wipefs|shred|blkdiscard|fdisk|sfdisk|sgdisk|gdisk|parted|partprobe|pvcreate|vgcreate|lvcreate|mkswap|dd|mdadm|cryptsetup)\b/i';
-        $rmOnRoot = '/\brm\s+(-{1,2}[\w-]+\s+)*\/(\s|$|\*|\.)/';
+        $rmOnRoot = '/\brm\s+(-{1,2}[\w-]+\s+)*\/(?=$|[\s\*\.;&|)<>`"\'\n\r\t])/';
 
         $normalized = str_replace("\0", '', (string) $command);
         $analysis = (string) preg_replace('/#.*$/m', '', $normalized);
