@@ -31,8 +31,6 @@ _normalizar_remoto() {
     local url="$1" repo=""
     if [[ "$url" == "https://github.com/"* ]]; then
         repo="${url#https://github.com/}"
-    elif [[ "$url" == "http://github.com/"* ]]; then
-        repo="${url#http://github.com/}"
     elif [[ "$url" == "git@github.com:"* ]]; then
         repo="${url#git@github.com:}"
     elif [[ "$url" == "ssh://git@github.com/"* ]]; then
