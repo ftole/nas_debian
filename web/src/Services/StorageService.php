@@ -190,6 +190,14 @@ class StorageService
                 if ($pvReal === $real || basename($pvReal) === basename($real)) {
                     return true;
                 }
+                // El volumen físico puede residir en una partición del disco consultado (p. ej. /dev/sda1 para /dev/sda)
+                $pvChain = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', $pvReal])['stdout'] ?? '';
+                foreach (preg_split('/\s+/', trim((string) $pvChain)) as $ancestor) {
+                    $ancestor = (string) preg_replace('/^[^a-zA-Z0-9]+/', '', $ancestor);
+                    if ($ancestor !== '' && $ancestor === basename($real)) {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -350,7 +358,9 @@ class StorageService
             return false;
         }
         $rootSrc = trim(SystemService::runCommand(['findmnt', '-n', '-o', 'SOURCE', '/'])['stdout'] ?? '');
-        if ($rootSrc === '') {
+        // findmnt reporta subvolúmenes Btrfs como "/dev/sda2[/@]"; limpiar el sufijo
+        $rootSrc = preg_replace('#\[.*$#', '', $rootSrc) ?? $rootSrc;
+        if ($rootSrc === '' || !str_starts_with($rootSrc, '/dev/')) {
             return false;
         }
         $rootDisk = trim(SystemService::runCommand(['lsblk', '-no', 'PKNAME', $rootSrc])['stdout'] ?? '');
