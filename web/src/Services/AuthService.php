@@ -107,6 +107,13 @@ class AuthService
         // para prevenir autenticaciones espurias debidas al mapeo a invitado (map to guest = Bad User).
         $userCheck = SystemService::sudo(['pdbedit', '-v', '-u', $cleanUsername]);
         if ($userCheck['code'] !== 0) {
+            // Mitigación de enumeración por canal lateral de tiempo:
+            // Ejecutar un intento sintético homogéneo con smbclient para que
+            // la duración sea equivalente tanto si el usuario existe como si no.
+            SystemService::sudo(
+                ['smbclient', '//127.0.0.1/IPC$', '-U', 'nas_dummy_probe_user', '-c', 'exit'],
+                "invalid_dummy_pass\n"
+            );
             return [
                 'success' => false,
                 'error' => 'Usuario o contraseña incorrectos.',
@@ -261,14 +268,23 @@ class AuthService
 
     /**
      * Limpia los intentos fallidos registrados para una IP tras un inicio de sesión exitoso.
+     * Si se proporciona el nombre de usuario, se borran únicamente los registros de esa cuenta,
+     * impidiendo que un atacante reinicie el contador para otras cuentas tras iniciar sesión.
      */
-    public function clearFailedAttempts(string $ip): void
+    public function clearFailedAttempts(string $ip, ?string $username = null): void
     {
         try {
-            DatabaseService::execute(
-                'DELETE FROM login_attempts WHERE ip = :ip',
-                ['ip' => $ip]
-            );
+            if ($username !== null && trim($username) !== '') {
+                DatabaseService::execute(
+                    'DELETE FROM login_attempts WHERE ip = :ip AND username = :username COLLATE NOCASE',
+                    ['ip' => $ip, 'username' => trim($username)]
+                );
+            } else {
+                DatabaseService::execute(
+                    'DELETE FROM login_attempts WHERE ip = :ip',
+                    ['ip' => $ip]
+                );
+            }
         } catch (\Throwable $e) {
             error_log('Error limpiando intentos fallidos: ' . $e->getMessage());
         }
@@ -277,6 +293,8 @@ class AuthService
     /**
      * Comprueba y registra una petición contra el Rate Limiter global en SQLite.
      * Retorna true si la petición es admitida, o false si excede el límite permitido.
+     * Ejecuta la comprobación y el incremento en una transacción inmediata atómica
+     * para evitar condiciones de carrera (TOCTOU).
      *
      * @param string $key Identificador único (ej: ip:ruta o usuario:ruta)
      * @param int $maxHits Número máximo de peticiones permitidas en la ventana de tiempo.
@@ -286,24 +304,34 @@ class AuthService
     public static function checkRateLimit(string $key, int $maxHits = 10, int $windowSeconds = 60): bool
     {
         try {
-            // Poda probabilística (5%) de registros antiguos fuera de la ventana
-            if (random_int(1, 20) === 1) {
-                DatabaseService::execute(
-                    "DELETE FROM api_rate_limits WHERE created_at < datetime('now', '-" . ($windowSeconds * 2) . " seconds')"
-                );
-            }
+            $pdo = DatabaseService::getConnection();
+            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            try {
+                // Poda probabilística (5%) de registros antiguos fuera de la ventana
+                if (random_int(1, 20) === 1) {
+                    $stmtDel = $pdo->prepare("DELETE FROM api_rate_limits WHERE created_at < datetime('now', '-' || :pruneWindow || ' seconds')");
+                    $stmtDel->execute(['pruneWindow' => $windowSeconds * 2]);
+                }
 
-            $rows = DatabaseService::query(
-                "SELECT COUNT(*) as cnt FROM api_rate_limits WHERE key = :key AND created_at >= datetime('now', '-{$windowSeconds} seconds')",
-                ['key' => $key]
-            );
-            $count = (int) ($rows[0]['cnt'] ?? 0);
-            if ($count >= $maxHits) {
-                return false;
-            }
+                $stmtCount = $pdo->prepare("SELECT COUNT(*) as cnt FROM api_rate_limits WHERE key = :key AND created_at >= datetime('now', '-' || :win || ' seconds')");
+                $stmtCount->execute(['key' => $key, 'win' => $windowSeconds]);
+                $count = (int) ($stmtCount->fetchColumn() ?: 0);
 
-            DatabaseService::insert('api_rate_limits', ['key' => $key]);
-            return true;
+                if ($count >= $maxHits) {
+                    $pdo->exec('COMMIT');
+                    return false;
+                }
+
+                $stmtIns = $pdo->prepare('INSERT INTO api_rate_limits (key) VALUES (:key)');
+                $stmtIns->execute(['key' => $key]);
+                $pdo->exec('COMMIT');
+                return true;
+            } catch (\Throwable $t) {
+                if ($pdo->inTransaction()) {
+                    $pdo->exec('ROLLBACK');
+                }
+                throw $t;
+            }
         } catch (\Throwable $e) {
             error_log('Error comprobando api rate limit: ' . $e->getMessage());
             return true;
