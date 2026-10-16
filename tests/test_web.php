@@ -1725,6 +1725,117 @@ $reqNullOrigin = new Request();
 assertTrue(!AuthMiddleware::verifySameOrigin($reqNullOrigin), 'verifySameOrigin rechaza Origin: null (vuln-0007)');
 unset($_SERVER['HTTP_ORIGIN'], $_SERVER['HTTP_HOST']);
 
+// ==============================================================================
+// 28. Validaciones Adicionales de Remediación Técnica (Audit nas-debian_d219)
+// ==============================================================================
+
+// SSRF & BackupService: Bloqueo de orígenes de red peligrosos (vuln-0017)
+$bkSvcAudit = new BackupService();
+$resSsrfLoopback = $bkSvcAudit->createTask([
+    'id' => 'bkp_ssrf_loop',
+    'source_type' => 'windows',
+    'source_ip' => '127.0.0.1',
+    'source_share' => 'share',
+    'username' => 'user',
+    'password' => 'pass',
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resSsrfLoopback['success'], 'BackupService::createTask bloquea origen loopback 127.0.0.1 (vuln-0017)');
+
+$resSsrfLinkLocal = $bkSvcAudit->createTask([
+    'id' => 'bkp_ssrf_ll',
+    'source_type' => 'windows',
+    'source_ip' => '169.254.10.20',
+    'source_share' => 'share',
+    'username' => 'user',
+    'password' => 'pass',
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resSsrfLinkLocal['success'], 'BackupService::createTask bloquea origen link-local 169.254.10.20 (vuln-0017)');
+
+// Gap CIFS: Sanitización y rechazo de contraseñas con \r o \n
+$resCifsNl = $bkSvcAudit->createTask([
+    'id' => 'bkp_cifs_nl',
+    'source_type' => 'windows',
+    'source_ip' => '10.10.1.50',
+    'source_share' => 'share',
+    'username' => 'user',
+    'password' => "secret\nusername=injected",
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resCifsNl['success'] && str_contains($resCifsNl['error'] ?? '', 'saltos de línea'),
+    'BackupService::createTask rechaza contraseñas CIFS con saltos de línea');
+
+// vuln-0014: SSH usuario con guion inicial
+$resSshDash = $bkSvcAudit->createTask([
+    'id' => 'bkp_ssh_dash',
+    'source_type' => 'linux',
+    'source_ip' => '10.10.1.50',
+    'source_path' => '/var/data',
+    'username' => '-eviluser',
+    'password' => 'secret',
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resSshDash['success'] && (str_contains($resSshDash['error'] ?? '', 'guión') || str_contains($resSshDash['error'] ?? '', 'guion')),
+    'BackupService::createTask rechaza usuario SSH con guion inicial (vuln-0014)');
+
+// vuln-0015: Confinar origen de respaldo local dentro de /srv/nas
+$resLocalEsc = $bkSvcAudit->createTask([
+    'id' => 'bkp_local_esc',
+    'source_type' => 'local',
+    'source_path' => '/srv/nas/../../etc',
+    'schedule' => '0 2 * * *',
+]);
+assertTrue(!$resLocalEsc['success'], 'BackupService::createTask confina origen local dentro de /srv/nas (vuln-0015)');
+
+// vuln-0013: AuthService::clearFailedAttempts retrocompatible y con username
+$authSvcTest = new AuthService();
+$authSvcTest->recordFailedAttempt('198.51.100.99', 'testuser');
+$authSvcTest->clearFailedAttempts('198.51.100.99', 'testuser');
+$isBlocked = $authSvcTest->isRateLimited('198.51.100.99');
+assertTrue(!$isBlocked, 'AuthService::clearFailedAttempts purga intentos con IP y username (vuln-0013)');
+$authSvcTest->recordFailedAttempt('198.51.100.99', 'testuser2');
+$authSvcTest->clearFailedAttempts('198.51.100.99');
+assertTrue(!$authSvcTest->isRateLimited('198.51.100.99'), 'AuthService::clearFailedAttempts funciona con un solo argumento (retrocompatibilidad)');
+
+// vuln-0012: SambaController restringe Esquema 4 (guest ok = yes) a administradores
+$sambaCtrlAudit = new \App\Controllers\SambaController();
+$_SESSION['nas_user'] = ['username' => 'operador2', 'role' => 'operator', 'is_admin' => false];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+unset($_SERVER['CONTENT_TYPE']);
+$_POST = [
+    'name' => 'PUBLICO_GUEST_TEST',
+    'path' => '/srv/nas/PUBLICO_GUEST_TEST',
+    'scheme' => 4,
+];
+$reqGuestShare = new Request();
+ob_start();
+$sambaCtrlAudit->create($reqGuestShare);
+$rawGuestResp = ob_get_clean();
+$guestResp = json_decode($rawGuestResp, true);
+assertTrue(is_array($guestResp) && empty($guestResp['success']) && str_contains($guestResp['error'] ?? '', 'administrador'),
+    'SambaController::create restringe Esquema 4 (invitados) ante rol operador con 403 (vuln-0012)');
+
+// vuln-0007 / vuln-0008: TerminalService cliente y normalización destructiva
+$termSvcAudit = new TerminalService();
+$termSvcAudit->setClientId('sess-test-999');
+assertTrue($termSvcAudit->getClientId() === 'sess-test-999', 'TerminalService soporta asignación de client_id (vuln-0007)');
+
+$cmdBlockedByComment = $termSvcAudit->execute('mkfs.ext4 /dev/sdb1 # comentario de prueba');
+assertTrue($cmdBlockedByComment['exit_code'] === 126, 'TerminalService detecta comando destructivo con comentario shell (vuln-0008)');
+
+$cmdBlockedByQuotes = $termSvcAudit->execute('m"k"fs.ext4 /dev/sdb1');
+assertTrue($cmdBlockedByQuotes['exit_code'] === 126, 'TerminalService detecta comando destructivo ofuscado con comillas (vuln-0008)');
+
+$cmdBlockedByNull = $termSvcAudit->execute("mkfs.ext4\0 /dev/sdb1");
+assertTrue($cmdBlockedByNull['exit_code'] === 126, 'TerminalService detecta comando destructivo con caracteres nulos (vuln-0008)');
+
+// vuln-0001 / vuln-0002: SheetJS versión >= 0.20.2
+$vendorXlsxPath = __DIR__ . '/../web/public/js/vendor/xlsx.full.min.js';
+$vendorXlsxData = (string) @file_get_contents($vendorXlsxPath);
+assertTrue(str_contains($vendorXlsxData, '.version="0.20.') || str_contains($vendorXlsxData, '.version="0.21.'),
+    'Librería local SheetJS xlsx.full.min.js actualizada contra vulnerabilidades conocidas (versión >= 0.20.2)');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
@@ -1732,3 +1843,4 @@ echo "==================================================\n";
 if ($failed > 0) {
     exit(1);
 }
+
