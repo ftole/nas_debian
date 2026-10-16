@@ -169,6 +169,25 @@ _hook_post_actualizacion() {
         rm -f "$tmp_chp" 2>/dev/null || true
     fi
 
+    local gecos_dest="${NAS_GECOS_DEST:-/usr/local/sbin/nas-user-gecos}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_GECOS_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local tmp_gecos
+        tmp_gecos="$(mktemp 2>/dev/null || echo "/tmp/nas-gecos.$$")"
+        if awk '
+            /^cat << '\''NAS_GECOS_EOF'\'' > \/usr\/local\/sbin\/nas-user-gecos$/ { capture=1; next }
+            capture && /^NAS_GECOS_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_gecos" 2>/dev/null && [ -s "$tmp_gecos" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$gecos_dest")" ]; then
+                mkdir -p "$(dirname "$gecos_dest")" 2>/dev/null || true
+                cp -f "$tmp_gecos" "$gecos_dest" 2>/dev/null || true
+                chmod 0755 "$gecos_dest" 2>/dev/null || true
+                chown root:root "$gecos_dest" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$tmp_gecos" 2>/dev/null || true
+    fi
+
     if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/lib/nas" ]; then
         mkdir -p /var/lib/nas/staging 2>/dev/null || true
         chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
