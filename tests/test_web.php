@@ -1872,6 +1872,153 @@ $vendorXlsxData = (string) @file_get_contents($vendorXlsxPath);
 assertTrue(str_contains($vendorXlsxData, '.version="0.20.') || str_contains($vendorXlsxData, '.version="0.21.'),
     'Librería local SheetJS xlsx.full.min.js actualizada contra vulnerabilidades conocidas (versión >= 0.20.2)');
 
+// ==============================================================================
+// 27. Pruebas de regresión: Remediación de 11 vulnerabilidades (nas-debian_d219)
+// ==============================================================================
+
+// 1) vuln-0002: BackupService fail-closed ante direcciones no canónicas o inválidas (SSRF)
+$bkpRemed = new BackupService();
+assertTrue($bkpRemed->validateOriginHost('0x7f000001') !== null, 'BackupService::validateOriginHost bloquea hex IPv4 0x7f000001 (vuln-0002)');
+assertTrue($bkpRemed->validateOriginHost('0X7F000001') !== null, 'BackupService::validateOriginHost bloquea hex IPv4 en mayúsculas 0X7F000001');
+assertTrue($bkpRemed->validateOriginHost('0x7f.0.0.1') !== null, 'BackupService::validateOriginHost bloquea dotted-hex 0x7f.0.0.1');
+assertTrue($bkpRemed->validateOriginHost('127.0.0.1.') !== null, 'BackupService::validateOriginHost bloquea IP con punto final 127.0.0.1.');
+assertTrue($bkpRemed->validateOriginHost('0xA9FEA9FE') !== null, 'BackupService::validateOriginHost bloquea hex link-local 0xA9FEA9FE');
+
+// 2) Operador restringido en scripts de respaldo y subdirectorio local
+$_SESSION['nas_user'] = ['username' => 'operador_bkp', 'role' => 'operator', 'is_admin' => false];
+$opScriptTask = $bkpRemed->createTask([
+    'id' => 'task_op_script',
+    'proto' => 'local',
+    'cron' => '0 2 * * *',
+    'path' => '/srv/nas/SISTEMAS',
+    'script' => 'echo pwn',
+]);
+assertTrue(!$opScriptTask['success'] && str_contains($opScriptTask['error'] ?? '', 'operador no puede configurar scripts'), 'BackupService::createTask bloquea scripts personalizados para rol operador');
+
+$subfolderTrav = $bkpRemed->createTask([
+    'id' => 'task_trav',
+    'proto' => 'local',
+    'cron' => '0 2 * * *',
+    'path' => '/srv/nas/SISTEMAS',
+    'local_subfolder' => '../escaped',
+]);
+assertTrue(!$subfolderTrav['success'] && str_contains($subfolderTrav['error'] ?? '', 'secuencias prohibidas'), 'BackupService::createTask valida local_subfolder contra path traversal');
+unset($_SESSION['nas_user']);
+
+// 3) vuln-0004: AuditService::log neutraliza saltos de línea y caracteres de control (Log Forgery)
+$logTmp = sys_get_temp_dir() . '/audit_test_' . uniqid() . '.log';
+AuditService::setLogPath($logTmp);
+AuditService::log("action\r\ninjected", "user_target\n[2026-01-01 00:00:00] [9.9.9.9] [root] [user_create] [FORGED] [SUCCESS] {}", 'FAILED', ['err' => 'test']);
+$logLines = file($logTmp, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+assertTrue(count($logLines) === 1, 'AuditService::log neutraliza saltos de línea y produce exactamente una sola línea por registro (vuln-0004)');
+assertTrue(str_contains($logLines[0] ?? '', 'user_target [2026-01-01 00:00:00]'), 'AuditService::log reemplaza saltos de línea con espacios sin romper la estructura');
+@unlink($logTmp);
+
+// 4) AuthService limitación de tasa por usuario además de IP
+$authRemed = new AuthService();
+$targetUser = 'test_user_limit_' . uniqid();
+for ($i = 0; $i < 5; $i++) {
+    $authRemed->recordFailedAttempt('198.51.100.' . $i, $targetUser);
+}
+assertTrue($authRemed->isRateLimited('192.0.2.1', $targetUser), 'AuthService::isRateLimited detecta límite alcanzado por nombre de usuario');
+$authRemed->clearFailedAttempts('192.0.2.1', $targetUser);
+assertTrue(!$authRemed->isRateLimited('192.0.2.1', $targetUser), 'AuthService::clearFailedAttempts limpia intentos por usuario e IP');
+
+// 5) vuln-0005: SystemService redacta credenciales en bitácoras de journalctl
+$sysSvcRemed = new SystemService();
+$reflSys = new \ReflectionClass($sysSvcRemed);
+$methodRedact = $reflSys->getMethod('redactJournalSecrets');
+$methodRedact->setAccessible(true);
+$rawMsg = "sistemas : PWD=/home/sistemas ; USER=root ; COMMAND=/usr/bin/sudo -u www-data -- sh -c 'printf \\'root:Secret123#\\\\n\\' | sudo -n /usr/local/sbin/nas-chpasswd; echo rc=0'";
+$cleanMsg = $methodRedact->invoke($sysSvcRemed, $rawMsg);
+assertTrue(!str_contains($cleanMsg, 'Secret123#'), 'SystemService::redactJournalSecrets oculta contraseña canalizada a nas-chpasswd (vuln-0005)');
+assertTrue(str_contains($cleanMsg, '[REDACTADO]'), 'SystemService::redactJournalSecrets sustituye credencial con [REDACTADO]');
+
+$rawArg = "COMMAND=/usr/bin/nas-cli user create jdoe --password=AdminPass456# --admin";
+$cleanArg = $methodRedact->invoke($sysSvcRemed, $rawArg);
+assertTrue(!str_contains($cleanArg, 'AdminPass456#'), 'SystemService::redactJournalSecrets oculta argumento --password');
+assertTrue(str_contains($cleanArg, '--password=[REDACTADO]'), 'SystemService::redactJournalSecrets sustituye argumento con [REDACTADO]');
+
+// SystemController::logs bloquea operador en source=system o source=all
+$sysCtrlRemed = new SystemController();
+$_SESSION['nas_user'] = ['username' => 'operador_log', 'role' => 'operator', 'is_admin' => false];
+$reqSysLogs = new Request();
+ob_start();
+$sysCtrlRemed->logs($reqSysLogs);
+$outLogs = ob_get_clean();
+$jsonLogs = json_decode($outLogs, true);
+assertTrue(isset($jsonLogs['success']) && $jsonLogs['success'] === false, 'SystemController::logs bloquea consulta de source=all a operadores con 403');
+unset($_SESSION['nas_user']);
+
+// 6) vuln-0007: FileExplorerService::renameItem prohíbe renombrar la raíz del almacenamiento
+$feRemed = new FileExplorerService();
+$renameRootRes = $feRemed->renameItem('.', 'nas_renamed_escape');
+assertTrue(!$renameRootRes['success'] && str_contains($renameRootRes['error'] ?? '', 'No se puede renombrar la raíz'), 'FileExplorerService::renameItem prohíbe renombrar la raíz del almacenamiento (vuln-0007)');
+$renameSlashRes = $feRemed->renameItem('/', 'nas_renamed_escape');
+assertTrue(!$renameSlashRes['success'] && str_contains($renameSlashRes['error'] ?? '', 'No se puede renombrar la raíz'), 'FileExplorerService::renameItem prohíbe renombrar /');
+
+// FileExplorerService::downloadDirectoryZip prohíbe comprimir la raíz del almacenamiento
+ob_start();
+$feRemed->downloadDirectoryZip('');
+$zipOut = ob_get_clean();
+assertTrue(str_contains($zipOut, 'no está permitida'), 'FileExplorerService::downloadDirectoryZip prohíbe comprimir la raíz /srv/nas antes de chequeo ZipArchive');
+
+// 7) vuln-0008: StorageService::btrfsSubvolume protege disco del SO y miembros LVM/RAID
+$storageRemed = new StorageService();
+$subvolBadConfirm = $storageRemed->btrfsSubvolume('/dev/sda', 'subvol_test', 'NO');
+assertTrue(!$subvolBadConfirm['success'] && str_contains($subvolBadConfirm['error'] ?? '', 'Confirmación requerida'), 'StorageService::btrfsSubvolume exige SI-FORMATEAR');
+
+// 8) SambaService rechaza secciones reservadas ampliadas
+$sambaRemed = new SambaService();
+$resHomes = $sambaRemed->createShare(['name' => 'homes', 'scheme' => 1]);
+assertTrue(!$resHomes['success'] && str_contains($resHomes['error'] ?? '', 'reservado'), 'SambaService::createShare rechaza recurso reservado homes');
+$resIpc = $sambaRemed->createShare(['name' => 'ipc$', 'scheme' => 1]);
+assertTrue(!$resIpc['success'] && str_contains($resIpc['error'] ?? '', 'reservado'), 'SambaService::createShare rechaza recurso reservado ipc$');
+$resNetlogon = $sambaRemed->createShare(['name' => 'netlogon', 'scheme' => 1]);
+assertTrue(!$resNetlogon['success'] && str_contains($resNetlogon['error'] ?? '', 'reservado'), 'SambaService::createShare rechaza recurso reservado netlogon');
+$resSysvol = $sambaRemed->createShare(['name' => 'sysvol', 'scheme' => 1]);
+assertTrue(!$resSysvol['success'] && str_contains($resSysvol['error'] ?? '', 'reservado'), 'SambaService::createShare rechaza recurso reservado sysvol');
+
+$delReserved = $sambaRemed->deleteShare('netlogon');
+assertTrue(!$delReserved['success'] && str_contains($delReserved['error'] ?? '', 'protegida'), 'SambaService::deleteShare rechaza eliminar recurso reservado netlogon');
+
+$updReserved = $sambaRemed->updateShare('sysvol', []);
+assertTrue(!$updReserved['success'] && str_contains($updReserved['error'] ?? '', 'protegida'), 'SambaService::updateShare rechaza actualizar recurso reservado sysvol');
+
+// SambaService sanitiza comentarios de recursos contra inyección INI
+$reflSamba = new \ReflectionClass($sambaRemed);
+$methodComment = $reflSamba->getMethod('sanitizeComment');
+$methodComment->setAccessible(true);
+$dirtyComment = "Comentario de prueba; directiva=invalida # [nueva_seccion]\r\npath=/srv/evil\\";
+$sanitizedComment = $methodComment->invoke($sambaRemed, $dirtyComment);
+assertTrue(!str_contains($sanitizedComment, ';'), 'SambaService::sanitizeComment elimina punto y coma (;)');
+assertTrue(!str_contains($sanitizedComment, '#'), 'SambaService::sanitizeComment elimina numeral (#)');
+assertTrue(!str_contains($sanitizedComment, '['), 'SambaService::sanitizeComment elimina corchetes ([)');
+assertTrue(!str_contains($sanitizedComment, "\n"), 'SambaService::sanitizeComment elimina saltos de línea');
+assertTrue(!str_ends_with($sanitizedComment, '\\'), 'SambaService::sanitizeComment elimina barra invertida final');
+
+// 9) vuln-0011: TerminalService bloquea evasión por variables, sustitución y decodificadores
+$termRemed = new TerminalService();
+$cmdIfs = $termRemed->execute('rm -rf${IFS}/');
+assertTrue($cmdIfs['exit_code'] === 126, 'TerminalService bloquea rm -rf${IFS}/ mediante normalización de \$IFS (vuln-0011)');
+
+$cmdVarDev = $termRemed->execute('z9=/dev; sudo parted -s ${z9}/nvme0n1 print');
+assertTrue($cmdVarDev['exit_code'] === 126, 'TerminalService bloquea reconstrucción de /dev mediante variables combinadas con parted/sudo (vuln-0011)');
+
+$cmdBase64Sudo = $termRemed->execute('cc9=$(echo bWtmcy5leHQ0 | base64 -d); sudo $cc9 -n /dev/sda');
+assertTrue($cmdBase64Sudo['exit_code'] === 126, 'TerminalService bloquea sustitución de comando combinada con sudo o herramienta protegida (vuln-0011)');
+
+// 10) AuthMiddleware: Sec-Fetch-Site y SameSite=Strict
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['HTTP_SEC_FETCH_SITE'] = 'cross-site';
+$reqSecFetch = new Request();
+ob_start();
+$secCheck = AuthMiddleware::check($reqSecFetch);
+ob_end_clean();
+assertTrue(!$secCheck, 'AuthMiddleware bloquea peticiones mutantes con Sec-Fetch-Site cross-site');
+unset($_SERVER['HTTP_SEC_FETCH_SITE']);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
