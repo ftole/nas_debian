@@ -236,7 +236,7 @@ class AuthService
     /**
      * Verifica si una dirección IP se encuentra temporalmente bloqueada por superar el límite de intentos.
      */
-    public function isRateLimited(string $ip): bool
+    public function isRateLimited(string $ip, ?string $username = null): bool
     {
         try {
             $rows = DatabaseService::query(
@@ -244,7 +244,22 @@ class AuthService
                 ['ip' => $ip]
             );
             $count = (int) ($rows[0]['cnt'] ?? 0);
-            return $count >= self::MAX_FAILED_ATTEMPTS;
+            if ($count >= self::MAX_FAILED_ATTEMPTS) {
+                return true;
+            }
+
+            if ($username !== null && trim($username) !== '') {
+                $rowsUser = DatabaseService::query(
+                    "SELECT COUNT(*) as cnt FROM login_attempts WHERE username = :username COLLATE NOCASE AND attempted_at >= datetime('now', '-" . self::LOCKOUT_MINUTES . " minutes')",
+                    ['username' => trim($username)]
+                );
+                $countUser = (int) ($rowsUser[0]['cnt'] ?? 0);
+                if ($countUser >= self::MAX_FAILED_ATTEMPTS) {
+                    return true;
+                }
+            }
+
+            return false;
         } catch (\Throwable $e) {
             error_log('Error comprobando rate limit: ' . $e->getMessage());
             return false;
@@ -276,7 +291,7 @@ class AuthService
         try {
             if ($username !== null && trim($username) !== '') {
                 DatabaseService::execute(
-                    'DELETE FROM login_attempts WHERE ip = :ip AND username = :username COLLATE NOCASE',
+                    'DELETE FROM login_attempts WHERE ip = :ip OR username = :username COLLATE NOCASE',
                     ['ip' => $ip, 'username' => trim($username)]
                 );
             } else {
