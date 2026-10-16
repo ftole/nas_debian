@@ -632,7 +632,7 @@ case "$ACTION" in
             TARGET_HOME=/srv/nas
         fi
         if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
-            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME"
+            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME" /bin/bash
         fi
         ;;
     keys)
@@ -680,8 +680,10 @@ IFS=: read -r TARGET_USER PASSWORD || {
     exit 1
 }
 
+PASSWORD="${PASSWORD%$'\r'}"
+
 # Sanitizar y validar usuario
-if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ] || [[ "$TARGET_USER" =~ [^a-zA-Z0-9_.-] ]]; then
     echo "nas-chpasswd: no se permite modificar contraseñas de cuentas protegidas o root" >&2
     exit 1
 fi
@@ -696,6 +698,38 @@ printf '%s:%s\n' "$TARGET_USER" "$PASSWORD" | /usr/sbin/chpasswd
 NAS_CHPASSWD_EOF
 chmod 0755 /usr/local/sbin/nas-chpasswd
 chown root:root /usr/local/sbin/nas-chpasswd
+
+# 4d. Helper seguro para asignación de nombre real/cargo (gecos) en usuarios Linux (UID >= 1000)
+cat << 'NAS_GECOS_EOF' > /usr/local/sbin/nas-user-gecos
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+    echo "uso: nas-user-gecos <usuario> [nombre_completo...]" >&2
+    exit 2
+fi
+
+TARGET_USER="$1"; shift || true
+FULL_NAME="$*"
+
+if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ] || [[ "$TARGET_USER" =~ [^a-zA-Z0-9_.-] ]]; then
+    echo "nas-user-gecos: cuenta protegida o invalida" >&2
+    exit 1
+fi
+
+TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || true)
+if [ -z "$TARGET_UID" ] || [ "$TARGET_UID" -lt 1000 ] || [ "$TARGET_UID" -ge 65534 ]; then
+    echo "nas-user-gecos: el usuario no existe o es una cuenta de sistema (UID < 1000)" >&2
+    exit 1
+fi
+
+# Sanitizar nombre: solo caracteres seguros
+FULL_NAME=$(printf '%s' "$FULL_NAME" | tr -cd '[:alnum:] .,_ -')
+
+/usr/sbin/usermod -c "$FULL_NAME" "$TARGET_USER"
+NAS_GECOS_EOF
+chmod 0755 /usr/local/sbin/nas-user-gecos
+chown root:root /usr/local/sbin/nas-user-gecos
 
 # 5. Configurar sudoers para www-data con permisos acotados y seguros
 cat << SUDOERS_EOF > /etc/sudoers.d/nas-web
@@ -745,7 +779,8 @@ Cmnd_Alias NAS_USERS = /usr/sbin/useradd -m -s /bin/bash [a-zA-Z0-9_.-]*, /usr/s
     /usr/sbin/usermod -s /usr/sbin/nologin [a-zA-Z0-9_.-]*, \\
     /usr/sbin/groupadd grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupadd -f grp_[a-zA-Z0-9_.-]*, \\
     /usr/sbin/groupdel grp_[a-zA-Z0-9_.-]*, /usr/sbin/groupmod -n grp_[a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
-    /usr/local/sbin/nas-chpasswd, \\
+    /usr/local/sbin/nas-chpasswd, \
+    /usr/local/sbin/nas-user-gecos [a-zA-Z0-9_.-]*, /usr/local/sbin/nas-user-gecos [a-zA-Z0-9_.-]* *, \\
     /usr/bin/passwd -S -a, /usr/bin/passwd -S [a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, /usr/bin/gpasswd -d [a-zA-Z0-9_.-]* grp_[a-zA-Z0-9_.-]*, \\
     /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* sudo, /usr/bin/gpasswd -a [a-zA-Z0-9_.-]* adm, \\
