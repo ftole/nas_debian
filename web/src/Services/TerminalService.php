@@ -129,11 +129,17 @@ class TerminalService
         //    sudo, y los borrados recursivos sobre rutas raiz. Las operaciones de
         //    almacenamiento legitimas deben ejecutarse por la ruta controlada de
         //    StorageService (isOsDisk + confirmacion SI-FORMATEAR).
-        $deviceTools = '/\b(mkfs(\.\w+)?|wipefs|shred|blkdiscard|fdisk|sfdisk|parted|pvcreate|vgcreate|lvcreate|mkswap|dd)\b/';
-        $targetsDevice = '#/dev/[a-zA-Z0-9/_.-]+#i';
-        $rmOnRoot = '/\brm\s+(-{1,2}[a-zA-Z]+\s+)*\/(\s|$|\*)/';
-        if (((preg_match($deviceTools, $command) === 1 && preg_match($targetsDevice, $command) === 1) && !str_contains($command, '--help'))
-            || preg_match($rmOnRoot, $command) === 1) {
+        $deviceTools = '/\b(mkfs(\.\w+)?|wipefs|shred|blkdiscard|fdisk|sfdisk|sgdisk|gdisk|parted|partprobe|pvcreate|vgcreate|lvcreate|mkswap|dd|mdadm|cryptsetup)\b/i';
+        $rmOnRoot = '/\brm\s+(-{1,2}[\w-]+\s+)*\/(\s|$|\*|\.)/';
+
+        $normalized = str_replace("\0", '', (string) $command);
+        $analysis = (string) preg_replace('/#.*$/m', '', $normalized);
+        $unquoted = str_replace(["'", '"', '\\'], '', $analysis);
+
+        if (((preg_match($deviceTools, $unquoted) === 1 && str_contains($unquoted, '/dev/'))
+            || preg_match($rmOnRoot, $unquoted) === 1
+            || (preg_match($deviceTools, $analysis) === 1 && str_contains($analysis, '/dev/'))
+            || preg_match($rmOnRoot, $analysis) === 1)) {
             $denyRes = [
                 'success' => true,
                 'output' => "Acceso denegado: Comando destructivo de sistema no permitido en la consola web.\n",
@@ -307,6 +313,31 @@ class TerminalService
         return preg_match('/^[a-zA-Z0-9_.-]{1,32}$/', $u) === 1 ? $u : null;
     }
 
+    private ?string $clientId = null;
+
+    public function setClientId(?string $clientId): void
+    {
+        $this->clientId = $clientId !== null ? substr((string) preg_replace('/[^a-zA-Z0-9_-]/', '', $clientId), 0, 32) : null;
+    }
+
+    public function getClientId(): string
+    {
+        if ($this->clientId !== null && $this->clientId !== '') {
+            return $this->clientId;
+        }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            if (!empty($_SESSION['nas_terminal_client_id'])) {
+                return (string) $_SESSION['nas_terminal_client_id'];
+            }
+            if (session_id() !== '') {
+                $id = substr(hash('sha256', session_id()), 0, 16);
+                $_SESSION['nas_terminal_client_id'] = $id;
+                return $id;
+            }
+        }
+        return '';
+    }
+
     private function sessionUser(): string
     {
         return (string) ($_SESSION['nas_user']['username'] ?? 'sistemas');
@@ -382,7 +413,14 @@ class TerminalService
             2 => ['pipe', 'w'],
         ];
 
-        $process = @proc_open($cmd, $descriptors, $pipes);
+        $env = array_merge($_ENV, [
+            'TERM' => 'xterm-256color',
+            'LANG' => 'C.UTF-8',
+            'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'NAS_CLIENT_ID' => $this->getClientId(),
+        ]);
+
+        $process = @proc_open($cmd, $descriptors, $pipes, null, $env);
         if (!is_resource($process)) {
             return ['success' => false, 'error' => 'No se pudo invocar el helper de terminal.', 'output' => ''];
         }
