@@ -143,13 +143,26 @@ class TerminalService
         $mentionsTool = preg_match($deviceTools, $unquoted) === 1;
         $usesSudo = preg_match('/\bsudo\b/i', $unquoted) === 1;
 
+        // Detección de decodificadores / evaluadores y tuberías a intérpretes
+        $hasDecoder = preg_match('/\b(base64|base32|xxd|eval)\b|\\\\x[0-9a-fA-F]{2}/i', $analysis) === 1
+            || preg_match('/\b(base64|base32|xxd|eval)\b|\\\\x[0-9a-fA-F]{2}/i', $unquoted) === 1;
+        $hasPipeToShell = preg_match('/\|\s*(sh|bash|dash|zsh)\b/i', $unquoted) === 1;
+
+        // Ejecución indirecta donde el comando ejecutado sea una variable ($cmd ..., ${cmd} ..., sudo $cmd ...)
+        $isIndirectCmd = preg_match('/(?:^|[;&|]\s*|\bsudo\s+(?:-n\s+)?)\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?=$|[\s;&|])/', $unquoted) === 1;
+
+        // Combinación de decodificadores con sustitución de comandos, variables o tuberías a intérprete
+        $isObfuscatedExec = $hasDecoder && ($hasCmdSub || $hasVarExp || $hasPipeToShell);
+
         if (((preg_match($deviceTools, $unquoted) === 1 && str_contains($unquoted, '/dev/'))
             || preg_match($rmOnRoot, $unquoted) === 1
             || preg_match($rmOnRoot, $deobfuscated) === 1
             || (preg_match($deviceTools, $analysis) === 1 && str_contains($analysis, '/dev/'))
             || preg_match($rmOnRoot, $analysis) === 1
             || ($hasCmdSub && ($mentionsTool || $usesSudo || str_contains($unquoted, '/dev')))
-            || ($hasVarExp && ($mentionsTool || $usesSudo)))) {
+            || ($hasVarExp && ($mentionsTool || $usesSudo))
+            || $isIndirectCmd
+            || $isObfuscatedExec)) {
             $denyRes = [
                 'success' => true,
                 'output' => "Acceso denegado: Comando destructivo de sistema no permitido en la consola web.\n",
