@@ -356,6 +356,14 @@ class FileExplorerService
             return ['success' => false, 'error' => 'El elemento de origen no existe o la ruta es inválida.'];
         }
 
+        // La raíz del almacenamiento nunca puede ser el origen de un renombrado: su
+        // directorio padre (/srv) queda fuera del confinamiento y el rename movería
+        // todos los datos fuera de /srv/nas.
+        $rootDir = self::getRootDir();
+        if ($source === $rootDir) {
+            return ['success' => false, 'error' => 'Operación no permitida: No se puede renombrar la raíz del almacenamiento.'];
+        }
+
         $cleanName = preg_replace('/[^\p{L}\p{N}._-]/u', '_', trim($newName));
         if ($cleanName === '' || $cleanName === '.' || $cleanName === '..') {
             return ['success' => false, 'error' => 'Nuevo nombre inválido.'];
@@ -363,6 +371,14 @@ class FileExplorerService
 
         $parent = dirname($source);
         $destination = $parent . '/' . $cleanName;
+
+        // Verificación canónica adicional: el directorio destino debe residir dentro de la raíz.
+        $realParent = realpath($parent);
+        $realRoot = realpath($rootDir);
+        if ($realParent === false || $realRoot === false
+            || ($realParent !== $realRoot && !str_starts_with($realParent, $realRoot . DIRECTORY_SEPARATOR))) {
+            return ['success' => false, 'error' => 'Ruta de destino fuera de los límites autorizados.'];
+        }
 
         if (file_exists($destination)) {
             return ['success' => false, 'error' => 'Ya existe un elemento con el nuevo nombre.'];
@@ -996,14 +1012,6 @@ class FileExplorerService
             return;
         }
 
-        if (!class_exists(ZipArchive::class)) {
-            if (!headers_sent()) {
-                http_response_code(500);
-            }
-            echo 'Error: La extensión php-zip no está habilitada en el servidor.';
-            return;
-        }
-
         $realTargetDir = realpath($targetDir);
         if ($realTargetDir === false) {
             if (!headers_sent()) {
@@ -1022,11 +1030,34 @@ class FileExplorerService
             return;
         }
 
+        if (!class_exists(ZipArchive::class)) {
+            if (!headers_sent()) {
+                http_response_code(500);
+            }
+            echo 'Error: La extensión php-zip no está habilitada en el servidor.';
+            return;
+        }
+
+        $lockFile = sys_get_temp_dir() . '/nas_zip_download.lock';
+        $lockFp = @fopen($lockFile, 'c+');
+        if ($lockFp !== false && !flock($lockFp, LOCK_EX | LOCK_NB)) {
+            if (!headers_sent()) {
+                http_response_code(429);
+            }
+            echo 'Operación en curso: ya se está procesando una compresión ZIP en el servidor. Intente más tarde.';
+            fclose($lockFp);
+            return;
+        }
+
         $folderName = basename($targetDir);
         $zipFile = sys_get_temp_dir() . '/nas_export_' . uniqid() . '.zip';
-        register_shutdown_function(static function () use ($zipFile): void {
+        register_shutdown_function(static function () use ($zipFile, $lockFp): void {
             if (file_exists($zipFile)) {
                 @unlink($zipFile);
+            }
+            if (is_resource($lockFp)) {
+                @flock($lockFp, LOCK_UN);
+                @fclose($lockFp);
             }
         });
 
@@ -1049,6 +1080,9 @@ class FileExplorerService
         $addedEntries = 0;
 
         foreach ($files as $file) {
+            if ($file->isLink()) {
+                continue;
+            }
             if (!$file->isDir()) {
                 $filePath = $file->getRealPath();
                 if ($filePath === false) {
