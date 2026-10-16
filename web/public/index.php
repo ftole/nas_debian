@@ -58,7 +58,8 @@ set_exception_handler(function (\Throwable $e): void {
 $request = new Request();
 $router = new Router();
 
-// Middleware de autenticación y protección de sesiones
+// Middleware de autenticación y protección de sesiones (SameSite=Strict)
+AuthMiddleware::initSession();
 if (!AuthMiddleware::check($request)) {
     return;
 }
