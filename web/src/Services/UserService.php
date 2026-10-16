@@ -602,26 +602,31 @@ class UserService
         }
 
         // Rol administrador (root/sudo) y política de shell
+        $wasPrivileged = in_array('sudo', $currentGroups, true)
+            || in_array('adm', $currentGroups, true)
+            || in_array('grp_samba', $currentGroups, true);
+
         if ($isPrivileged) {
-            if (!in_array('sudo', $currentGroups, true)) {
+            if (!$wasPrivileged) {
                 if (file_exists('/usr/local/sbin/nas-admin-manage')) {
                     SystemService::sudo(['/usr/local/sbin/nas-admin-manage', 'add', $username]);
                 } else {
-                    SystemService::sudo(['gpasswd', '-a', $username, 'sudo']);
                     SystemService::sudo(['gpasswd', '-a', $username, 'adm']);
+                    SystemService::sudo(['gpasswd', '-a', $username, 'grp_samba']);
                 }
-                SystemService::sudo(['gpasswd', '-a', $username, 'grp_samba']);
             }
             SystemService::sudo(['usermod', '-s', '/bin/bash', $username]);
         } else {
-            if (in_array('sudo', $currentGroups, true)) {
+            if ($wasPrivileged) {
                 if (file_exists('/usr/local/sbin/nas-admin-manage')) {
                     SystemService::sudo(['/usr/local/sbin/nas-admin-manage', 'remove', $username]);
                 } else {
-                    SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
                     SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
+                    SystemService::sudo(['gpasswd', '-d', $username, 'grp_samba']);
                 }
-                SystemService::sudo(['gpasswd', '-d', $username, 'grp_samba']);
+                if (in_array('sudo', $currentGroups, true)) {
+                    SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
+                }
             }
             SystemService::sudo(['usermod', '-s', '/usr/sbin/nologin', $username]);
         }
