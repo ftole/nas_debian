@@ -528,14 +528,21 @@ class StorageService
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $device) || !preg_match('/^[a-zA-Z0-9._-]{1,60}$/', $subvol)) {
             return ['success' => false, 'error' => 'Parámetros inválidos para subvolumen Btrfs.'];
         }
-        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
-            return ['success' => true, 'message' => "Subvolumen Btrfs $subvol simulado (modo dev)."];
-        }
         $resolvedBtrfsDevice = $this->resolveBlockDevice($device);
         if ($resolvedBtrfsDevice === null) {
             return ['success' => false, 'error' => 'El dispositivo no corresponde a un disco o partición de bloque reconocido por el sistema.'];
         }
         $device = $resolvedBtrfsDevice;
+        $name = basename($device);
+        if ($this->isOsDisk($name)) {
+            return ['success' => false, 'error' => 'Operación prohibida: es el disco del sistema operativo.'];
+        }
+        if ($this->deviceInUseCritical($device)) {
+            return ['success' => false, 'error' => 'Operación prohibida: el dispositivo contiene un volumen LVM o un miembro de RAID activo.'];
+        }
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return ['success' => true, 'message' => "Subvolumen Btrfs $subvol simulado (modo dev)."];
+        }
         $mountPoint = '/mnt/nas-btrfs-tmp';
         SystemService::sudo(['mkdir', '-p', $mountPoint]);
         if (SystemService::sudo(['mount', $device, $mountPoint])['code'] !== 0) {
