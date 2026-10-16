@@ -21,8 +21,20 @@ class TerminalController
         $this->terminalService = $service ?? new TerminalService();
     }
 
+    private function isAdminCaller(): bool
+    {
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        return !empty($_SESSION['nas_user']['is_admin'])
+            || in_array($role, ['admin', 'superadmin'], true);
+    }
+
     public function exec(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $body = $request->getBody();
         $cmd = (string) ($body['cmd'] ?? $body['command'] ?? '');
         $cwd = (string) ($body['cwd'] ?? '/srv/nas');
@@ -48,6 +60,11 @@ class TerminalController
 
     public function history(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $limit = (int) ($request->getQuery()['limit'] ?? 20);
         $history = $this->terminalService->getHistory(max(1, min($limit, 100)));
         Response::json([
@@ -58,6 +75,11 @@ class TerminalController
 
     public function session(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $body = $request->getBody();
         $cols = max(40, min((int) ($body['cols'] ?? 200), 400));
         $rows = max(10, min((int) ($body['rows'] ?? 50), 200));
@@ -71,6 +93,11 @@ class TerminalController
 
     public function send(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $body = $request->getBody();
         $data = (string) ($body['data'] ?? '');
         $res = $this->terminalService->send($data);
@@ -83,6 +110,11 @@ class TerminalController
 
     public function capture(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $res = $this->terminalService->capture();
         if (!$res['success']) {
             Response::error($res['error'] ?? 'No se pudo capturar la terminal.');
@@ -93,6 +125,11 @@ class TerminalController
 
     public function resize(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $body = $request->getBody();
         $cols = max(40, min((int) ($body['cols'] ?? 200), 400));
         $rows = max(10, min((int) ($body['rows'] ?? 50), 200));
@@ -102,6 +139,11 @@ class TerminalController
 
     public function kill(Request $request): void
     {
+        if (!$this->isAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
         $this->terminalService->killSession();
         Response::success(null, 'Sesión de terminal finalizada.');
     }
