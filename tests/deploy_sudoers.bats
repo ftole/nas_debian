@@ -114,7 +114,7 @@ _extraer_bloque_sudoers() {
     _extraer_bloque_sudoers > "$tmp"
     [ -s "$tmp" ]
 
-    run grep -q '/usr/local/sbin/nas-user-gecos \[a-zA-Z0-9_.-]\*' "$tmp"
+    run grep -F '/usr/local/sbin/nas-user-gecos ^[a-z_][a-z0-9_.-]*$' "$tmp"
     [ "$status" -eq 0 ]
 
     rm -f "$tmp"
@@ -126,9 +126,9 @@ _extraer_bloque_sudoers() {
     _extraer_bloque_sudoers > "$tmp"
     [ -s "$tmp" ]
 
-    run grep -q '/usr/local/sbin/nas-admin-manage add \[a-zA-Z0-9_.-]\*' "$tmp"
+    run grep -F '/usr/local/sbin/nas-admin-manage ^add\ [a-z_][a-z0-9_.-]*$' "$tmp"
     [ "$status" -eq 0 ]
-    run grep -q '/usr/local/sbin/nas-admin-manage remove \[a-zA-Z0-9_.-]\*' "$tmp"
+    run grep -F '/usr/local/sbin/nas-admin-manage ^remove\ [a-z_][a-z0-9_.-]*$' "$tmp"
     [ "$status" -eq 0 ]
 
     rm -f "$tmp"
