@@ -150,6 +150,32 @@ _hook_post_actualizacion() {
         rm -f "$tmp_term" 2>/dev/null || true
     fi
 
+    local chp_dest="${NAS_CHPASSWD_DEST:-/usr/local/sbin/nas-chpasswd}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CHPASSWD_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local tmp_chp
+        tmp_chp="$(mktemp 2>/dev/null || echo "/tmp/nas-chpasswd.$$")"
+        if awk '
+            /^cat << '\''NAS_CHPASSWD_EOF'\'' > \/usr\/local\/sbin\/nas-chpasswd$/ { capture=1; next }
+            capture && /^NAS_CHPASSWD_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_chp" 2>/dev/null && [ -s "$tmp_chp" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$chp_dest")" ]; then
+                mkdir -p "$(dirname "$chp_dest")" 2>/dev/null || true
+                cp -f "$tmp_chp" "$chp_dest" 2>/dev/null || true
+                chmod 0755 "$chp_dest" 2>/dev/null || true
+                chown root:root "$chp_dest" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$tmp_chp" 2>/dev/null || true
+    fi
+
+    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/lib/nas" ]; then
+        mkdir -p /var/lib/nas/staging 2>/dev/null || true
+        chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
+        chmod 0770 /var/lib/nas 2>/dev/null || true
+        chmod 0700 /var/lib/nas/staging 2>/dev/null || true
+    fi
+
     local sudoers_dir="${NAS_SUDOERS_DIR:-/etc/sudoers.d}"
     local sudoers_dest="${NAS_SUDOERS_DEST:-$sudoers_dir/nas-web}"
     if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$sudoers_dir" ]; then
