@@ -422,7 +422,9 @@ class SambaService
         }
 
         try {
-            $tmpFile = tempnam(sys_get_temp_dir(), 'smbconf_');
+            $stagingDir = '/var/lib/nas/staging';
+            $tmpDir = (is_dir($stagingDir) && is_writable($stagingDir)) ? $stagingDir : sys_get_temp_dir();
+            $tmpFile = tempnam($tmpDir, 'smbconf_');
             if ($tmpFile === false) {
                 return ['success' => false, 'error' => 'No se pudo crear archivo temporal para smb.conf.'];
             }
