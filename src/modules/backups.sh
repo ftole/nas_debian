@@ -335,7 +335,7 @@ else
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --timeout=60 --delete)
+RSYNC_OPTS=(-a --safe-links --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
@@ -587,7 +587,7 @@ if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; th
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
@@ -781,7 +781,7 @@ if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; th
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --numeric-ids --timeout=60 --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=60 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
