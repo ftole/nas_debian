@@ -202,6 +202,59 @@ class AuthService
     }
 
     /**
+     * Valida credenciales contra las cuentas del sistema, eliminando cualquier caché residual
+     * y mitigando ataques de temporización cuando la cuenta no existe en el sistema.
+     *
+     * @param string $username Nombre de usuario.
+     * @param string $password Contraseña en texto plano.
+     * @return bool True si las credenciales son válidas, false en caso contrario.
+     */
+    public function verifyCredentials(string $username, string $password): bool
+    {
+        // 1. Eliminar caché de verificación si existiera en la sesión
+        if (isset($_SESSION['auth_verify_cache'])) {
+            unset($_SESSION['auth_verify_cache']);
+        }
+
+        $cleanUsername = strtolower(trim($username));
+        $dummyHash = '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345';
+
+        if ($cleanUsername === '' || $password === '' || !preg_match('/^[a-z0-9_-]{2,32}$/', $cleanUsername)) {
+            password_verify($password, $dummyHash);
+            return false;
+        }
+
+        // Modo suite de pruebas unitarias
+        if (getenv('APP_ENV') === 'testing') {
+            $testCreds = self::getTestCredentials();
+            if (!isset($testCreds[$cleanUsername])) {
+                password_verify($password, $dummyHash);
+                return false;
+            }
+            return ($password === $testCreds[$cleanUsername]);
+        }
+
+        // Comprobación de existencia de usuario en el sistema operativo mediante getpwnam
+        $pwnam = function_exists('posix_getpwnam') ? @posix_getpwnam($cleanUsername) : false;
+        if ($pwnam === false) {
+            // Mitigación de canal lateral de temporización:
+            // Ejecutar operación dummy compensatoria para igualar la latencia con usuarios existentes
+            password_verify($password, $dummyHash);
+            if (DIRECTORY_SEPARATOR !== '\\') {
+                SystemService::sudo(
+                    ['smbclient', '//127.0.0.1/IPC$', '-U', 'nas_dummy_probe_user', '-c', 'exit'],
+                    "invalid_dummy_pass\n"
+                );
+            }
+            return false;
+        }
+
+        // Si el usuario existe, validar credenciales
+        $res = $this->authenticate($cleanUsername, $password);
+        return !empty($res['success']);
+    }
+
+    /**
      * Cierra la sesión activa en el servidor y limpia las cookies asociadas.
      */
     public function logout(): void
@@ -249,13 +302,27 @@ class AuthService
             }
 
             if ($username !== null && trim($username) !== '') {
+                $cleanUser = strtolower(trim($username));
                 $rowsUser = DatabaseService::query(
                     "SELECT COUNT(*) as cnt FROM login_attempts WHERE username = :username COLLATE NOCASE AND attempted_at >= datetime('now', '-" . self::LOCKOUT_MINUTES . " minutes')",
-                    ['username' => trim($username)]
+                    ['username' => $cleanUser]
                 );
                 $countUser = (int) ($rowsUser[0]['cnt'] ?? 0);
                 if ($countUser >= self::MAX_FAILED_ATTEMPTS) {
                     return true;
+                }
+
+                $userKey = 'login_user:' . $cleanUser;
+                try {
+                    $rowsLimit = DatabaseService::query(
+                        "SELECT COUNT(*) as cnt FROM api_rate_limits WHERE key = :key AND created_at >= datetime('now', '-" . (self::LOCKOUT_MINUTES * 60) . " seconds')",
+                        ['key' => $userKey]
+                    );
+                    if ((int) ($rowsLimit[0]['cnt'] ?? 0) >= self::MAX_FAILED_ATTEMPTS) {
+                        return true;
+                    }
+                } catch (\Throwable $e) {
+                    // Ignorar si api_rate_limits no está inicializada aún
                 }
             }
 
@@ -276,6 +343,9 @@ class AuthService
                 'ip' => $ip,
                 'username' => $username,
             ]);
+            if (trim($username) !== '') {
+                self::checkRateLimit('login_user:' . strtolower(trim($username)), self::MAX_FAILED_ATTEMPTS, self::LOCKOUT_MINUTES * 60);
+            }
         } catch (\Throwable $e) {
             error_log('Error registrando intento fallido: ' . $e->getMessage());
         }
@@ -290,10 +360,12 @@ class AuthService
     {
         try {
             if ($username !== null && trim($username) !== '') {
+                $cleanUser = strtolower(trim($username));
                 DatabaseService::execute(
                     'DELETE FROM login_attempts WHERE ip = :ip OR username = :username COLLATE NOCASE',
-                    ['ip' => $ip, 'username' => trim($username)]
+                    ['ip' => $ip, 'username' => $cleanUser]
                 );
+                self::clearRateLimits('login_user:' . $cleanUser);
             } else {
                 DatabaseService::execute(
                     'DELETE FROM login_attempts WHERE ip = :ip',
