@@ -241,13 +241,9 @@ class UserService
         $validGroups = [];
         if ($isSuperadmin) {
             SystemService::sudo(['groupadd', '-f', 'grp_superadmin']);
-            $validGroups[] = 'sudo';
-            $validGroups[] = 'adm';
             $validGroups[] = 'grp_samba';
             $validGroups[] = 'grp_superadmin';
         } elseif ($isAdmin) {
-            $validGroups[] = 'sudo';
-            $validGroups[] = 'adm';
             $validGroups[] = 'grp_samba';
         } elseif ($canWeb) {
             SystemService::sudo(['groupadd', '-f', 'grp_web']);
@@ -260,6 +256,15 @@ class UserService
         }
         foreach (array_unique($validGroups) as $vGroup) {
             SystemService::sudo(['gpasswd', '-a', $username, $vGroup]);
+        }
+
+        if ($isPrivileged) {
+            if (file_exists('/usr/local/sbin/nas-admin-manage')) {
+                SystemService::sudo(['/usr/local/sbin/nas-admin-manage', 'add', $username]);
+            } else {
+                SystemService::sudo(['gpasswd', '-a', $username, 'sudo']);
+                SystemService::sudo(['gpasswd', '-a', $username, 'adm']);
+            }
         }
 
         // 6. Política de shell: bash para admin/superadmin, nologin para el resto
@@ -577,15 +582,23 @@ class UserService
         // Rol administrador (root/sudo) y política de shell
         if ($isPrivileged) {
             if (!in_array('sudo', $currentGroups, true)) {
-                SystemService::sudo(['gpasswd', '-a', $username, 'sudo']);
-                SystemService::sudo(['gpasswd', '-a', $username, 'adm']);
+                if (file_exists('/usr/local/sbin/nas-admin-manage')) {
+                    SystemService::sudo(['/usr/local/sbin/nas-admin-manage', 'add', $username]);
+                } else {
+                    SystemService::sudo(['gpasswd', '-a', $username, 'sudo']);
+                    SystemService::sudo(['gpasswd', '-a', $username, 'adm']);
+                }
                 SystemService::sudo(['gpasswd', '-a', $username, 'grp_samba']);
             }
             SystemService::sudo(['usermod', '-s', '/bin/bash', $username]);
         } else {
             if (in_array('sudo', $currentGroups, true)) {
-                SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
-                SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
+                if (file_exists('/usr/local/sbin/nas-admin-manage')) {
+                    SystemService::sudo(['/usr/local/sbin/nas-admin-manage', 'remove', $username]);
+                } else {
+                    SystemService::sudo(['gpasswd', '-d', $username, 'sudo']);
+                    SystemService::sudo(['gpasswd', '-d', $username, 'adm']);
+                }
                 SystemService::sudo(['gpasswd', '-d', $username, 'grp_samba']);
             }
             SystemService::sudo(['usermod', '-s', '/usr/sbin/nologin', $username]);
