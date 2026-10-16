@@ -89,8 +89,18 @@ class AuthMiddleware
         $hostHeader = (string) ($request->getHeader('Host') ?? ($_SERVER['SERVER_NAME'] ?? ''));
         $targetHost = parse_url('http://' . $hostHeader, PHP_URL_HOST);
 
-        return is_string($targetHost) && $targetHost !== ''
-            && strcasecmp($sourceHost, $targetHost) === 0;
+        if (!is_string($targetHost) || $targetHost === '' || strcasecmp($sourceHost, $targetHost) !== 0) {
+            return false;
+        }
+
+        // Si ambos especifican un puerto explícito, deben coincidir para prevenir CSRF entre puertos
+        $sourcePort = parse_url($source, PHP_URL_PORT);
+        $targetPort = parse_url('http://' . $hostHeader, PHP_URL_PORT);
+        if ($targetPort !== null && $sourcePort !== null && $sourcePort !== $targetPort) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
