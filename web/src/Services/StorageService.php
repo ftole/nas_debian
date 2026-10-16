@@ -146,6 +146,12 @@ class StorageService
         return $result;
     }
 
+    /** @var string Ruta al archivo mdstat para detección de arreglos RAID */
+    public static string $mdstatPath = '/proc/mdstat';
+
+    /** @var string|null Salida simulada de comando pvs para pruebas unitarias */
+    public static ?string $mockPvs = null;
+
     /**
      * Indica si un disco contiene metadatos de volumen activo (PV de LVM o miembro de RAID md).
      * Estos discos no deben formatearse ni provisionarse aunque se solicite desmontarlos.
@@ -156,15 +162,18 @@ class StorageService
             return false;
         }
 
-        $real = realpath($device);
-        if ($real === false || !str_starts_with($real, '/dev/')) {
+        $real = realpath($device) ?: $device;
+        if (!str_starts_with($real, '/dev/')) {
             return false;
         }
 
-        // Miembro de arreglo RAID (md): el nombre del kernel aparece en /proc/mdstat.
+        // Miembro de arreglo RAID (md): el nombre del kernel aparece en mdstat.
         $kernelNames = SystemService::runCommand(['lsblk', '-ln', '-o', 'NAME', $real])['stdout'] ?? '';
-        if (is_readable('/proc/mdstat')) {
-            $mdstat = (string) file_get_contents('/proc/mdstat');
+        if (empty($kernelNames)) {
+            $kernelNames = basename($real);
+        }
+        if (is_readable(self::$mdstatPath)) {
+            $mdstat = (string) file_get_contents(self::$mdstatPath);
             foreach (preg_split('/\s+/', trim((string) $kernelNames)) as $kernelName) {
                 if ($kernelName !== '' && preg_match('/\b' . preg_quote($kernelName, '/') . '\b/', $mdstat)) {
                     return true;
@@ -173,11 +182,14 @@ class StorageService
         }
 
         // Physical Volume de LVM activo ('sudo pvs' ya está autorizado para www-data).
-        $pvs = SystemService::sudo(['pvs'])['stdout'] ?? '';
+        $pvs = self::$mockPvs ?? (SystemService::sudo(['pvs'])['stdout'] ?? '');
         foreach (preg_split('/\r\n|\r|\n/', (string) $pvs) as $line) {
             $cols = preg_split('/\s+/', trim($line));
-            if (!empty($cols[0]) && str_starts_with($cols[0], '/dev/') && realpath($cols[0]) === $real) {
-                return true;
+            if (!empty($cols[0]) && str_starts_with($cols[0], '/dev/')) {
+                $pvReal = realpath($cols[0]) ?: $cols[0];
+                if ($pvReal === $real || basename($pvReal) === basename($real)) {
+                    return true;
+                }
             }
         }
 
@@ -299,20 +311,34 @@ class StorageService
      *
      * @return string|null Ruta canónica /dev/... o null si no es un disco válido.
      */
-    private function resolveBlockDevice(string $device): ?string
+    public function resolveBlockDevice(string $device): ?string
     {
-        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+        if (DIRECTORY_SEPARATOR === '\\') {
             return $device;
         }
+
         $real = realpath($device);
-        if ($real === false || !str_starts_with($real, '/dev/') || @filetype($real) !== 'block') {
-            return null;
+        if ($real !== false) {
+            // El dispositivo existe físicamente: debe ser un dispositivo de bloque y reconocido por lsblk
+            if (!str_starts_with($real, '/dev/') || @filetype($real) !== 'block') {
+                return null;
+            }
+            $type = trim(SystemService::runCommand(['lsblk', '-nd', '-o', 'TYPE', $real])['stdout'] ?? '');
+            if (!in_array($type, ['disk', 'part'], true)) {
+                return null;
+            }
+            return $real;
         }
-        $type = trim(SystemService::runCommand(['lsblk', '-nd', '-o', 'TYPE', $real])['stdout'] ?? '');
-        if (!in_array($type, ['disk', 'part'], true)) {
-            return null;
+
+        // Si no existe físicamente en el filesystem:
+        // En entorno de pruebas solo se aceptan nombres de disco canónicos simulados (sdX, vdX, nvmeX)
+        if (getenv('APP_ENV') === 'testing') {
+            if (preg_match('#^/dev/(sd[a-z][0-9]?|vd[a-z][0-9]?|nvme[0-9]n[0-9](p[0-9])?)$#', $device)) {
+                return $device;
+            }
         }
-        return $real;
+
+        return null;
     }
 
     /**
