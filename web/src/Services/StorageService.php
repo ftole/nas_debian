@@ -182,19 +182,21 @@ class StorageService
         }
 
         // Physical Volume de LVM activo ('sudo pvs' ya está autorizado para www-data).
+        $diskBase = basename($real);
         $pvs = self::$mockPvs ?? (SystemService::sudo(['pvs'])['stdout'] ?? '');
         foreach (preg_split('/\r\n|\r|\n/', (string) $pvs) as $line) {
             $cols = preg_split('/\s+/', trim($line));
             if (!empty($cols[0]) && str_starts_with($cols[0], '/dev/')) {
                 $pvReal = realpath($cols[0]) ?: $cols[0];
-                if ($pvReal === $real || basename($pvReal) === basename($real)) {
+                $pvBase = basename($pvReal);
+                if ($pvReal === $real || $pvBase === $diskBase || preg_match('/^' . preg_quote($diskBase, '/') . '(?:p?\d+)$/', $pvBase)) {
                     return true;
                 }
                 // El volumen físico puede residir en una partición del disco consultado (p. ej. /dev/sda1 para /dev/sda)
                 $pvChain = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', $pvReal])['stdout'] ?? '';
                 foreach (preg_split('/\s+/', trim((string) $pvChain)) as $ancestor) {
                     $ancestor = (string) preg_replace('/^[^a-zA-Z0-9]+/', '', $ancestor);
-                    if ($ancestor !== '' && $ancestor === basename($real)) {
+                    if ($ancestor !== '' && ($ancestor === $diskBase || preg_match('/^' . preg_quote($diskBase, '/') . '(?:p?\d+)$/', $ancestor))) {
                         return true;
                     }
                 }
@@ -357,6 +359,13 @@ class StorageService
         if (DIRECTORY_SEPARATOR === '\\') {
             return false;
         }
+        $name = trim($name);
+        if ($name === '') {
+            return false;
+        }
+        $diskDev = str_starts_with($name, '/dev/') ? $name : '/dev/' . $name;
+        $diskBase = basename($name);
+
         $rootSrc = trim(SystemService::runCommand(['findmnt', '-n', '-o', 'SOURCE', '/'])['stdout'] ?? '');
         // findmnt reporta subvolúmenes Btrfs como "/dev/sda2[/@]"; limpiar el sufijo
         $rootSrc = preg_replace('#\[.*$#', '', $rootSrc) ?? $rootSrc;
@@ -370,7 +379,11 @@ class StorageService
         $rootDevs = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', $rootSrc])['stdout'] ?? '';
         $rootDevSet = array_filter(preg_split('/\s+/', trim($rootDevs)));
 
-        $parents = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', '/dev/' . $name])['stdout'] ?? '';
+        if ($diskBase === $rootDisk || in_array($diskBase, $rootDevSet, true)) {
+            return true;
+        }
+
+        $parents = SystemService::runCommand(['lsblk', '-s', '-n', '-o', 'NAME', $diskDev])['stdout'] ?? '';
         foreach (preg_split('/\s+/', trim($parents)) as $p) {
             if ($p !== '' && ($p === $rootDisk || in_array($p, $rootDevSet, true))) {
                 return true;
