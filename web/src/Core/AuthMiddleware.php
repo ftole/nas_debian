@@ -65,6 +65,35 @@ class AuthMiddleware
     }
 
     /**
+     * Verifica que una petición mutante proceda del mismo origen que el panel.
+     * Se aplica también al flujo de login, que no dispone de token CSRF de sesión
+     * previo y por tanto quedaba expuesto a login-CSRF.
+     */
+    public static function verifySameOrigin(Request $request): bool
+    {
+        $source = $request->getHeader('Origin');
+        if ($source === null || $source === '') {
+            $source = $request->getHeader('Referer');
+        }
+
+        // Cliente no navegador (sin Origin ni Referer): no es un vector CSRF.
+        if ($source === null || $source === '') {
+            return true;
+        }
+
+        $sourceHost = parse_url($source, PHP_URL_HOST);
+        if (!is_string($sourceHost) || $sourceHost === '') {
+            return false;
+        }
+
+        $hostHeader = (string) ($request->getHeader('Host') ?? ($_SERVER['SERVER_NAME'] ?? ''));
+        $targetHost = parse_url('http://' . $hostHeader, PHP_URL_HOST);
+
+        return is_string($targetHost) && $targetHost !== ''
+            && strcasecmp($sourceHost, $targetHost) === 0;
+    }
+
+    /**
      * Valida si la petición actual está autorizada para continuar.
      *
      * @param Request $request
@@ -151,7 +180,26 @@ class AuthMiddleware
 
         // Validación estricta de CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
         if (in_array($method, ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
-            // Permitir formulario y API pública de login sin token CSRF previo
+            // Toda petición mutante debe proceder del mismo origen (bloquea login-CSRF).
+            if (!self::verifySameOrigin($request)) {
+                if (getenv('APP_ENV') !== 'testing') {
+                    \App\Services\AuditService::log('csrf_origin_denied', $path, 'FAILED', ['method' => $method]);
+                }
+                if ($request->isJson()) {
+                    Response::error('Origen de la solicitud no permitido.', 403);
+                } else {
+                    if (!headers_sent()) {
+                        http_response_code(403);
+                    }
+                    echo '<h1>403 - Origen de la solicitud no permitido</h1>';
+                    if (getenv('APP_ENV') !== 'testing') {
+                        exit;
+                    }
+                }
+                return false;
+            }
+
+            // El flujo de login no dispone de token CSRF de sesión previo; el resto sí lo exige.
             if ($path !== '/login' && $path !== '/api/auth/login') {
                 $token = $request->getCsrfToken();
                 if (!self::verifyCsrfToken($token)) {
@@ -189,7 +237,7 @@ class AuthMiddleware
             return true;
         }
 
-        foreach (['/api/files', '/api/shares', '/api/backups', '/api/users', '/api/groups', '/api/services/'] as $prefix) {
+        foreach (['/api/files', '/api/shares', '/api/backups', '/api/users', '/api/groups'] as $prefix) {
             if (str_starts_with($path, $prefix)) {
                 return true;
             }
