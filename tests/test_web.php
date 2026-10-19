@@ -2090,6 +2090,10 @@ assertTrue($updDemote['success'], 'UserService::updateUser permite revocar privi
 // 28. Pruebas de Tamaño de Carpetas, Compresión ZIP (.tmp_zip) y Origen Remoto en Backups
 // ==============================================================================
 
+$tempSizeRoot = sys_get_temp_dir() . '/nas_size_root_' . uniqid();
+@mkdir($tempSizeRoot, 0777, true);
+FileExplorerService::setRootDir($tempSizeRoot);
+
 $feSizeTest = new FileExplorerService();
 $sizeFolderName = 'CARPETA_TAMANO_' . uniqid();
 $feSizeTest->createDirectory('', $sizeFolderName);
@@ -2134,6 +2138,9 @@ $leftoverZips = glob($tmpZipDir . '/nas_export_*.zip') ?: [];
 assertTrue($leftoverZips === [], 'FileExplorerService::downloadDirectoryZip elimina el archivo ZIP temporal de .tmp_zip tras finalizar la transmisión');
 
 $feSizeTest->deleteItem($sizeFolderName, true);
+@rmdir($tmpZipDir);
+@rmdir($tempSizeRoot);
+FileExplorerService::setRootDir(null);
 
 // Verificar extracción de origen remoto en BackupService::listTasks() con comillas simples (escapeshellarg) y dobles
 $bkpOriginDir = sys_get_temp_dir() . '/nas_bkp_runners_' . uniqid();
