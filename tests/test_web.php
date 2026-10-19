@@ -2086,6 +2086,89 @@ $userTestRemed = new UserService();
 $updDemote = $userTestRemed->updateUser('admin_demo', null, 'Usuario Demo', ['grp_general'], false, true, true, false);
 assertTrue($updDemote['success'], 'UserService::updateUser permite revocar privilegios administrativos');
 
+// ==============================================================================
+// 28. Pruebas de Tamaño de Carpetas, Compresión ZIP (.tmp_zip) y Origen Remoto en Backups
+// ==============================================================================
+
+$feSizeTest = new FileExplorerService();
+$sizeFolderName = 'CARPETA_TAMANO_' . uniqid();
+$feSizeTest->createDirectory('', $sizeFolderName);
+$sizeFolderAbs = FileExplorerService::getRootDir() . '/' . $sizeFolderName;
+file_put_contents($sizeFolderAbs . '/archivo_2kb.bin', str_repeat('A', 2048));
+file_put_contents($sizeFolderAbs . '/archivo_1kb.bin', str_repeat('B', 1024));
+
+$listRootForSize = $feSizeTest->listDirectory('');
+$foundFolderItem = null;
+foreach ($listRootForSize['items'] ?? [] as $it) {
+    if (($it['name'] ?? '') === $sizeFolderName) {
+        $foundFolderItem = $it;
+        break;
+    }
+}
+assertTrue($foundFolderItem !== null, 'FileExplorerService::listDirectory encuentra la carpeta creada');
+assertTrue(($foundFolderItem['size_bytes'] ?? 0) === 3072, 'FileExplorerService::listDirectory calcula size_bytes exacto (3072 B) para carpetas');
+assertTrue(($foundFolderItem['size_formatted'] ?? '--') === '3 KB', 'FileExplorerService::listDirectory formatea size_formatted (3 KB) para carpetas en lugar de --');
+
+// Verificar que .tmp_zip se crea dentro de la raíz NAS, está oculto en listDirectory y bloqueado en resolveSafePath
+$tmpZipDir = FileExplorerService::getTempZipDir();
+assertTrue(is_dir($tmpZipDir) && str_ends_with(str_replace('\\', '/', $tmpZipDir), '/.tmp_zip'), 'FileExplorerService::getTempZipDir utiliza /.tmp_zip en el volumen de almacenamiento');
+assertTrue($feSizeTest->resolveSafePath('.tmp_zip') === null, 'FileExplorerService::resolveSafePath bloquea acceso directo a .tmp_zip');
+assertTrue($feSizeTest->resolveSafePath('.tmp_zip/test.zip') === null, 'FileExplorerService::resolveSafePath bloquea acceso a subrutas dentro de .tmp_zip');
+
+$listAfterTmpZip = $feSizeTest->listDirectory('');
+$tmpZipVisible = false;
+foreach ($listAfterTmpZip['items'] ?? [] as $it) {
+    if (($it['name'] ?? '') === '.tmp_zip') {
+        $tmpZipVisible = true;
+        break;
+    }
+}
+assertTrue(!$tmpZipVisible, 'FileExplorerService::listDirectory oculta el directorio interno .tmp_zip');
+
+// Verificar compresión y descarga ZIP de la carpeta y limpieza posterior en .tmp_zip
+ob_start();
+$feSizeTest->downloadDirectoryZip($sizeFolderName);
+$zipBinaryStream = ob_get_clean();
+assertTrue(strlen($zipBinaryStream) > 50 && str_starts_with($zipBinaryStream, "PK\x03\x04"), 'FileExplorerService::downloadDirectoryZip transmite un archivo ZIP válido (cabecera PK)');
+$leftoverZips = glob($tmpZipDir . '/nas_export_*.zip') ?: [];
+assertTrue($leftoverZips === [], 'FileExplorerService::downloadDirectoryZip elimina el archivo ZIP temporal de .tmp_zip tras finalizar la transmisión');
+
+$feSizeTest->deleteItem($sizeFolderName, true);
+
+// Verificar extracción de origen remoto en BackupService::listTasks() con comillas simples (escapeshellarg) y dobles
+$bkpOriginDir = sys_get_temp_dir() . '/nas_bkp_runners_' . uniqid();
+@mkdir($bkpOriginDir, 0770, true);
+$bkpOriginSvc = new BackupService();
+$bkpOriginSvc->binDir = $bkpOriginDir;
+$bkpOriginSvc->cronDir = $bkpOriginDir;
+$bkpOriginSvc->logRoot = $bkpOriginDir;
+
+// Runner 1: CIFS con comillas simples (generado por escapeshellarg en BackupService::buildCifsRunner)
+file_put_contents($bkpOriginDir . '/backup_cifs_single.sh', "#!/usr/bin/env bash\nTASK_ID='cifs_single'\nSRC_IP='10.10.1.150'\nSRC_SHARE='Facturacion_2026'\nRETENTION=14\n");
+// Runner 2: SSH con comillas simples y puerto personalizado
+file_put_contents($bkpOriginDir . '/backup_ssh_single.sh', "#!/usr/bin/env bash\nTASK_ID='ssh_single'\nSRC_IP='10.10.1.160'\nSRC_PORT=2222\nSRC_USER='operador_lnx'\nSRC_PATH='/var/backups/postgres'\nRETENTION=21\n");
+// Runner 3: CIFS con comillas dobles (creado desde TUI Bash)
+file_put_contents($bkpOriginDir . '/backup_cifs_double.sh', "#!/usr/bin/env bash\nTASK_ID=\"cifs_double\"\nSRC_IP=\"10.10.1.170\"\nSRC_SHARE=\"RecursosHumanos\"\nRETENTION=30\n");
+// Runner 4: Local con comillas simples
+file_put_contents($bkpOriginDir . '/backup_local_single.sh', "#!/usr/bin/env bash\nTASK_ID='local_single'\nSRC_PATH='/srv/nas/SISTEMAS'\nRETENTION=7\n");
+
+$parsedTasks = $bkpOriginSvc->listTasks();
+$taskMap = [];
+foreach ($parsedTasks as $pt) {
+    $taskMap[$pt['id']] = $pt;
+}
+
+assertTrue(($taskMap['cifs_single']['source'] ?? '') === '//10.10.1.150/Facturacion_2026', 'BackupService::listTasks extrae origen CIFS con comillas simples (//10.10.1.150/Facturacion_2026)');
+assertTrue(($taskMap['cifs_single']['destination'] ?? '') === '//10.10.1.150/Facturacion_2026', 'BackupService::listTasks incluye clave destination para compatibilidad con CLI');
+assertTrue(($taskMap['ssh_single']['source'] ?? '') === 'operador_lnx@10.10.1.160:2222:/var/backups/postgres', 'BackupService::listTasks extrae origen SSH con comillas simples y puerto personalizado');
+assertTrue(($taskMap['cifs_double']['source'] ?? '') === '//10.10.1.170/RecursosHumanos', 'BackupService::listTasks extrae origen CIFS con comillas dobles (retrocompatibilidad TUI)');
+assertTrue(($taskMap['local_single']['source'] ?? '') === '/srv/nas/SISTEMAS', 'BackupService::listTasks extrae origen Local con comillas simples');
+
+foreach (glob($bkpOriginDir . '/*') ?: [] as $f) {
+    @unlink($f);
+}
+@rmdir($bkpOriginDir);
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
@@ -2093,4 +2176,5 @@ echo "==================================================\n";
 if ($failed > 0) {
     exit(1);
 }
+
 
