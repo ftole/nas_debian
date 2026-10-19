@@ -65,16 +65,16 @@ for r in runners:
         content = f.read()
         if "SRC_SHARE=" in content:
             proto = "CIFS (Win)"
-            m_ip = re.search(r"SRC_IP=['\"]?([^'\"\r\n]+)['\"]?", content)
-            m_sh = re.search(r"SRC_SHARE=['\"]?([^'\"\r\n]+)['\"]?", content)
+            m_ip = re.search(r"SRC_IP=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
+            m_sh = re.search(r"SRC_SHARE=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
             if m_ip and m_sh:
                 src = f"//{m_ip.group(1)}/{m_sh.group(1)}"
         elif "SRC_PORT=" in content or "sshpass" in content:
             proto = "SSH (Linux)"
-            m_ip = re.search(r"SRC_IP=['\"]?([^'\"\r\n]+)['\"]?", content)
-            m_pt = re.search(r"SRC_PATH=['\"]?([^'\"\r\n]+)['\"]?", content)
-            m_us = re.search(r"SRC_USER=['\"]?([^'\"\r\n]+)['\"]?", content)
-            m_po = re.search(r"SRC_PORT=['\"]?(\d+)['\"]?", content)
+            m_ip = re.search(r"SRC_IP=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
+            m_pt = re.search(r"SRC_PATH=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
+            m_us = re.search(r"SRC_USER=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
+            m_po = re.search(r"SRC_PORT=[\x27\"]?(\d+)[\x27\"]?", content)
             if m_ip and m_pt:
                 user_val = m_us.group(1) if m_us else "root"
                 port_val = int(m_po.group(1)) if m_po else 22
@@ -82,7 +82,7 @@ for r in runners:
                 src = f"{user_val}@{m_ip.group(1)}{port_suffix}:{m_pt.group(1)}"
         else:
             proto = "Local"
-            m_pt = re.search(r"SRC_PATH=['\"]?([^'\"\r\n]+)['\"]?", content)
+            m_pt = re.search(r"SRC_PATH=[\x27\"]?([^\x27\"\r\n]+)[\x27\"]?", content)
             if m_pt: src = m_pt.group(1)
         
         m_ret = re.search(r"RETENTION=(\d+)", content)
