@@ -833,6 +833,7 @@ assertTrue(!str_contains($zipStreamOut, 'secreto_fuera_de_raiz'), 'FileExplorerS
 @unlink($zipSubDir . '/symlink_leak.txt');
 @unlink($zipSubDir . '/seguro.txt');
 @rmdir($zipSubDir);
+@rmdir($tempSvgDir . '/.tmp_zip');
 @unlink($tempSvgDir . '/vector.svg');
 @rmdir($tempSvgDir);
 @unlink($outsideSecret);
@@ -2113,9 +2114,26 @@ assertTrue($foundFolderItem !== null, 'FileExplorerService::listDirectory encuen
 assertTrue(($foundFolderItem['size_bytes'] ?? 0) === 3072, 'FileExplorerService::listDirectory calcula size_bytes exacto (3072 B) para carpetas');
 assertTrue(($foundFolderItem['size_formatted'] ?? '--') === '3 KB', 'FileExplorerService::listDirectory formatea size_formatted (3 KB) para carpetas en lugar de --');
 
-// Verificar que .tmp_zip se crea dentro de la raíz NAS, está oculto en listDirectory y bloqueado en resolveSafePath
+if (DIRECTORY_SEPARATOR === '/' && @link($sizeFolderAbs . '/archivo_2kb.bin', $sizeFolderAbs . '/archivo_2kb_hardlink.bin')) {
+    clearstatcache();
+    $listHardlinkSize = $feSizeTest->listDirectory('');
+    $hlFolderItem = null;
+    foreach ($listHardlinkSize['items'] ?? [] as $it) {
+        if (($it['name'] ?? '') === $sizeFolderName) {
+            $hlFolderItem = $it;
+            break;
+        }
+    }
+    assertTrue(($hlFolderItem['size_bytes'] ?? 0) === 3072, 'FileExplorerService::listDirectory deduplica hardlinks por inodo dentro de la misma carpeta');
+    @unlink($sizeFolderAbs . '/archivo_2kb_hardlink.bin');
+}
+
+// Verificar que .tmp_zip se crea dentro de la raíz NAS con permisos 02770 (sin pérdida por umask), está oculto en listDirectory y bloqueado en resolveSafePath
 $tmpZipDir = FileExplorerService::getTempZipDir();
 assertTrue(is_dir($tmpZipDir) && str_ends_with(str_replace('\\', '/', $tmpZipDir), '/.tmp_zip'), 'FileExplorerService::getTempZipDir utiliza /.tmp_zip en el volumen de almacenamiento');
+if (DIRECTORY_SEPARATOR === '/') {
+    assertTrue(((@fileperms($tmpZipDir) ?: 0) & 0770) === 0770, 'FileExplorerService::getTempZipDir aplica permisos 02770 con escritura de grupo pese a umask');
+}
 assertTrue($feSizeTest->resolveSafePath('.tmp_zip') === null, 'FileExplorerService::resolveSafePath bloquea acceso directo a .tmp_zip');
 assertTrue($feSizeTest->resolveSafePath('.tmp_zip/test.zip') === null, 'FileExplorerService::resolveSafePath bloquea acceso a subrutas dentro de .tmp_zip');
 
@@ -2129,13 +2147,31 @@ foreach ($listAfterTmpZip['items'] ?? [] as $it) {
 }
 assertTrue(!$tmpZipVisible, 'FileExplorerService::listDirectory oculta el directorio interno .tmp_zip');
 
-// Verificar compresión y descarga ZIP de la carpeta y limpieza posterior en .tmp_zip
+// Verificar compresión y descarga ZIP directa (1 paso) y limpieza posterior en .tmp_zip
 ob_start();
 $feSizeTest->downloadDirectoryZip($sizeFolderName);
 $zipBinaryStream = ob_get_clean();
 assertTrue(strlen($zipBinaryStream) > 50 && str_starts_with($zipBinaryStream, "PK\x03\x04"), 'FileExplorerService::downloadDirectoryZip transmite un archivo ZIP válido (cabecera PK)');
 $leftoverZips = glob($tmpZipDir . '/nas_export_*.zip') ?: [];
 assertTrue($leftoverZips === [], 'FileExplorerService::downloadDirectoryZip elimina el archivo ZIP temporal de .tmp_zip tras finalizar la transmisión');
+
+// Verificar flujo de compresión y descarga en 2 pasos (prepare=true + token) para archivos masivos sin límite de RAM en el navegador
+ob_start();
+$feSizeTest->downloadDirectoryZip($sizeFolderName, true);
+$prepJsonRaw = ob_get_clean();
+$prepRes = json_decode((string) $prepJsonRaw, true) ?: [];
+$prepToken = (string) ($prepRes['token'] ?? '');
+assertTrue(($prepRes['success'] ?? false) === true && strlen($prepToken) === 32, 'FileExplorerService::downloadDirectoryZip(prepareOnly=true) genera token hexadecimal de 32 caracteres');
+assertTrue(($prepRes['filename'] ?? '') === $sizeFolderName . '.zip', 'FileExplorerService::downloadDirectoryZip(prepareOnly=true) devuelve el nombre del archivo ZIP');
+$preparedZips = glob($tmpZipDir . '/nas_export_' . $prepToken . '.zip') ?: [];
+assertTrue(count($preparedZips) === 1, 'FileExplorerService::downloadDirectoryZip(prepareOnly=true) persiste el archivo temporal en .tmp_zip hasta su descarga');
+
+ob_start();
+$feSizeTest->downloadDirectoryZip($sizeFolderName, false, $prepToken);
+$tokenBinaryStream = ob_get_clean();
+assertTrue(strlen($tokenBinaryStream) > 50 && str_starts_with($tokenBinaryStream, "PK\x03\x04"), 'FileExplorerService::downloadDirectoryZip(token) transmite el archivo ZIP preparado');
+$leftoverAfterToken = glob($tmpZipDir . '/nas_export_*.zip') ?: [];
+assertTrue($leftoverAfterToken === [], 'FileExplorerService::downloadDirectoryZip(token) elimina el archivo ZIP temporal de .tmp_zip tras transmitirlo');
 
 $feSizeTest->deleteItem($sizeFolderName, true);
 @rmdir($tmpZipDir);
