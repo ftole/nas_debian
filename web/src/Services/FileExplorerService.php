@@ -420,9 +420,12 @@ class FileExplorerService
         $trashDir = self::getRootDir() . '/.trash';
         if (!is_dir($trashDir)) {
             @mkdir($trashDir, 0770, true);
+            @chmod($trashDir, 02770);
             if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
                 @chgrp($trashDir, 'grp_samba');
             }
+        } elseif (((@fileperms($trashDir) ?: 0) & 0770) !== 0770) {
+            @chmod($trashDir, 02770);
         }
         return $trashDir;
     }
@@ -436,11 +439,21 @@ class FileExplorerService
         $tmpZipDir = self::getRootDir() . '/.tmp_zip';
         if (!is_dir($tmpZipDir)) {
             @mkdir($tmpZipDir, 0770, true);
+            @chmod($tmpZipDir, 02770);
             if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
                 @chgrp($tmpZipDir, 'grp_samba');
             }
+        } elseif (((@fileperms($tmpZipDir) ?: 0) & 0770) !== 0770) {
+            @chmod($tmpZipDir, 02770);
         }
         if (is_dir($tmpZipDir) && is_writable($tmpZipDir)) {
+            $now = time();
+            foreach (glob($tmpZipDir . '/nas_export_*.zip') ?: [] as $oldZip) {
+                $mtime = @filemtime($oldZip);
+                if ($mtime !== false && ($now - $mtime) > 3600) {
+                    @unlink($oldZip);
+                }
+            }
             return $tmpZipDir;
         }
         return sys_get_temp_dir();
@@ -1035,7 +1048,7 @@ class FileExplorerService
     /**
      * Genera un archivo ZIP temporal de una carpeta y lo transmite al cliente.
      */
-    public function downloadDirectoryZip(string $subpath): void
+    public function downloadDirectoryZip(string $subpath, bool $prepareOnly = false, string $token = ''): void
     {
         $targetDir = $this->resolveSafePath($subpath);
         if ($targetDir === null || !is_dir($targetDir)) {
@@ -1073,6 +1086,38 @@ class FileExplorerService
         }
 
         @set_time_limit(0);
+        if (getenv('APP_ENV') !== 'testing' && session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
+
+        $folderName = basename($targetDir);
+        $tmpZipDir = self::getTempZipDir();
+
+        // Fase 2 (transmisión directa por navegador tras compresión previa con prepare=1)
+        if ($token !== '') {
+            if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
+                if (!headers_sent()) {
+                    http_response_code(400);
+                }
+                echo 'Token de descarga ZIP inválido.';
+                return;
+            }
+            $preparedZip = $tmpZipDir . '/nas_export_' . $token . '.zip';
+            if (!is_file($preparedZip) || is_link($preparedZip)) {
+                if (!headers_sent()) {
+                    http_response_code(404);
+                }
+                echo 'El archivo comprimido temporal ya fue descargado o expiró.';
+                return;
+            }
+            register_shutdown_function(static function () use ($preparedZip): void {
+                if (file_exists($preparedZip)) {
+                    @unlink($preparedZip);
+                }
+            });
+            $this->streamFileDownload($preparedZip, $folderName . '.zip', true);
+            return;
+        }
 
         $lockFile = sys_get_temp_dir() . '/nas_zip_download.lock';
         $lockFp = @fopen($lockFile, 'c+');
@@ -1085,9 +1130,9 @@ class FileExplorerService
             return;
         }
 
-        $folderName = basename($targetDir);
-        $tmpZipDir = self::getTempZipDir();
-        $zipFile = $tmpZipDir . '/nas_export_' . uniqid('', true) . '.zip';
+        $exportToken = bin2hex(random_bytes(16));
+        $zipFile = $tmpZipDir . '/nas_export_' . $exportToken . '.zip';
+        $keepPreparedZip = false;
         $releaseLock = static function () use (&$lockFp): void {
             if (is_resource($lockFp)) {
                 @flock($lockFp, LOCK_UN);
@@ -1095,8 +1140,8 @@ class FileExplorerService
                 $lockFp = null;
             }
         };
-        register_shutdown_function(static function () use ($zipFile, $releaseLock): void {
-            if (file_exists($zipFile)) {
+        register_shutdown_function(static function () use ($zipFile, &$keepPreparedZip, $releaseLock): void {
+            if (!$keepPreparedZip && file_exists($zipFile)) {
                 @unlink($zipFile);
             }
             $releaseLock();
@@ -1112,12 +1157,30 @@ class FileExplorerService
             return;
         }
 
+        $dirIterator = new RecursiveDirectoryIterator($targetDir, RecursiveDirectoryIterator::SKIP_DOTS);
+        $filterIterator = new RecursiveCallbackFilterIterator($dirIterator, static function ($current) {
+            if ($current->isLink()) {
+                return false;
+            }
+            $filename = $current->getFilename();
+            if ($filename === '.trash' || $filename === '.tmp_zip') {
+                return false;
+            }
+            return true;
+        });
         $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($targetDir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::LEAVES_ONLY
+            $filterIterator,
+            RecursiveIteratorIterator::LEAVES_ONLY,
+            RecursiveIteratorIterator::CATCH_GET_CHILD
         );
 
         $addedEntries = 0;
+        $storeExts = [
+            'zip' => true, 'rar' => true, '7z' => true, 'gz' => true, 'bz2' => true,
+            'xz' => true, 'tgz' => true, 'iso' => true, 'img' => true, 'mp4' => true,
+            'mkv' => true, 'avi' => true, 'mov' => true, 'webm' => true, 'mp3' => true,
+            'flac' => true, 'jpg' => true, 'jpeg' => true, 'png' => true, 'webp' => true,
+        ];
 
         foreach ($files as $file) {
             if ($file->isLink()) {
@@ -1163,8 +1226,14 @@ class FileExplorerService
                 }
                 $relativePath = implode('/', $entryParts);
 
-                $zip->addFile($filePath, $relativePath);
-                $addedEntries++;
+                if ($zip->addFile($filePath, $relativePath)) {
+                    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                    $fSize = (int) @$file->getSize();
+                    if (isset($storeExts[$ext]) || $fSize > 52428800) {
+                        @$zip->setCompressionName($relativePath, ZipArchive::CM_STORE);
+                    }
+                    $addedEntries++;
+                }
             }
         }
 
@@ -1183,6 +1252,23 @@ class FileExplorerService
             return;
         }
 
+        if ($prepareOnly) {
+            $keepPreparedZip = true;
+            $releaseLock();
+            $zipSize = (int) (@filesize($zipFile) ?: 0);
+            if (!headers_sent()) {
+                header('Content-Type: application/json; charset=utf-8');
+            }
+            echo json_encode([
+                'success' => true,
+                'token' => $exportToken,
+                'filename' => $folderName . '.zip',
+                'size_bytes' => $zipSize,
+                'size_formatted' => $this->formatBytes($zipSize, false),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return;
+        }
+
         try {
             $this->streamFileDownload($zipFile, $folderName . '.zip', true);
         } finally {
@@ -1193,7 +1279,7 @@ class FileExplorerService
     /**
      * Descarga de archivo individual o carpeta comprimida.
      */
-    public function downloadItem(string $subpath): void
+    public function downloadItem(string $subpath, bool $prepareOnly = false, string $token = ''): void
     {
         $target = $this->resolveSafePath($subpath);
         if ($target === null || !file_exists($target)) {
@@ -1205,7 +1291,7 @@ class FileExplorerService
         }
 
         if (is_dir($target)) {
-            $this->downloadDirectoryZip($subpath);
+            $this->downloadDirectoryZip($subpath, $prepareOnly, $token);
             return;
         }
 
@@ -1215,6 +1301,9 @@ class FileExplorerService
     private function streamFileDownload(string $filePath, string $downloadName, bool $unlinkAfter): void
     {
         @set_time_limit(0);
+        if (getenv('APP_ENV') !== 'testing' && session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
         $size = filesize($filePath);
         if (getenv('APP_ENV') !== 'testing' && ob_get_level()) {
             ob_end_clean();
@@ -1224,6 +1313,7 @@ class FileExplorerService
             header('Content-Description: File Transfer');
             header('Content-Type: application/octet-stream');
             header('Content-Disposition: attachment; filename="' . rawurlencode($downloadName) . '"');
+            header('X-Accel-Buffering: no');
             header('Expires: 0');
             header('Cache-Control: must-revalidate');
             header('Pragma: public');
@@ -1272,9 +1362,11 @@ class FileExplorerService
     {
         $size = 0;
         $entries = 0;
-        $maxEntries = 10000;
+        $maxEntries = 50000;
         $startTime = microtime(true);
         $maxSeconds = 0.25;
+        $seenInodes = [];
+        $trackInodes = DIRECTORY_SEPARATOR !== '\\';
 
         try {
             $dirIterator = new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS);
@@ -1288,9 +1380,26 @@ class FileExplorerService
                 }
                 return true;
             });
-            $files = new RecursiveIteratorIterator($filterIterator, RecursiveIteratorIterator::LEAVES_ONLY);
+            $files = new RecursiveIteratorIterator(
+                $filterIterator,
+                RecursiveIteratorIterator::LEAVES_ONLY,
+                RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
             foreach ($files as $file) {
                 if ($file->isFile()) {
+                    if ($trackInodes) {
+                        $inode = (int) @$file->getInode();
+                        if ($inode > 0) {
+                            if (isset($seenInodes[$inode])) {
+                                $entries++;
+                                if ($entries >= $maxEntries || (microtime(true) - $startTime) >= $maxSeconds) {
+                                    break;
+                                }
+                                continue;
+                            }
+                            $seenInodes[$inode] = true;
+                        }
+                    }
                     $size += (int) @$file->getSize();
                 }
                 $entries++;
