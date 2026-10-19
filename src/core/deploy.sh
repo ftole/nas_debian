@@ -487,7 +487,7 @@ pm.process_idle_timeout = 10s
 pm.max_requests = 500
 php_admin_value[upload_max_filesize] = 512M
 php_admin_value[post_max_size] = 512M
-php_admin_value[max_execution_time] = 300
+php_value[max_execution_time] = 300
 php_admin_value[max_input_time] = 300
 php_admin_value[memory_limit] = 512M
 PHP_POOL_EOF
@@ -589,6 +589,8 @@ server {
         fastcgi_pass unix:/run/php/php-fpm-nas.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTPS on;
+        fastcgi_read_timeout 3600s;
+        fastcgi_send_timeout 3600s;
         include fastcgi_params;
     }
 
@@ -1022,9 +1024,10 @@ else
 fi
 
 echo " [5/9] Preparando almacenamiento base en /srv/nas con permisos para Samba..."
-mkdir -p /srv/nas
-chown root:grp_samba /srv/nas
+mkdir -p /srv/nas /srv/nas/.trash /srv/nas/.tmp_zip
+chown root:grp_samba /srv/nas /srv/nas/.trash /srv/nas/.tmp_zip
 chmod 2771 /srv/nas
+chmod 2770 /srv/nas/.trash /srv/nas/.tmp_zip
 
 if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
     mkdir -p /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
