@@ -2838,7 +2838,7 @@ async function downloadFolderZip(relPath) {
   try {
     const root = encodeURIComponent(AppState.files.root || 'nas');
     const path = encodeURIComponent(cleanRel);
-    const res = await fetch(`/api/files/download?root=${root}&path=${path}`, {
+    const res = await fetch(`/api/files/download?root=${root}&path=${path}&prepare=1`, {
       method: 'GET',
       credentials: 'same-origin'
     });
@@ -2857,6 +2857,27 @@ async function downloadFolderZip(relPath) {
         }
       } catch (_) {}
       showToast(errMsg, 'error');
+      return;
+    }
+
+    const contentType = (res.headers.get('Content-Type') || '').toLowerCase();
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      if (!data || !data.success || !data.token) {
+        showToast((data && (data.error || data.message)) || 'Error al preparar el archivo ZIP.', 'error');
+        return;
+      }
+      const downloadFilename = data.filename || `${folderName}.zip`;
+      const sizeSuffix = data.size_formatted ? ` (${data.size_formatted})` : '';
+      showToast(`Compresión finalizada${sizeSuffix}. Iniciando descarga de "${downloadFilename}"...`, 'success');
+
+      const link = document.createElement('a');
+      link.href = `/api/files/download?root=${root}&path=${path}&token=${encodeURIComponent(data.token)}`;
+      link.download = downloadFilename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       return;
     }
 
