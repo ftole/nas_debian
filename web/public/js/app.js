@@ -742,7 +742,7 @@ async function loadBackups() {
       <tr>
         <td><strong>${escapeHtml(t.id)}</strong></td>
         <td><span class="tag-pill">${escapeHtml(t.protocol)}</span></td>
-        <td><code>${escapeHtml(t.source)}</code></td>
+        <td><code>${escapeHtml(t.source || t.destination || 'N/A')}</code></td>
         <td>${escapeHtml(t.cron_desc)}</td>
         <td>${t.retention} snapshots</td>
         <td>
@@ -2420,7 +2420,8 @@ function renderFileGrid(items) {
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
-    const sizeStr = isDir ? 'Carpeta' : (item.size_formatted || '0 B');
+    const rawSize = item.size_formatted && item.size_formatted !== '--' ? item.size_formatted : '0 B';
+    const sizeStr = isDir ? `Carpeta · ${rawSize}` : rawSize;
 
     const previewBtn = !isDir
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'preview')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
@@ -2528,6 +2529,7 @@ function renderFileTable(items) {
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
     const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
+    const tableSizeStr = item.size_formatted && item.size_formatted !== '--' ? item.size_formatted : '0 B';
 
     const previewAction = !isDir
       ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'preview')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
@@ -2556,7 +2558,7 @@ function renderFileTable(items) {
             <span>${escapeHtml(item.name)}</span>
           </div>
         </td>
-        <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+        <td>${escapeHtml(tableSizeStr)}</td>
         <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
         <td>${ownerStr}:${groupStr}</td>
         <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
@@ -2810,16 +2812,98 @@ function downloadFile(relPath) {
   window.location.href = `/api/files/download?root=${root}&path=${path}`;
 }
 
-function downloadFolderZip(relPath) {
-  const root = encodeURIComponent(AppState.files.root || 'nas');
-  const path = encodeURIComponent(relPath);
-  window.location.href = `/api/files/download?root=${root}&path=${path}`;
+let _zipDownloadInProgress = false;
+
+async function downloadFolderZip(relPath) {
+  const cleanRel = String(relPath || '').replace(/^\/+|\/+$/g, '');
+  if (!cleanRel) {
+    showToast('Seleccione o ingrese a una carpeta específica para descargarla en formato ZIP.', 'warning');
+    return;
+  }
+  if (_zipDownloadInProgress) {
+    showToast('Ya hay una compresión ZIP en progreso, por favor espera a que finalice.', 'info');
+    return;
+  }
+
+  _zipDownloadInProgress = true;
+  const btnZip = document.getElementById('btn-download-zip');
+  if (btnZip) {
+    btnZip.disabled = true;
+    btnZip.classList.add('is-loading');
+  }
+
+  const folderName = cleanRel.split('/').pop() || 'carpeta';
+  showToast(`Iniciando compresión ZIP de "${folderName}", por favor espera...`, 'info');
+
+  try {
+    const root = encodeURIComponent(AppState.files.root || 'nas');
+    const path = encodeURIComponent(cleanRel);
+    const res = await fetch(`/api/files/download?root=${root}&path=${path}`, {
+      method: 'GET',
+      credentials: 'same-origin'
+    });
+
+    if (!res.ok) {
+      let errMsg = `Error al comprimir la carpeta (${res.status})`;
+      try {
+        const text = (await res.text()).trim();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            errMsg = parsed.error || parsed.message || text;
+          } catch (_) {
+            errMsg = text;
+          }
+        }
+      } catch (_) {}
+      showToast(errMsg, 'error');
+      return;
+    }
+
+    const blob = await res.blob();
+    let downloadFilename = `${folderName}.zip`;
+    const disp = res.headers.get('Content-Disposition') || '';
+    const match = disp.match(/filename="?([^";]+)"?/i);
+    if (match && match[1]) {
+      try {
+        downloadFilename = decodeURIComponent(match[1]);
+      } catch (_) {
+        downloadFilename = match[1];
+      }
+    }
+
+    showToast(`Compresión finalizada. Iniciando descarga de "${downloadFilename}"...`, 'success');
+
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = downloadFilename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+  } catch (err) {
+    showToast(`Error durante la compresión o descarga ZIP: ${err.message || err}`, 'error');
+  } finally {
+    _zipDownloadInProgress = false;
+    if (btnZip) {
+      btnZip.disabled = false;
+      btnZip.classList.remove('is-loading');
+    }
+  }
 }
 
 function downloadCurrentFolderZip() {
-  const root = encodeURIComponent(AppState.files.root || 'nas');
-  const path = encodeURIComponent(AppState.files.currentPath || '');
-  window.location.href = `/api/files/download?root=${root}&path=${path}`;
+  const current = String(AppState.files.currentPath || '').replace(/^\/+|\/+$/g, '');
+  const selected = String(AppState.files.selectedItemPath || '').replace(/^\/+|\/+$/g, '');
+  if (!current && selected) {
+    const item = (AppState.files.items || []).find(i => (i.relative_path || i.path) === selected);
+    if (item && item.is_dir) {
+      downloadFolderZip(selected);
+      return;
+    }
+  }
+  downloadFolderZip(current);
 }
 
 function openNewFolderModal() {
