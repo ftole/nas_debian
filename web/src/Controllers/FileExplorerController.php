@@ -280,8 +280,10 @@ class FileExplorerController
     {
         $root = (string) $request->getQuery('root', 'nas');
         $rawPath = (string) $request->getQuery('path', '');
+        $prepare = ((string) $request->getQuery('prepare', '')) === '1';
+        $token = trim((string) $request->getQuery('token', ''));
         $path = $this->resolveSubpath($root, $rawPath);
 
-        $this->fileService->downloadItem($path);
+        $this->fileService->downloadItem($path, $prepare, $token);
     }
 }
