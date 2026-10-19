@@ -34,12 +34,14 @@ class BackupService
      */
     public function listTasks(): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
+        $runners = glob($this->binDir . '/backup_*.sh') ?: [];
+        if ($runners === [] && DIRECTORY_SEPARATOR === '\\') {
             return [
                 [
                     'id' => 'win_contabilidad',
                     'protocol' => 'CIFS (Windows)',
                     'source' => '//10.10.1.50/Contabilidad',
+                    'destination' => '//10.10.1.50/Contabilidad',
                     'cron' => '0 23 * * *',
                     'cron_desc' => 'Diario a las 23:00 hrs',
                     'retention' => 30,
@@ -55,6 +57,7 @@ class BackupService
                     'id' => 'lnx_web_prod',
                     'protocol' => 'SSH (Linux)',
                     'source' => 'root@10.10.1.55:/var/www',
+                    'destination' => 'root@10.10.1.55:/var/www',
                     'cron' => '0 */6 * * *',
                     'cron_desc' => 'Cada 6 horas',
                     'retention' => 15,
@@ -69,7 +72,6 @@ class BackupService
             ];
         }
 
-        $runners = glob($this->binDir . '/backup_*.sh') ?: [];
         $tasks = [];
 
         foreach ($runners as $runner) {
@@ -83,17 +85,20 @@ class BackupService
 
             if (str_contains($content, 'SRC_SHARE=')) {
                 $proto = 'CIFS (Windows)';
-                preg_match('/SRC_IP="([^"]+)"/', $content, $mIp);
-                preg_match('/SRC_SHARE="([^"]+)"/', $content, $mSh);
+                preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mIp);
+                preg_match('/SRC_SHARE=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mSh);
                 $src = '//' . ($mIp[1] ?? 'IP') . '/' . ($mSh[1] ?? 'SHARE');
             } elseif (str_contains($content, 'SRC_PORT=') || str_contains($content, 'sshpass')) {
                 $proto = 'SSH (Linux)';
-                preg_match('/SRC_IP="([^"]+)"/', $content, $mIp);
-                preg_match('/SRC_PATH="([^"]+)"/', $content, $mPt);
-                preg_match('/SRC_USER="([^"]+)"/', $content, $mUs);
-                $src = ($mUs[1] ?? 'root') . '@' . ($mIp[1] ?? 'IP') . ':' . ($mPt[1] ?? '/');
+                preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mIp);
+                preg_match('/SRC_PATH=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mPt);
+                preg_match('/SRC_USER=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mUs);
+                preg_match('/SRC_PORT=[\'"]?(\d+)[\'"]?/', $content, $mPort);
+                $portVal = (int) ($mPort[1] ?? 22);
+                $portSuffix = ($portVal > 0 && $portVal !== 22) ? (':' . $portVal) : '';
+                $src = ($mUs[1] ?? 'root') . '@' . ($mIp[1] ?? 'IP') . $portSuffix . ':' . ($mPt[1] ?? '/');
             } else {
-                preg_match('/SRC_PATH="([^"]+)"/', $content, $mPt);
+                preg_match('/SRC_PATH=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mPt);
                 $src = $mPt[1] ?? '/';
             }
 
@@ -128,6 +133,7 @@ class BackupService
                 'id' => $taskId,
                 'protocol' => $proto,
                 'source' => $src,
+                'destination' => $src,
                 'cron' => $cronExpr,
                 'cron_desc' => $this->describeCron($cronExpr),
                 'retention' => $retention,
@@ -702,8 +708,11 @@ class BackupService
             return "El subdirectorio local '$subfolder' no es válido o contiene secuencias prohibidas.";
         }
 
-        if (str_starts_with($subfolder, '.trash') || $subfolder === '.trash') {
-            return "El acceso al repositorio de papelera de reciclaje está restringido.";
+        if (
+            str_starts_with($subfolder, '.trash') || $subfolder === '.trash'
+            || str_starts_with($subfolder, '.tmp_zip') || $subfolder === '.tmp_zip'
+        ) {
+            return "El acceso al repositorio de papelera de reciclaje o directorio temporal está restringido.";
         }
 
         if ($role === null) {
