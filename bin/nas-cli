@@ -722,7 +722,7 @@ switch ($module) {
                 renderTable([
                     'id'          => 'ID TAREA',
                     'protocol'    => 'PROTOCOLO',
-                    'destination' => 'ORIGEN / DESTINO',
+                    'source'      => 'ORIGEN REMOTO / LOCAL',
                     'cron'        => 'CRON',
                     'retention'   => 'RETENCIÓN',
                     'last_status' => 'ÚLTIMO ESTADO',
