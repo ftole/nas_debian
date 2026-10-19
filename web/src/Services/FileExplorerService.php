@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Throwable;
@@ -49,7 +50,10 @@ class FileExplorerService
         $rootDir = self::getRootDir();
         $cleanSub = trim(str_replace(['\\', '..'], ['/', ''], $subpath), '/');
 
-        if (str_starts_with($cleanSub, '.trash') || $cleanSub === '.trash') {
+        if (
+            str_starts_with($cleanSub, '.trash') || $cleanSub === '.trash'
+            || str_starts_with($cleanSub, '.tmp_zip') || $cleanSub === '.tmp_zip'
+        ) {
             return null;
         }
 
@@ -60,11 +64,17 @@ class FileExplorerService
         $candidate = $rootDir . '/' . $cleanSub;
         $realRoot = realpath($rootDir);
         $realTrash = realpath(self::getTrashDir());
+        $realTmpZip = realpath($rootDir . '/.tmp_zip');
         $realCandidate = realpath($candidate);
 
-        // Bloqueo estricto del repositorio de papelera y cualquier contenido dentro de él
+        // Bloqueo estricto del repositorio de papelera y directorio temporal de compresión ZIP
         if ($realTrash !== false && $realCandidate !== false) {
             if ($realCandidate === $realTrash || str_starts_with($realCandidate, $realTrash . DIRECTORY_SEPARATOR) || str_starts_with($realCandidate, $realTrash . '/')) {
+                return null;
+            }
+        }
+        if ($realTmpZip !== false && $realCandidate !== false) {
+            if ($realCandidate === $realTmpZip || str_starts_with($realCandidate, $realTmpZip . DIRECTORY_SEPARATOR) || str_starts_with($realCandidate, $realTmpZip . '/')) {
                 return null;
             }
         }
@@ -80,6 +90,11 @@ class FileExplorerService
             $realParent = realpath($parent);
             if ($realTrash !== false && $realParent !== false) {
                 if ($realParent === $realTrash || str_starts_with($realParent, $realTrash . DIRECTORY_SEPARATOR) || str_starts_with($realParent, $realTrash . '/')) {
+                    return null;
+                }
+            }
+            if ($realTmpZip !== false && $realParent !== false) {
+                if ($realParent === $realTmpZip || str_starts_with($realParent, $realTmpZip . DIRECTORY_SEPARATOR) || str_starts_with($realParent, $realTmpZip . '/')) {
                     return null;
                 }
             }
@@ -123,13 +138,13 @@ class FileExplorerService
 
         $items = [];
         foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..' || $entry === '.trash') {
+            if ($entry === '.' || $entry === '..' || $entry === '.trash' || $entry === '.tmp_zip') {
                 continue;
             }
 
             $fullPath = $targetDir . '/' . $entry;
-            $isDir = is_dir($fullPath);
-            $size = $isDir ? 0 : (@filesize($fullPath) ?: 0);
+            $isDir = !is_link($fullPath) && is_dir($fullPath);
+            $size = $isDir ? $this->calculateDirectorySize($fullPath) : (@filesize($fullPath) ?: 0);
             $mtime = @filemtime($fullPath) ?: 0;
             $perms = @fileperms($fullPath);
             $permsStr = $perms !== false ? substr(sprintf('%o', $perms), -4) : '0660';
@@ -410,6 +425,25 @@ class FileExplorerService
             }
         }
         return $trashDir;
+    }
+
+    /**
+     * Retorna la ruta absoluta del directorio de trabajo temporal para compresiones ZIP (/srv/nas/.tmp_zip),
+     * garantizando que los archivos ZIP masivos se generen en el volumen de almacenamiento NAS y no saturen /tmp.
+     */
+    public static function getTempZipDir(): string
+    {
+        $tmpZipDir = self::getRootDir() . '/.tmp_zip';
+        if (!is_dir($tmpZipDir)) {
+            @mkdir($tmpZipDir, 0770, true);
+            if (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+                @chgrp($tmpZipDir, 'grp_samba');
+            }
+        }
+        if (is_dir($tmpZipDir) && is_writable($tmpZipDir)) {
+            return $tmpZipDir;
+        }
+        return sys_get_temp_dir();
     }
 
     /**
@@ -1038,6 +1072,8 @@ class FileExplorerService
             return;
         }
 
+        @set_time_limit(0);
+
         $lockFile = sys_get_temp_dir() . '/nas_zip_download.lock';
         $lockFp = @fopen($lockFile, 'c+');
         if ($lockFp !== false && !flock($lockFp, LOCK_EX | LOCK_NB)) {
@@ -1050,7 +1086,8 @@ class FileExplorerService
         }
 
         $folderName = basename($targetDir);
-        $zipFile = sys_get_temp_dir() . '/nas_export_' . uniqid() . '.zip';
+        $tmpZipDir = self::getTempZipDir();
+        $zipFile = $tmpZipDir . '/nas_export_' . uniqid('', true) . '.zip';
         register_shutdown_function(static function () use ($zipFile, $lockFp): void {
             if (file_exists($zipFile)) {
                 @unlink($zipFile);
@@ -1075,8 +1112,6 @@ class FileExplorerService
             RecursiveIteratorIterator::LEAVES_ONLY
         );
 
-        $totalSize = 0;
-        $maxZipSize = 500 * 1024 * 1024; // Límite de seguridad: 500 MB
         $addedEntries = 0;
 
         foreach ($files as $file) {
@@ -1089,8 +1124,13 @@ class FileExplorerService
                     continue;
                 }
 
-                // Excluir elementos de la papelera de reciclaje (.trash)
-                if (str_contains($filePath, DIRECTORY_SEPARATOR . '.trash' . DIRECTORY_SEPARATOR) || str_ends_with($filePath, DIRECTORY_SEPARATOR . '.trash')) {
+                // Excluir elementos de la papelera de reciclaje (.trash) y del directorio temporal (.tmp_zip)
+                if (
+                    str_contains($filePath, DIRECTORY_SEPARATOR . '.trash' . DIRECTORY_SEPARATOR)
+                    || str_ends_with($filePath, DIRECTORY_SEPARATOR . '.trash')
+                    || str_contains($filePath, DIRECTORY_SEPARATOR . '.tmp_zip' . DIRECTORY_SEPARATOR)
+                    || str_ends_with($filePath, DIRECTORY_SEPARATOR . '.tmp_zip')
+                ) {
                     continue;
                 }
 
@@ -1117,17 +1157,6 @@ class FileExplorerService
                     continue;
                 }
                 $relativePath = implode('/', $entryParts);
-                $totalSize += $file->getSize();
-
-                if ($totalSize > $maxZipSize) {
-                    $zip->close();
-                    @unlink($zipFile);
-                    if (!headers_sent()) {
-                        http_response_code(413);
-                    }
-                    echo 'El tamaño de la carpeta supera el límite web permitido (500 MB). Utilice la red compartida Samba para transferencias masivas.';
-                    return;
-                }
 
                 $zip->addFile($filePath, $relativePath);
                 $addedEntries++;
@@ -1175,6 +1204,7 @@ class FileExplorerService
 
     private function streamFileDownload(string $filePath, string $downloadName, bool $unlinkAfter): void
     {
+        @set_time_limit(0);
         $size = filesize($filePath);
         if (getenv('APP_ENV') !== 'testing' && ob_get_level()) {
             ob_end_clean();
@@ -1231,13 +1261,32 @@ class FileExplorerService
     private function calculateDirectorySize(string $dir): int
     {
         $size = 0;
+        $entries = 0;
+        $maxEntries = 10000;
+        $startTime = microtime(true);
+        $maxSeconds = 0.25;
+
         try {
-            $files = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::LEAVES_ONLY
-            );
+            $dirIterator = new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS);
+            $filterIterator = new RecursiveCallbackFilterIterator($dirIterator, static function ($current) {
+                if ($current->isLink()) {
+                    return false;
+                }
+                $filename = $current->getFilename();
+                if ($filename === '.trash' || $filename === '.tmp_zip') {
+                    return false;
+                }
+                return true;
+            });
+            $files = new RecursiveIteratorIterator($filterIterator, RecursiveIteratorIterator::LEAVES_ONLY);
             foreach ($files as $file) {
-                $size += $file->getSize();
+                if ($file->isFile()) {
+                    $size += (int) @$file->getSize();
+                }
+                $entries++;
+                if ($entries >= $maxEntries || (microtime(true) - $startTime) >= $maxSeconds) {
+                    break;
+                }
             }
         } catch (Throwable) {
             // Ignorar errores de acceso
@@ -1263,12 +1312,12 @@ class FileExplorerService
         };
     }
 
-    private function formatBytes(int $bytes, bool $isDir): string
+    private function formatBytes(int $bytes, bool $isDir = false): string
     {
-        if ($isDir) {
-            return '--';
+        unset($isDir);
+        if ($bytes >= 1099511627776) {
+            return round($bytes / 1099511627776, 2) . ' TB';
         }
-
         if ($bytes >= 1073741824) {
             return round($bytes / 1073741824, 2) . ' GB';
         }
