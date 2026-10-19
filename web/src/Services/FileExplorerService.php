@@ -1088,18 +1088,23 @@ class FileExplorerService
         $folderName = basename($targetDir);
         $tmpZipDir = self::getTempZipDir();
         $zipFile = $tmpZipDir . '/nas_export_' . uniqid('', true) . '.zip';
-        register_shutdown_function(static function () use ($zipFile, $lockFp): void {
-            if (file_exists($zipFile)) {
-                @unlink($zipFile);
-            }
+        $releaseLock = static function () use (&$lockFp): void {
             if (is_resource($lockFp)) {
                 @flock($lockFp, LOCK_UN);
                 @fclose($lockFp);
+                $lockFp = null;
             }
+        };
+        register_shutdown_function(static function () use ($zipFile, $releaseLock): void {
+            if (file_exists($zipFile)) {
+                @unlink($zipFile);
+            }
+            $releaseLock();
         });
 
         $zip = new ZipArchive();
         if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $releaseLock();
             if (!headers_sent()) {
                 http_response_code(500);
             }
@@ -1170,6 +1175,7 @@ class FileExplorerService
         $zip->close();
 
         if (!file_exists($zipFile)) {
+            $releaseLock();
             if (!headers_sent()) {
                 http_response_code(500);
             }
@@ -1177,7 +1183,11 @@ class FileExplorerService
             return;
         }
 
-        $this->streamFileDownload($zipFile, $folderName . '.zip', true);
+        try {
+            $this->streamFileDownload($zipFile, $folderName . '.zip', true);
+        } finally {
+            $releaseLock();
+        }
     }
 
     /**
