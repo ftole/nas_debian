@@ -31,6 +31,14 @@ class FileExplorerController
             if (!str_starts_with($clean, 'BACKUPS_HISTORICOS')) {
                 return 'BACKUPS_HISTORICOS/' . $clean;
             }
+        } elseif (str_starts_with($root, 'unidades/')) {
+            $unitPrefix = trim(str_replace(['\\', '..'], ['/', ''], $root), '/');
+            if ($clean === '') {
+                return $unitPrefix;
+            }
+            if (!str_starts_with($clean, $unitPrefix)) {
+                return $unitPrefix . '/' . $clean;
+            }
         }
         return $clean;
     }
