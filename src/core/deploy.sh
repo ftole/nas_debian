@@ -606,6 +606,7 @@ ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
 cat << 'NAS_TERM_EOF' > /usr/local/sbin/nas-terminal
 #!/bin/bash
 set -euo pipefail
+export SHELL=/bin/bash
 
 if [ "$#" -lt 1 ]; then
     echo "uso: nas-terminal <accion> [args...]" >&2
@@ -656,9 +657,9 @@ case "$ACTION" in
     start)
         COLS="${1:-200}"
         ROWS="${2:-50}"
-        TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)
-        if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
-            TARGET_HOME=/srv/nas
+        TARGET_HOME=/srv/nas
+        if [ ! -d "$TARGET_HOME" ]; then
+            TARGET_HOME="$(pwd 2>/dev/null || echo /tmp)"
         fi
         if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
             run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME" /bin/bash
@@ -1319,6 +1320,15 @@ if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; the
     ufw allow 5355/udp comment 'WSDD2 LLMNR UDP' 2>/dev/null || true
     ufw allow 5355/tcp comment 'WSDD2 LLMNR TCP' 2>/dev/null || true
     ufw allow 5357/tcp comment 'WSDD2 WSD HTTP' 2>/dev/null || true
+
+    # Descarte silencioso de tráfico multicast/broadcast MikroTik Neighbor Discovery Protocol (MNDP UDP 5678)
+    if [ -f /etc/ufw/before.rules ] && ! grep -q -- '--dport 5678 -j DROP' /etc/ufw/before.rules; then
+        sed -i '/^COMMIT/i # Descarte silencioso MikroTik MNDP (UDP 5678)\n-A ufw-before-input -p udp --dport 5678 -j DROP' /etc/ufw/before.rules 2>/dev/null || true
+    fi
+    if [ -f /etc/ufw/before6.rules ] && ! grep -q -- '--dport 5678 -j DROP' /etc/ufw/before6.rules; then
+        sed -i '/^COMMIT/i # Descarte silencioso MikroTik MNDP (UDP 5678 IPv6 Multicast)\n-A ufw6-before-input -p udp -d ff02::1 --dport 5678 -j DROP' /etc/ufw/before6.rules 2>/dev/null || true
+    fi
+    ufw reload 2>/dev/null || true
 fi
 
 echo ""
