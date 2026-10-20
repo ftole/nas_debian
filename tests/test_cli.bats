@@ -344,5 +344,17 @@ setup() {
     [[ "$output" =~ "IP ORIGEN" ]]
 }
 
+@test "nas-cli log samba incluye cabecera de IP CLIENTE en salida ANSI" {
+    run php bin/nas-cli log samba --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "IP CLIENTE" ]]
+}
+
+@test "nas-cli log admin incluye cabecera de IP ORIGEN en salida ANSI" {
+    run php bin/nas-cli log admin --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "IP ORIGEN" ]]
+}
+
 
 
