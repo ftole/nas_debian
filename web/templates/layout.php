@@ -58,7 +58,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
     })();
   </script>
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>; window.NAS_SERVER_ROLE = <?= json_encode($serverRole) ?>;</script>
+  <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>; window.NAS_SERVER_ROLE = <?= json_encode($serverRole) ?>; window.NAS_INITIAL_SERVER_TIME = { timestamp: <?= time() ?>, tz: '<?= htmlspecialchars(date('T'), ENT_QUOTES, 'UTF-8') ?>' };</script>
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
   <style>
     .badge-antispam {
@@ -181,6 +181,11 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
       </div>
       <div class="header-meta-pill">
         <span>Workgroup:</span> <strong><?= htmlspecialchars(\App\Services\SystemService::getWorkgroup(), ENT_QUOTES, 'UTF-8') ?></strong>
+      </div>
+      <div class="header-meta-pill" id="header-clock-pill" title="Hora local sincronizada del servidor NAS">
+        <svg class="icon icon-sm"><use href="#icon-clock"></use></svg>
+        <span id="header-server-clock"><?= htmlspecialchars(date('H:i:s'), ENT_QUOTES, 'UTF-8') ?></span>
+        <span class="badge badge-gray" id="header-server-tz" style="font-size:10px; margin-left:4px;"><?= htmlspecialchars(date('T'), ENT_QUOTES, 'UTF-8') ?></span>
       </div>
 <?php if ($isSuperAdmin): ?>
       <button class="btn btn-secondary btn-sm" onclick="switchView('terminal')" title="Abrir Consola Web Interactiva">
