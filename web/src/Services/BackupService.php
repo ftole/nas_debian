@@ -784,10 +784,177 @@ class BackupService
             }
         }
 
+        $runnerContent = file_exists($runnerFile) ? (string) @file_get_contents($runnerFile) : '';
+
+        // Deducir o normalizar protocolo
+        $proto = strtolower(trim((string) ($data['proto'] ?? ($data['source_type'] ?? ''))));
+        if ($proto === 'windows') $proto = 'cifs';
+        if ($proto === 'linux') $proto = 'ssh';
+        if (empty($proto) && $runnerContent !== '') {
+            if (str_contains($runnerContent, 'SRC_SHARE=')) {
+                $proto = 'cifs';
+            } elseif (str_contains($runnerContent, 'SRC_PORT=') || str_contains($runnerContent, 'sshpass')) {
+                $proto = 'ssh';
+            } else {
+                $proto = 'local';
+            }
+        }
+        if (empty($proto)) {
+            $proto = 'cifs';
+        }
+        $data['proto'] = $proto;
+
+        // Si la contraseña viene vacía, conservar la existente en el archivo .cred
+        $credFile = $this->credDir . '/' . $taskId . '.cred';
+        if (empty($data['password']) && file_exists($credFile)) {
+            $credContent = (string) @file_get_contents($credFile);
+            if ($proto === 'cifs') {
+                if (preg_match('/^password=(.*)$/m', $credContent, $mPass)) {
+                    $data['password'] = $mPass[1];
+                }
+            } else {
+                $data['password'] = trim($credContent);
+            }
+        }
+
+        // Si faltan campos en $data, recuperar del runner existente si está disponible
+        if ($runnerContent !== '') {
+            if (empty($data['ip']) && empty($data['target']) && empty($data['source_ip'])) {
+                if (preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mIp)) {
+                    $data['ip'] = $mIp[1];
+                }
+            }
+            if ($proto === 'cifs') {
+                if (empty($data['share']) && empty($data['path']) && empty($data['source_share'])) {
+                    if (preg_match('/SRC_SHARE=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mSh)) {
+                        $data['share'] = $mSh[1];
+                    }
+                }
+                if (empty($data['user']) && empty($data['username']) && empty($data['source_user']) && file_exists($credFile)) {
+                    $credRaw = (string) @file_get_contents($credFile);
+                    if (preg_match('/^username=(.*)$/m', $credRaw, $mUsr)) {
+                        $usrVal = $mUsr[1];
+                        if (preg_match('/^domain=(.*)$/m', $credRaw, $mDom) && !empty($mDom[1])) {
+                            $usrVal = $mDom[1] . '\\' . $usrVal;
+                        }
+                        $data['user'] = $usrVal;
+                    }
+                }
+            } elseif ($proto === 'ssh') {
+                if (empty($data['path']) && empty($data['share']) && empty($data['source_path'])) {
+                    if (preg_match('/SRC_PATH=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mPt)) {
+                        $data['path'] = $mPt[1];
+                    }
+                }
+                if (empty($data['user']) && empty($data['username']) && empty($data['source_user'])) {
+                    if (preg_match('/SRC_USER=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mUs)) {
+                        $data['user'] = $mUs[1];
+                    }
+                }
+                if (empty($data['port'])) {
+                    if (preg_match('/SRC_PORT=[\'"]?(\d+)[\'"]?/', $runnerContent, $mPo)) {
+                        $data['port'] = (int) $mPo[1];
+                    }
+                }
+            }
+            if (empty($data['retention'])) {
+                if (preg_match('/RETENTION=(\d+)/', $runnerContent, $mRet)) {
+                    $data['retention'] = (int) $mRet[1];
+                }
+            }
+            if (empty($data['cron'])) {
+                $cronFile = $this->cronDir . '/backup_' . $taskId;
+                if (file_exists($cronFile)) {
+                    $cLine = trim((string) @file_get_contents($cronFile));
+                    $parts = preg_split('/\s+/', $cLine);
+                    if (count($parts) >= 5) {
+                        $data['cron'] = implode(' ', array_slice($parts, 0, 5));
+                    }
+                }
+            }
+        }
+
         $data['id'] = $taskId;
         $data['task_id'] = $taskId;
 
         return $this->createTask($data);
+    }
+
+    /**
+     * Comprueba si existen respaldos en curso verificando bloqueos /var/lock/backup_*.lock
+     * y procesos rsync o runners activos.
+     *
+     * @return array{running: bool, count: int, tasks: array<string>, rsync_active: bool, locks: array<string>}
+     */
+    public function getRunningBackups(): array
+    {
+        $runningTasks = [];
+        $activeLocks = [];
+
+        // Buscar bloqueos en /var/lock y /run/lock
+        $dirs = ['/var/lock', '/run/lock'];
+        foreach ($dirs as $dir) {
+            $lockFiles = glob($dir . '/backup_*.lock') ?: [];
+            foreach ($lockFiles as $lf) {
+                $fp = @fopen($lf, 'c+');
+                if ($fp) {
+                    if (!@flock($fp, LOCK_EX | LOCK_NB)) {
+                        // El bloqueo flock está adquirido activamente por un runner
+                        $baseName = basename($lf);
+                        $activeLocks[] = $baseName;
+                        if (preg_match('/^backup_(.+)\.lock$/', $baseName, $m)) {
+                            $runningTasks[] = $m[1];
+                        }
+                    } else {
+                        @flock($fp, LOCK_UN);
+                    }
+                    @fclose($fp);
+                }
+            }
+        }
+
+        // Verificar procesos rsync activos
+        $rsyncActive = false;
+        $pgRsync = SystemService::runCommand(['pgrep', '-x', 'rsync']);
+        if ($pgRsync['code'] === 0 && trim((string) $pgRsync['stdout']) !== '') {
+            $rsyncActive = true;
+        }
+
+        // Verificar procesos de runners de respaldo
+        $pgRunners = SystemService::runCommand(['pgrep', '-f', 'backup_.*\.sh']);
+        if ($pgRunners['code'] === 0 && trim((string) $pgRunners['stdout']) !== '') {
+            $lines = explode("\n", trim((string) $pgRunners['stdout']));
+            foreach ($lines as $line) {
+                if (trim($line) === '') continue;
+                $cmdInfo = SystemService::runCommand(['ps', '-p', trim($line), '-o', 'args=']);
+                if ($cmdInfo['code'] === 0 && preg_match('/backup_([a-z0-9_-]+)\.sh/', (string) $cmdInfo['stdout'], $m)) {
+                    $runningTasks[] = $m[1];
+                }
+            }
+        }
+
+        // Revisar tareas según getTaskStatus() para mayor consistencia
+        if (empty($runningTasks) && !$this->isDev()) {
+            $runners = glob($this->binDir . '/backup_*.sh') ?: [];
+            foreach ($runners as $runner) {
+                $base = basename($runner);
+                $tid = preg_replace('/^backup_|\.sh$/', '', $base);
+                if ($this->getTaskStatus($tid) === 'running') {
+                    $runningTasks[] = $tid;
+                }
+            }
+        }
+
+        $runningTasks = array_values(array_unique($runningTasks));
+        $isRunning = !empty($runningTasks) || !empty($activeLocks) || $rsyncActive;
+
+        return [
+            'running' => $isRunning,
+            'count' => count($runningTasks),
+            'tasks' => $runningTasks,
+            'rsync_active' => $rsyncActive,
+            'locks' => array_values(array_unique($activeLocks)),
+        ];
     }
 
     public function isDangerousIp(string $ip): bool
