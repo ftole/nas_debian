@@ -440,6 +440,7 @@ class TerminalService
             'TERM' => 'xterm-256color',
             'LANG' => 'C.UTF-8',
             'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'SHELL' => '/bin/bash',
             'NAS_CLIENT_ID' => $this->getClientId(),
         ]);
 
