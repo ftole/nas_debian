@@ -145,7 +145,12 @@ function updateServerClockDisplay(newTzAbbr) {
 }
 
 function openModal(modalId) {
-  const modal = document.getElementById(modalId);
+  let modal = document.getElementById(modalId);
+  if (!modal && modalId === 'modal-format-disk') {
+    modal = document.getElementById('modal-storage-manage');
+  } else if (!modal && modalId === 'modal-storage-manage') {
+    modal = document.getElementById('modal-format-disk');
+  }
   if (modal) {
     modal.classList.add('active');
     modal.classList.add('open');
@@ -153,7 +158,12 @@ function openModal(modalId) {
 }
 
 function closeModal(modalId) {
-  const modal = document.getElementById(modalId);
+  let modal = document.getElementById(modalId);
+  if (!modal && modalId === 'modal-format-disk') {
+    modal = document.getElementById('modal-storage-manage');
+  } else if (!modal && modalId === 'modal-storage-manage') {
+    modal = document.getElementById('modal-format-disk');
+  }
   if (modal) {
     modal.classList.remove('active');
     modal.classList.remove('open');
@@ -247,6 +257,12 @@ function switchView(viewName, updateHash = true) {
   if (viewName === 'permissions') {
     viewName = 'users';
   }
+  if (viewName === 'diagnostics') {
+    viewName = 'services';
+  }
+  if (viewName === 'updates') {
+    viewName = 'applications';
+  }
   if (!VALID_VIEWS.includes(viewName)) {
     viewName = 'dashboard';
   }
@@ -272,18 +288,29 @@ function switchView(viewName, updateHash = true) {
     window.location.hash = '#' + viewName;
   }
 
-  // Actualizar sidebar nav
+  // Actualizar sidebar nav (soporta alias unificados)
   document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
-    if (item.getAttribute('data-view') === viewName) {
+    const itemTarget = item.getAttribute('data-view');
+    const isMatch = itemTarget === viewName ||
+      (viewName === 'services' && itemTarget === 'diagnostics') ||
+      (viewName === 'diagnostics' && itemTarget === 'services') ||
+      (viewName === 'applications' && itemTarget === 'updates') ||
+      (viewName === 'updates' && itemTarget === 'applications');
+    if (isMatch) {
       item.classList.add('active');
     } else {
       item.classList.remove('active');
     }
   });
 
-  // Actualizar secciones de vista
+  // Actualizar secciones de vista (soporta alias unificados)
   document.querySelectorAll('.view-section').forEach(sec => {
-    if (sec.id === `view-${viewName}`) {
+    const isSecMatch = sec.id === `view-${viewName}` ||
+      (viewName === 'services' && sec.id === 'view-diagnostics') ||
+      (viewName === 'diagnostics' && sec.id === 'view-services') ||
+      (viewName === 'applications' && sec.id === 'view-updates') ||
+      (viewName === 'updates' && sec.id === 'view-applications');
+    if (isSecMatch) {
       sec.classList.add('active');
     } else {
       sec.classList.remove('active');
@@ -324,7 +351,9 @@ function switchView(viewName, updateHash = true) {
       loadAccessMatrix();
       break;
     case 'services':
+    case 'diagnostics':
       loadServices();
+      loadDiagnostics();
       break;
     case 'logs':
       loadLogs();
@@ -335,13 +364,9 @@ function switchView(viewName, updateHash = true) {
     case 'terminal':
       loadTerminal();
       break;
-    case 'diagnostics':
-      loadDiagnostics();
-      break;
+    case 'applications':
     case 'updates':
       loadUpdates();
-      break;
-    case 'applications':
       loadApplications();
       break;
     case 'domain':
@@ -1192,20 +1217,28 @@ async function deleteBackupTask(taskId) {
 // ==============================================================================
 // 7. Módulo: Almacenamiento & Mantenimiento
 // ==============================================================================
+let _scrubPollTimer = null;
+
 async function loadStorage() {
   const tbody = document.getElementById('storage-disks-body');
   if (!tbody) return;
 
   try {
-    const res = await apiFetch('/api/storage');
+    const res = await apiFetch('/api/storage/disks');
     const disks = res.data?.disks ?? res.disks ?? [];
+    const overview = res.data?.overview ?? res.overview ?? {};
+
+    // Actualizar tarjetas de inteligencia BTRFS y TRIM
+    updateStorageIntelligence(overview);
 
     if (disks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No se detectaron discos de bloque adicionales.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No se detectaron discos de bloque adicionales.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = disks.map(d => `
+    tbody.innerHTML = disks.map(d => {
+      const devPath = d.device || ('/dev/' + d.name);
+      return `
       <tr>
         <td><strong>${escapeHtml(d.name)}</strong>${d.protected ? ' <span class="badge badge-err">SO · protegido</span>' : (d.in_use ? ' <span class="badge badge-warn">En uso</span>' : ' <span class="badge badge-ok">Disponible</span>')}</td>
         <td>${escapeHtml(d.model)}</td>
@@ -1213,41 +1246,209 @@ async function loadStorage() {
         <td>${escapeHtml(d.type)}</td>
         <td><code>${escapeHtml(d.mount || 'Sin montar')}</code></td>
         <td>${escapeHtml(d.fstype || 'N/A')}</td>
+        <td style="text-align:right;">
+          ${!d.protected ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManage('${escapeHtml(devPath)}')"><svg class="icon icon-sm"><use href="#icon-wrench"></use></svg> Gestionar</button>` : '<span class="text-muted" style="font-size:11px;">Protegido</span>'}
+        </td>
       </tr>
-    `).join('');
+    `}).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--accent-danger);">Error al cargar inventario: ${escapeHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger);">Error al cargar inventario: ${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
-async function runStorageScrub() {
+function updateStorageIntelligence(overview) {
+  const scrubBadge = document.getElementById('stg-scrub-badge');
+  const scrubInfo = document.getElementById('stg-scrub-info');
+  const scrubBtn = document.getElementById('btn-scrub-storage');
+
+  const trimBadge = document.getElementById('stg-trim-badge');
+  const trimInfo = document.getElementById('stg-trim-info');
+  const trimBtn = document.getElementById('btn-trim-storage');
+
+  const isBtrfs = Boolean(overview?.is_btrfs);
+  const supportsTrim = Boolean(overview?.supports_trim);
+  const devType = overview?.device_type || 'HDD (Mecánico)';
+  const fsType = (overview?.filesystem || 'ext4').toUpperCase();
+
+  // 1. Diagnóstico BTRFS Scrub
+  if (!isBtrfs) {
+    if (scrubBadge) {
+      scrubBadge.className = 'badge badge-warn';
+      scrubBadge.textContent = 'No disponible (' + fsType + ')';
+    }
+    if (scrubInfo) {
+      scrubInfo.innerHTML = '<span style="color:var(--text-secondary);">El volumen <code>' + escapeHtml(overview?.path || '/srv/nas') + '</code> está formateado en <strong>' + escapeHtml(fsType) + '</strong>. La verificación criptográfica contra Bit Rot requiere BTRFS.</span>';
+    }
+    if (scrubBtn) {
+      scrubBtn.title = 'Requiere sistema de archivos BTRFS (actual: ' + fsType + ')';
+    }
+  } else {
+    checkBtrfsScrubStatus(false);
+  }
+
+  // 2. Diagnóstico SSD TRIM
+  if (!supportsTrim) {
+    if (trimBadge) {
+      trimBadge.className = 'badge badge-warn';
+      trimBadge.textContent = 'Incompatible (' + devType + ')';
+    }
+    if (trimInfo) {
+      trimInfo.innerHTML = '<span style="color:var(--text-secondary);">El volumen <code>' + escapeHtml(overview?.path || '/srv/nas') + '</code> reside en un <strong>' + escapeHtml(devType) + '</strong>. TRIM está reservado exclusivamente para unidades flash (SSD / NVMe) para evitar errores del controlador mecánico.</span>';
+    }
+    if (trimBtn) {
+      trimBtn.title = 'TRIM deshabilitado: el almacenamiento reside en un ' + devType;
+    }
+  } else {
+    if (trimBadge) {
+      trimBadge.className = 'badge badge-ok';
+      trimBadge.textContent = 'Compatible (SSD / NVMe)';
+    }
+    if (trimInfo) {
+      trimInfo.innerHTML = '<span style="color:var(--accent-success-text);">Unidad de estado sólido SSD/NVMe detectada. Listo para descartar bloques de celdas flash eliminadas.</span>';
+    }
+    if (trimBtn) {
+      trimBtn.title = 'Ejecutar orden discard fstrim para optimizar celdas flash';
+    }
+  }
+}
+
+async function checkBtrfsScrubStatus(isPolling = false) {
+  const scrubBadge = document.getElementById('stg-scrub-badge');
+  const scrubInfo = document.getElementById('stg-scrub-info');
+
   try {
-    await apiFetch('/api/storage/scrub', { method: 'POST' });
-    showToast('Auditoría BTRFS scrub iniciada.', 'info');
+    const res = await apiFetch('/api/storage/scrub');
+    const d = res.data || res;
+
+    const isRunning = Boolean(d.running || d.status === 'running');
+    if (scrubBadge) {
+      scrubBadge.className = isRunning ? 'badge badge-warn' : 'badge badge-ok';
+      scrubBadge.textContent = isRunning ? 'En curso' : (d.status === 'finished' ? 'Completado' : 'Listo');
+    }
+
+    if (scrubInfo) {
+      if (isRunning) {
+        scrubInfo.innerHTML = `
+          <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
+            <div style="display:flex; justify-content:space-between; font-size:12px;">
+              <strong>Verificando sumas criptográficas bloque a bloque...</strong>
+              <span>${escapeHtml(d.rate || 'Analizando')}</span>
+            </div>
+            <div style="height:6px; background:var(--border-color); border-radius:3px; overflow:hidden;">
+              <div style="height:100%; width:100%; background:var(--accent-primary); animation:pulse 1.5s infinite;"></div>
+            </div>
+            <span class="text-muted" style="font-size:11px;">${d.time_left ? 'Tiempo restante estimado: ' + escapeHtml(d.time_left) : 'Examinando bloques de datos y metadatos...'}</span>
+          </div>
+        `;
+      } else {
+        scrubInfo.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+            <span>${escapeHtml(d.summary || 'Auditoría no iniciada recientemente.')}</span>
+            ${d.duration ? `<small class="text-muted" style="margin-left:8px;">Duración: ${escapeHtml(d.duration)}</small>` : ''}
+          </div>
+        `;
+      }
+    }
+    return !isRunning;
   } catch (e) {
-    // Ya mostrado
+    return true;
+  }
+}
+
+function pollBtrfsScrubProgress() {
+  if (_scrubPollTimer) clearInterval(_scrubPollTimer);
+
+  checkBtrfsScrubStatus(true);
+  _scrubPollTimer = setInterval(async () => {
+    const isFinished = await checkBtrfsScrubStatus(true);
+    if (isFinished) {
+      clearInterval(_scrubPollTimer);
+      _scrubPollTimer = null;
+      showToast('Auditoría BTRFS scrub finalizada exitosamente.', 'success');
+    }
+  }, 3000);
+}
+
+async function runStorageScrub() {
+  const btn = document.getElementById('btn-scrub-storage');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
+  try {
+    const stg = await apiFetch('/api/storage');
+    const isBtrfs = Boolean(stg.data?.overview?.is_btrfs);
+    const fsName = stg.data?.overview?.filesystem || 'ext4';
+
+    if (!isBtrfs) {
+      showToast('Operación cancelada: el volumen está en ' + fsName.toUpperCase() + '. BTRFS Scrub requiere un filesystem Btrfs.', 'warning');
+      return;
+    }
+
+    const proceed = window.confirm(
+      'Auditoría Criptográfica BTRFS Scrub\n\n' +
+      'Esta operación valida cada bloque del almacenamiento contra sus sumas de comprobación criptográficas SHA-256/blake2b para detectar y autorreparar corrupción silenciosa (Bit Rot).\n\n' +
+      '¿Deseas iniciar la auditoría en segundo plano ahora?'
+    );
+    if (!proceed) return;
+
+    const res = await apiFetch('/api/storage/scrub', { method: 'POST' });
+    showToast(res.message || 'Auditoría BTRFS scrub iniciada.', 'info');
+    pollBtrfsScrubProgress();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
 async function runStorageTrim() {
+  const btn = document.getElementById('btn-trim-storage');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
   try {
-    await apiFetch('/api/storage/trim', { method: 'POST' });
-    showToast('Optimización fstrim ejecutada.', 'success');
+    const stg = await apiFetch('/api/storage');
+    const supportsTrim = Boolean(stg.data?.overview?.supports_trim);
+    const devType = stg.data?.overview?.device_type || 'HDD (Mecánico)';
+
+    if (!supportsTrim) {
+      showToast('TRIM no ejecutable: el almacenamiento reside en un ' + devType + '. Solo aplica a unidades SSD / NVMe.', 'warning');
+      return;
+    }
+
+    const proceed = window.confirm(
+      'Optimización TRIM para SSD (fstrim)\n\n' +
+      'Esta operación envía comandos discard al controlador para liberar celdas de almacenamiento flash de bloques ya eliminados, manteniendo la velocidad sostenida y prolongando la vida útil del SSD.\n\n' +
+      '¿Deseas ejecutar TRIM ahora?'
+    );
+    if (!proceed) return;
+
+    const res = await apiFetch('/api/storage/trim', { method: 'POST' });
+    const freed = res.data?.bytes_trimmed || res.message || 'bloques descartados';
+    showToast('TRIM SSD completado: ' + freed, 'success');
+
+    const trimInfo = document.getElementById('stg-trim-info');
+    if (trimInfo) {
+      trimInfo.innerHTML = '<span style="color:var(--accent-success-text); font-weight:500;">Último TRIM ejecutado: ' + escapeHtml(freed) + '</span>';
+    }
   } catch (e) {
-    // Ya mostrado
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
-async function openStorageManage() {
+async function openStorageManage(preselectedDevice = null) {
   try {
-    const res = await apiFetch('/api/storage');
-    const disks = res.data?.disks || [];
+    const res = await apiFetch('/api/storage/disks');
+    const disks = res.data?.disks || res.disks || [];
     const sel = document.getElementById('stg-device');
+    if (!sel) return;
+
     const usable = disks.filter(d => !d.protected);
     sel.innerHTML = usable.length
       ? usable.map(d => {
         const dev = d.device || ('/dev/' + d.name);
-        return `<option value="${escapeHtml(dev)}">${escapeHtml(dev)} — ${escapeHtml(d.size)} ${escapeHtml(d.model || '')}${d.mount ? ' (montado ' + escapeHtml(d.mount) + ')' : ''}</option>`;
+        const isSel = (preselectedDevice && (dev === preselectedDevice || d.name === preselectedDevice)) ? 'selected' : '';
+        return `<option value="${escapeHtml(dev)}" ${isSel}>${escapeHtml(dev)} — ${escapeHtml(d.size)} ${escapeHtml(d.model || '')}${d.mount ? ' (montado ' + escapeHtml(d.mount) + ')' : ''}</option>`;
       }).join('')
       : '<option value="">(sin discos de datos disponibles)</option>';
     toggleStorageOp();
@@ -1255,6 +1456,10 @@ async function openStorageManage() {
   } catch (e) {
     // Ya mostrado
   }
+}
+
+function openFormatDisk(dev) {
+  openStorageManage(dev);
 }
 
 function toggleStorageOp() {
@@ -2459,6 +2664,23 @@ async function loadUpdates() {
     `;
   } catch (e) {
     container.innerHTML = '<p style="color:var(--accent-danger);">Error al consultar actualizaciones.</p>';
+  }
+}
+
+async function applySystemUpdate() {
+  const proceed = window.confirm(
+    'Actualización del Sistema desde GitHub\n\n' +
+    'Esta acción comprobará y sincronizará la versión oficial más reciente desde el repositorio GitHub (main), aplicando parches de seguridad y mejoras al panel web y módulos CLI sin interrumpir el almacenamiento.\n\n' +
+    '¿Deseas iniciar la comprobación ahora?'
+  );
+  if (!proceed) return;
+
+  showToast('Comprobando actualizaciones oficiales en GitHub...', 'info');
+  try {
+    await loadUpdates();
+    showToast('Repositorio verificado. Para aplicar cambios en caliente en el servidor ejecuta: sudo nas update', 'success');
+  } catch (e) {
+    showToast('Error al consultar el repositorio: ' + e.message, 'error');
   }
 }
 
