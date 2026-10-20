@@ -1421,6 +1421,69 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </form>
       </div>
+  </div>
+
+  <!-- Modal: Editar Tarea de Backup -->
+  <div class="modal-backdrop" id="modal-edit-backup">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Editar tarea de respaldo</h3>
+        <button class="modal-close" onclick="closeModal('modal-edit-backup')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-edit-backup" onsubmit="submitEditBackup(event)">
+          <div class="form-group">
+            <label for="edit-bkp-id">Identificador único de la tarea:</label>
+            <input type="text" id="edit-bkp-id" readonly style="font-weight:600; background:var(--bg-surface);">
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-proto">Protocolo de replicación:</label>
+            <select id="edit-bkp-proto" onchange="toggleEditBackupFields()">
+              <option value="cifs">CIFS / SMB 3.1.1 (Servidor Windows)</option>
+              <option value="ssh">SSH + Rsync (Servidor Linux Remoto)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-ip">Dirección IP o Nombre del Host Remoto:</label>
+            <input type="text" id="edit-bkp-ip" required placeholder="ej. 10.10.1.50">
+          </div>
+          <div class="form-group" id="field-edit-bkp-share">
+            <label for="edit-bkp-share">Recurso compartido remoto:</label>
+            <input type="text" id="edit-bkp-share" placeholder="ej. Facturacion o C$">
+          </div>
+          <div class="form-group" id="field-edit-bkp-path" style="display:none;">
+            <label for="edit-bkp-path">Ruta absoluta remota en Linux:</label>
+            <input type="text" id="edit-bkp-path" placeholder="ej. /var/www">
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-user">Usuario remoto (ej. Administrador o DOMINIO\usuario):</label>
+            <input type="text" id="edit-bkp-user" required placeholder="ej. Administrador">
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-pass">Contraseña (dejar en blanco para conservar la actual):</label>
+            <input type="password" id="edit-bkp-pass" placeholder="•••••••• (sin cambios)">
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-cron">Frecuencia programada (Cron):</label>
+            <select id="edit-bkp-cron">
+              <option value="0 23 * * *">Diario a las 23:00 hrs (Recomendado)</option>
+              <option value="0 */6 * * *">Cada 6 horas</option>
+              <option value="0 * * * *">Cada hora en punto</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-bkp-retention">Snapshots a conservar antes de rotar:</label>
+            <input type="number" id="edit-bkp-retention" value="30" min="1" max="365">
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+            <button type="button" class="btn btn-secondary" onclick="testEditBackupConnection()" id="btn-test-edit-backup" style="margin-right:auto;">
+              <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-backup')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-edit-backup">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 <?php endif; ?>
@@ -1877,6 +1940,34 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-file')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDeleteFile()">Proceder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Advertencia de Compresión ZIP con Respaldos en Curso -->
+  <div class="modal-backdrop" id="modal-zip-backup-warning">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon" style="color:var(--accent-warning);"><use href="#icon-alert-triangle"></use></svg>
+          Respaldos en ejecución detectados
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-zip-backup-warning')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-top:0;">Actualmente hay procesos de copia de seguridad (rsync) activos en el servidor NAS:</p>
+        <div id="zip-running-backups-list" style="background:var(--bg-body); padding:10px 14px; border-radius:6px; font-family:var(--font-mono); font-size:12px; margin-bottom:14px; border:1px solid var(--border-color);">
+          <!-- Tareas activas -->
+        </div>
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:0;">
+          Generar y comprimir un archivo ZIP en este momento incrementará el uso de CPU y el I/O en los discos, lo cual podría ralentizar o prolongar la finalización de los respaldos en curso.
+        </p>
+      </div>
+      <div class="modal-footer" style="padding:14px 22px; gap:10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-zip-backup-warning')">Cancelar descarga</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-zip-download" style="background:var(--accent-warning); border-color:var(--accent-warning); color:#000;">
+          Continuar de todos modos
+        </button>
       </div>
     </div>
   </div>
