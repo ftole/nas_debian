@@ -152,6 +152,15 @@ class BackupService
                 'idle' => 'Sin ejecutar',
             ][$state] ?? 'Sin ejecutar';
 
+            $bkpDir = $this->bkpRoot . '/' . $taskId;
+            if (preg_match('/BKP_DIR=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mDir)) {
+                $bkpDir = str_replace('$TASK', $taskId, $mDir[1]);
+            }
+            $destUnit = 'principal';
+            if (str_contains($bkpDir, '/srv/nas/unidades/')) {
+                $destUnit = preg_replace('#^.*/srv/nas/unidades/([^/]+).*$#', '$1', $bkpDir);
+            }
+
             $tasks[] = [
                 'id' => $taskId,
                 'protocol' => $proto,
@@ -162,6 +171,8 @@ class BackupService
                 'port' => $portVal,
                 'source' => $src,
                 'destination' => $src,
+                'dest_path' => $bkpDir,
+                'dest_unit' => $destUnit,
                 'cron' => $cronExpr,
                 'cron_desc' => $this->describeCron($cronExpr),
                 'retention' => $retention,
@@ -226,6 +237,18 @@ class BackupService
             }
         }
 
+        $destUnit = trim((string) ($data['dest_unit'] ?? ($data['unit'] ?? ($data['unit_id'] ?? ''))));
+        $storageRoot = getenv('NAS_STORAGE_ROOT') ?: $this->storageRoot;
+        $taskBkpRoot = $this->bkpRoot;
+        if ($destUnit !== '' && $destUnit !== 'principal' && $destUnit !== '/srv/nas') {
+            $cleanUnit = preg_replace('#^(/srv/nas/unidades/|unidades/)#', '', $destUnit);
+            $cleanUnit = trim((string) $cleanUnit, '/');
+            if (!preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $cleanUnit)) {
+                return ['success' => false, 'error' => 'Identificador de unidad de destino inválido.'];
+            }
+            $taskBkpRoot = rtrim($storageRoot, '/') . '/unidades/' . $cleanUnit . '/BACKUPS_HISTORICOS';
+        }
+
         if ($proto === 'cifs') {
             $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $share = trim($data['share'] ?? ($data['path'] ?? ($data['source_share'] ?? '')));
@@ -251,7 +274,7 @@ class BackupService
 
             // Crear directorios de soporte
             $this->ensureDirectory($this->credDir);
-            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($taskBkpRoot . '/' . $taskId);
             $this->ensureDirectory($this->logRoot);
             $this->ensureDirectory($this->binDir);
             $this->ensureDirectory($this->cronDir);
@@ -273,7 +296,7 @@ class BackupService
             if (!$wCred) {
                 return ['success' => false, 'error' => 'No se pudo guardar el archivo de credenciales de respaldo.'];
             }
-            $runnerContent = $this->buildCifsRunner($taskId, $ip, $share, $credFile, $retention);
+            $runnerContent = $this->buildCifsRunner($taskId, $ip, $share, $credFile, $retention, $taskBkpRoot);
         } elseif ($proto === 'ssh') {
             $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $port = (int) ($data['port'] ?? 22);
@@ -304,7 +327,7 @@ class BackupService
 
             // Crear directorios de soporte
             $this->ensureDirectory($this->credDir);
-            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($taskBkpRoot . '/' . $taskId);
             $this->ensureDirectory($this->logRoot);
             $this->ensureDirectory($this->binDir);
             $this->ensureDirectory($this->cronDir);
@@ -317,7 +340,7 @@ class BackupService
             if (!$wCred) {
                 return ['success' => false, 'error' => 'No se pudo guardar el archivo de credenciales de respaldo.'];
             }
-            $runnerContent = $this->buildSshRunner($taskId, $ip, $port, $user, $path, $credFile, $retention);
+            $runnerContent = $this->buildSshRunner($taskId, $ip, $port, $user, $path, $credFile, $retention, $taskBkpRoot);
         } elseif ($proto === 'local') {
             $path = trim($data['path'] ?? ($data['source_path'] ?? ($data['share'] ?? '/srv/nas/SISTEMAS')));
             if (!$this->isAllowedLocalPath($path)) {
@@ -328,7 +351,7 @@ class BackupService
 
             // Crear directorios de soporte
             $this->ensureDirectory($this->credDir);
-            $this->ensureDirectory($this->bkpRoot . '/' . $taskId);
+            $this->ensureDirectory($taskBkpRoot . '/' . $taskId);
             $this->ensureDirectory($this->logRoot);
             $this->ensureDirectory($this->binDir);
             $this->ensureDirectory($this->cronDir);
@@ -336,7 +359,7 @@ class BackupService
             $runnerFile = $this->binDir . '/backup_' . $taskId . '.sh';
             $cronFile = $this->cronDir . '/backup_' . $taskId;
 
-            $runnerContent = $this->buildLocalRunner($taskId, $realPath, $retention);
+            $runnerContent = $this->buildLocalRunner($taskId, $realPath, $retention, $taskBkpRoot);
         } else {
             return ['success' => false, 'error' => 'Protocolo de backup no soportado.'];
         }
@@ -372,6 +395,14 @@ class BackupService
         $cred = $this->credDir . '/' . $taskId . '.cred';
         $lock = '/var/lock/backup_' . $taskId . '.lock';
 
+        $dir = $this->bkpRoot . '/' . $taskId;
+        if (file_exists($runner)) {
+            $runnerContent = (string) @file_get_contents($runner);
+            if (preg_match('/BKP_DIR=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mDir)) {
+                $dir = str_replace('$TASK', $taskId, $mDir[1]);
+            }
+        }
+
         @unlink($runner);
         @unlink($cron);
         @unlink($cred);
@@ -385,12 +416,12 @@ class BackupService
         }
 
         if ($deleteBackups) {
-            $dir = $this->bkpRoot . '/' . $taskId;
-            if (is_dir($dir) && $dir !== $this->bkpRoot) {
+            if (is_dir($dir) && $dir !== $this->bkpRoot && !in_array($dir, ['/', '/srv', '/srv/nas', '/srv/nas/unidades'], true)) {
                 if (DIRECTORY_SEPARATOR !== '\\') {
                     SystemService::sudo(['chattr', '-R', '-i', $dir]);
                 }
-                if (is_writable($this->bkpRoot)) {
+                $parentDir = dirname($dir);
+                if (is_writable($parentDir)) {
                     $this->removeDirectoryRecursive($dir);
                 } else {
                     SystemService::sudo(['rm', '-rf', $dir]);
@@ -885,6 +916,16 @@ class BackupService
                     }
                 }
             }
+            if (empty($data['dest_unit']) && empty($data['unit']) && empty($data['unit_id'])) {
+                if (preg_match('/BKP_DIR=[\'"]?([^\'"\r\n]+)[\'"]?/', $runnerContent, $mDir)) {
+                    $rawDir = str_replace('$TASK', $taskId, $mDir[1]);
+                    if (str_contains($rawDir, '/srv/nas/unidades/')) {
+                        $data['dest_unit'] = preg_replace('#^.*/srv/nas/unidades/([^/]+).*$#', '$1', $rawDir);
+                    } else {
+                        $data['dest_unit'] = 'principal';
+                    }
+                }
+            }
             if (empty($data['retention'])) {
                 if (preg_match('/RETENTION=(\d+)/', $runnerContent, $mRet)) {
                     $data['retention'] = (int) $mRet[1];
@@ -1203,9 +1244,6 @@ class BackupService
         if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
             return 'idle';
         }
-        if ($this->isDev()) {
-            return 'ok';
-        }
 
         $pg = SystemService::runCommand(['pgrep', '-f', 'backup_' . $taskId . '.sh']);
         if ($pg['code'] === 0 && trim($pg['stdout']) !== '') {
@@ -1213,12 +1251,18 @@ class BackupService
         }
 
         $log = $this->logRoot . '/backup_' . $taskId . '.log';
-        if (!file_exists($log)) {
-            return 'idle';
+        if (file_exists($log)) {
+            $classified = $this->classifyLatestRun($this->readTaskLog($log));
+            if ($classified !== 'idle') {
+                return $classified;
+            }
         }
 
-        $classified = $this->classifyLatestRun($this->readTaskLog($log));
-        return $classified === 'idle' ? 'idle' : $classified;
+        if ($this->isDev()) {
+            return 'ok';
+        }
+
+        return 'idle';
     }
 
     /**
@@ -1254,6 +1298,11 @@ class BackupService
             || str_contains($segment, 'MOUNT_FAILED')
             || str_contains($segment, 'ABORTADO')) {
             return 'error';
+        }
+        if (str_contains($segment, 'INICIANDO BACKUP')
+            || str_contains($segment, 'LOCK_ACQUIRED')
+            || str_contains($segment, 'TO-CHK')) {
+            return 'running';
         }
         return 'idle';
     }
@@ -1301,29 +1350,93 @@ class BackupService
             }
         }
 
-        // El progreso también debe provenir solo de la última ejecución.
+        $elapsed = $start !== null ? max(0, time() - $start) : 0;
+
+        // Extraer métricas de rsync y calcular ETA suavizado (EMA)
         $percent = 0;
         $speed = '';
-        for ($i = count($lines) - 1; $i >= $startIdx; $i--) {
-            if (preg_match('/(\d{1,3})%/', $lines[$i], $pm)) {
-                $percent = min(100, (int) $pm[1]);
-                if (preg_match('/([\d.]+[KMGkmg]?B\/s)/', $lines[$i], $sm)) {
+        $rawEtas = [];
+        $lastChkRemaining = null;
+        $lastChkTotal = null;
+
+        for ($i = $startIdx; $i < count($lines); $i++) {
+            $line = $lines[$i];
+            // Formato progress2 de rsync:
+            // ej: " 1,234,567  45%   12.34MB/s    0:01:23 (xfr#12, to-chk=45/120)"
+            if (preg_match('/(\d{1,3})%/', $line, $pm)) {
+                $pVal = min(100, (int) $pm[1]);
+                $percent = $pVal;
+                if (preg_match('/([\d.]+[KMGkmg]?B\/s)/', $line, $sm)) {
                     $speed = $sm[1];
                 }
-                break;
+
+                $chkRemaining = null;
+                $chkTotal = null;
+                if (preg_match('/(?:to|ir)-chk=(\d+)\/(\d+)/', $line, $cm)) {
+                    $chkRemaining = (int) $cm[1];
+                    $chkTotal = (int) $cm[2];
+                    $lastChkRemaining = $chkRemaining;
+                    $lastChkTotal = $chkTotal;
+                }
+
+                $rsyncSec = null;
+                if (preg_match('/(\d+):(\d{2}):(\d{2})/', $line, $tm)) {
+                    $rsyncSec = ((int) $tm[1] * 3600) + ((int) $tm[2] * 60) + (int) $tm[3];
+                }
+
+                // Cálculo ponderado combinando bytes y to-chk
+                if ($pVal > 0) {
+                    $bytesFractionRemaining = max(0.0, (100.0 - $pVal) / 100.0);
+                    if ($chkTotal !== null && $chkTotal > 0) {
+                        $filesFractionRemaining = max(0.0, min(1.0, $chkRemaining / $chkTotal));
+                        // Ponderación: 70% bytes restantes + 30% archivos pendientes
+                        $weightedFraction = (0.7 * $bytesFractionRemaining) + (0.3 * $filesFractionRemaining);
+                    } else {
+                        $weightedFraction = $bytesFractionRemaining;
+                    }
+
+                    $sampleEta = null;
+                    if ($elapsed > 0 && $pVal > 0) {
+                        $totalEstimatedSec = $elapsed / ($pVal / 100.0);
+                        $sampleEta = (int) round($totalEstimatedSec * $weightedFraction);
+                    }
+                    if ($rsyncSec !== null && $rsyncSec > 0) {
+                        $sampleEta = $sampleEta !== null ? (int) round(($sampleEta * 0.5) + ($rsyncSec * 0.5)) : $rsyncSec;
+                    }
+                    if ($sampleEta !== null && $sampleEta >= 0) {
+                        $rawEtas[] = $sampleEta;
+                    }
+                }
             }
         }
 
-        $elapsed = $start !== null ? max(0, time() - $start) : 0;
+        // Suavizado EMA (Exponential Moving Average) con factor alpha = 0.35
+        $smoothedRemaining = null;
+        if (!empty($rawEtas)) {
+            $ema = (float) $rawEtas[0];
+            $alpha = 0.35;
+            for ($k = 1; $k < count($rawEtas); $k++) {
+                $ema = ($alpha * (float) $rawEtas[$k]) + ((1.0 - $alpha) * $ema);
+            }
+            $smoothedRemaining = (int) round($ema);
+        } elseif ($percent > 0 && $elapsed > 0) {
+            $smoothedRemaining = (int) round($elapsed * (100 - $percent) / $percent);
+        }
+
         $result['percent'] = $percent;
         $result['speed'] = $speed;
         $result['elapsed_sec'] = $elapsed;
         $result['elapsed'] = $this->formatDuration($elapsed);
+        $result['to_chk_remaining'] = $lastChkRemaining;
+        $result['to_chk_total'] = $lastChkTotal;
+
         if ($status === 'ok') {
             $result['percent'] = 100;
             $result['remaining'] = '00:00:00';
-        } elseif ($percent > 0 && $elapsed > 0) {
-            $result['remaining'] = $this->formatDuration((int) round($elapsed * (100 - $percent) / $percent));
+            $result['remaining_sec'] = 0;
+        } elseif ($smoothedRemaining !== null && $smoothedRemaining >= 0) {
+            $result['remaining'] = $this->formatDuration($smoothedRemaining);
+            $result['remaining_sec'] = $smoothedRemaining;
         }
         return $result;
     }
@@ -1436,8 +1549,9 @@ class BackupService
         };
     }
 
-    private function buildCifsRunner(string $task, string $ip, string $share, string $cred, int $retention): string
+    private function buildCifsRunner(string $task, string $ip, string $share, string $cred, int $retention, ?string $destBkpRoot = null): string
     {
+        $targetBkpRoot = $destBkpRoot ?: $this->bkpRoot;
         $escTask = escapeshellarg($task);
         $escIp = escapeshellarg($ip);
         $escShare = escapeshellarg($share);
@@ -1451,7 +1565,7 @@ SRC_IP=$escIp
 SRC_SHARE=$escShare
 CRED_FILE=$escCred
 MOUNT_POINT="\${MOUNT_ROOT:-/mnt/backup_sources}/\$TASK"
-BKP_DIR="{$this->bkpRoot}/\$TASK"
+BKP_DIR="{$targetBkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
 MASTER_LOG="{$this->logRoot}/backups_master.log"
 RETENTION=$retention
@@ -1570,8 +1684,9 @@ log_backup_event "BACKUP_COMPLETED" "notice" "Respaldo CIFS \$TASK finalizado co
 BASH;
     }
 
-    private function buildSshRunner(string $task, string $ip, int $port, string $user, string $path, string $cred, int $retention): string
+    private function buildSshRunner(string $task, string $ip, int $port, string $user, string $path, string $cred, int $retention, ?string $destBkpRoot = null): string
     {
+        $targetBkpRoot = $destBkpRoot ?: $this->bkpRoot;
         $escTask = escapeshellarg($task);
         $escIp = escapeshellarg($ip);
         $escUser = escapeshellarg($user);
@@ -1587,7 +1702,7 @@ SRC_PORT=$port
 SRC_USER=$escUser
 SRC_PATH=$escPath
 CRED_FILE=$escCred
-BKP_DIR="{$this->bkpRoot}/\$TASK"
+BKP_DIR="{$targetBkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
 MASTER_LOG="{$this->logRoot}/backups_master.log"
 RETENTION=$retention
@@ -1699,8 +1814,9 @@ log_backup_event "BACKUP_COMPLETED" "notice" "Respaldo SSH \$TASK finalizado con
 BASH;
     }
 
-    private function buildLocalRunner(string $task, string $path, int $retention): string
+    private function buildLocalRunner(string $task, string $path, int $retention, ?string $destBkpRoot = null): string
     {
+        $targetBkpRoot = $destBkpRoot ?: $this->bkpRoot;
         $escTask = escapeshellarg($task);
         $escPath = escapeshellarg($path);
 
@@ -1710,7 +1826,7 @@ set -e
 TASK=$escTask
 SRC_IP="127.0.0.1"
 SRC_PATH=$escPath
-BKP_DIR="{$this->bkpRoot}/\$TASK"
+BKP_DIR="{$targetBkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
 MASTER_LOG="{$this->logRoot}/backups_master.log"
 RETENTION=$retention
