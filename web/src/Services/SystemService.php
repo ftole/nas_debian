@@ -789,17 +789,69 @@ class SystemService
         $u = strtolower(trim($unit));
         $m = trim($message);
 
-        // Firewall UFW: bloques de paquetes
+        // Firewall UFW: bloques de paquetes y eventos de red
         if (stripos($m, 'UFW') !== false) {
             $proto = preg_match('/PROTO=(\S+)/', $m, $p) ? strtoupper($p[1]) : '';
             $src = preg_match('/SRC=(\S+)/', $m, $x) ? $x[1] : '?';
             $dst = preg_match('/DST=(\S+)/', $m, $y) ? $y[1] : '?';
             $spt = preg_match('/SPT=(\d+)/', $m, $w) ? $w[1] : '';
             $dpt = preg_match('/DPT=(\d+)/', $m, $z) ? $z[1] : '';
-            $accion = (stripos($m, 'BLOCK') !== false) ? 'Bloqueado' : ((stripos($m, 'ALLOW') !== false) ? 'Permitido' : 'Evento');
-            $origen = $src . ($spt !== '' ? ':' . $spt : '');
-            $destino = $dst . ($dpt !== '' ? ':' . $dpt : '');
-            return ['human' => "[UFW] {$accion} {$proto} de {$origen} → {$destino}", 'level' => 'warn'];
+            $isBlock = stripos($m, 'BLOCK') !== false;
+            $accion = $isBlock ? 'Bloqueado' : ((stripos($m, 'ALLOW') !== false) ? 'Permitido' : 'Evento');
+
+            // Normalización legible de direcciones IPv6 (comprime secuencias de ceros)
+            $formatIp = static function (string $ip): string {
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                    $packed = @inet_pton($ip);
+                    if ($packed !== false) {
+                        return (string) inet_ntop($packed);
+                    }
+                }
+                return $ip;
+            };
+
+            $srcClean = $formatIp($src);
+            $dstClean = $formatIp($dst);
+
+            // Detección de naturaleza de red (multicast o broadcast)
+            $isMulticast = str_starts_with($dstClean, 'ff02:') || str_starts_with($dstClean, '224.') || str_starts_with($dstClean, '239.');
+            $isBroadcast = $dstClean === '255.255.255.255' || str_ends_with($dstClean, '.255');
+            $castType = $isMulticast ? ' [IPv6 Multicast]' : ($isBroadcast ? ' [Broadcast]' : '');
+
+            // Enriquecimiento semántico de servicios y protocolos de red
+            $service = '';
+            if ($proto === 'UDP' && ($dpt === '5678' || $spt === '5678')) {
+                $service = 'Descubrimiento de red MikroTik MNDP' . $castType;
+            } elseif ($proto === 'UDP' && ($dpt === '5353' || $spt === '5353')) {
+                $service = 'Descubrimiento mDNS / Apple Bonjour' . $castType;
+            } elseif ($proto === 'UDP' && ($dpt === '1900' || $spt === '1900')) {
+                $service = 'Descubrimiento SSDP / UPnP' . $castType;
+            } elseif ($proto === 'UDP' && ($dpt === '5355' || $spt === '5355')) {
+                $service = 'Resolución de nombres LLMNR' . $castType;
+            } elseif ($proto === 'UDP' && ($dpt === '3702' || $spt === '3702')) {
+                $service = 'Descubrimiento WSD Windows' . $castType;
+            } elseif ($proto === 'UDP' && in_array($dpt, ['137', '138'], true)) {
+                $service = 'Difusión NetBIOS Windows' . $castType;
+            } elseif ($proto === 'TCP' && in_array($dpt, ['139', '445'], true)) {
+                $service = 'Tráfico de archivos Samba / SMB';
+            } elseif ($proto === 'TCP' && $dpt === '22') {
+                $service = 'Acceso remoto SSH';
+            } elseif ($proto === 'TCP' && in_array($dpt, ['80', '443'], true)) {
+                $service = 'Acceso web HTTP/HTTPS';
+            }
+
+            if ($service !== '') {
+                $verb = $isBlock ? 'Tráfico de red local descartado' : 'Tráfico de red permitido';
+                $origen = $srcClean . ($spt !== '' ? ':' . $spt : '');
+                $destino = $dstClean . ($dpt !== '' ? ':' . $dpt : '');
+                $human = "[Firewall UFW] {$verb}: {$service} ({$proto} {$origen} → {$destino})";
+            } else {
+                $origen = $srcClean . ($spt !== '' ? ':' . $spt : '');
+                $destino = $dstClean . ($dpt !== '' ? ':' . $dpt : '');
+                $human = "[Firewall UFW] {$accion} {$proto} de {$origen} → {$destino}";
+            }
+
+            return ['human' => $human, 'level' => $isBlock ? 'warn' : 'info'];
         }
 
         // Cron: ejecuciones programadas
