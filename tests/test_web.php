@@ -2482,6 +2482,13 @@ $logindNew = $sysSvcInst->humanizeSystemLog('systemd-logind', 'New session 42 of
 assertTrue(str_contains($logindNew['human'], 'Nueva sesión 42 iniciada para el usuario sistemas') && $logindNew['action_label'] === 'Sesión',
     'humanizeSystemLog traduce creación de sesión en systemd-logind');
 
+// Pruebas de configuración y sincronización de zona horaria local
+$currentTimezone = date_default_timezone_get();
+assertTrue($currentTimezone !== '', 'La zona horaria de PHP está configurada');
+$nowStr = date('Y-m-d H:i:s');
+assertTrue(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $nowStr) === 1,
+    'date() genera formato de marca de tiempo válido con la zona horaria activa');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
