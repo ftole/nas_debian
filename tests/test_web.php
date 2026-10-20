@@ -2518,6 +2518,104 @@ assertTrue(str_contains($appJsSrc, '_serverClock'), 'app.js define objeto global
 assertTrue(str_contains($appJsSrc, 'Intl.DateTimeFormat'), 'app.js utiliza Intl.DateTimeFormat para la zona IANA del servidor');
 assertTrue(str_contains($appJsSrc, 'getUTCHours'), 'app.js incluye fallback matemático getUTCHours inmune al cliente');
 
+// 27. Pruebas de mejoras de Respaldo, Auditoría de ACL y Modales
+$bkpTestSvc = new BackupService();
+$bkpTestSvc->binDir = sys_get_temp_dir() . '/nas_test_bin_' . bin2hex(random_bytes(4));
+$bkpTestSvc->cronDir = sys_get_temp_dir() . '/nas_test_cron_' . bin2hex(random_bytes(4));
+$bkpTestSvc->credDir = sys_get_temp_dir() . '/nas_test_cred_' . bin2hex(random_bytes(4));
+$bkpTestSvc->bkpRoot = sys_get_temp_dir() . '/nas_test_bkp_' . bin2hex(random_bytes(4));
+$bkpTestSvc->logRoot = sys_get_temp_dir() . '/nas_test_log_' . bin2hex(random_bytes(4));
+@mkdir($bkpTestSvc->binDir, 0755, true);
+@mkdir($bkpTestSvc->cronDir, 0755, true);
+@mkdir($bkpTestSvc->credDir, 0700, true);
+@mkdir($bkpTestSvc->bkpRoot, 0755, true);
+@mkdir($bkpTestSvc->logRoot, 0755, true);
+
+// 27.1 BackupService::updateTask validaciones
+$badIdRes = $bkpTestSvc->updateTask('bad id!', []);
+assertTrue(!$badIdRes['success'], 'BackupService::updateTask rechaza identificadores con caracteres inválidos');
+
+$badLenRes = $bkpTestSvc->updateTask('a', []);
+assertTrue(!$badLenRes['success'], 'BackupService::updateTask rechaza identificadores con longitud menor a 2');
+
+// 27.2 BackupService::getRunningBackups
+$runningRes = $bkpTestSvc->getRunningBackups();
+assertTrue(is_array($runningRes) && isset($runningRes['running']) && is_bool($runningRes['running']), 'BackupService::getRunningBackups devuelve campo booleano running');
+assertTrue(isset($runningRes['tasks']) && is_array($runningRes['tasks']), 'BackupService::getRunningBackups devuelve lista de tareas');
+assertTrue(isset($runningRes['rsync_active']) && is_bool($runningRes['rsync_active']), 'BackupService::getRunningBackups devuelve campo booleano rsync_active');
+assertTrue(isset($runningRes['locks']) && is_array($runningRes['locks']), 'BackupService::getRunningBackups devuelve lista de locks');
+
+// 27.3 BackupController endpoints
+$bkpCtrlTest = new BackupController();
+
+// update endpoint
+$reqEmpty = new Request();
+ob_start();
+$bkpCtrlTest->update($reqEmpty);
+$outEmpty = ob_get_clean();
+$jsonEmpty = json_decode((string) $outEmpty, true);
+assertTrue(!empty($jsonEmpty) && empty($jsonEmpty['success']), 'BackupController::update rechaza peticiones con identificador vacío');
+
+$reqBadId = new Request([], [], [], [], [], ['id' => 'INVALID CHARS!!']);
+ob_start();
+$bkpCtrlTest->update($reqBadId);
+$outBadId = ob_get_clean();
+$jsonBadId = json_decode((string) $outBadId, true);
+assertTrue(!empty($jsonBadId) && empty($jsonBadId['success']), 'BackupController::update rechaza identificadores no conformes a regex');
+
+// running endpoint
+$reqRunning = new Request();
+ob_start();
+$bkpCtrlTest->running($reqRunning);
+$outRunning = ob_get_clean();
+$jsonRunning = json_decode((string) $outRunning, true);
+assertTrue(!empty($jsonRunning) && !empty($jsonRunning['success']) && isset($jsonRunning['data']['running']), 'BackupController::running devuelve respuesta exitosa con estructura running');
+
+// 27.4 SambaService::auditShareAcls y auditAcls
+$tmpAuditSmb = tempnam(sys_get_temp_dir(), 'nas_audit_smb_');
+file_put_contents($tmpAuditSmb, "[global]\nworkgroup = TEAM-JOFRATO\n\n[AUDIT_SHARE]\npath = /srv/nas/AUDIT_SHARE\nvalid users = @grp_ventas\nwrite list = @grp_admin\nread only = no\n");
+$sambaAuditSvc = new SambaService($tmpAuditSmb);
+
+$auditMissing = $sambaAuditSvc->auditShareAcls('NO_EXISTE');
+assertTrue(!$auditMissing['success'] || !$auditMissing['in_sync'], 'SambaService::auditShareAcls reporta error o fuera de sincronía para recurso inexistente');
+
+$auditSingle = $sambaAuditSvc->auditShareAcls('AUDIT_SHARE');
+assertTrue(isset($auditSingle['in_sync']) && isset($auditSingle['discrepancies']), 'SambaService::auditShareAcls devuelve campos in_sync y discrepancies');
+
+$auditAll = $sambaAuditSvc->auditAcls();
+assertTrue(isset($auditAll['shares']) && isset($auditAll['total']) && isset($auditAll['out_of_sync_count']), 'SambaService::auditAcls devuelve resumen estructurado');
+
+// 27.5 SambaController::auditAccess
+$sambaCtrlTest = new SambaController();
+$reqAuditAcc = new Request();
+ob_start();
+$sambaCtrlTest->auditAccess($reqAuditAcc);
+$outAuditAcc = ob_get_clean();
+$jsonAuditAcc = json_decode((string) $outAuditAcc, true);
+assertTrue(!empty($jsonAuditAcc) && !empty($jsonAuditAcc['success']) && isset($jsonAuditAcc['data']['shares']), 'SambaController::auditAccess devuelve listado de auditoría');
+
+// 27.6 Verificaciones de Modales y Scripts en Frontend
+assertTrue(str_contains($layoutSrc, 'id="modal-edit-backup"'), 'layout.php contiene modal #modal-edit-backup');
+assertTrue(str_contains($layoutSrc, 'id="modal-zip-backup-warning"'), 'layout.php contiene modal #modal-zip-backup-warning');
+assertTrue(str_contains($layoutSrc, 'id="edit-bkp-id"'), 'layout.php contiene campo edit-bkp-id para edicion');
+assertTrue(str_contains($layoutSrc, 'id="edit-bkp-proto"'), 'layout.php contiene selector edit-bkp-proto');
+
+assertTrue(str_contains($appJsSrc, 'openEditBackup'), 'app.js define función openEditBackup');
+assertTrue(str_contains($appJsSrc, 'submitEditBackup'), 'app.js define función submitEditBackup');
+assertTrue(str_contains($appJsSrc, 'toggleEditBackupFields'), 'app.js define función toggleEditBackupFields');
+assertTrue(str_contains($appJsSrc, '/api/backups/running'), 'app.js consulta /api/backups/running antes de comprimir ZIP');
+assertTrue(str_contains($appJsSrc, 'modal-pulse'), 'app.js aplica efecto modal-pulse al interactuar con modales estáticos o formularios');
+assertTrue(str_contains($appJsSrc, 'modal-static'), 'app.js protege modales con clase .modal-static');
+assertTrue(str_contains($appJsSrc, '/api/shares/access/audit'), 'app.js audita previamente en repairAcls');
+
+// Limpieza de directorios temporales de prueba
+@unlink($tmpAuditSmb);
+@rmdir($bkpTestSvc->binDir);
+@rmdir($bkpTestSvc->cronDir);
+@rmdir($bkpTestSvc->credDir);
+@rmdir($bkpTestSvc->bkpRoot);
+@rmdir($bkpTestSvc->logRoot);
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
