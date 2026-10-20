@@ -1487,6 +1487,15 @@ switch ($module) {
                     outData($logs, true);
                 }
                 echo CliTheme::BOLD . "=== REGISTROS AUDITADOS UNIFICADOS (Últimos $limit) ===" . CliTheme::RESET . PHP_EOL;
+                $formattedRows = array_map(function ($l) {
+                    $row = $l;
+                    $act = $row['action_label'] ?? ($row['action'] ?? ($row['event_label'] ?? ($row['event'] ?? 'Registro')));
+                    if (($row['count'] ?? 1) > 1) {
+                        $act .= " (x{$row['count']})";
+                    }
+                    $row['action'] = $act;
+                    return $row;
+                }, $logs);
                 renderTable([
                     'timestamp' => 'FECHA / HORA',
                     'source'    => 'ORIGEN',
@@ -1495,15 +1504,24 @@ switch ($module) {
                     'action'    => 'ACCIÓN',
                     'target'    => 'OBJETIVO',
                     'status'    => 'ESTADO',
-                ], $logs);
+                ], $formattedRows);
                 break;
 
             case 'samba':
-                $sambaLogs = $svc->parseSambaAuditLog($limit, $query);
+                $sambaLogs = $svc->getLogs('samba_audit', $limit, $query);
                 if ($isJson) {
                     outData($sambaLogs, true);
                 }
                 echo CliTheme::BOLD . "=== AUDITORÍA DE ARCHIVOS SAMBA (full_audit) ===" . CliTheme::RESET . PHP_EOL;
+                $formattedRows = array_map(function ($l) {
+                    $row = $l;
+                    $act = $row['action_label'] ?? ($row['action'] ?? 'Acción');
+                    if (($row['count'] ?? 1) > 1) {
+                        $act .= " (x{$row['count']})";
+                    }
+                    $row['action'] = $act;
+                    return $row;
+                }, $sambaLogs);
                 renderTable([
                     'timestamp' => 'FECHA / HORA',
                     'user'      => 'USUARIO',
@@ -1511,16 +1529,25 @@ switch ($module) {
                     'action'    => 'ACCIÓN',
                     'share'     => 'RECURSO',
                     'file'      => 'ARCHIVO AFECTADO',
-                ], $sambaLogs);
+                ], $formattedRows);
                 break;
 
             case 'admin':
             case 'audit':
-                $adminLogs = $svc->parseAdminAuditLog($limit, $query);
+                $adminLogs = $svc->getLogs('admin', $limit, $query);
                 if ($isJson) {
                     outData($adminLogs, true);
                 }
                 echo CliTheme::BOLD . "=== AUDITORÍA DE ACCIONES ADMINISTRATIVAS ===" . CliTheme::RESET . PHP_EOL;
+                $formattedRows = array_map(function ($l) {
+                    $row = $l;
+                    $act = $row['action_label'] ?? ($row['action'] ?? 'Acción');
+                    if (($row['count'] ?? 1) > 1) {
+                        $act .= " (x{$row['count']})";
+                    }
+                    $row['action'] = $act;
+                    return $row;
+                }, $adminLogs);
                 renderTable([
                     'timestamp' => 'FECHA / HORA',
                     'user'      => 'ADMIN',
@@ -1528,12 +1555,12 @@ switch ($module) {
                     'action'    => 'ACCIÓN',
                     'target'    => 'OBJETIVO',
                     'status'    => 'ESTADO',
-                ], $adminLogs);
+                ], $formattedRows);
                 break;
 
             case 'backup':
             case 'backups':
-                $bkpLogs = $svc->parseBackupAuditLog($limit, $query);
+                $bkpLogs = $svc->getLogs('backup', $limit, $query);
                 if ($isJson) {
                     outData($bkpLogs, true);
                 }
@@ -1549,17 +1576,16 @@ switch ($module) {
                 break;
 
             case 'journal':
+            case 'system':
                 $unit = $parsedOptions['unit'] ?? null;
                 $journal = $svc->getJournalLogs($limit, $unit);
                 if ($isJson) {
                     outData($journal, true);
                 }
                 echo CliTheme::BOLD . "=== REGISTROS DE JOURNALD (SYSTEMD) ===" . CliTheme::RESET . PHP_EOL;
-                $reflection = new ReflectionClass($svc);
-                $humanizeMethod = $reflection->getMethod('humanizeSystemLog');
                 foreach ($journal as $line) {
                     if (is_array($line)) {
-                        $h = $humanizeMethod->invoke($svc, $line['unit'] ?? 'system', $line['message'] ?? '');
+                        $h = $svc->humanizeSystemLog($line['unit'] ?? 'system', $line['message'] ?? '');
                         $badge = ($h['level'] === 'warn' || $h['level'] === 'err') ? CliTheme::YELLOW : CliTheme::RESET;
                         echo CliTheme::GRAY . "[" . ($line['timestamp'] ?? '') . "] " . CliTheme::RESET .
                              CliTheme::CYAN . "[" . ($line['unit'] ?? 'system') . "] " . CliTheme::RESET .
