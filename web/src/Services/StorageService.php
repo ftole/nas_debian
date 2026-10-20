@@ -132,25 +132,49 @@ class StorageService
 
         $data = json_decode($res['stdout'], true);
         $devices = $data['blockdevices'] ?? [];
-        $result = [];
+        return $this->flattenBlockDevices($devices);
+    }
 
+    /**
+     * Aplana recursivamente la jerarquía de dispositivos y particiones (children) de lsblk.
+     */
+    public function flattenBlockDevices(array $devices, ?string $parentModel = null, ?bool $parentRota = null): array
+    {
+        $result = [];
         foreach ($devices as $dev) {
-            $sizeGb = round(((int) ($dev['size'] ?? 0)) / (1024 ** 3), 1);
             $name = $dev['name'] ?? '';
+            if ($name === '') {
+                continue;
+            }
+            $sizeGb = round(((int) ($dev['size'] ?? 0)) / (1024 ** 3), 1);
+            $model = trim((string) ($dev['model'] ?? ($parentModel ?? 'N/A')));
+            $rota = isset($dev['rota']) ? (bool) $dev['rota'] : ($parentRota ?? true);
+            $devPath = '/dev/' . $name;
+            $type = $dev['type'] ?? '';
+            $isOs = $this->isOsDisk($name);
+            $inUse = $this->deviceHasMount($devPath) || $this->deviceInUseCritical($devPath);
+
             $result[] = [
                 'name' => $name,
-                'device' => '/dev/' . $name,
+                'device' => $devPath,
                 'size' => $sizeGb > 1000 ? round($sizeGb / 1024, 2) . ' TB' : $sizeGb . ' GB',
-                'model' => trim($dev['model'] ?? 'N/A'),
-                'type' => $dev['type'] ?? '',
+                'model' => $model,
+                'type' => $type,
                 'mount' => $dev['mountpoint'] ?? '',
                 'fstype' => $dev['fstype'] ?? '',
-                'rotational' => ($dev['rota'] ?? true),
-                'protected' => $this->isOsDisk($name),
-                'in_use' => $this->deviceHasMount('/dev/' . $name) || $this->deviceInUseCritical('/dev/' . $name),
+                'rotational' => $rota,
+                'protected' => $isOs,
+                'in_use' => $inUse,
+                'children_count' => isset($dev['children']) && is_array($dev['children']) ? count($dev['children']) : 0,
             ];
-        }
 
+            if (!empty($dev['children']) && is_array($dev['children'])) {
+                $children = $this->flattenBlockDevices($dev['children'], $model, $rota);
+                foreach ($children as $c) {
+                    $result[] = $c;
+                }
+            }
+        }
         return $result;
     }
 
@@ -408,8 +432,8 @@ class StorageService
     {
         $device = trim($device);
         $fstype = strtolower(trim($fstype));
-        if ($confirm !== 'SI-FORMATEAR') {
-            return ['success' => false, 'error' => "Confirmación requerida (escribe SI-FORMATEAR)."];
+        if ($confirm !== 'SI-FORMATEAR' && $confirm !== 'SI-DESTRUIR-DATOS') {
+            return ['success' => false, 'error' => "Confirmación requerida (escribe SI-FORMATEAR o SI-DESTRUIR-DATOS)."];
         }
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $device)) {
             return ['success' => false, 'error' => 'Dispositivo inválido.'];
@@ -468,8 +492,8 @@ class StorageService
      */
     public function lvmCreate(string $disk, string $vg, string $lv, string $size, string $fstype, string $confirm, bool $unmount = false): array
     {
-        if ($confirm !== 'SI-FORMATEAR') {
-            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-FORMATEAR).'];
+        if ($confirm !== 'SI-FORMATEAR' && $confirm !== 'SI-DESTRUIR-DATOS') {
+            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-FORMATEAR o SI-DESTRUIR-DATOS).'];
         }
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $disk) || !preg_match('/^[a-z0-9_]{2,20}$/', $vg) || !preg_match('/^[a-z0-9_]{2,20}$/', $lv)) {
             return ['success' => false, 'error' => 'Parámetros LVM inválidos.'];
@@ -530,8 +554,8 @@ class StorageService
      */
     public function btrfsSubvolume(string $device, string $subvol, string $confirm): array
     {
-        if ($confirm !== 'SI-FORMATEAR') {
-            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-FORMATEAR).'];
+        if ($confirm !== 'SI-FORMATEAR' && $confirm !== 'SI-DESTRUIR-DATOS') {
+            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-FORMATEAR o SI-DESTRUIR-DATOS).'];
         }
         if (!preg_match('#^/dev/[a-zA-Z0-9/]+$#', $device) || !preg_match('/^[a-zA-Z0-9._-]{1,60}$/', $subvol)) {
             return ['success' => false, 'error' => 'Parámetros inválidos para subvolumen Btrfs.'];
@@ -865,6 +889,416 @@ class StorageService
             'bytes_trimmed' => $bytesFreed,
             'message' => 'TRIM SSD completado exitosamente: ' . $bytesFreed . ' liberados en celdas flash.',
             'output' => $out,
+        ];
+    }
+
+    /**
+     * Inspecciona un disco o partición para detectar sistemas de archivos, tablas de
+     * particiones y firmas de datos preexistentes usando wipefs, blkid y lsblk.
+     */
+    public function inspectDevice(string $device): array
+    {
+        $device = trim($device);
+        if (!preg_match('#^/dev/[a-zA-Z0-9/._-]+$#', $device)) {
+            return [
+                'success' => false,
+                'device' => $device,
+                'has_data' => false,
+                'error' => 'Dispositivo inválido.',
+            ];
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            $hasData = str_contains($device, 'sdb') || str_contains($device, 'mock_data');
+            return [
+                'success' => true,
+                'device' => $device,
+                'has_data' => $hasData,
+                'requires_confirm' => $hasData,
+                'signatures' => $hasData ? ['ext4', 'dos_partition_table'] : [],
+                'partitions' => $hasData ? [['name' => basename($device) . '1', 'size' => '500 GB', 'fstype' => 'ext4', 'label' => 'DATOS_PREVIOS']] : [],
+                'pttype' => $hasData ? 'dos' : '',
+                'fstype' => $hasData ? 'ext4' : '',
+                'label' => $hasData ? 'DATOS_PREVIOS' : '',
+                'uuid' => $hasData ? 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' : '',
+                'warning' => $hasData
+                    ? 'ADVERTENCIA CRÍTICA: Se detectaron particiones o firmas de datos preexistentes en ' . $device . '. La operación destruirá de forma permanente e irreversible todos los datos contenidos. Se requiere confirmación estricta SI-DESTRUIR-DATOS o SI-FORMATEAR.'
+                    : null,
+            ];
+        }
+
+        $resolvedDevice = $this->resolveBlockDevice($device);
+        if ($resolvedDevice === null) {
+            return [
+                'success' => false,
+                'device' => $device,
+                'has_data' => false,
+                'error' => 'El dispositivo no corresponde a un disco o partición de bloque reconocido.',
+            ];
+        }
+        $device = $resolvedDevice;
+
+        $hasData = false;
+        $signatures = [];
+        $partitions = [];
+        $pttype = '';
+        $fstype = '';
+        $label = '';
+        $uuid = '';
+
+        // 1. wipefs -n para detectar firmas sin destruirlas
+        $wipeRes = SystemService::sudo(['wipefs', '-n', $device]);
+        if ($wipeRes['code'] === 0 && trim((string) $wipeRes['stdout']) !== '') {
+            $lines = explode("\n", trim((string) $wipeRes['stdout']));
+            foreach ($lines as $i => $line) {
+                if ($i === 0 && (str_contains($line, 'DEVICE') || str_contains($line, 'OFFSET'))) {
+                    continue;
+                }
+                $parts = preg_split('/\s+/', trim($line));
+                if (!empty($parts[2])) {
+                    $signatures[] = $parts[2];
+                    $hasData = true;
+                }
+            }
+        }
+
+        // 2. blkid para metadatos (UUID, LABEL, TYPE, PTTYPE)
+        $blkRes = SystemService::sudo(['blkid', '-p', $device]);
+        if ($blkRes['code'] === 0 && trim((string) $blkRes['stdout']) !== '') {
+            $out = trim((string) $blkRes['stdout']);
+            if (preg_match('/TYPE="([^"]+)"/', $out, $m)) {
+                $fstype = $m[1];
+                $hasData = true;
+            }
+            if (preg_match('/LABEL="([^"]+)"/', $out, $m)) {
+                $label = $m[1];
+                $hasData = true;
+            }
+            if (preg_match('/UUID="([^"]+)"/', $out, $m)) {
+                $uuid = $m[1];
+                $hasData = true;
+            }
+            if (preg_match('/PTTYPE="([^"]+)"/', $out, $m)) {
+                $pttype = $m[1];
+                $hasData = true;
+            }
+        }
+
+        // 3. lsblk para inspeccionar particiones hijas
+        $lsblkRes = SystemService::runCommand(['lsblk', '-J', '-b', '-o', 'NAME,SIZE,TYPE,FSTYPE,LABEL,UUID', $device]);
+        if ($lsblkRes['code'] === 0) {
+            $data = json_decode($lsblkRes['stdout'], true);
+            $devList = $data['blockdevices'] ?? [];
+            foreach ($devList as $topDev) {
+                if (!empty($topDev['children']) && is_array($topDev['children'])) {
+                    foreach ($topDev['children'] as $child) {
+                        $cSize = round(((int) ($child['size'] ?? 0)) / (1024 ** 3), 1);
+                        $partitions[] = [
+                            'name' => $child['name'] ?? '',
+                            'size' => $cSize . ' GB',
+                            'fstype' => $child['fstype'] ?? '',
+                            'label' => $child['label'] ?? '',
+                            'uuid' => $child['uuid'] ?? '',
+                        ];
+                        $hasData = true;
+                    }
+                }
+            }
+        }
+
+        $warning = $hasData
+            ? 'ADVERTENCIA CRÍTICA: Se detectaron particiones o firmas de datos preexistentes en ' . $device . '. La operación destruirá de forma permanente e irreversible todos los datos contenidos. Se requiere confirmación estricta SI-DESTRUIR-DATOS o SI-FORMATEAR.'
+            : null;
+
+        return [
+            'success' => true,
+            'device' => $device,
+            'has_data' => $hasData,
+            'requires_confirm' => $hasData,
+            'signatures' => array_values(array_unique($signatures)),
+            'partitions' => $partitions,
+            'pttype' => $pttype,
+            'fstype' => $fstype,
+            'label' => $label,
+            'uuid' => $uuid,
+            'warning' => $warning,
+        ];
+    }
+
+    /**
+     * Retorna la lista de unidades de almacenamiento disponibles para recursos Samba y respaldos.
+     * Incluye la Unidad Principal (/srv/nas) y las Unidades Adicionales montadas en /srv/nas/unidades/<id>.
+     *
+     * @return array<int, array{id: string, name: string, path: string, is_main: bool, filesystem: string, total_gb: float, used_gb: float, free_gb: float, usage_percent: float}>
+     */
+    public function getUnits(): array
+    {
+        $overview = $this->getStorageOverview('/srv/nas');
+        $units = [
+            [
+                'id' => 'principal',
+                'name' => 'Unidad Principal (/srv/nas)',
+                'path' => '/srv/nas',
+                'is_main' => true,
+                'filesystem' => $overview['filesystem'] ?? 'ext4',
+                'total_gb' => $overview['total_gb'] ?? 0,
+                'used_gb' => $overview['used_gb'] ?? 0,
+                'free_gb' => $overview['free_gb'] ?? 0,
+                'usage_percent' => $overview['usage_percent'] ?? 0,
+            ],
+        ];
+
+        $unitsBase = '/srv/nas/unidades';
+        if (DIRECTORY_SEPARATOR === '\\') {
+            // Unidades simuladas en dev
+            $units[] = [
+                'id' => 'unidad2',
+                'name' => 'Unidad Adicional: unidad2 (/srv/nas/unidades/unidad2)',
+                'path' => '/srv/nas/unidades/unidad2',
+                'is_main' => false,
+                'filesystem' => 'ext4',
+                'total_gb' => 2000.0,
+                'used_gb' => 350.0,
+                'free_gb' => 1650.0,
+                'usage_percent' => 17.5,
+            ];
+            return $units;
+        }
+
+        if (is_dir($unitsBase)) {
+            $entries = scandir($unitsBase) ?: [];
+            foreach ($entries as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+                $unitPath = $unitsBase . '/' . $entry;
+                if (is_dir($unitPath)) {
+                    $uOv = $this->getStorageOverview($unitPath);
+                    $units[] = [
+                        'id' => $entry,
+                        'name' => 'Unidad Adicional: ' . $entry . ' (' . $unitPath . ')',
+                        'path' => $unitPath,
+                        'is_main' => false,
+                        'filesystem' => $uOv['filesystem'] ?? 'ext4',
+                        'total_gb' => $uOv['total_gb'] ?? 0,
+                        'used_gb' => $uOv['used_gb'] ?? 0,
+                        'free_gb' => $uOv['free_gb'] ?? 0,
+                        'usage_percent' => $uOv['usage_percent'] ?? 0,
+                    ];
+                }
+            }
+        }
+
+        return $units;
+    }
+
+    /**
+     * Opción A: Sumar capacidad al pool existente de /srv/nas en caliente.
+     * Si el pool es LVM: pvcreate + vgextend + lvextend -r -l +100%FREE.
+     * Si el pool es Btrfs: btrfs device add -f + btrfs balance start en caliente.
+     */
+    public function extendPool(string $device, string $confirm): array
+    {
+        $device = trim($device);
+        if ($confirm !== 'SI-DESTRUIR-DATOS' && $confirm !== 'SI-FORMATEAR') {
+            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-DESTRUIR-DATOS o SI-FORMATEAR).'];
+        }
+        if (!preg_match('#^/dev/[a-zA-Z0-9/._-]+$#', $device)) {
+            return ['success' => false, 'error' => 'Dispositivo inválido.'];
+        }
+        if ($this->isOsDisk(basename($device))) {
+            return ['success' => false, 'error' => 'Operación prohibida: es el disco del sistema operativo.'];
+        }
+        if ($this->deviceInUseCritical($device)) {
+            return ['success' => false, 'error' => 'Operación prohibida: el disco contiene un volumen LVM o miembro RAID activo.'];
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return [
+                'success' => true,
+                'pool' => 'btrfs',
+                'message' => "Capacidad de /srv/nas expandida exitosamente con $device (modo dev).",
+            ];
+        }
+
+        $resolvedDevice = $this->resolveBlockDevice($device);
+        if ($resolvedDevice === null) {
+            return ['success' => false, 'error' => 'El dispositivo no corresponde a un disco de bloque reconocido.'];
+        }
+        $device = $resolvedDevice;
+
+        if ($this->deviceHasMount($device)) {
+            if (!$this->unmountDevice($device)) {
+                return ['success' => false, 'error' => 'No se pudieron desmontar las particiones del dispositivo antes de expandir el pool.'];
+            }
+        }
+
+        $fsType = 'ext4';
+        $fsRes = SystemService::runCommand(['findmnt', '-n', '-o', 'FSTYPE', '/srv/nas']);
+        if ($fsRes['code'] === 0 && !empty($fsRes['stdout'])) {
+            $fsType = strtolower(trim($fsRes['stdout']));
+        }
+
+        if ($fsType === 'btrfs') {
+            // Opción A Btrfs: btrfs device add -f + balance en caliente
+            $addRes = SystemService::sudo(['btrfs', 'device', 'add', '-f', $device, '/srv/nas']);
+            if ($addRes['code'] !== 0) {
+                return ['success' => false, 'error' => 'Fallo al añadir dispositivo al pool Btrfs: ' . ($addRes['stderr'] ?: $addRes['stdout'])];
+            }
+            SystemService::sudo(['btrfs', 'balance', 'start', '/srv/nas']);
+            return [
+                'success' => true,
+                'pool' => 'btrfs',
+                'message' => "Dispositivo $device agregado exitosamente al pool BTRFS de /srv/nas. Balance de datos en ejecución.",
+            ];
+        }
+
+        // Opción A LVM:
+        $srcRes = SystemService::runCommand(['findmnt', '-n', '-o', 'SOURCE', '/srv/nas']);
+        $srcDev = trim($srcRes['stdout'] ?? '');
+        if ($srcDev === '' || (!str_contains($srcDev, '/dev/mapper/') && !str_contains($srcDev, '/dev/'))) {
+            return ['success' => false, 'error' => 'No se detectó un volumen LVM activo en /srv/nas para expandir.'];
+        }
+
+        // Obtener VG del volumen lógico
+        $vgRes = SystemService::sudo(['lvs', '--noheadings', '-o', 'vg_name', $srcDev]);
+        $vgName = trim($vgRes['stdout'] ?? '');
+        if ($vgName === '') {
+            return ['success' => false, 'error' => 'No se pudo identificar el grupo de volúmenes (VG) de /srv/nas.'];
+        }
+
+        // pvcreate + vgextend + lvextend -r
+        $pvRes = SystemService::sudo(['pvcreate', '-f', '-y', $device]);
+        if ($pvRes['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al inicializar volumen físico (PV): ' . ($pvRes['stderr'] ?: $pvRes['stdout'])];
+        }
+
+        $vgExt = SystemService::sudo(['vgextend', $vgName, $device]);
+        if ($vgExt['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al extender el grupo de volúmenes (VG): ' . ($vgExt['stderr'] ?: $vgExt['stdout'])];
+        }
+
+        $lvExt = SystemService::sudo(['lvextend', '-r', '-l', '+100%FREE', $srcDev]);
+        if ($lvExt['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al expandir el volumen lógico y sistema de archivos: ' . ($lvExt['stderr'] ?: $lvExt['stdout'])];
+        }
+
+        return [
+            'success' => true,
+            'pool' => 'lvm',
+            'message' => "Grupo de volúmenes $vgName y volumen /srv/nas expandidos exitosamente al 100% de la capacidad disponible.",
+        ];
+    }
+
+    /**
+     * Opción B: Disco adicional independiente.
+     * Formatea (ext4 optimizado o Btrfs) y monta de forma estructurada y persistente
+     * en /srv/nas/unidades/<id_unidad>, registrando en /etc/fstab con UUID y noatime,nofail,
+     * aplicando permisos 2770 root:grp_samba.
+     */
+    public function addUnit(string $device, string $unitId, string $fstype = 'ext4', string $confirm = ''): array
+    {
+        $device = trim($device);
+        $unitId = trim($unitId);
+        $fstype = strtolower(trim($fstype));
+
+        if ($confirm !== 'SI-DESTRUIR-DATOS' && $confirm !== 'SI-FORMATEAR') {
+            return ['success' => false, 'error' => 'Confirmación requerida (escribe SI-DESTRUIR-DATOS o SI-FORMATEAR).'];
+        }
+        if (!preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $unitId)) {
+            return ['success' => false, 'error' => 'Identificador de unidad inválido (1-32 caracteres alfanuméricos, guion o guion bajo).'];
+        }
+        if (in_array(strtolower($unitId), ['principal', 'trash', 'tmp', 'unidades', 'system'], true)) {
+            return ['success' => false, 'error' => "El identificador de unidad '$unitId' está reservado."];
+        }
+        if (!preg_match('#^/dev/[a-zA-Z0-9/._-]+$#', $device)) {
+            return ['success' => false, 'error' => 'Dispositivo inválido.'];
+        }
+        if ($this->isOsDisk(basename($device))) {
+            return ['success' => false, 'error' => 'Operación prohibida: es el disco del sistema operativo.'];
+        }
+        if ($this->deviceInUseCritical($device)) {
+            return ['success' => false, 'error' => 'Operación prohibida: el disco contiene un volumen LVM o miembro RAID activo.'];
+        }
+        if (!in_array($fstype, ['ext4', 'btrfs'], true)) {
+            return ['success' => false, 'error' => 'Sistema de archivos no soportado (ext4|btrfs).'];
+        }
+
+        $mountPoint = '/srv/nas/unidades/' . $unitId;
+
+        if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
+            return [
+                'success' => true,
+                'unit_id' => $unitId,
+                'mount' => $mountPoint,
+                'fstype' => $fstype,
+                'message' => "Unidad adicional '$unitId' aprovisionada y montada exitosamente en $mountPoint (modo dev).",
+            ];
+        }
+
+        $resolvedDevice = $this->resolveBlockDevice($device);
+        if ($resolvedDevice === null) {
+            return ['success' => false, 'error' => 'El dispositivo no corresponde a un disco de bloque reconocido.'];
+        }
+        $device = $resolvedDevice;
+
+        if ($this->deviceHasMount($device)) {
+            if (!$this->unmountDevice($device)) {
+                return ['success' => false, 'error' => 'No se pudieron desmontar las particiones del dispositivo antes de formatear.'];
+            }
+        }
+
+        $type = trim(SystemService::runCommand(['lsblk', '-nd', '-o', 'TYPE', $device])['stdout'] ?? '');
+        $target = $device;
+        if ($type === 'disk') {
+            SystemService::sudo(['parted', '-s', $device, 'mklabel', 'gpt', 'mkpart', 'primary', '0%', '100%']);
+            SystemService::sudo(['partprobe', $device]);
+            $name = basename($device);
+            $target = str_contains($name, 'nvme') || preg_match('/[0-9]$/', $name) ? $device . 'p1' : $device . '1';
+        }
+
+        // Formateo
+        $mkfs = SystemService::sudo(
+            $fstype === 'btrfs'
+                ? ['mkfs.btrfs', '-f', '-L', 'NAS_' . strtoupper($unitId), $target]
+                : ['mkfs.ext4', '-F', '-m', '1', '-L', 'NAS_' . strtoupper($unitId), $target]
+        );
+        if ($mkfs['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al formatear la unidad: ' . ($mkfs['stderr'] ?: $mkfs['stdout'])];
+        }
+
+        // Montaje persistente estructurado
+        SystemService::sudo(['mkdir', '-p', $mountPoint]);
+        $uuid = trim(SystemService::sudo(['blkid', '-s', 'UUID', '-o', 'value', $target])['stdout'] ?? '');
+        $ref = $uuid !== '' ? "UUID=$uuid" : $target;
+        $opts = ($fstype === 'btrfs') ? 'defaults,noatime,nofail,compress=zstd:3,space_cache=v2 0 0' : 'defaults,noatime,nofail 0 2';
+
+        $stagingDir = '/var/lib/nas/staging';
+        $stagingBase = (is_dir($stagingDir) && is_writable($stagingDir)) ? $stagingDir : sys_get_temp_dir();
+        $fstabTmp = $stagingBase . '/nas_fstab_unit_' . bin2hex(random_bytes(4));
+        $current = @file_get_contents('/etc/fstab') ?: '';
+        $marker = "# NAS_UNIT_$unitId";
+        $clean = preg_replace("/$marker.*?\n/s", '', $current) ?? $current;
+        $clean .= "\n$ref $mountPoint $fstype $opts $marker\n";
+        file_put_contents($fstabTmp, $clean);
+        SystemService::sudo(['cp', $fstabTmp, '/etc/fstab']);
+        @unlink($fstabTmp);
+
+        $mntRes = SystemService::sudo(['mount', $mountPoint]);
+        if ($mntRes['code'] !== 0) {
+            return ['success' => false, 'error' => 'Fallo al montar ' . $mountPoint . ': ' . ($mntRes['stderr'] ?: $mntRes['stdout'])];
+        }
+
+        // Permisos corporativos 2770 root:grp_samba
+        SystemService::sudo(['chown', 'root:grp_samba', $mountPoint]);
+        SystemService::sudo(['chmod', '2770', $mountPoint]);
+
+        return [
+            'success' => true,
+            'unit_id' => $unitId,
+            'mount' => $mountPoint,
+            'fstype' => $fstype,
+            'message' => "Unidad adicional '$unitId' formateada ($fstype), montada en $mountPoint y registrada en /etc/fstab con permisos 2770.",
         ];
     }
 }
