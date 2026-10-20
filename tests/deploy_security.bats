@@ -58,6 +58,24 @@ _extraer_bloque_audit() {
     rm -f "$tmp"
 }
 
+@test "el bloque sysctl de deploy.sh contiene directivas para desactivar IPv6" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sysctl > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q '^net\.ipv6\.conf\.all\.disable_ipv6 = 1$' "$tmp"
+    [ "$status" -eq 0 ]
+
+    run grep -q '^net\.ipv6\.conf\.default\.disable_ipv6 = 1$' "$tmp"
+    [ "$status" -eq 0 ]
+
+    run grep -q '^net\.ipv6\.conf\.lo\.disable_ipv6 = 1$' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
 @test "el bloque sysctl de deploy.sh contiene directivas de aislamiento de kernel y ptrace" {
     local tmp
     tmp="$(mktemp)"
