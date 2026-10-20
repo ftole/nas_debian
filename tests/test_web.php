@@ -2492,6 +2492,7 @@ assertTrue(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $nowStr) === 1,
 $metrics = $sysSvcInst->getSystemMetrics();
 assertTrue(isset($metrics['server_time']) && isset($metrics['server_timestamp']), 'getSystemMetrics retorna server_time y server_timestamp');
 assertTrue(isset($metrics['timezone']) && isset($metrics['timezone_abbr']), 'getSystemMetrics retorna timezone y timezone_abbr');
+assertTrue(isset($metrics['timezone_offset']) && is_int($metrics['timezone_offset']), 'getSystemMetrics retorna timezone_offset entero');
 assertTrue($metrics['timezone'] === date_default_timezone_get(), 'getSystemMetrics timezone coincide con date_default_timezone_get');
 
 // Test normalizeTimestamp con marca en el futuro simulada desde UTC
@@ -2504,11 +2505,18 @@ if ($tzOffset < 0) {
     assertTrue(!empty($normalized), 'normalizeTimestamp procesa marcas válidas');
 }
 
-// Test layout template contenga los elementos del reloj en vivo
+// Test layout template contenga los elementos del reloj en vivo y metadatos de sincronización
 $layoutSrc = (string) file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
 assertTrue(str_contains($layoutSrc, 'id="header-server-clock"'), 'layout.php contiene el elemento del reloj en vivo header-server-clock');
 assertTrue(str_contains($layoutSrc, 'id="header-server-tz"'), 'layout.php contiene el elemento de la zona horaria header-server-tz');
 assertTrue(str_contains($layoutSrc, 'window.NAS_INITIAL_SERVER_TIME'), 'layout.php inyecta window.NAS_INITIAL_SERVER_TIME');
+assertTrue(str_contains($layoutSrc, 'offset:'), 'layout.php inyecta offset en window.NAS_INITIAL_SERVER_TIME');
+
+// Test motor de reloj en app.js soporte Intl y fallback offset
+$appJsSrc = (string) file_get_contents(dirname(__DIR__) . '/web/public/js/app.js');
+assertTrue(str_contains($appJsSrc, '_serverClock'), 'app.js define objeto global _serverClock');
+assertTrue(str_contains($appJsSrc, 'Intl.DateTimeFormat'), 'app.js utiliza Intl.DateTimeFormat para la zona IANA del servidor');
+assertTrue(str_contains($appJsSrc, 'getUTCHours'), 'app.js incluye fallback matemático getUTCHours inmune al cliente');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
