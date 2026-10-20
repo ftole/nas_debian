@@ -60,6 +60,42 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
   <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>; window.NAS_SERVER_ROLE = <?= json_encode($serverRole) ?>;</script>
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
+  <style>
+    .badge-antispam {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 10px;
+      background: rgba(245, 158, 11, 0.18);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      margin-left: 6px;
+      letter-spacing: 0.5px;
+    }
+    [data-theme="light"] .badge-antispam {
+      background: rgba(217, 119, 6, 0.14);
+      color: #b45309;
+      border: 1px solid rgba(217, 119, 6, 0.3);
+    }
+    .table-logs-ip {
+      display: block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .table-logs-ip code {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-size: 10.5px;
+    }
+    [data-theme="light"] .table-logs-ip code {
+      background: rgba(0, 0, 0, 0.05);
+    }
+  </style>
 </head>
 <body>
 
