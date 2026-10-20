@@ -2443,13 +2443,44 @@ $sshFailed = $humanizeMethod->invoke($sysSvcInst, 'sshd', 'Failed password for i
 assertTrue($sshFailed['badge'] === 'err' && $sshFailed['status'] === 'FAILED' && $sshFailed['ip'] === '203.0.113.5' && str_contains($sshFailed['human'], 'Intento de acceso fallido para hacker'),
     'SystemService::humanizeSystemLog humaniza y alerta en rojo/err intentos SSH fallidos');
 
-$svcStarted = $humanizeMethod->invoke($sysSvcInst, 'systemd', 'Started Samba SMB Daemon.');
+$svcStarted = $sysSvcInst->humanizeSystemLog('systemd', 'Started Samba SMB Daemon.');
 assertTrue($svcStarted['badge'] === 'ok' && $svcStarted['status'] === 'OK' && str_contains($svcStarted['human'], 'Samba SMB Daemon iniciado con éxito'),
     'SystemService::humanizeSystemLog traduce y colorea el arranque exitoso de servicios systemd');
 
-$ntpSync = $humanizeMethod->invoke($sysSvcInst, 'systemd-timesyncd', 'Initial clock synchronization to Mon 2026-10-19 20:00:00 UTC.');
+$ntpSync = $sysSvcInst->humanizeSystemLog('systemd-timesyncd', 'Initial clock synchronization to Mon 2026-10-19 20:00:00 UTC.');
 assertTrue($ntpSync['badge'] === 'ok' && $ntpSync['action_label'] === 'NTP' && str_contains($ntpSync['human'], 'Reloj del sistema sincronizado'),
     'SystemService::humanizeSystemLog clasifica y humaniza sincronizaciones NTP');
+
+// Pruebas de resiliencia en parseBackupAuditLog ante corchetes anidados en el mensaje (4 corchetes)
+$tempResilienceLog = tempnam(sys_get_temp_dir(), 'backup_resilience_test_');
+file_put_contents($tempResilienceLog, implode("\n", [
+    '[2026-10-19 20:00:00] [lnx_prod] [RSYNC_COMPLETED] [notice] [DRY-RUN] Sincronizacion rsync de prueba',
+    '[2026-10-19 20:00:01] [win_app] [srv-db.corp] [BACKUP_COMPLETED] [ok] Respaldo de servidor completado',
+]));
+SystemService::$backupAuditPath = $tempResilienceLog;
+$parsedResilience = $sysSvcInst->parseBackupAuditLog(10);
+@unlink($tempResilienceLog);
+assertTrue(count($parsedResilience) === 2,
+    'parseBackupAuditLog procesa correctamente entradas con corchetes en el mensaje y 5 corchetes con host');
+assertTrue($parsedResilience[0]['event'] === 'BACKUP_COMPLETED' && $parsedResilience[0]['severity'] === 'ok',
+    'parseBackupAuditLog reconoce formato de 5 corchetes con hostname corporativo');
+assertTrue($parsedResilience[1]['event'] === 'RSYNC_COMPLETED' && $parsedResilience[1]['severity'] === 'notice' && str_contains($parsedResilience[1]['message'], '[DRY-RUN]'),
+    'parseBackupAuditLog no confunde corchetes del mensaje en formato legacy de 4 corchetes');
+assertTrue(isset($parsedResilience[1]['action']) && $parsedResilience[1]['action'] !== '',
+    'parseBackupAuditLog incluye el campo action para interoperabilidad con CLI y Web');
+
+// Pruebas de invocación pública directa de humanizeSystemLog y patrones enriquecidos
+$sshPamOpen = $sysSvcInst->humanizeSystemLog('sshd-session', 'pam_unix(sshd:session): session opened for user sistemas(uid=1000) by (uid=0)');
+assertTrue(str_contains($sshPamOpen['human'], 'Sesión de usuario abierta para sistemas') && $sshPamOpen['action_label'] === 'SSH',
+    'humanizeSystemLog traduce apertura de sesión pam en sshd-session');
+
+$sudoPamOpen = $sysSvcInst->humanizeSystemLog('sudo', 'pam_unix(sudo:session): session opened for user root(uid=0) by sistemas(uid=1000)');
+assertTrue(str_contains($sudoPamOpen['human'], 'Sesión administrativa abierta para root por sistemas') && $sudoPamOpen['action_label'] === 'Sudo',
+    'humanizeSystemLog traduce apertura de sesión pam en comandos sudo');
+
+$logindNew = $sysSvcInst->humanizeSystemLog('systemd-logind', 'New session 42 of user sistemas.');
+assertTrue(str_contains($logindNew['human'], 'Nueva sesión 42 iniciada para el usuario sistemas') && $logindNew['action_label'] === 'Sesión',
+    'humanizeSystemLog traduce creación de sesión en systemd-logind');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
