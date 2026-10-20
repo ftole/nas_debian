@@ -45,7 +45,10 @@ class AuditService
         // Neutraliza CR/LF y otros caracteres de control para impedir la
         // inyección o falsificación de líneas en la bitácora de auditoría.
         $clean = static fn (mixed $value): string => trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string) $value));
-        $ip = $clean(self::resolveClientIp());
+        $rawIp = !empty($details['ip']) && filter_var((string) $details['ip'], FILTER_VALIDATE_IP)
+            ? (string) $details['ip']
+            : self::resolveClientIp();
+        $ip = $clean($rawIp);
         $user = $clean(self::resolveCurrentUser());
         $action = $clean($action);
         $target = $clean($target);
@@ -102,9 +105,41 @@ class AuditService
         }
     }
 
+    /**
+     * Resuelve la dirección IP del cliente universalmente (HTTP Proxy, headers o entorno SSH/CLI).
+     */
     private static function resolveClientIp(): string
     {
-        return (new Request())->getClientIp();
+        // 1. Detección HTTP mediante abstracción Request
+        if (isset($_SERVER['REMOTE_ADDR']) || isset($_SERVER['HTTP_X_FORWARDED_FOR']) || isset($_SERVER['HTTP_X_REAL_IP'])) {
+            $clientIp = (new Request())->getClientIp();
+            if ($clientIp !== '127.0.0.1' && filter_var($clientIp, FILTER_VALIDATE_IP)) {
+                return $clientIp;
+            }
+        }
+
+        // 2. Detección en sesiones SSH remotas (CLI / Paramiko / OpenSSH)
+        $sshClient = getenv('SSH_CLIENT') ?: ($_SERVER['SSH_CLIENT'] ?? null);
+        if (!empty($sshClient)) {
+            $parts = explode(' ', trim((string) $sshClient));
+            if (!empty($parts[0]) && filter_var($parts[0], FILTER_VALIDATE_IP)) {
+                return $parts[0];
+            }
+        }
+        $sshConn = getenv('SSH_CONNECTION') ?: ($_SERVER['SSH_CONNECTION'] ?? null);
+        if (!empty($sshConn)) {
+            $parts = explode(' ', trim((string) $sshConn));
+            if (!empty($parts[0]) && filter_var($parts[0], FILTER_VALIDATE_IP)) {
+                return $parts[0];
+            }
+        }
+
+        // 3. Fallback a REMOTE_ADDR o localhost
+        if (isset($_SERVER['REMOTE_ADDR']) && filter_var($_SERVER['REMOTE_ADDR'], FILTER_VALIDATE_IP)) {
+            return (string) $_SERVER['REMOTE_ADDR'];
+        }
+
+        return '127.0.0.1';
     }
 
     private static function resolveCurrentUser(): string
