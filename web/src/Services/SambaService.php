@@ -157,9 +157,28 @@ class SambaService
             $name .= '$';
         }
 
-        // Ruta estándar dentro del almacenamiento administrado /srv/nas
+        // Ruta estándar dentro del almacenamiento administrado (/srv/nas o /srv/nas/unidades/<id>)
         $subfolder = rtrim($name, '$');
-        $path = '/srv/nas/' . $subfolder;
+        $baseDir = '/srv/nas';
+        $unit = trim((string) ($data['unit'] ?? ($data['unit_id'] ?? '')));
+        if ($unit !== '' && $unit !== 'principal' && $unit !== '/srv/nas') {
+            $cleanUnit = preg_replace('#^(/srv/nas/unidades/|unidades/)#', '', $unit);
+            $cleanUnit = trim((string) $cleanUnit, '/');
+            if (!preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $cleanUnit)) {
+                return ['success' => false, 'error' => 'Identificador de unidad no válido.'];
+            }
+            $baseDir = '/srv/nas/unidades/' . $cleanUnit;
+        }
+
+        if (!empty($data['path']) && (str_starts_with((string) $data['path'], '/srv/nas/') || str_starts_with((string) $data['path'], '/srv/nas'))) {
+            $pathCandidate = rtrim((string) $data['path'], '/');
+            if (!str_contains($pathCandidate, '..')) {
+                $path = $pathCandidate;
+            }
+        }
+        if (!isset($path)) {
+            $path = $baseDir . '/' . $subfolder;
+        }
 
         $serverRole = SystemService::getServerRole();
         if ($serverRole === 'BACKUP') {
@@ -187,7 +206,7 @@ class SambaService
         }
 
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
-            return ['success' => true, 'message' => "Recurso [$name] creado correctamente (modo dev)."];
+            return ['success' => true, 'message' => "Recurso [$name] creado correctamente (modo dev).", 'path' => $path];
         }
 
         // 1. Preparar directorio en disco
@@ -271,7 +290,7 @@ class SambaService
         SystemService::sudo(['systemctl', 'reload', 'smbd']);
         $this->syncShareAcls($name);
 
-        return ['success' => true, 'message' => "Recurso compartido [$name] creado y activo en Samba."];
+        return ['success' => true, 'message' => "Recurso compartido [$name] creado y activo en Samba.", 'path' => $path];
     }
 
     /**
