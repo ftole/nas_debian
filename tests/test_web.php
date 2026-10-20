@@ -2669,6 +2669,8 @@ assertTrue(str_contains($layoutSrc, 'id="view-diagnostics" style="display:none;"
 assertTrue(str_contains($layoutSrc, 'id="view-updates" style="display:none;"'), 'layout.php preserva contenedor view-updates oculto por compatibilidad');
 assertTrue(str_contains($layoutSrc, 'id="btn-scrub-storage"'), 'layout.php contiene botón inteligente de auditoría BTRFS Scrub');
 assertTrue(str_contains($layoutSrc, 'id="btn-trim-storage"'), 'layout.php contiene botón inteligente de optimización SSD TRIM');
+assertTrue(str_contains($layoutSrc, 'id="btn-format-disk"'), 'layout.php contiene botón de gestión de disco con id btn-format-disk');
+assertTrue(str_contains($layoutSrc, 'data-modal-alias="modal-format-disk"'), 'layout.php asocia alias modal-format-disk a modal-storage-manage');
 
 // Verificaciones de frontend app.js
 assertTrue(str_contains($appJsSrc, "viewName === 'diagnostics'"), 'app.js redirige vista diagnostics hacia services unificada');
@@ -2676,6 +2678,15 @@ assertTrue(str_contains($appJsSrc, "viewName === 'updates'"), 'app.js redirige v
 assertTrue(str_contains($appJsSrc, 'pollBtrfsScrubProgress'), 'app.js implementa sondeo de progreso de BTRFS scrub');
 assertTrue(str_contains($appJsSrc, 'openStorageManage'), 'app.js define función openStorageManage con soporte para modal-format-disk');
 assertTrue(str_contains($appJsSrc, 'openFormatDisk'), 'app.js define función openFormatDisk como alias de openStorageManage');
+
+// Verificación de parsing multilingüe (español e inglés) de fstrim
+$spanishOutput = "/: 15.3 GiB (16456900608 bytes) recortado";
+$matchedSpanish = preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+\(([0-9]+)\s+bytes\)/i', $spanishOutput, $mEs);
+assertTrue($matchedSpanish === 1 && $mEs[1] === '15.3 GiB' && $mEs[2] === '16456900608', 'StorageService::runTrim extrae métricas de descarte en español (recortado)');
+
+$englishOutput = "/srv/nas: 10.5 GiB (11274289152 bytes) trimmed";
+$matchedEnglish = preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+\(([0-9]+)\s+bytes\)/i', $englishOutput, $mEn);
+assertTrue($matchedEnglish === 1 && $mEn[1] === '10.5 GiB' && $mEn[2] === '11274289152', 'StorageService::runTrim extrae métricas de descarte en inglés (trimmed)');
 
 
 // Limpieza de directorios temporales de prueba
