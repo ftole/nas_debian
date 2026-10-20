@@ -31,7 +31,7 @@ $role = (string) ($_SESSION['nas_user']['role'] ?? 'operator');
 $isSuper = !empty($_SESSION['nas_user']['is_superadmin']) || $role === 'superadmin';
 $isSuperAdmin = $isSuper;
 $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
-if (!$isAdmin && in_array($activeView, ['storage', 'services', 'domain', 'updates', 'applications'], true)) {
+if (!$isAdmin && in_array($activeView, ['storage', 'domain', 'updates', 'applications'], true)) {
     $activeView = 'dashboard';
 }
 if (!$isSuperAdmin && $activeView === 'terminal') {
@@ -301,22 +301,12 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           <span class="nav-badge" id="badge-users">...</span>
         </div>
 
-<?php if ($isAdmin): ?>
-        <div class="nav-item <?= $activeView === 'services' ? 'active' : '' ?>" data-view="services">
+        <div class="nav-item <?= in_array($activeView, ['services', 'diagnostics'], true) ? 'active' : '' ?>" data-view="services">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-services"></use></svg>
-            <span>Servicios</span>
+            <span>Servicios y Salud</span>
           </div>
           <span class="nav-badge" id="badge-services">OK</span>
-        </div>
-<?php endif; ?>
-
-        <div class="nav-item <?= $activeView === 'diagnostics' ? 'active' : '' ?>" data-view="diagnostics">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-wrench"></use></svg>
-            <span>Diagnóstico</span>
-          </div>
-          <span class="nav-badge" id="badge-diagnostics">Live</span>
         </div>
 
         <div class="nav-item <?= $activeView === 'networking' ? 'active' : '' ?>" data-view="networking">
@@ -336,20 +326,12 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           <span class="nav-badge" id="badge-domain">AD</span>
         </div>
 
-        <div class="nav-item <?= $activeView === 'updates' ? 'active' : '' ?>" data-view="updates">
-          <div class="nav-item-left">
-            <svg class="icon"><use href="#icon-download"></use></svg>
-            <span>Actualizaciones</span>
-          </div>
-          <span class="nav-badge badge-ok">Al día</span>
-        </div>
-
-        <div class="nav-item <?= $activeView === 'applications' ? 'active' : '' ?>" data-view="applications">
+        <div class="nav-item <?= in_array($activeView, ['applications', 'updates'], true) ? 'active' : '' ?>" data-view="applications">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-apps"></use></svg>
-            <span>Componentes</span>
+            <span>Aplicaciones y Actualizaciones</span>
           </div>
-          <span class="nav-badge">Nativo</span>
+          <span class="nav-badge" id="badge-updates">Al día</span>
         </div>
 <?php endif; ?>
 
@@ -582,15 +564,51 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <p>Monitoreo de particiones, integridad de datos y mantenimiento BTRFS / TRIM</p>
           </div>
           <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadStorage()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Refrescar
+            </button>
             <button class="btn btn-primary" onclick="openStorageManage()">
               <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión de disco
             </button>
-            <button class="btn btn-secondary" onclick="runStorageScrub()">
+            <button class="btn btn-secondary" id="btn-scrub-storage" onclick="runStorageScrub()">
               <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
             </button>
-            <button class="btn btn-secondary" onclick="runStorageTrim()">
+            <button class="btn btn-secondary" id="btn-trim-storage" onclick="runStorageTrim()">
               <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar TRIM SSD
             </button>
+          </div>
+        </div>
+
+        <!-- Tarjetas de Mantenimiento Inteligente (BTRFS Scrub & SSD TRIM) -->
+        <div class="card-grid-2" style="margin-bottom:20px;">
+          <div class="panel-card">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Auditoría BTRFS Scrub</h3>
+              <span id="stg-scrub-badge" class="badge badge-gray">Inactivo</span>
+            </div>
+            <div class="panel-card-body">
+              <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">
+                <strong>Función:</strong> Verificación criptográfica bloque a bloque (SHA-256/blake2b) para detectar y autorreparar corrupción silenciosa (<em>Bit Rot</em>).
+              </p>
+              <div id="stg-scrub-info" style="font-size:12px; background:var(--bg-body); padding:10px; border-radius:6px; min-height:48px; display:flex; align-items:center;">
+                <span class="text-muted">Cargando estado de scrub...</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-wrench"></use></svg> Descarte TRIM para SSD</h3>
+              <span id="stg-trim-badge" class="badge badge-gray">Comprobando</span>
+            </div>
+            <div class="panel-card-body">
+              <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">
+                <strong>Función:</strong> Envío de órdenes discard al controlador flash para liberar celdas de bloques eliminados, manteniendo velocidad sostenida y vida útil del SSD.
+              </p>
+              <div id="stg-trim-info" style="font-size:12px; background:var(--bg-body); padding:10px; border-radius:6px; min-height:48px; display:flex; align-items:center;">
+                <span class="text-muted">Cargando compatibilidad del dispositivo...</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -608,10 +626,11 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                   <th>Tipo</th>
                   <th>Punto de montaje</th>
                   <th>Filesystem</th>
+                  <th style="width:120px; text-align:right;">Acciones</th>
                 </tr>
               </thead>
               <tbody id="storage-disks-body">
-                <tr><td colspan="6" style="text-align:center;">Cargando inventario de discos...</td></tr>
+                <tr><td colspan="7" style="text-align:center;">Cargando inventario de discos...</td></tr>
               </tbody>
             </table>
           </div>
@@ -654,17 +673,65 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         </div>
       </section>
 
-<?php if ($isAdmin): ?>
-      <!-- 5. SERVICIOS (SERVICES) -->
-      <section id="view-services" class="view-section <?= $activeView === 'services' ? 'active' : '' ?>">
+      <!-- 5. SERVICIOS Y SALUD DEL SISTEMA (SERVICES & DIAGNOSTICS) -->
+      <section id="view-services" class="view-section <?= in_array($activeView, ['services', 'diagnostics'], true) ? 'active' : '' ?>">
+        <div id="view-diagnostics" style="display:none;"></div>
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Demonios y servicios del sistema</h2>
-            <p>Control de ejecución de Samba, WSDD2, Nginx, PHP-FPM y Cron</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Servicios y Salud del Sistema</h2>
+            <p>Control de demonios en tiempo real (Samba, WSDD2, Nginx, PHP-FPM, Cron) y auditoría integral de salud</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadServices()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Refrescar demonios
+            </button>
+            <button class="btn btn-primary" onclick="loadDiagnostics()">
+              <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar diagnóstico completo
+            </button>
           </div>
         </div>
 
-        <div class="panel-card">
+        <!-- Tarjetas KPI de Salud y Diagnóstico -->
+        <div class="kpi-grid" style="margin-bottom:20px;">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Estado General</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-check-circle"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-overall-val"><span class="badge badge-ok">OK</span></div>
+            <div class="kpi-sub">
+              <span id="diag-overall-sub">Subsistemas operativos</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Demonios Activos</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-services"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-services-val">... / ...</div>
+            <div class="kpi-sub">
+              <span>Servicios clave en ejecución</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span>Configuración Samba</span>
+              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-folder"></use></svg></div>
+            </div>
+            <div class="kpi-val" id="diag-samba-val"><span class="badge badge-ok">Válida</span></div>
+            <div class="kpi-sub">
+              <span>Sintaxis testparm sin errores</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla: Demonios y Servicios del Sistema -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-head">
+            <h3>Demonios y servicios del sistema</h3>
+          </div>
           <div class="table-responsive">
             <table class="nas-table">
               <thead>
@@ -681,8 +748,17 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             </table>
           </div>
         </div>
+
+        <!-- Panel: Resultado de Diagnóstico Integral -->
+        <div class="panel-card">
+          <div class="panel-card-head">
+            <h3>Auditoría y diagnóstico integral del sistema</h3>
+          </div>
+          <div class="panel-card-body" id="diagnostics-summary-container">
+            <p>Cargando diagnóstico en vivo del servidor...</p>
+          </div>
+        </div>
       </section>
-<?php endif; ?>
 
       <!-- EXPLORADOR DE ARCHIVOS (FILES) -->
       <section id="view-files" class="view-section <?= $activeView === 'files' ? 'active' : '' ?>">
@@ -1061,31 +1137,38 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </section>
 
 <?php if ($isAdmin): ?>
-      <!-- 10. ACTUALIZACIONES (UPDATES) -->
-      <section id="view-updates" class="view-section <?= $activeView === 'updates' ? 'active' : '' ?>">
+      <!-- 10. APLICACIONES Y ACTUALIZACIONES (APPLICATIONS & UPDATES) -->
+      <section id="view-applications" class="view-section <?= in_array($activeView, ['applications', 'updates'], true) ? 'active' : '' ?>">
+        <div id="view-updates" style="display:none;"></div>
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-download"></use></svg> Actualizaciones de software</h2>
-            <p>Control de versiones del servidor NAS y parches del sistema Debian 13</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Aplicaciones y Actualizaciones</h2>
+            <p>Control de versiones, actualización desde GitHub y componentes del servidor NAS Debian 13</p>
+          </div>
+          <div class="page-head-actions">
+            <button class="btn btn-secondary" onclick="loadUpdates()">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Comprobar versión
+            </button>
+            <button class="btn btn-primary" onclick="applySystemUpdate()">
+              <svg class="icon"><use href="#icon-download"></use></svg> Actualizar desde GitHub
+            </button>
           </div>
         </div>
 
-        <div class="panel-card">
+        <!-- Tarjeta de Control de Versiones -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-head">
+            <h3>Estado de versiones y repositorio</h3>
+          </div>
           <div class="panel-card-body" id="updates-container">
             <p>Cargando información de versiones...</p>
           </div>
         </div>
-      </section>
 
-      <!-- 11. COMPONENTES (APPLICATIONS) -->
-      <section id="view-applications" class="view-section <?= $activeView === 'applications' ? 'active' : '' ?>">
-        <div class="page-head">
-          <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Módulos y componentes del servidor</h2>
-            <p>Tecnologías integradas para alto rendimiento, concurrencia y resiliencia</p>
-          </div>
+        <!-- Componentes y Tecnologías Integradas -->
+        <div class="panel-card-head" style="margin-bottom:12px; padding:0;">
+          <h3 style="font-size:16px;">Módulos y componentes integrados del servidor</h3>
         </div>
-
         <div class="card-grid-2">
           <div class="panel-card">
             <div class="panel-card-head"><h3>Samba 4 & VFS</h3></div>
@@ -1102,6 +1185,14 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="panel-card">
             <div class="panel-card-head"><h3>Rsync Multiplataforma</h3></div>
             <div class="panel-card-body">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>WSDD2 & NetBIOS</h3></div>
+            <div class="panel-card-body">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
+          </div>
+          <div class="panel-card">
+            <div class="panel-card-head"><h3>Seguridad Activa (AIDE & auditd)</h3></div>
+            <div class="panel-card-body">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
           </div>
         </div>
       </section>
@@ -1190,64 +1281,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </section>
 <?php endif; ?>
 
-      <!-- 13. DIAGNÓSTICO EN VIVO (DIAGNOSTICS) -->
-      <section id="view-diagnostics" class="view-section <?= $activeView === 'diagnostics' ? 'active' : '' ?>">
-        <div class="page-head">
-          <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-wrench"></use></svg> Diagnóstico y salud integral del sistema</h2>
-            <p>Auditoría en tiempo real de demonios, almacenamiento, configuración Samba y tareas programadas</p>
-          </div>
-          <div class="page-head-actions">
-            <button class="btn btn-primary" onclick="loadDiagnostics()">
-              <svg class="icon"><use href="#icon-refresh"></use></svg> Ejecutar diagnóstico completo
-            </button>
-          </div>
-        </div>
 
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span>Estado General</span>
-              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-check-circle"></use></svg></div>
-            </div>
-            <div class="kpi-val" id="diag-overall-val"><span class="badge badge-ok">OK</span></div>
-            <div class="kpi-sub">
-              <span id="diag-overall-sub">Subsistemas operativos</span>
-            </div>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span>Demonios Activos</span>
-              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-services"></use></svg></div>
-            </div>
-            <div class="kpi-val" id="diag-services-val">... / ...</div>
-            <div class="kpi-sub">
-              <span>Servicios clave en ejecución</span>
-            </div>
-          </div>
-
-          <div class="kpi-card">
-            <div class="kpi-header">
-              <span>Configuración Samba</span>
-              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-folder"></use></svg></div>
-            </div>
-            <div class="kpi-val" id="diag-samba-val"><span class="badge badge-ok">Válida</span></div>
-            <div class="kpi-sub">
-              <span>Sintaxis testparm sin errores</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-card" style="margin-top:20px;">
-          <div class="panel-card-head">
-            <h3>Resultado de la última comprobación</h3>
-          </div>
-          <div class="panel-card-body" id="diagnostics-summary-container">
-            <p>Cargando diagnóstico en vivo del servidor...</p>
-          </div>
-        </div>
-      </section>
 
     </main>
   </div>
