@@ -7,6 +7,21 @@ declare(strict_types=1);
  * Enruta peticiones a los controladores MVC correspondientes.
  */
 
+// Sincronización de zona horaria con el sistema operativo
+$sysTz = null;
+if (is_link('/etc/localtime')) {
+    $target = (string) @readlink('/etc/localtime');
+    if (preg_match('#/zoneinfo/(.+)$#', $target, $m)) {
+        $sysTz = $m[1];
+    }
+} elseif (file_exists('/etc/timezone') && is_readable('/etc/timezone')) {
+    $sysTz = trim((string) @file_get_contents('/etc/timezone'));
+}
+if (!$sysTz && !empty(ini_get('date.timezone'))) {
+    $sysTz = ini_get('date.timezone');
+}
+date_default_timezone_set($sysTz ?: 'America/Mexico_City');
+
 // Autocarga PSR-4 (Nativo o via Composer)
 $composerAutoload = dirname(__DIR__) . '/vendor/autoload.php';
 if (file_exists($composerAutoload)) {
