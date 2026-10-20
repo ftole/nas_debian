@@ -1253,6 +1253,21 @@ if systemctl list-unit-files --type=service 'rsyslog.service' 2>/dev/null | grep
     systemctl restart rsyslog 2>/dev/null || true
 fi
 
+# Sincronización horaria (NTP) y RTC en UTC
+if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl set-local-rtc 0 2>/dev/null || true
+    timedatectl set-ntp true 2>/dev/null || true
+fi
+if [ -d /etc/systemd ]; then
+    mkdir -p /etc/systemd/timesyncd.conf.d
+    cat << 'NTP_CONF' > /etc/systemd/timesyncd.conf.d/10-nas-ntp.conf
+[Time]
+NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org pool.ntp.org time.google.com
+FallbackNTP=0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com
+NTP_CONF
+    systemctl restart systemd-timesyncd 2>/dev/null || true
+fi
+
 # Configuración de Auditoría del Kernel (auditd) e Integridad (AIDE)
 mkdir -p /etc/audit/rules.d
 cat << 'AUDIT_EOF' > /etc/audit/rules.d/nas.rules
