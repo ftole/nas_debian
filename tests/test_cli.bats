@@ -356,5 +356,39 @@ setup() {
     [[ "$output" =~ "IP ORIGEN" ]]
 }
 
+@test "nas-cli storage inspect --json retorna metadatos del dispositivo" {
+    run php bin/nas-cli storage inspect /dev/sdb --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"device": "/dev/sdb"' ]]
+    [[ "$output" =~ '"has_data"' ]]
+}
+
+@test "nas-cli storage units --json retorna listado de unidades" {
+    run php bin/nas-cli storage units --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+    [[ "$output" =~ '"id": "principal"' ]]
+}
+
+@test "nas-cli storage pool extend rechaza sin confirmacion estricta" {
+    run php bin/nas-cli storage pool extend /dev/sdb --confirm=NO --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "SI-FORMATEAR" ]]
+}
+
+@test "nas-cli storage unit add rechaza sin confirmacion o parametros invalidos" {
+    run php bin/nas-cli storage unit add /dev/sdb disco2 ext4 --confirm=NO --json
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "SI-FORMATEAR" ]]
+}
+
+@test "nas-cli share create admite opcion --unit" {
+    run php bin/nas-cli share create --name=UNIT_SHARE --unit=disco2 --scheme=1 --groups=grp_samba --json
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '"success": true' ]]
+}
+
+
 
 
