@@ -56,7 +56,7 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `tests/test_remote.bats` | BATS | Pruebas unitarias del script de pruebas remotas `test_remote.sh`. |
 | `tests/test_remote_runner.py` | pytest | Pruebas unitarias de parsing .env, política accept-new de claves de host y ejecución remota. |
 | `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
-| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, problemas/soluciones y diagramas SVG. |
+| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas GPG, problemas/soluciones y diagramas SVG. |
 | `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
 | `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP (con `php-sqlite3 php-zip`). |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
