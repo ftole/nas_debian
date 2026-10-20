@@ -564,10 +564,10 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <p>Monitoreo de particiones, integridad de datos y mantenimiento BTRFS / TRIM</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadStorage()">
+            <button class="btn btn-secondary" id="btn-refresh-storage" onclick="loadStorage()">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Refrescar
             </button>
-            <button class="btn btn-primary" onclick="openStorageManage()">
+            <button class="btn btn-primary" id="btn-format-disk" onclick="openStorageManage()">
               <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión de disco
             </button>
             <button class="btn btn-secondary" id="btn-scrub-storage" onclick="runStorageScrub()">
@@ -1523,7 +1523,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 <?php endif; ?>
 
   <!-- Modal: Gestión de Disco -->
-  <div class="modal-backdrop" id="modal-storage-manage">
+  <div class="modal-backdrop" id="modal-storage-manage" data-modal-alias="modal-format-disk">
     <div class="modal-dialog" style="max-width:640px;">
       <div class="modal-header">
         <h3>Gestión de disco</h3>
