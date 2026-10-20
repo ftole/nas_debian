@@ -29,8 +29,12 @@ $activeView = htmlspecialchars((string) ($activeView ?? 'dashboard'), ENT_QUOTES
 $sessionUser = htmlspecialchars((string) ($_SESSION['nas_user']['username'] ?? 'sistemas'), ENT_QUOTES, 'UTF-8');
 $role = (string) ($_SESSION['nas_user']['role'] ?? 'operator');
 $isSuper = !empty($_SESSION['nas_user']['is_superadmin']) || $role === 'superadmin';
+$isSuperAdmin = $isSuper;
 $isAdmin = !empty($_SESSION['nas_user']['is_admin']) || in_array($role, ['admin', 'superadmin'], true);
-if (!$isAdmin && in_array($activeView, ['storage', 'services', 'terminal', 'domain', 'updates', 'applications'], true)) {
+if (!$isAdmin && in_array($activeView, ['storage', 'services', 'domain', 'updates', 'applications'], true)) {
+    $activeView = 'dashboard';
+}
+if (!$isSuperAdmin && $activeView === 'terminal') {
     $activeView = 'dashboard';
 }
 $roleLabel = htmlspecialchars((string) ($_SESSION['nas_user']['role_label'] ?? ($isAdmin ? 'Administrador' : 'Operador Web')), ENT_QUOTES, 'UTF-8');
@@ -142,11 +146,13 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
       <div class="header-meta-pill">
         <span>Workgroup:</span> <strong><?= htmlspecialchars(\App\Services\SystemService::getWorkgroup(), ENT_QUOTES, 'UTF-8') ?></strong>
       </div>
-<?php if ($isAdmin): ?>
+<?php if ($isSuperAdmin): ?>
       <button class="btn btn-secondary btn-sm" onclick="switchView('terminal')" title="Abrir Consola Web Interactiva">
         <svg class="icon"><use href="#icon-terminal"></use></svg>
         <span class="btn-text-responsive">Terminal</span>
       </button>
+<?php endif; ?>
+<?php if ($isAdmin): ?>
       <button class="btn btn-secondary btn-sm" onclick="openModal('modal-reboot-server')" title="Reiniciar Servidor NAS">
         <svg class="icon" style="color:var(--accent-danger);"><use href="#icon-power"></use></svg>
         <span class="btn-text-responsive">Reiniciar</span>
@@ -236,8 +242,8 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
 
         <div class="nav-section-title">ADMINISTRACIÓN Y SISTEMA</div>
 
-<?php if ($isAdmin): ?>
-        <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" data-view="terminal">
+<?php if ($isSuperAdmin): ?>
+        <div class="nav-item <?= $activeView === 'terminal' ? 'active' : '' ?>" id="nav-terminal" data-view="terminal">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-terminal"></use></svg>
             <span>Terminal</span>
@@ -790,7 +796,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         </div>
       </section>
 
-<?php if ($isAdmin): ?>
+<?php if ($isSuperAdmin): ?>
       <!-- TERMINAL WEB REAL -->
       <section id="view-terminal" class="view-section <?= $activeView === 'terminal' ? 'active' : '' ?>">
         <div class="page-head">
