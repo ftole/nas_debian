@@ -1424,7 +1424,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Editar Tarea de Backup -->
-  <div class="modal-backdrop" id="modal-edit-backup">
+  <div class="modal-backdrop modal-static" id="modal-edit-backup">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Editar tarea de respaldo</h3>
@@ -1909,7 +1909,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Eliminar Archivo o Carpeta -->
-  <div class="modal-backdrop" id="modal-delete-file">
+  <div class="modal-backdrop modal-static" id="modal-delete-file">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3 id="modal-delete-title"><svg class="icon" style="color:var(--accent-warning);"><use href="#icon-trash"></use></svg> Eliminar elemento</h3>
@@ -1945,7 +1945,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Advertencia de Compresión ZIP con Respaldos en Curso -->
-  <div class="modal-backdrop" id="modal-zip-backup-warning">
+  <div class="modal-backdrop modal-static" id="modal-zip-backup-warning">
     <div class="modal-dialog" style="max-width:520px;">
       <div class="modal-header">
         <h3 style="display:flex; align-items:center; gap:8px;">
@@ -2076,7 +2076,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Vaciar Papelera -->
-  <div class="modal-backdrop" id="modal-empty-trash">
+  <div class="modal-backdrop modal-static" id="modal-empty-trash">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3><svg class="icon" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg> Vaciar papelera de reciclaje</h3>
@@ -2094,7 +2094,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Confirmar Reinicio -->
-  <div class="modal-backdrop" id="modal-reboot-server">
+  <div class="modal-backdrop modal-static" id="modal-reboot-server">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Reiniciar Servidor NAS</h3>
