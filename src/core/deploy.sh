@@ -179,6 +179,9 @@ vm.dirty_expire_centisecs = 300
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.tcp_syncookies = 1
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
 kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
 kernel.yama.ptrace_scope = 2
@@ -551,7 +554,6 @@ cat << 'NGINX_EOF' > /etc/nginx/sites-available/nas-web
 # 1. Servidor HTTP (Puerto 80: Redirección permanente a HTTPS)
 server {
     listen 80 default_server;
-    listen [::]:80 default_server;
     server_name _;
     return 301 https://$host$request_uri;
 }
@@ -559,7 +561,6 @@ server {
 # 2. Servidor HTTPS (Puerto 443: Acceso Seguro SSL)
 server {
     listen 443 ssl default_server;
-    listen [::]:443 ssl default_server;
     server_name _;
     root /var/www/nas-web/public;
     index index.php index.html;
@@ -1300,6 +1301,9 @@ for _svc in smbd nmbd wsdd2 nginx cron rsyslog auditd; do
 done
 
 echo " [9/9] Verificando y asegurando reglas de Firewall (UFW)..."
+if [ -f /etc/default/ufw ]; then
+    sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw 2>/dev/null || true
+fi
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -qw "active"; then
     ufw allow 22/tcp comment 'SSH' 2>/dev/null || true
     LOCAL_SUBNET=$(ip route show 2>/dev/null | awk '/proto kernel.*scope link/ {print $1}' | head -n1)
