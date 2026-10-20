@@ -731,14 +731,225 @@ class SambaService
     }
 
     /**
+     * Audita las ACL POSIX del directorio de un recurso comparándolas contra la configuración
+     * de smb.conf para detectar discrepancias reales antes de ejecutar operaciones recursivas.
+     *
+     * @return array{success: bool, share: string, path: string, in_sync: bool, discrepancies: array<string>, expected_count?: int, error?: string}
+     */
+    public function auditShareAcls(string $name): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [
+                'success' => true,
+                'share' => $name,
+                'path' => '/srv/nas/' . $name,
+                'in_sync' => true,
+                'discrepancies' => [],
+                'expected_count' => 0,
+            ];
+        }
+
+        $sections = $this->parseSmbConf();
+        if (!isset($sections[$name])) {
+            return ['success' => false, 'share' => $name, 'path' => '', 'in_sync' => false, 'discrepancies' => ["El recurso [$name] no existe en smb.conf."], 'error' => "El recurso [$name] no existe en smb.conf."];
+        }
+
+        $props = $sections[$name];
+        $path = trim((string) ($props['path'] ?? ''));
+        if ($path === '' || !str_starts_with($path, '/srv/nas')) {
+            return ['success' => false, 'share' => $name, 'path' => $path, 'in_sync' => false, 'discrepancies' => ['El recurso no apunta a una ruta administrada en /srv/nas.'], 'error' => 'El recurso no apunta a una ruta administrada en /srv/nas.'];
+        }
+
+        if (!is_dir($path)) {
+            return [
+                'success' => true,
+                'share' => $name,
+                'path' => $path,
+                'in_sync' => false,
+                'discrepancies' => ["El directorio $path no existe en el sistema de archivos."],
+                'expected_count' => 0,
+            ];
+        }
+
+        $guestOk = (strtolower((string) ($props['guest ok'] ?? 'no')) === 'yes');
+        $discrepancies = [];
+
+        // Obtener ACL actuales con getfacl
+        $cmd = SystemService::runCommand(['getfacl', '-p', '-E', $path]);
+        if ($cmd['code'] !== 0) {
+            return [
+                'success' => false,
+                'share' => $name,
+                'path' => $path,
+                'in_sync' => false,
+                'discrepancies' => ['Error al ejecutar getfacl en ' . $path],
+                'error' => 'Error al leer ACL con getfacl',
+            ];
+        }
+
+        $output = (string) $cmd['stdout'];
+        $currentOwner = '';
+        $currentGroup = '';
+        $currentAcl = [];
+        $currentDef = [];
+
+        foreach (explode("\n", $output) as $line) {
+            $line = trim($line);
+            if (str_starts_with($line, '# owner:')) {
+                $currentOwner = trim(substr($line, 8));
+            } elseif (str_starts_with($line, '# group:')) {
+                $currentGroup = trim(substr($line, 8));
+            } elseif (str_starts_with($line, 'default:user:')) {
+                $p = explode(':', $line);
+                if (count($p) >= 4 && $p[2] !== '') {
+                    $currentDef['u:' . $p[2]] = $p[3];
+                }
+            } elseif (str_starts_with($line, 'default:group:')) {
+                $p = explode(':', $line);
+                if (count($p) >= 4 && $p[2] !== '') {
+                    $currentDef['g:' . $p[2]] = $p[3];
+                }
+            } elseif (str_starts_with($line, 'user:')) {
+                $p = explode(':', $line);
+                if (count($p) >= 3 && $p[1] !== '') {
+                    $currentAcl['u:' . $p[1]] = $p[2];
+                }
+            } elseif (str_starts_with($line, 'group:')) {
+                $p = explode(':', $line);
+                if (count($p) >= 3 && $p[1] !== '') {
+                    $currentAcl['g:' . $p[1]] = $p[2];
+                }
+            }
+        }
+
+        if ($guestOk) {
+            foreach (['u:www-data' => 'rwx', 'u:nobody' => 'rwx'] as $k => $expectedPerm) {
+                if (!isset($currentAcl[$k])) {
+                    $discrepancies[] = "Falta entrada ACL de acceso para $k (esperado: $expectedPerm)";
+                } elseif ($currentAcl[$k] !== $expectedPerm) {
+                    $discrepancies[] = "Permisos desalineados en ACL de acceso para $k (actual: {$currentAcl[$k]}, esperado: $expectedPerm)";
+                }
+            }
+        } else {
+            if ($currentOwner !== 'root') {
+                $discrepancies[] = "Propietario del directorio incorrecto (actual: $currentOwner, esperado: root)";
+            }
+            if ($currentGroup !== 'grp_samba') {
+                $discrepancies[] = "Grupo del directorio incorrecto (actual: $currentGroup, esperado: grp_samba)";
+            }
+
+            $valid = $this->splitTokens((string) ($props['valid users'] ?? ''));
+            $write = $this->splitTokens((string) ($props['write list'] ?? ''));
+
+            $levels = [];
+            foreach ($valid as $t) {
+                $levels[$t] = 'read';
+            }
+            foreach ($write as $t) {
+                $levels[$t] = 'write';
+            }
+            $levels['@grp_samba'] = 'write';
+            $levels['u:www-data'] = 'write';
+
+            $expectedKeys = [];
+            foreach ($levels as $token => $level) {
+                $perm = ($level === 'write') ? 'rwx' : 'r-x';
+                $key = str_starts_with($token, '@') ? ('g:' . ltrim($token, '@')) : (str_starts_with($token, 'u:') ? $token : ('u:' . $token));
+                $expectedKeys[$key] = $perm;
+
+                if (!isset($currentAcl[$key])) {
+                    $discrepancies[] = "Falta entrada ACL de acceso para $key (esperado: $perm)";
+                } elseif ($currentAcl[$key] !== $perm) {
+                    $discrepancies[] = "Permisos desalineados en ACL de acceso para $key (actual: {$currentAcl[$key]}, esperado: $perm)";
+                }
+
+                if (!isset($currentDef[$key])) {
+                    $discrepancies[] = "Falta entrada ACL por defecto para $key (esperado: $perm)";
+                } elseif ($currentDef[$key] !== $perm) {
+                    $discrepancies[] = "Permisos desalineados en ACL por defecto para $key (actual: {$currentDef[$key]}, esperado: $perm)";
+                }
+            }
+
+            foreach ($currentAcl as $k => $perm) {
+                if (!isset($expectedKeys[$k])) {
+                    $discrepancies[] = "Entrada residual en ACL de acceso: $k ($perm)";
+                }
+            }
+        }
+
+        return [
+            'success' => true,
+            'share' => $name,
+            'path' => $path,
+            'in_sync' => empty($discrepancies),
+            'discrepancies' => $discrepancies,
+            'expected_count' => count($guestOk ? ['u:www-data', 'u:nobody'] : ($expectedKeys ?? [])),
+        ];
+    }
+
+    /**
+     * Audita las ACL de uno o todos los recursos compartidos.
+     *
+     * @return array{shares: array<string, array>, total: int, out_of_sync_count: int, in_sync_count: int}
+     */
+    public function auditAcls(?string $shareName = null): array
+    {
+        $sharesToAudit = [];
+        if (!empty($shareName)) {
+            $sharesToAudit = [$shareName];
+        } else {
+            foreach ($this->listShares() as $s) {
+                $sharesToAudit[] = $s['name'];
+            }
+        }
+
+        $results = [];
+        $outOfSync = 0;
+        $inSync = 0;
+
+        foreach ($sharesToAudit as $sn) {
+            $res = $this->auditShareAcls($sn);
+            $results[$sn] = $res;
+            if (!empty($res['in_sync'])) {
+                $inSync++;
+            } else {
+                $outOfSync++;
+            }
+        }
+
+        return [
+            'shares' => $results,
+            'total' => count($results),
+            'out_of_sync_count' => $outOfSync,
+            'in_sync_count' => $inSync,
+        ];
+    }
+
+    /**
      * Recalcula las ACL POSIX del directorio de un recurso para que coincidan con
      * 'valid users' / 'write list' de smb.conf. Corrige desajustes donde Samba
      * autoriza a un grupo pero el sistema de archivos lo deniega (y viceversa).
+     *
+     * Si $force es false, audita previamente las ACL y omite la reaplicación recursiva
+     * (setfacl -R) si el directorio ya se encuentra sincronizado, previniendo I/O innecesario.
      */
-    public function syncShareAcls(string $name): array
+    public function syncShareAcls(string $name, bool $force = false): array
     {
         if (DIRECTORY_SEPARATOR === '\\') {
             return ['success' => true, 'message' => "ACL de [$name] sincronizadas (modo dev)."];
+        }
+
+        // Si no se fuerza la reaplicación, auditar primero para prevenir sobrecargas de I/O innecesarias
+        if (!$force) {
+            $audit = $this->auditShareAcls($name);
+            if (!empty($audit['in_sync'])) {
+                return [
+                    'success' => true,
+                    'message' => "ACL de [$name] ya están sincronizadas con smb.conf. Se omitió la reaplicación recursiva.",
+                    'skipped' => true,
+                    'path' => $audit['path'] ?? ('/srv/nas/' . $name),
+                ];
+            }
         }
 
         $sections = $this->parseSmbConf();
