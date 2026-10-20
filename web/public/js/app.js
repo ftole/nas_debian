@@ -986,9 +986,14 @@ async function submitNewBackup(event) {
   }
 }
 
+let _editBkpPort = 22;
+
 function openEditBackup(id) {
   const t = (_backupsData || []).find(x => x.id === id);
-  if (!t) return;
+  if (!t) {
+    showToast(`No se encontró la tarea de respaldo [${id}].`, 'error');
+    return;
+  }
 
   const idEl = document.getElementById('edit-bkp-id');
   if (idEl) idEl.value = t.id;
@@ -1000,23 +1005,25 @@ function openEditBackup(id) {
   if (protoEl) protoEl.value = proto;
 
   let ip = t.ip || '';
-  let share = '';
-  let path = '';
-  let user = 'Administrador';
+  let share = t.share || '';
+  let path = t.path || '';
+  let user = t.user || (isSsh ? 'root' : 'Administrador');
+  _editBkpPort = t.port || 22;
 
   const src = t.source || t.destination || '';
   if (!isSsh) {
-    const m = src.match(/^\/\/([^/]+)\/(.+)$/);
+    const m = src.match(/^[\/\\]+([^/\\]+)[\/\\]+(.+)$/);
     if (m) {
-      ip = m[1];
-      share = m[2];
+      if (!ip) ip = m[1];
+      if (!share) share = m[2];
     }
   } else {
-    const m = src.match(/^([^@]+)@([^:]+):(.*)$/);
+    const m = src.match(/^([^@]+)@([^:]+)(?::(\d+))?:(.*)$/);
     if (m) {
-      user = m[1];
-      ip = m[2];
-      path = m[3];
+      if (!t.user) user = m[1];
+      if (!ip) ip = m[2];
+      if (m[3]) _editBkpPort = parseInt(m[3], 10);
+      if (!path) path = m[4];
     }
   }
 
@@ -1079,19 +1086,24 @@ async function submitEditBackup(event) {
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
 
   try {
+    const payload = {
+      id,
+      proto,
+      ip,
+      share,
+      path,
+      user,
+      password,
+      cron,
+      retention,
+    };
+    if (proto === 'ssh' && _editBkpPort) {
+      payload.port = _editBkpPort;
+    }
+
     const res = await apiFetch('/api/backups/update', {
       method: 'POST',
-      body: JSON.stringify({
-        id,
-        proto,
-        ip,
-        share,
-        path,
-        user,
-        password,
-        cron,
-        retention,
-      }),
+      body: JSON.stringify(payload),
     });
     showToast(res.message || `Tarea de respaldo [${id}] actualizada con éxito.`, 'success');
     closeModal('modal-edit-backup');
@@ -1109,11 +1121,13 @@ async function submitEditBackup(event) {
 async function testEditBackupConnection() {
   const btn = document.getElementById('btn-test-edit-backup');
   const payload = {
+    id: document.getElementById('edit-bkp-id').value,
+    task_id: document.getElementById('edit-bkp-id').value,
     proto: document.getElementById('edit-bkp-proto').value,
     ip: document.getElementById('edit-bkp-ip').value,
     share: document.getElementById('edit-bkp-share')?.value || '',
     path: document.getElementById('edit-bkp-path')?.value || '',
-    port: 22,
+    port: _editBkpPort || 22,
     user: document.getElementById('edit-bkp-user').value,
     password: document.getElementById('edit-bkp-pass').value,
   };
