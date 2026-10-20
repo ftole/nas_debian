@@ -113,6 +113,8 @@ $router->post('/api/shares', [SambaController::class, 'create']);
 $router->post('/api/shares/update', [SambaController::class, 'update']);
 $router->post('/api/shares/access', [SambaController::class, 'setAccess']);
 $router->get('/api/shares/access', [SambaController::class, 'accessMap']);
+$router->get('/api/shares/access/audit', [SambaController::class, 'auditAccess']);
+$router->post('/api/shares/access/audit', [SambaController::class, 'auditAccess']);
 $router->post('/api/shares/access/repair', [SambaController::class, 'repairAccess']);
 $router->post('/api/shares/delete', [SambaController::class, 'delete']);
 $router->delete('/api/shares/{name}', [SambaController::class, 'delete']);
@@ -120,7 +122,9 @@ $router->delete('/api/shares/{name}', [SambaController::class, 'delete']);
 // Rutas API: Central de Respaldos (Backups)
 $router->get('/api/backups', [BackupController::class, 'list']);
 $router->get('/api/backups/tasks', [BackupController::class, 'list']);
+$router->get('/api/backups/running', [BackupController::class, 'running']);
 $router->post('/api/backups', [BackupController::class, 'create']);
+$router->post('/api/backups/update', [BackupController::class, 'update']);
 $router->post('/api/backups/test', [BackupController::class, 'test']);
 $router->post('/api/backups/delete', [BackupController::class, 'delete']);
 $router->delete('/api/backups/{id}', [BackupController::class, 'delete']);
