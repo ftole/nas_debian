@@ -165,6 +165,13 @@ class AuthMiddleware
                 }
                 return false;
             }
+
+            // Restricción estricta de terminal web: confinada exclusivamente al superadministrador
+            if ($path === '/terminal' || str_starts_with($path, '/api/terminal')) {
+                if (!self::requireSuperAdmin($request)) {
+                    return false;
+                }
+            }
         }
 
         // Restricción por rol de servidor activo:
@@ -332,6 +339,71 @@ class AuthMiddleware
                 }
                 return false;
             }
+        }
+
+        return true;
+    }
+
+    /**
+     * Valida si el usuario en sesión ostenta privilegios de superadministrador.
+     */
+    public static function isSuperAdmin(): bool
+    {
+        self::initSession();
+        $user = $_SESSION['nas_user'] ?? [];
+        if (!empty($user['is_superadmin']) || ($user['role'] ?? '') === 'superadmin') {
+            return true;
+        }
+
+        $username = strtolower(trim((string) ($user['username'] ?? '')));
+        if ($username === '') {
+            return false;
+        }
+
+        if (is_readable('/etc/nas/superadmin')) {
+            $configuredSuper = strtolower(trim((string) @file_get_contents('/etc/nas/superadmin')));
+            if ($configuredSuper !== '' && $username === $configuredSuper) {
+                return true;
+            }
+        }
+
+        $grpRes = \App\Services\SystemService::runCommand(['id', '-Gn', $username]);
+        if ($grpRes['code'] === 0) {
+            $groups = preg_split('/\s+/', trim($grpRes['stdout']));
+            if (is_array($groups) && in_array('grp_superadmin', $groups, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Exige privilegios de superadministrador para la petición actual o emite 403 Forbidden.
+     */
+    public static function requireSuperAdmin(Request $request): bool
+    {
+        if (!self::isSuperAdmin()) {
+            $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+            if (getenv('APP_ENV') !== 'testing') {
+                \App\Services\AuditService::log('access_denied', $request->getPath(), 'FAILED', [
+                    'role' => $role ?: 'unknown',
+                    'method' => $request->getMethod(),
+                    'required' => 'superadmin',
+                ]);
+            }
+            if ($request->isJson()) {
+                Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
+            } else {
+                if (!headers_sent()) {
+                    http_response_code(403);
+                }
+                echo '<h1>403 - Acceso restringido a superadministradores</h1>';
+                if (getenv('APP_ENV') !== 'testing') {
+                    exit;
+                }
+            }
+            return false;
         }
 
         return true;
