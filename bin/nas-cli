@@ -12,8 +12,20 @@ declare(strict_types=1);
  * ==============================================================================
  */
 
-// 1. Configuración de entorno y zona horaria
-date_default_timezone_set('UTC');
+// 1. Configuración de entorno y zona horaria sincronizada con el sistema operativo
+$sysTz = null;
+if (is_link('/etc/localtime')) {
+    $target = (string) @readlink('/etc/localtime');
+    if (preg_match('#/zoneinfo/(.+)$#', $target, $m)) {
+        $sysTz = $m[1];
+    }
+} elseif (file_exists('/etc/timezone') && is_readable('/etc/timezone')) {
+    $sysTz = trim((string) @file_get_contents('/etc/timezone'));
+}
+if (!$sysTz && !empty(ini_get('date.timezone'))) {
+    $sysTz = ini_get('date.timezone');
+}
+date_default_timezone_set($sysTz ?: 'America/Mexico_City');
 
 // 2. Autocarga PSR-4 del núcleo y servicios web
 $baseDir = dirname(__DIR__);
