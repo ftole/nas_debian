@@ -375,6 +375,41 @@ NTP_CONF
             systemctl reload "$php_fpm_svc" 2>/dev/null || systemctl restart "$php_fpm_svc" 2>/dev/null || true
         fi
     fi
+
+    # 10. Normalización auto-reparable de marcas de tiempo históricas en UTC
+    if [ -f "/var/lib/nas/nas.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 /var/lib/nas/nas.sqlite "UPDATE audit_logs SET timestamp = datetime(timestamp, '-6 hours') WHERE timestamp > datetime('now', 'localtime', '+5 minutes');" 2>/dev/null || true
+    fi
+    if [ -f "/var/log/nas-admin.log" ] && command -v python3 >/dev/null 2>&1; then
+        python3 -c '
+import re
+from datetime import datetime, timedelta
+log = "/var/log/nas-admin.log"
+try:
+    with open(log, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+    changed = False
+    new_lines = []
+    now = datetime.now()
+    for l in lines:
+        m = re.match(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](.*)$", l)
+        if m:
+            dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+            if dt > now + timedelta(minutes=5):
+                dt_corr = dt - timedelta(hours=6)
+                new_lines.append(f"[{dt_corr.strftime(\"%Y-%m-%d %H:%M:%S\")}]{m.group(2)}\n")
+                changed = True
+            else:
+                new_lines.append(l)
+        else:
+            new_lines.append(l)
+    if changed:
+        with open(log, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+except Exception:
+    pass
+' 2>/dev/null || true
+    fi
 }
 
 actualizar_desde_git() {
