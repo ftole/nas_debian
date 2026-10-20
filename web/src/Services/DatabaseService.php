@@ -182,16 +182,28 @@ SQL;
 
         // Normalización auto-reparable de marcas de tiempo históricas en UTC
         try {
-            $futureRows = $pdo->query("SELECT id, timestamp FROM audit_logs WHERE timestamp > datetime('now', 'localtime', '+5 minutes') LIMIT 200")->fetchAll();
-            if (!empty($futureRows)) {
-                $tzOffset = (int) date('Z');
-                if ($tzOffset < 0) {
+            $tzOffset = (int) date('Z');
+            if ($tzOffset < 0) {
+                $futureRows = $pdo->query("SELECT id, timestamp FROM audit_logs WHERE timestamp > datetime('now', 'localtime', '+5 minutes')")->fetchAll();
+                if (!empty($futureRows)) {
                     $stmt = $pdo->prepare('UPDATE audit_logs SET timestamp = :newTs WHERE id = :id');
                     foreach ($futureRows as $row) {
                         $rowTs = strtotime((string) $row['timestamp']);
                         if ($rowTs !== false) {
                             $adj = $rowTs + $tzOffset;
                             $stmt->execute([':newTs' => date('Y-m-d H:i:s', $adj), ':id' => $row['id']]);
+                        }
+                    }
+                }
+
+                $futureTerms = $pdo->query("SELECT id, executed_at FROM terminal_history WHERE executed_at > datetime('now', 'localtime', '+5 minutes')")->fetchAll();
+                if (!empty($futureTerms)) {
+                    $stmtTerm = $pdo->prepare('UPDATE terminal_history SET executed_at = :newTs WHERE id = :id');
+                    foreach ($futureTerms as $tRow) {
+                        $tTs = strtotime((string) $tRow['executed_at']);
+                        if ($tTs !== false) {
+                            $tAdj = $tTs + $tzOffset;
+                            $stmtTerm->execute([':newTs' => date('Y-m-d H:i:s', $tAdj), ':id' => $tRow['id']]);
                         }
                     }
                 }
