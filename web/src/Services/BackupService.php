@@ -83,13 +83,30 @@ class BackupService
             $src = 'N/A';
             $ip = '127.0.0.1';
             $retention = 30;
+            $shareVal = '';
+            $pathVal = '';
+            $userVal = '';
+            $portVal = 22;
 
             if (str_contains($content, 'SRC_SHARE=')) {
                 $proto = 'CIFS (Windows)';
                 preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mIp);
                 preg_match('/SRC_SHARE=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mSh);
                 $ip = $mIp[1] ?? '127.0.0.1';
-                $src = '//' . ($mIp[1] ?? 'IP') . '/' . ($mSh[1] ?? 'SHARE');
+                $shareVal = $mSh[1] ?? '';
+                $src = '//' . ($mIp[1] ?? 'IP') . '/' . $shareVal;
+                $userVal = 'Administrador';
+                $cFile = $this->credDir . '/' . $taskId . '.cred';
+                if (file_exists($cFile)) {
+                    $cRaw = (string) @file_get_contents($cFile);
+                    if (preg_match('/^username=(.*)$/m', $cRaw, $mUsr)) {
+                        $u = $mUsr[1];
+                        if (preg_match('/^domain=(.*)$/m', $cRaw, $mDom) && !empty($mDom[1])) {
+                            $u = $mDom[1] . '\\' . $u;
+                        }
+                        $userVal = $u;
+                    }
+                }
             } elseif (str_contains($content, 'SRC_PORT=') || str_contains($content, 'sshpass')) {
                 $proto = 'SSH (Linux)';
                 preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mIp);
@@ -99,10 +116,13 @@ class BackupService
                 $ip = $mIp[1] ?? '127.0.0.1';
                 $portVal = (int) ($mPort[1] ?? 22);
                 $portSuffix = ($portVal > 0 && $portVal !== 22) ? (':' . $portVal) : '';
-                $src = ($mUs[1] ?? 'root') . '@' . ($mIp[1] ?? 'IP') . $portSuffix . ':' . ($mPt[1] ?? '/');
+                $pathVal = $mPt[1] ?? '/';
+                $userVal = $mUs[1] ?? 'root';
+                $src = $userVal . '@' . ($mIp[1] ?? 'IP') . $portSuffix . ':' . $pathVal;
             } else {
                 preg_match('/SRC_PATH=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mPt);
-                $src = $mPt[1] ?? '/';
+                $pathVal = $mPt[1] ?? '/';
+                $src = $pathVal;
             }
 
             if (preg_match('/RETENTION=(\d+)/', $content, $mRet)) {
@@ -136,6 +156,10 @@ class BackupService
                 'id' => $taskId,
                 'protocol' => $proto,
                 'ip' => $ip,
+                'share' => $shareVal,
+                'path' => $pathVal,
+                'user' => $userVal,
+                'port' => $portVal,
                 'source' => $src,
                 'destination' => $src,
                 'cron' => $cronExpr,
@@ -771,6 +795,10 @@ class BackupService
             return ['success' => false, 'error' => "La tarea de respaldo [$taskId] no existe."];
         }
 
+        if ($this->getTaskStatus($taskId) === 'running') {
+            return ['success' => false, 'error' => "La tarea de respaldo [$taskId] se encuentra actualmente en ejecución. Espere a que finalice para editarla."];
+        }
+
         $role = (string) ($_SESSION['nas_user']['role'] ?? '');
         $isOperator = ($role === 'operator');
         if ($isOperator && (!empty($data['script']) || !empty($data['pre_script']) || !empty($data['post_script']))) {
@@ -897,8 +925,11 @@ class BackupService
             $lockFiles = glob($dir . '/backup_*.lock') ?: [];
             foreach ($lockFiles as $lf) {
                 $fp = @fopen($lf, 'c+');
+                if (!$fp) {
+                    $fp = @fopen($lf, 'r');
+                }
                 if ($fp) {
-                    if (!@flock($fp, LOCK_EX | LOCK_NB)) {
+                    if (!@flock($fp, LOCK_SH | LOCK_NB)) {
                         // El bloqueo flock está adquirido activamente por un runner
                         $baseName = basename($lf);
                         $activeLocks[] = $baseName;
@@ -1034,12 +1065,42 @@ class BackupService
     public function testConnection(array $data): array
     {
         $proto = strtolower(trim($data['proto'] ?? 'cifs'));
+        $taskId = strtolower(trim((string) ($data['task_id'] ?? ($data['id'] ?? ''))));
+        $pass = (string) ($data['password'] ?? '');
+
+        $credContent = '';
+        if ($taskId !== '' && preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            $credFile = $this->credDir . '/' . $taskId . '.cred';
+            if (file_exists($credFile)) {
+                $credContent = (string) @file_get_contents($credFile);
+                if ($pass === '') {
+                    if ($proto === 'cifs') {
+                        if (preg_match('/^password=(.*)$/m', $credContent, $mPass)) {
+                            $pass = $mPass[1];
+                        }
+                    } else {
+                        $pass = trim($credContent);
+                    }
+                }
+            }
+        }
 
         if ($proto === 'cifs') {
             $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $share = trim($data['share'] ?? ($data['path'] ?? ($data['source_share'] ?? '')));
             $user = trim($data['user'] ?? ($data['source_user'] ?? ''));
-            $pass = (string) ($data['password'] ?? '');
+            if ($user === '' && !empty($credContent)) {
+                if (preg_match('/^username=(.*)$/m', $credContent, $mUsr)) {
+                    $usrVal = $mUsr[1];
+                    if (preg_match('/^domain=(.*)$/m', $credContent, $mDom) && !empty($mDom[1])) {
+                        $usrVal = $mDom[1] . '\\' . $usrVal;
+                    }
+                    $user = $usrVal;
+                }
+            }
+            if ($user === '') {
+                $user = 'Administrador';
+            }
             if ($ip === '' || $share === '') {
                 return ['success' => false, 'error' => 'IP y recurso compartido son obligatorios.'];
             }
@@ -1069,7 +1130,9 @@ class BackupService
             $ip = trim($data['ip'] ?? ($data['target'] ?? ($data['source_ip'] ?? '')));
             $port = (int) ($data['port'] ?? 22);
             $user = trim($data['user'] ?? ($data['source_user'] ?? 'root'));
-            $pass = (string) ($data['password'] ?? '');
+            if (!empty($data['password'])) {
+                $pass = (string) $data['password'];
+            }
             if ($ip === '') {
                 return ['success' => false, 'error' => 'La IP del servidor Linux es obligatoria.'];
             }
