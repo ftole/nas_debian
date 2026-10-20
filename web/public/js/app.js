@@ -62,6 +62,33 @@ function showToast(message, type = 'info') {
   }, 4000);
 }
 
+// Reloj del Servidor en Vivo Sincronizado
+let _serverTimeDiffMs = 0;
+let _clockTimer = null;
+
+function initServerClock(initialTimestampSec, serverTz) {
+  if (initialTimestampSec) {
+    _serverTimeDiffMs = (initialTimestampSec * 1000) - Date.now();
+  }
+  updateServerClockDisplay(serverTz);
+  if (!_clockTimer) {
+    _clockTimer = setInterval(() => updateServerClockDisplay(serverTz), 1000);
+  }
+}
+
+function updateServerClockDisplay(serverTz) {
+  const clockEl = document.getElementById('header-server-clock');
+  if (!clockEl) return;
+  const nowServer = new Date(Date.now() + _serverTimeDiffMs);
+  const pad = n => String(n).padStart(2, '0');
+  const timeStr = `${pad(nowServer.getHours())}:${pad(nowServer.getMinutes())}:${pad(nowServer.getSeconds())}`;
+  clockEl.textContent = timeStr;
+  if (serverTz) {
+    const tzEl = document.getElementById('header-server-tz');
+    if (tzEl) tzEl.textContent = serverTz;
+  }
+}
+
 function openModal(modalId) {
   const modal = document.getElementById(modalId);
   if (modal) {
@@ -352,6 +379,10 @@ async function refreshDashboardMetrics() {
     const d = res.data || res;
 
     if (d.system) {
+      if (d.system.server_timestamp) {
+        _serverTimeDiffMs = (d.system.server_timestamp * 1000) - Date.now();
+        updateServerClockDisplay(d.system.timezone_abbr);
+      }
       const ramVal = document.getElementById('kpi-ram-val');
       const ramBar = document.getElementById('kpi-ram-bar');
       if (ramVal) ramVal.innerHTML = `${d.system.ram_used_gb} GB <small style="font-size:12px; color:var(--text-secondary);">/ ${d.system.ram_total_gb} GB</small>`;
@@ -4141,6 +4172,9 @@ async function loadDiagnostics() {
 // 15. Inicialización Robusta al Cargar el DOM
 // ==============================================================================
 function initApp() {
+  if (window.NAS_INITIAL_SERVER_TIME) {
+    initServerClock(window.NAS_INITIAL_SERVER_TIME.timestamp, window.NAS_INITIAL_SERVER_TIME.tz);
+  }
   applyRoleUi();
 
   // Configurar listeners de navegación sidebar
