@@ -518,8 +518,117 @@ switch ($module) {
                 outSuccess('Dispositivo desmontado con éxito', null, $isJson);
                 break;
 
+            case 'inspect':
+                $dev = $extraArgs[0] ?? ($parsedOptions['device'] ?? ($parsedOptions['dev'] ?? null));
+                if (!$dev) {
+                    outError("Debes especificar el dispositivo a inspeccionar. Ejemplo: nas storage inspect /dev/sdb", 1, null, $isJson);
+                }
+                $res = $svc->inspectDevice((string) $dev);
+                if ($isJson) {
+                    outData($res, true);
+                }
+                echo CliTheme::BOLD . "=== INSPECCIÓN DEL DISPOSITIVO: $dev ===" . CliTheme::RESET . PHP_EOL;
+                renderKeyValues([
+                    'Dispositivo' => $res['device'] ?? $dev,
+                    'Tipo'        => $res['type'] ?? 'N/A',
+                    'Capacidad'   => $res['size'] ?? 'N/A',
+                    'Tiene Datos' => !empty($res['has_data']) ? 'SÍ (Peligro de sobreescritura)' : 'NO (Limpio)',
+                ]);
+                if (!empty($res['signatures'])) {
+                    echo PHP_EOL . CliTheme::YELLOW . "Firmas preexistentes detectadas:" . CliTheme::RESET . PHP_EOL;
+                    renderTable([
+                        'type'  => 'TIPO FS',
+                        'label' => 'ETIQUETA',
+                        'uuid'  => 'UUID',
+                    ], $res['signatures']);
+                }
+                if (!empty($res['partitions'])) {
+                    echo PHP_EOL . CliTheme::YELLOW . "Particiones preexistentes detectadas:" . CliTheme::RESET . PHP_EOL;
+                    renderTable([
+                        'name'   => 'PARTICIÓN',
+                        'size'   => 'TAMAÑO',
+                        'fstype' => 'FILESYSTEM',
+                        'mount'  => 'MONTAJE',
+                    ], $res['partitions']);
+                }
+                break;
+
+            case 'units':
+                $units = $svc->getUnits();
+                if ($isJson) {
+                    outData($units, true);
+                }
+                echo CliTheme::BOLD . "=== UNIDADES DE ALMACENAMIENTO DISPONIBLES ===" . CliTheme::RESET . PHP_EOL;
+                renderTable([
+                    'id'          => 'ID UNIDAD',
+                    'name'        => 'NOMBRE',
+                    'path'        => 'PUNTO DE MONTAJE',
+                    'filesystem'  => 'FILESYSTEM',
+                    'total'       => 'TOTAL',
+                    'used'        => 'USADO',
+                    'free'        => 'LIBRE',
+                    'usage_pct'   => 'USO %',
+                    'is_main'     => 'PRINCIPAL',
+                ], $units);
+                break;
+
+            case 'pool':
+                $sub = strtolower($extraArgs[0] ?? '');
+                if ($sub === 'extend') {
+                    $dev = $extraArgs[1] ?? ($parsedOptions['device'] ?? null);
+                    $confirm = $parsedOptions['confirm'] ?? ($extraArgs[2] ?? '');
+                    if (!$dev) {
+                        outError("Debes especificar el dispositivo a sumar al pool. Ejemplo: nas storage pool extend /dev/sdb --confirm=SI-FORMATEAR", 1, null, $isJson);
+                    }
+                    $res = $svc->extendPool((string) $dev, (string) $confirm);
+                    if (empty($res['success'])) {
+                        outError($res['error'] ?? 'Fallo al extender el pool de almacenamiento', 1, $res, $isJson);
+                    }
+                    AuditService::log('storage_pool_extend', (string) $dev, 'SUCCESS');
+                    outSuccess($res['message'] ?? 'Pool de almacenamiento extendido con éxito', $res, $isJson);
+                } else {
+                    outError("Acción de pool no reconocida: $sub. Uso: nas storage pool extend <dispositivo> --confirm=SI-FORMATEAR", 1, null, $isJson);
+                }
+                break;
+
+            case 'unit':
+                $sub = strtolower($extraArgs[0] ?? '');
+                if ($sub === 'add' || $sub === 'create') {
+                    $dev = $extraArgs[1] ?? ($parsedOptions['device'] ?? null);
+                    $unitId = $extraArgs[2] ?? ($parsedOptions['id'] ?? ($parsedOptions['unit_id'] ?? null));
+                    $fs = $extraArgs[3] ?? ($parsedOptions['fs'] ?? 'ext4');
+                    $confirm = $parsedOptions['confirm'] ?? ($extraArgs[4] ?? '');
+                    if (!$dev || !$unitId) {
+                        outError("Faltan parámetros obligatorios. Uso: nas storage unit add <dispositivo> <id_unidad> [ext4|btrfs] --confirm=SI-FORMATEAR", 1, null, $isJson);
+                    }
+                    $res = $svc->addUnit((string) $dev, (string) $unitId, (string) $fs, (string) $confirm);
+                    if (empty($res['success'])) {
+                        outError($res['error'] ?? 'Fallo al añadir unidad independiente', 1, $res, $isJson);
+                    }
+                    AuditService::log('storage_unit_add', (string) $unitId, 'SUCCESS', ['device' => $dev, 'fs' => $fs]);
+                    outSuccess($res['message'] ?? "Unidad [$unitId] aprovisionada y montada exitosamente en /srv/nas/unidades/$unitId", $res, $isJson);
+                } elseif ($sub === 'list') {
+                    $units = $svc->getUnits();
+                    if ($isJson) {
+                        outData($units, true);
+                    }
+                    echo CliTheme::BOLD . "=== UNIDADES DE ALMACENAMIENTO DISPONIBLES ===" . CliTheme::RESET . PHP_EOL;
+                    renderTable([
+                        'id'          => 'ID UNIDAD',
+                        'name'        => 'NOMBRE',
+                        'path'        => 'PUNTO DE MONTAJE',
+                        'filesystem'  => 'FILESYSTEM',
+                        'total'       => 'TOTAL',
+                        'used'        => 'USADO',
+                        'free'        => 'LIBRE',
+                    ], $units);
+                } else {
+                    outError("Acción de unidad no reconocida: $sub. Uso: nas storage unit add <disco> <id> [ext4|btrfs] --confirm=SI-FORMATEAR", 1, null, $isJson);
+                }
+                break;
+
             default:
-                outError("Acción de almacenamiento no reconocida: $action. Acciones disponibles: overview, disks, format, lvm, subvol, scrub, trim, unmount", 1, null, $isJson);
+                outError("Acción de almacenamiento no reconocida: $action. Acciones disponibles: overview, disks, format, lvm, subvol, scrub, trim, unmount, inspect, units, pool, unit", 1, null, $isJson);
         }
         break;
 
@@ -595,9 +704,12 @@ switch ($module) {
                     }
                 }
 
+                $unit = $parsedOptions['unit'] ?? ($parsedOptions['unit_id'] ?? null);
+
                 $res = $svc->createShare([
                     'name'        => $name,
                     'path'        => $path,
+                    'unit'        => $unit,
                     'comment'     => $comment,
                     'scheme'      => $scheme,
                     'hidden'      => $hidden,
@@ -801,6 +913,8 @@ switch ($module) {
                     outError("Faltan parámetros obligatorios. Uso: nas backup create --id=<id> --proto=cifs|ssh|local --target=<ip_o_host> --path=<recurso_o_ruta> [--cron='0 2 * * *'] [--retention=7] [--user=...] [--password=...] [--port=...]", 1, null, $isJson);
                 }
 
+                $destUnit = $parsedOptions['dest-unit'] ?? ($parsedOptions['dest_unit'] ?? ($parsedOptions['unit'] ?? null));
+
                 $res = $svc->createTask([
                     'id'            => $taskId,
                     'task_id'       => $taskId,
@@ -811,6 +925,7 @@ switch ($module) {
                     'path'          => $path,
                     'cron'          => $cron,
                     'retention'     => $retention,
+                    'dest_unit'     => $destUnit,
                     'user'          => $parsedOptions['user'] ?? '',
                     'password'      => $parsedOptions['password'] ?? '',
                     'port'          => isset($parsedOptions['port']) ? (int) $parsedOptions['port'] : null,
@@ -1726,7 +1841,7 @@ switch ($module) {
 
         echo CliTheme::BOLD . "Módulos y comandos disponibles:" . CliTheme::RESET . PHP_EOL;
         echo "  " . CliTheme::GREEN . "storage" . CliTheme::RESET . "     Gestión de discos, formato ext4/Btrfs, LVM, subvolúmenes, scrub y TRIM." . PHP_EOL;
-        echo "              overview | disks | format | lvm | subvol | scrub | trim | unmount" . PHP_EOL;
+        echo "              overview | disks | format | lvm | subvol | scrub | trim | unmount | inspect | units | pool | unit" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "share" . CliTheme::RESET . "       Recursos compartidos Samba, 4 esquemas de permisos y reparación ACLs." . PHP_EOL;
         echo "              list | create | update | access | repair | delete | access-map" . PHP_EOL;
         echo "  " . CliTheme::GREEN . "backup" . CliTheme::RESET . "      Copias de seguridad CIFS/SSH/Local, snapshots atómicos y rotación." . PHP_EOL;
@@ -1753,6 +1868,9 @@ switch ($module) {
 
         echo CliTheme::BOLD . "Ejemplos prácticos:" . CliTheme::RESET . PHP_EOL;
         echo "  sudo nas storage disks" . PHP_EOL;
+        echo "  sudo nas storage inspect /dev/sdb" . PHP_EOL;
+        echo "  sudo nas storage pool extend /dev/sdb --confirm=SI-FORMATEAR" . PHP_EOL;
+        echo "  sudo nas storage unit add /dev/sdc disco2 ext4 --confirm=SI-FORMATEAR" . PHP_EOL;
         echo "  sudo nas storage format /dev/sdb ext4 --confirm=SI-FORMATEAR" . PHP_EOL;
         echo "  sudo nas share list --json" . PHP_EOL;
         echo "  sudo nas share repair SISTEMAS" . PHP_EOL;
