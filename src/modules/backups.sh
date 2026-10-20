@@ -331,7 +331,7 @@ if [ "$CRED_OWNER" != "root:root" ] || [ "$CRED_MODE" != "600" ]; then
     exit 1
 fi
 # Montaje en solo lectura
-if mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft 2>> "$LOG_FILE"; then
+if mount -t cifs "//$SRC_IP/$SRC_SHARE" "$MOUNT_POINT" -o credentials="$CRED_FILE",ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl 2>> "$LOG_FILE"; then
     log_backup_event "MOUNT_SUCCESS" "info" "Recurso CIFS //$SRC_IP/$SRC_SHARE montado exitosamente"
 else
     log_backup_event "MOUNT_FAILED" "err" "Fallo al montar recurso CIFS //$SRC_IP/$SRC_SHARE"
@@ -339,7 +339,7 @@ else
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-a --safe-links --timeout=60 --delete)
+RSYNC_OPTS=(-a --safe-links --timeout=300 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
@@ -591,7 +591,7 @@ if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; th
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --safe-links --numeric-ids -v -z --timeout=60 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids -v -z --timeout=300 -e "ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
@@ -786,7 +786,7 @@ if [[ "$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; th
 fi
 
 LAST_SNAPSHOT=$(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
-RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=60 --delete)
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=300 --delete)
 if [ -n "$LAST_SNAPSHOT" ] && [ -d "$LAST_SNAPSHOT" ]; then
     if btrfs subvolume show "$LAST_SNAPSHOT" >/dev/null 2>&1; then btrfs property set "$LAST_SNAPSHOT" ro false 2>/dev/null || true; fi
     chattr -R -i "$LAST_SNAPSHOT" 2>/dev/null || true
