@@ -2546,7 +2546,7 @@ assertTrue(isset($runningRes['rsync_active']) && is_bool($runningRes['rsync_acti
 assertTrue(isset($runningRes['locks']) && is_array($runningRes['locks']), 'BackupService::getRunningBackups devuelve lista de locks');
 
 // 27.3 BackupController endpoints
-$bkpCtrlTest = new BackupController();
+$bkpCtrlTest = new \App\Controllers\BackupController();
 
 // update endpoint
 $reqEmpty = new Request();
@@ -2586,7 +2586,7 @@ $auditAll = $sambaAuditSvc->auditAcls();
 assertTrue(isset($auditAll['shares']) && isset($auditAll['total']) && isset($auditAll['out_of_sync_count']), 'SambaService::auditAcls devuelve resumen estructurado');
 
 // 27.5 SambaController::auditAccess
-$sambaCtrlTest = new SambaController();
+$sambaCtrlTest = new \App\Controllers\SambaController();
 $reqAuditAcc = new Request();
 ob_start();
 $sambaCtrlTest->auditAccess($reqAuditAcc);
