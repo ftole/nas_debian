@@ -244,6 +244,12 @@ if (file_exists($credFile)) {
     $cContent = (string) file_get_contents($credFile);
     assertTrue(str_contains($cContent, 'domain=EMPRESA') && str_contains($cContent, 'username=admin'), 'BackupService desglosa dominio y usuario correctamente en archivo .cred');
 }
+$runnerFile = $tmpCredDir . '/bin/backup_cifs_domain.sh';
+if (file_exists($runnerFile)) {
+    $rContent = (string) file_get_contents($runnerFile);
+    assertTrue(str_contains($rContent, 'nobrl'), 'BackupService::buildCifsRunner incluye opción nobrl para prevenir bloqueos CIFS en Windows');
+    assertTrue(str_contains($rContent, '--timeout=300'), 'BackupService::buildCifsRunner utiliza timeout=300 para rsync');
+}
 // Limpiar sandbox temporal de prueba
 @unlink($credFile);
 @unlink($tmpCredDir . '/bin/backup_cifs_domain.sh');
