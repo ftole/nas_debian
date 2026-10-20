@@ -2689,6 +2689,106 @@ $matchedEnglish = preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+\(([0-9]+)\s+bytes\)/
 assertTrue($matchedEnglish === 1 && $mEn[1] === '10.5 GiB' && $mEn[2] === '11274289152', 'StorageService::runTrim extrae métricas de descarte en inglés (trimmed)');
 
 
+// ==============================================================================
+// Pruebas de Almacenamiento Multi-Unidad y Detección Empresarial
+// ==============================================================================
+
+// 1. StorageService::inspectDevice
+$stgInspect = (new StorageService())->inspectDevice('/dev/sdb');
+assertTrue(isset($stgInspect['device']) && isset($stgInspect['has_data']) && isset($stgInspect['requires_confirm']),
+    'StorageService::inspectDevice devuelve metadatos completos y bandera requires_confirm');
+
+// 2. StorageService::getUnits
+$stgUnits = (new StorageService())->getUnits();
+assertTrue(!empty($stgUnits) && $stgUnits[0]['id'] === 'principal' && $stgUnits[0]['is_main'] === true,
+    'StorageService::getUnits expone la unidad Principal (/srv/nas) como is_main');
+
+// 3. StorageService::extendPool validación de confirmación estricta
+$extReject = (new StorageService())->extendPool('/dev/sdb', 'CONFIRMAR_ERRONEO');
+assertTrue(empty($extReject['success']) && str_contains($extReject['error'] ?? '', 'SI-FORMATEAR'),
+    'StorageService::extendPool exige confirmación textual SI-FORMATEAR o SI-DESTRUIR-DATOS');
+
+// 4. StorageService::addUnit validación de parámetros y confirmación
+$addUnitRejectConfirm = (new StorageService())->addUnit('/dev/sdb', 'disco2', 'ext4', 'NO');
+assertTrue(empty($addUnitRejectConfirm['success']) && str_contains($addUnitRejectConfirm['error'] ?? '', 'SI-FORMATEAR'),
+    'StorageService::addUnit rechaza sin confirmación estricta');
+
+$addUnitRejectId = (new StorageService())->addUnit('/dev/sdb', 'id invalido!', 'ext4', 'SI-FORMATEAR');
+assertTrue(empty($addUnitRejectId['success']) && str_contains($addUnitRejectId['error'] ?? '', 'inválido'),
+    'StorageService::addUnit valida formato del identificador de unidad');
+
+// 5. BackupService::getTaskProgress con EMA suavizado y to-chk
+$tmpLogBkp = sys_get_temp_dir() . '/backup_test_ema.log';
+$logContentEma = "[2026-10-20 10:00:00] === INICIANDO BACKUP CIFS: test_ema ===\n" .
+    " 1,234,567  25%   12.50MB/s    0:02:30 (xfr#5, to-chk=75/100)\n" .
+    " 2,469,134  50%   15.00MB/s    0:01:15 (xfr#10, to-chk=50/100)\n" .
+    " 3,703,701  75%   18.00MB/s    0:00:35 (xfr#15, to-chk=25/100)\n";
+file_put_contents($tmpLogBkp, $logContentEma);
+$bkpEmaSvc = new BackupService();
+$bkpEmaSvc->logRoot = sys_get_temp_dir();
+$progressEma = $bkpEmaSvc->getTaskProgress('test_ema');
+@unlink($tmpLogBkp);
+assertTrue($progressEma['percent'] === 75 && $progressEma['speed'] === '18.00MB/s' && isset($progressEma['remaining_sec']) && $progressEma['to_chk_remaining'] === 25,
+    'BackupService::getTaskProgress calcula progreso con EMA suavizado y extrae to-chk');
+
+// 6. SambaService::createShare con unidad independiente
+$sambaUnitSvc = new SambaService();
+$sambaUnitRes = $sambaUnitSvc->createShare([
+    'name' => 'DATOS_EXTRA',
+    'unit' => 'disco2',
+    'scheme' => 1,
+    'groups' => ['grp_samba'],
+]);
+assertTrue(!empty($sambaUnitRes['success']) && str_contains($sambaUnitRes['path'] ?? '', '/srv/nas/unidades/disco2/DATOS_EXTRA'),
+    'SambaService::createShare ubica el recurso bajo /srv/nas/unidades/<id> al especificar unit');
+
+// 7. BackupService::createTask con dest_unit
+$bkpUnitSvc = new BackupService();
+$bkpUnitSvc->binDir = sys_get_temp_dir() . '/bin_bkp_unit';
+$bkpUnitSvc->cronDir = sys_get_temp_dir() . '/cron_bkp_unit';
+$bkpUnitSvc->credDir = sys_get_temp_dir() . '/cred_bkp_unit';
+$bkpUnitSvc->storageRoot = sys_get_temp_dir() . '/nas_unit_root';
+$bkpUnitSvc->bkpRoot = $bkpUnitSvc->storageRoot . '/BACKUPS_HISTORICOS';
+@mkdir($bkpUnitSvc->binDir, 0755, true);
+@mkdir($bkpUnitSvc->cronDir, 0755, true);
+@mkdir($bkpUnitSvc->credDir, 0700, true);
+
+$bkpUnitRes = $bkpUnitSvc->createTask([
+    'id' => 'bkp_unit_test',
+    'proto' => 'cifs',
+    'ip' => '10.10.1.88',
+    'share' => 'Ventas',
+    'user' => 'Admin',
+    'password' => 'secret',
+    'dest_unit' => 'disco2',
+]);
+$runnerUnitFile = $bkpUnitSvc->binDir . '/backup_bkp_unit_test.sh';
+$runnerUnitContent = file_exists($runnerUnitFile) ? (string)file_get_contents($runnerUnitFile) : '';
+@unlink($runnerUnitFile);
+@unlink($bkpUnitSvc->cronDir . '/backup_bkp_unit_test');
+@unlink($bkpUnitSvc->credDir . '/bkp_unit_test.cred');
+@rmdir($bkpUnitSvc->binDir);
+@rmdir($bkpUnitSvc->cronDir);
+@rmdir($bkpUnitSvc->credDir);
+assertTrue(!empty($bkpUnitRes['success']) && str_contains($runnerUnitContent, '/unidades/disco2/BACKUPS_HISTORICOS/$TASK'),
+    'BackupService::createTask asigna BKP_DIR a la unidad de destino especificada');
+
+// 8. Verificaciones de layout.php para elementos de notificación y multialmacenamiento
+$layoutSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+$appJsSrc = file_get_contents(dirname(__DIR__) . '/web/public/js/app.js');
+assertTrue(str_contains($layoutSrc, 'id="btn-notifications"'), 'layout.php contiene botón de campana de notificaciones');
+assertTrue(str_contains($layoutSrc, 'id="notifications-drawer"'), 'layout.php contiene contenedor de notificaciones desplegable');
+assertTrue(str_contains($layoutSrc, 'id="system-banners"'), 'layout.php contiene contenedor de alertas persistentes system-banners');
+assertTrue(str_contains($layoutSrc, 'id="share-unit"'), 'layout.php contiene selector share-unit en modal-new-share');
+assertTrue(str_contains($layoutSrc, 'id="bkp-dest-unit"'), 'layout.php contiene selector bkp-dest-unit en modal-new-backup');
+assertTrue(str_contains($layoutSrc, 'id="edit-bkp-dest-unit"'), 'layout.php contiene selector edit-bkp-dest-unit en modal-edit-backup');
+assertTrue(str_contains($layoutSrc, 'id="stg-inspect-box"'), 'layout.php contiene caja de inspección stg-inspect-box en modal-storage-manage');
+
+// 9. Verificaciones de app.js
+assertTrue(str_contains($appJsSrc, 'onStorageDeviceChange'), 'app.js implementa inspección reactiva de disco onStorageDeviceChange');
+assertTrue(str_contains($appJsSrc, 'loadStorageUnits'), 'app.js implementa carga dinámica de unidades loadStorageUnits');
+assertTrue(str_contains($appJsSrc, 'addSystemNotification'), 'app.js implementa sistema de notificaciones addSystemNotification');
+
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
 @rmdir($bkpTestSvc->binDir);
