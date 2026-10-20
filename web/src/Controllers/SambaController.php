@@ -224,34 +224,52 @@ class SambaController
     }
 
     /**
-     * Repara las ACL POSIX de uno o todos los recursos para alinearlas con smb.conf.
+     * Audita discrepancias de ACL POSIX contra smb.conf para uno o todos los recursos.
+     */
+    public function auditAccess(Request $request): void
+    {
+        $share = trim((string) ($request->get('share') ?: $request->getQuery('share', '')));
+        $res = $this->samba->auditAcls($share !== '' ? $share : null);
+        Response::success($res);
+    }
+
+    /**
+     * Repara las ACL POSIX de uno o todos los recursos para alinearlas con smb.conf de forma inteligente.
      */
     public function repairAccess(Request $request): void
     {
         $data = $request->getBody();
         $name = trim((string) ($data['share'] ?? ''));
+        $force = !empty($data['force']);
 
         if ($name !== '') {
-            $res = $this->samba->syncShareAcls($name);
+            $res = $this->samba->syncShareAcls($name, $force);
             if (!$res['success']) {
                 AuditService::log('share_acl_repair', $name, 'FAILED', ['error' => $res['error'] ?? '']);
                 Response::error($res['error'] ?? 'No se pudieron reparar las ACL.');
                 return;
             }
-            AuditService::log('share_acl_repair', $name, 'SUCCESS');
-            Response::success(null, $res['message'] ?? 'ACL reparadas.');
+            AuditService::log('share_acl_repair', $name, 'SUCCESS', ['skipped' => !empty($res['skipped']), 'force' => $force]);
+            Response::success($res, $res['message'] ?? 'ACL procesadas.');
             return;
         }
 
-        $fixed = 0;
-        foreach ($this->samba->listShares() as $share) {
-            $res = $this->samba->syncShareAcls($share['name']);
+        $repaired = 0;
+        $skipped = 0;
+        $shares = $this->samba->listShares();
+        foreach ($shares as $share) {
+            $res = $this->samba->syncShareAcls($share['name'], $force);
             if (!empty($res['success'])) {
-                $fixed++;
+                if (!empty($res['skipped'])) {
+                    $skipped++;
+                } else {
+                    $repaired++;
+                }
             }
         }
-        AuditService::log('share_acl_repair', '*', 'SUCCESS', ['shares' => $fixed]);
-        Response::success(['repaired' => $fixed], "ACL sincronizadas en $fixed recurso(s).");
+        AuditService::log('share_acl_repair', '*', 'SUCCESS', ['repaired' => $repaired, 'skipped' => $skipped, 'force' => $force]);
+        $msg = "ACL procesadas: $repaired reparada(s), $skipped ya sincronizada(s).";
+        Response::success(['repaired' => $repaired, 'skipped' => $skipped, 'total' => count($shares)], $msg);
     }
 
     /**
