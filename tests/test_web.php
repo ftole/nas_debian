@@ -2360,6 +2360,97 @@ $searchMndp = $sysMockClass->getLogs('system', 10, 'MikroTik');
 assertTrue(count($searchMndp) === 1 && str_contains($searchMndp[0]['human'], 'MikroTik MNDP'),
     'SystemService::getLogs permite filtrar registros por términos semánticos humanizados ("MikroTik")');
 
+// Pruebas de captura universal de IP y soporte anti-spam en AuditService
+$tempAuditLog = tempnam(sys_get_temp_dir(), 'audit_ip_test_');
+AuditService::setLogPath($tempAuditLog);
+AuditService::log('login_test', 'test_target', 'SUCCESS', ['ip' => '192.168.1.100']);
+$contentAudit = (string) file_get_contents($tempAuditLog);
+@unlink($tempAuditLog);
+assertTrue(str_contains($contentAudit, '[192.168.1.100]'),
+    'AuditService::log respeta captura universal de IP provista explícitamente');
+
+// Pruebas de captura universal de IP en SystemService::parseBackupAuditLog
+$tempBackupLog = tempnam(sys_get_temp_dir(), 'backup_ip_test_');
+file_put_contents($tempBackupLog, implode("\n", [
+    '[2026-10-19 20:00:00] [win_ventas] [10.10.1.50] [MOUNT_SUCCESS] [ok] Recurso montado exitosamente',
+    '[2026-10-19 20:00:05] [lnx_prod] [RSYNC_COMPLETED] [notice] Sincronizacion rsync finalizada de root@10.10.1.55:/var/www',
+]));
+SystemService::$backupAuditPath = $tempBackupLog;
+$parsedBkp = $sysSvcInst->parseBackupAuditLog(10);
+@unlink($tempBackupLog);
+assertTrue(count($parsedBkp) === 2 && $parsedBkp[0]['ip'] === '10.10.1.55' && $parsedBkp[1]['ip'] === '10.10.1.50',
+    'SystemService::parseBackupAuditLog captura universalmente la IP en formatos de 5 y 4 corchetes');
+
+// Pruebas de agrupación anti-spam (xN) en SystemService::groupConsecutiveLogs
+$rawFloodLogs = [
+    [
+        'source' => 'system',
+        'unit' => 'kernel',
+        'user' => 'system',
+        'ip' => '10.10.1.200',
+        'action' => 'journal_log',
+        'target' => 'kernel',
+        'status' => 'BLOCK',
+        'human' => '[Firewall UFW] Tráfico bloqueado',
+        'message' => 'UFW BLOCK',
+    ],
+    [
+        'source' => 'system',
+        'unit' => 'kernel',
+        'user' => 'system',
+        'ip' => '10.10.1.200',
+        'action' => 'journal_log',
+        'target' => 'kernel',
+        'status' => 'BLOCK',
+        'human' => '[Firewall UFW] Tráfico bloqueado',
+        'message' => 'UFW BLOCK',
+    ],
+    [
+        'source' => 'system',
+        'unit' => 'kernel',
+        'user' => 'system',
+        'ip' => '10.10.1.200',
+        'action' => 'journal_log',
+        'target' => 'kernel',
+        'status' => 'BLOCK',
+        'human' => '[Firewall UFW] Tráfico bloqueado',
+        'message' => 'UFW BLOCK',
+    ],
+    [
+        'source' => 'system',
+        'unit' => 'systemd',
+        'user' => 'system',
+        'ip' => '127.0.0.1',
+        'action' => 'journal_log',
+        'target' => 'systemd',
+        'status' => 'OK',
+        'human' => '[Servicio] smbd iniciado con éxito',
+        'message' => 'Started smbd.service',
+    ],
+];
+$groupedResults = $sysSvcInst->groupConsecutiveLogs($rawFloodLogs);
+assertTrue(count($groupedResults) === 2,
+    'SystemService::groupConsecutiveLogs agrupa eventos consecutivos idénticos');
+assertTrue(($groupedResults[0]['count'] ?? 0) === 3 && ($groupedResults[0]['count_badge'] ?? '') === 'x3' && str_contains($groupedResults[0]['human'], '(x3)'),
+    'SystemService::groupConsecutiveLogs asigna contador x3 y etiqueta anti-spam');
+
+// Pruebas de diferenciación cromática y humanización en SystemService::humanizeSystemLog
+$sshSuccess = $humanizeMethod->invoke($sysSvcInst, 'sshd', 'Accepted password for operador from 192.168.1.50 port 54321 ssh2');
+assertTrue($sshSuccess['badge'] === 'ok' && $sshSuccess['status'] === 'OK' && $sshSuccess['ip'] === '192.168.1.50' && str_contains($sshSuccess['human'], 'Acceso concedido a operador'),
+    'SystemService::humanizeSystemLog humaniza y diferencia cromáticamente accesos SSH exitosos');
+
+$sshFailed = $humanizeMethod->invoke($sysSvcInst, 'sshd', 'Failed password for invalid user hacker from 203.0.113.5 port 43210 ssh2');
+assertTrue($sshFailed['badge'] === 'err' && $sshFailed['status'] === 'FAILED' && $sshFailed['ip'] === '203.0.113.5' && str_contains($sshFailed['human'], 'Intento de acceso fallido para hacker'),
+    'SystemService::humanizeSystemLog humaniza y alerta en rojo/err intentos SSH fallidos');
+
+$svcStarted = $humanizeMethod->invoke($sysSvcInst, 'systemd', 'Started Samba SMB Daemon.');
+assertTrue($svcStarted['badge'] === 'ok' && $svcStarted['status'] === 'OK' && str_contains($svcStarted['human'], 'Samba SMB Daemon iniciado con éxito'),
+    'SystemService::humanizeSystemLog traduce y colorea el arranque exitoso de servicios systemd');
+
+$ntpSync = $humanizeMethod->invoke($sysSvcInst, 'systemd-timesyncd', 'Initial clock synchronization to Mon 2026-10-19 20:00:00 UTC.');
+assertTrue($ntpSync['badge'] === 'ok' && $ntpSync['action_label'] === 'NTP' && str_contains($ntpSync['human'], 'Reloj del sistema sincronizado'),
+    'SystemService::humanizeSystemLog clasifica y humaniza sincronizaciones NTP');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
