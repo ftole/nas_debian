@@ -2489,6 +2489,27 @@ $nowStr = date('Y-m-d H:i:s');
 assertTrue(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $nowStr) === 1,
     'date() genera formato de marca de tiempo válido con la zona horaria activa');
 
+$metrics = $sysSvcInst->getSystemMetrics();
+assertTrue(isset($metrics['server_time']) && isset($metrics['server_timestamp']), 'getSystemMetrics retorna server_time y server_timestamp');
+assertTrue(isset($metrics['timezone']) && isset($metrics['timezone_abbr']), 'getSystemMetrics retorna timezone y timezone_abbr');
+assertTrue($metrics['timezone'] === date_default_timezone_get(), 'getSystemMetrics timezone coincide con date_default_timezone_get');
+
+// Test normalizeTimestamp con marca en el futuro simulada desde UTC
+$futureUtc = date('Y-m-d H:i:s', time() + 18000);
+$normalized = $sysSvcInst->normalizeTimestamp($futureUtc);
+$tzOffset = (int) date('Z');
+if ($tzOffset < 0) {
+    assertTrue(strtotime($normalized) <= time() + 300, 'normalizeTimestamp corrige marcas futuras originadas en UTC');
+} else {
+    assertTrue(!empty($normalized), 'normalizeTimestamp procesa marcas válidas');
+}
+
+// Test layout template contenga los elementos del reloj en vivo
+$layoutSrc = (string) file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+assertTrue(str_contains($layoutSrc, 'id="header-server-clock"'), 'layout.php contiene el elemento del reloj en vivo header-server-clock');
+assertTrue(str_contains($layoutSrc, 'id="header-server-tz"'), 'layout.php contiene el elemento de la zona horaria header-server-tz');
+assertTrue(str_contains($layoutSrc, 'window.NAS_INITIAL_SERVER_TIME'), 'layout.php inyecta window.NAS_INITIAL_SERVER_TIME');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
