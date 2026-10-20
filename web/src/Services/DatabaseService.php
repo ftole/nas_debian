@@ -178,8 +178,27 @@ CREATE TABLE IF NOT EXISTS api_rate_limits (
 );
 CREATE INDEX IF NOT EXISTS idx_api_rate_limits ON api_rate_limits(key, created_at DESC);
 SQL;
-
         $pdo->exec($schema);
+
+        // Normalización auto-reparable de marcas de tiempo históricas en UTC
+        try {
+            $futureRows = $pdo->query("SELECT id, timestamp FROM audit_logs WHERE timestamp > datetime('now', 'localtime', '+5 minutes') LIMIT 200")->fetchAll();
+            if (!empty($futureRows)) {
+                $tzOffset = (int) date('Z');
+                if ($tzOffset < 0) {
+                    $stmt = $pdo->prepare('UPDATE audit_logs SET timestamp = :newTs WHERE id = :id');
+                    foreach ($futureRows as $row) {
+                        $rowTs = strtotime((string) $row['timestamp']);
+                        if ($rowTs !== false) {
+                            $adj = $rowTs + $tzOffset;
+                            $stmt->execute([':newTs' => date('Y-m-d H:i:s', $adj), ':id' => $row['id']]);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable) {
+            // Silencioso ante contingencias de inicialización
+        }
     }
 
     public static function query(string $sql, array $params = []): array
