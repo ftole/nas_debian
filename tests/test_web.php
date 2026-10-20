@@ -2231,6 +2231,16 @@ $adminTermResp = json_decode($rawAdminTerm, true);
 assertTrue(is_array($adminTermResp) && empty($adminTermResp['success']) && str_contains($adminTermResp['error'] ?? '', 'superadministrador'),
     'TerminalController::exec rechaza administrador normal con 403 (solo superadmin)');
 
+// TerminalController rechaza todos sus métodos ante administradores normales (solo superadmin)
+foreach (['session', 'send', 'capture', 'resize', 'kill', 'history'] as $termMethod) {
+    ob_start();
+    $termCtrlStrict->$termMethod($reqOperatorManage);
+    $rawMethodOut = ob_get_clean();
+    $methodResp = json_decode($rawMethodOut, true);
+    assertTrue(is_array($methodResp) && empty($methodResp['success']) && str_contains($methodResp['error'] ?? '', 'superadministrador'),
+        "TerminalController::{$termMethod} rechaza administrador estándar con 403 (solo superadmin)");
+}
+
 // Superadministrador tiene acceso concedido
 $_SESSION['nas_user'] = [
     'username' => 'super_root',
@@ -2264,13 +2274,91 @@ $mwJson = json_decode($rawMwOut, true);
 assertTrue(!$resMwBlocked && is_array($mwJson) && empty($mwJson['success']) && str_contains($mwJson['error'] ?? '', 'superadministrador'),
     'AuthMiddleware::check bloquea /api/terminal/session ante admin regular con 403');
 
-// Humanización de logs UFW para MNDP MikroTik (UDP 5678)
-$ufwRawMndp = '[UFW BLOCK] IN=eth0 OUT= MAC=01:00:5e:00:00:01 SRC=fe80:0000:0000:0000:f61e:57ff:fe0c:31ac DST=ff02:0000:0000:0000:0000:0000:0001:5678 PROTO=UDP SPT=5678 DPT=5678';
+// AuthMiddleware::check bloquea vista GET /terminal ante admin regular
+$_SERVER['REQUEST_URI'] = '/terminal';
+$_SERVER['REQUEST_METHOD'] = 'GET';
+unset($_SERVER['HTTP_ACCEPT']);
+$reqViewBlocked = new Request();
+ob_start();
+$resViewBlocked = AuthMiddleware::check($reqViewBlocked);
+$rawViewOut = ob_get_clean();
+assertTrue(!$resViewBlocked && str_contains($rawViewOut, '403') && str_contains($rawViewOut, 'superadministradores'),
+    'AuthMiddleware::check bloquea GET /terminal ante admin regular emitiendo 403');
+
+// En layout.php, la terminal está completamente excluida del DOM para administradores normales
+$_SESSION['nas_user'] = [
+    'username' => 'admin_standar',
+    'is_admin' => true,
+    'is_superadmin' => false,
+    'role' => 'admin',
+];
+ob_start();
+$metrics = (new SystemService())->getSystemMetrics();
+$storage = (new StorageService())->getStorageOverview();
+$services = (new SystemService())->getServicesStatus();
+$activeView = 'dashboard';
+require dirname(__DIR__) . '/web/templates/layout.php';
+$htmlAdmin = ob_get_clean();
+assertTrue(!str_contains($htmlAdmin, 'id="nav-terminal"') && !str_contains($htmlAdmin, 'id="view-terminal"') && !str_contains($htmlAdmin, "switchView('terminal')"),
+    'layout.php no renderiza #nav-terminal ni #view-terminal ni botón de cabecera a administradores estándar');
+
+// En layout.php, la terminal se renderiza para superadministradores
+$_SESSION['nas_user'] = [
+    'username' => 'sistemas',
+    'is_admin' => true,
+    'is_superadmin' => true,
+    'role' => 'superadmin',
+];
+ob_start();
+require dirname(__DIR__) . '/web/templates/layout.php';
+$htmlSuper = ob_get_clean();
+assertTrue(str_contains($htmlSuper, 'id="nav-terminal"') && str_contains($htmlSuper, 'id="view-terminal"'),
+    'layout.php renderiza #nav-terminal y #view-terminal para superadministradores');
+
+// Humanización de logs UFW para MNDP MikroTik (UDP 5678 IPv6 Multicast con corchetes RFC 3986)
+$ufwRawMndp = '[UFW BLOCK] IN=eth0 OUT= MAC=01:00:5e:00:00:01 SRC=fe80:0000:0000:0000:f61e:57ff:fe0c:31ac DST=ff02:0000:0000:0000:0000:0000:0000:0001 LEN=120 PROTO=UDP SPT=5678 DPT=5678';
 $reflection = new ReflectionClass(SystemService::class);
 $humanizeMethod = $reflection->getMethod('humanizeSystemLog');
-$humanLog = $humanizeMethod->invoke(new SystemService(), 'kernel', $ufwRawMndp);
-assertTrue(str_contains($humanLog['human'], 'MikroTik MNDP') && str_contains($humanLog['human'], 'fe80::f61e:57ff:fe0c:31ac'),
-    'SystemService::humanizeSystemLog traduce y enriquece log UFW de MikroTik MNDP con IPv6 comprimida');
+$sysSvcInst = new SystemService();
+$humanLog = $humanizeMethod->invoke($sysSvcInst, 'kernel', $ufwRawMndp);
+assertTrue(str_contains($humanLog['human'], 'MikroTik MNDP') &&
+    str_contains($humanLog['human'], '[fe80::f61e:57ff:fe0c:31ac]:5678') &&
+    str_contains($humanLog['human'], '[ff02::1]:5678') &&
+    str_contains($humanLog['human'], '[IPv6 Multicast]'),
+    'SystemService::humanizeSystemLog traduce y enriquece log UFW MNDP con IPv6 comprimida y corchetes RFC 3986');
+
+// Humanización de logs UFW para SSDP (UDP 1900 IPv4 Multicast)
+$ufwRawSsdp = '[UFW BLOCK] IN=eth0 OUT= SRC=10.10.1.50 DST=239.255.255.250 PROTO=UDP SPT=1900 DPT=1900';
+$humanLogSsdp = $humanizeMethod->invoke($sysSvcInst, 'kernel', $ufwRawSsdp);
+assertTrue(str_contains($humanLogSsdp['human'], 'SSDP') &&
+    str_contains($humanLogSsdp['human'], '[IPv4 Multicast]') &&
+    !str_contains($humanLogSsdp['human'], '[IPv6 Multicast]'),
+    'SystemService::humanizeSystemLog clasifica correctamente multidifusión IPv4 como [IPv4 Multicast]');
+
+// Humanización de cadena textual exacta reportada por el usuario
+$ufwUserLiteral = '[UFW] Bloqueado UDP de fe80:0000:0000:0000:f61e:57ff:fe0c:31ac:5678 → ff02:0000:0000:0000:0000:0000:0001:5678';
+$humanLogLiteral = $humanizeMethod->invoke($sysSvcInst, 'system', $ufwUserLiteral);
+assertTrue(str_contains($humanLogLiteral['human'], 'MikroTik MNDP') &&
+    str_contains($humanLogLiteral['human'], '[fe80::f61e:57ff:fe0c:31ac]:5678') &&
+    str_contains($humanLogLiteral['human'], '[ff02::1]:5678'),
+    'SystemService::humanizeSystemLog traduce correctamente el formato legacy reportado por el usuario');
+
+// Búsqueda semántica en getLogs reconoce el contenido humanizado
+$sysMockClass = new class extends SystemService {
+    public function getJournalLogs(int $limit = 80, ?string $unit = null): array
+    {
+        return [
+            [
+                'timestamp' => '2026-10-19 18:00:00',
+                'unit' => 'kernel',
+                'message' => '[UFW BLOCK] IN=eth0 OUT= MAC=01:00:5e:00:00:01 SRC=fe80:0000:0000:0000:f61e:57ff:fe0c:31ac DST=ff02:0000:0000:0000:0000:0000:0000:0001 LEN=120 PROTO=UDP SPT=5678 DPT=5678',
+            ],
+        ];
+    }
+};
+$searchMndp = $sysMockClass->getLogs('system', 10, 'MikroTik');
+assertTrue(count($searchMndp) === 1 && str_contains($searchMndp[0]['human'], 'MikroTik MNDP'),
+    'SystemService::getLogs permite filtrar registros por términos semánticos humanizados ("MikroTik")');
 
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
