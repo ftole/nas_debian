@@ -167,7 +167,7 @@ class AuthMiddleware
             }
 
             // Restricción estricta de terminal web: confinada exclusivamente al superadministrador
-            if ($path === '/terminal' || str_starts_with($path, '/api/terminal')) {
+            if ($path === '/terminal' || str_starts_with($path, '/terminal/') || str_starts_with($path, '/api/terminal')) {
                 if (!self::requireSuperAdmin($request)) {
                     return false;
                 }
