@@ -44,6 +44,13 @@ El nivel más bajo de la arquitectura blinda los parámetros del kernel Linux me
   net.ipv4.tcp_keepalive_probes = 4
   ```
   Sondea conexiones inactivas a partir de los 2 minutos (en lugar de las 2 horas estándar de Linux) y las cierra tras 60 segundos sin respuesta. Esto libera descriptores de archivo y memoria ante caídas abruptas de clientes Windows.
+- **Desactivación Integral de IPv6 (Reducción de Superficie de Ataque):**
+  ```ini
+  net.ipv6.conf.all.disable_ipv6 = 1
+  net.ipv6.conf.default.disable_ipv6 = 1
+  net.ipv6.conf.lo.disable_ipv6 = 1
+  ```
+  Desactiva por completo el stack de red IPv6 a nivel del kernel y en el cortafuegos UFW (`IPV6=no`), eliminando vectores de ataque basados en Neighbor Discovery Protocol (NDP), Router Advertisements maliciosos y escaneos de red local multicast (`ff02::1`).
 
 ### 2.2 Aislamiento de Memoria, Punteros de Kernel y Control de Procesos
 - **Ocultamiento de Direcciones de Memoria del Kernel (`kptr_restrict`):**
@@ -261,6 +268,7 @@ La siguiente tabla resume cómo interactúan los 4 niveles defensivos ante vecto
 | :--- | :---: | :--- | :--- |
 | **IP Spoofing / DoS Amplificado** | Nivel 1 | `rp_filter = 1` en sysctl | El kernel descarta paquetes con IP origen incoherente. |
 | **TCP SYN Flood (Agotamiento DoS)** | Nivel 1 | `tcp_syncookies = 1` en sysctl | El host responde mediante cookies criptográficas sin agotar RAM. |
+| **Vectores de Ataque IPv6 / Multicast NDP** | Nivel 1 | `disable_ipv6 = 1` en sysctl + UFW `IPV6=no` | Stack IPv6 desactivado a nivel de kernel; cero superficie de ataque IPv6. |
 | **Explotación Local de Kernel (ROP/KASLR)** | Nivel 1 | `kptr_restrict = 2` y `dmesg_restrict = 1` | Direcciones de memoria y buffer de depuración ocultos incluso a root. |
 | **Inyección de Código entre Procesos** | Nivel 1 | `kernel.yama.ptrace_scope = 2` | Procesos no privilegiados no pueden inspeccionar memoria ajena. |
 | **Formateo Inadvertido del Disco del SO** | Nivel 1 | Regla udev `80-udisks2-hide-os.rules` | Disco del sistema ignorado y protegido en UDisks2. |
