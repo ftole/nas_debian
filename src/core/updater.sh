@@ -327,6 +327,23 @@ SYSCTL_IPV6_EOF
             ufw reload >/dev/null 2>&1 || true
         fi
     fi
+
+    # 8. Sincronizar servicio de hora (NTP) y reloj de hardware en UTC
+    if command -v timedatectl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        timedatectl set-local-rtc 0 2>/dev/null || true
+        timedatectl set-ntp true 2>/dev/null || true
+    fi
+    if [ -d /etc/systemd ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/systemd ]; }; then
+        mkdir -p /etc/systemd/timesyncd.conf.d 2>/dev/null || true
+        cat << 'NTP_CONF' > /etc/systemd/timesyncd.conf.d/10-nas-ntp.conf
+[Time]
+NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org pool.ntp.org time.google.com
+FallbackNTP=0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com
+NTP_CONF
+        if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            systemctl restart systemd-timesyncd 2>/dev/null || true
+        fi
+    fi
 }
 
 actualizar_desde_git() {
