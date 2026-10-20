@@ -332,5 +332,17 @@ setup() {
     [[ "$output" =~ "reservado por el sistema" ]]
 }
 
+@test "nas-cli log all incluye cabecera de IP ORIGEN en salida ANSI" {
+    run php bin/nas-cli log all --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "IP ORIGEN" ]]
+}
+
+@test "nas-cli log backup incluye cabecera de IP ORIGEN en salida ANSI" {
+    run php bin/nas-cli log backup --limit=3
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "IP ORIGEN" ]]
+}
+
 
 
