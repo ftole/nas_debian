@@ -453,6 +453,7 @@ class SystemService
                 'unit' => 'smbd',
                 'message' => "[$actionLabel] $target ($status)",
                 'raw' => $trimmed,
+                'count' => 1,
             ];
 
             if (count($results) >= $limit) {
@@ -575,6 +576,7 @@ class SystemService
                 'unit' => 'panel-web',
                 'message' => "[$actionLabel] Objetivo: $target ($status)",
                 'raw' => $trimmed,
+                'count' => 1,
             ];
 
             if (count($results) >= $limit) {
@@ -631,15 +633,37 @@ class SystemService
                 continue;
             }
 
-            if (!preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)$/', $trimmed, $m)) {
+            $ip = '127.0.0.1';
+            if (preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)$/', $trimmed, $m5)) {
+                $timestamp = $m5[1];
+                $task = $m5[2];
+                $ipCandidate = trim($m5[3]);
+                $event = $m5[4];
+                $severity = strtolower($m5[5]);
+                $message = $m5[6];
+                if (filter_var($ipCandidate, FILTER_VALIDATE_IP)) {
+                    $ip = $ipCandidate;
+                }
+            } elseif (preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)$/', $trimmed, $m)) {
+                $timestamp = $m[1];
+                $task = $m[2];
+                $event = $m[3];
+                $severity = strtolower($m[4]);
+                $message = $m[5];
+                if (preg_match('#//\[?([0-9a-zA-Z\.\:\-]+?)\]?[/\\\\]#', $message, $mIp)) {
+                    $cand = trim($mIp[1], '[]:/ ');
+                    if (filter_var($cand, FILTER_VALIDATE_IP)) {
+                        $ip = $cand;
+                    }
+                } elseif (preg_match('#@\[?([0-9a-zA-Z\.\:\-]+?)\]?[:/]#', $message, $mIp)) {
+                    $cand = trim($mIp[1], '[]:/ ');
+                    if (filter_var($cand, FILTER_VALIDATE_IP)) {
+                        $ip = $cand;
+                    }
+                }
+            } else {
                 continue;
             }
-
-            $timestamp = $m[1];
-            $task = $m[2];
-            $event = $m[3];
-            $severity = strtolower($m[4]);
-            $message = $m[5];
 
             $eventLabel = $eventLabels[$event] ?? ucfirst(str_replace('_', ' ', $event));
 
@@ -653,7 +677,7 @@ class SystemService
             $status = in_array($severity, ['err', 'error', 'failed'], true) ? 'FAILED' : 'SUCCESS';
 
             if ($qLower !== null) {
-                $searchable = $this->toLower("$task $event $eventLabel $severity $message");
+                $searchable = $this->toLower("$task $ip $event $eventLabel $severity $message");
                 if (!str_contains($searchable, $qLower)) {
                     continue;
                 }
@@ -664,6 +688,7 @@ class SystemService
                 'timestamp' => $timestamp,
                 'task' => $task,
                 'user' => $task,
+                'ip' => $ip,
                 'event' => $event,
                 'event_label' => $eventLabel,
                 'severity' => $severity,
@@ -673,6 +698,7 @@ class SystemService
                 'status' => $status,
                 'unit' => 'backup-' . $task,
                 'raw' => $trimmed,
+                'count' => 1,
             ];
 
             if (count($results) >= $limit) {
@@ -692,13 +718,13 @@ class SystemService
 
         switch ($cleanSource) {
             case 'samba_audit':
-                return $this->parseSambaAuditLog($limit, $query);
+                return $this->groupConsecutiveLogs($this->parseSambaAuditLog($limit, $query));
 
             case 'admin':
-                return $this->parseAdminAuditLog($limit, $query);
+                return $this->groupConsecutiveLogs($this->parseAdminAuditLog($limit, $query));
 
             case 'backup':
-                return $this->parseBackupAuditLog($limit, $query);
+                return $this->groupConsecutiveLogs($this->parseBackupAuditLog($limit, $query));
 
             case 'system':
                 $rawJournal = $this->getJournalLogs($limit * 2);
@@ -708,7 +734,7 @@ class SystemService
                 foreach ($rawJournal as $j) {
                     $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     if ($qLower !== null) {
-                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? ''));
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? '') . ' ' . ($h['ip'] ?? ''));
                         if (!str_contains($searchable, $qLower)) {
                             continue;
                         }
@@ -718,21 +744,23 @@ class SystemService
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
                         'unit' => $j['unit'] ?? 'system',
                         'user' => 'system',
+                        'ip' => $h['ip'] ?? '127.0.0.1',
                         'target' => $j['unit'] ?? 'system',
                         'action' => 'journal_log',
-                        'action_label' => 'Registro del Sistema',
-                        'badge' => 'gray',
-                        'status' => 'OK',
+                        'action_label' => $h['action_label'] ?? 'Registro del Sistema',
+                        'badge' => $h['badge'] ?? 'gray',
+                        'status' => $h['status'] ?? 'OK',
                         'message' => $j['message'] ?? '',
                         'human' => $h['human'],
                         'level' => $h['level'],
                         'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
+                        'count' => 1,
                     ];
-                    if (count($results) >= $limit) {
+                    if (count($results) >= $limit * 2) {
                         break;
                     }
                 }
-                return $results;
+                return array_slice($this->groupConsecutiveLogs($results), 0, $limit);
 
             case 'all':
             default:
@@ -746,7 +774,7 @@ class SystemService
                 foreach ($rawJournal as $j) {
                     $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     if ($qLower !== null) {
-                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? ''));
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? '') . ' ' . ($h['ip'] ?? ''));
                         if (!str_contains($searchable, $qLower)) {
                             continue;
                         }
@@ -756,15 +784,17 @@ class SystemService
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
                         'unit' => $j['unit'] ?? 'system',
                         'user' => 'system',
+                        'ip' => $h['ip'] ?? '127.0.0.1',
                         'target' => $j['unit'] ?? 'system',
                         'action' => 'journal_log',
-                        'action_label' => 'Sistema',
-                        'badge' => 'gray',
-                        'status' => 'OK',
+                        'action_label' => $h['action_label'] ?? 'Sistema',
+                        'badge' => $h['badge'] ?? 'gray',
+                        'status' => $h['status'] ?? 'OK',
                         'message' => $j['message'] ?? '',
                         'human' => $h['human'],
                         'level' => $h['level'],
                         'raw' => ($j['timestamp'] ?? '') . ' ' . ($j['unit'] ?? '') . ': ' . ($j['message'] ?? ''),
+                        'count' => 1,
                     ];
                 }
 
@@ -775,14 +805,87 @@ class SystemService
                     return strcmp($b['timestamp'] ?? '', $a['timestamp'] ?? '');
                 });
 
-                return array_slice($merged, 0, $limit);
+                $grouped = $this->groupConsecutiveLogs($merged);
+                return array_slice($grouped, 0, $limit);
         }
     }
 
     /**
-     * Traduce mensajes del sistema (ufw, cron, sshd...) a texto entendible.
+     * Agrupa eventos idénticos consecutivos en una sola entrada con contador y etiqueta anti-spam (xN).
      *
-     * @return array{human:string,level:string}
+     * @param array<array<string, mixed>> $logs
+     * @return array<array<string, mixed>>
+     */
+    public function groupConsecutiveLogs(array $logs): array
+    {
+        if (empty($logs)) {
+            return [];
+        }
+
+        $grouped = [];
+        $current = null;
+        $count = 1;
+        $currentKey = '';
+
+        foreach ($logs as $log) {
+            $key = ($log['source'] ?? '') . '|' .
+                   ($log['user'] ?? ($log['task'] ?? '')) . '|' .
+                   ($log['ip'] ?? '') . '|' .
+                   ($log['action'] ?? ($log['event'] ?? ($log['unit'] ?? ''))) . '|' .
+                   ($log['target'] ?? '') . '|' .
+                   ($log['status'] ?? '') . '|' .
+                   ($log['human'] ?? ($log['message'] ?? ''));
+
+            if ($current === null) {
+                $current = $log;
+                $current['count'] = 1;
+                $currentKey = $key;
+                $count = 1;
+                continue;
+            }
+
+            if ($key === $currentKey) {
+                $count++;
+                $current['count'] = $count;
+            } else {
+                if ($count > 1) {
+                    $current['count_badge'] = "x{$count}";
+                    if (isset($current['human']) && !str_contains($current['human'], "(x{$count})")) {
+                        $current['human'] = preg_replace('/\s+\(x\d+\)$/', '', (string) $current['human']) . " (x{$count})";
+                    }
+                    if (isset($current['message']) && !str_contains($current['message'], "(x{$count})")) {
+                        $current['message'] = preg_replace('/\s+\(x\d+\)$/', '', (string) $current['message']) . " (x{$count})";
+                    }
+                }
+                $grouped[] = $current;
+                $current = $log;
+                $current['count'] = 1;
+                $count = 1;
+                $currentKey = $key;
+            }
+        }
+
+        if ($current !== null) {
+            if ($count > 1) {
+                $current['count_badge'] = "x{$count}";
+                if (isset($current['human']) && !str_contains($current['human'], "(x{$count})")) {
+                    $current['human'] = preg_replace('/\s+\(x\d+\)$/', '', (string) $current['human']) . " (x{$count})";
+                }
+                if (isset($current['message']) && !str_contains($current['message'], "(x{$count})")) {
+                    $current['message'] = preg_replace('/\s+\(x\d+\)$/', '', (string) $current['message']) . " (x{$count})";
+                }
+            }
+            $grouped[] = $current;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Traduce y enriquece mensajes del sistema (UFW, Cron, SSH, Systemd, NTP...) a texto legible,
+     * extrayendo direcciones IP, niveles de severidad y clasificación cromática para la UI y CLI.
+     *
+     * @return array{human:string,level:string,badge:string,status:string,ip:string,action_label:string}
      */
     private function humanizeSystemLog(string $unit, string $message): array
     {
@@ -930,26 +1033,203 @@ class SystemService
                 $human = "[Firewall UFW] {$accion} {$proto} de {$origen} → {$destino}";
             }
 
-            return ['human' => $human, 'level' => $isBlock ? 'warn' : 'info'];
+            return [
+                'human' => $human,
+                'level' => $isBlock ? 'warn' : 'info',
+                'badge' => $isBlock ? 'err' : 'ok',
+                'status' => $isBlock ? 'BLOCK' : 'ALLOW',
+                'ip' => $srcClean,
+                'action_label' => 'Firewall UFW',
+            ];
         }
 
         // Cron: ejecuciones programadas
         if ($u === 'cron' || stripos($m, 'CRON') !== false) {
             if (preg_match('/\(([^)]+)\)\s+CMD\s+\((.*)\)/', $m, $cm)) {
-                return ['human' => "[Cron] {$cm[1]} ejecutó: {$cm[2]}", 'level' => 'info'];
+                return [
+                    'human' => "[Cron] {$cm[1]} ejecutó: {$cm[2]}",
+                    'level' => 'info',
+                    'badge' => 'blue',
+                    'status' => 'OK',
+                    'ip' => '127.0.0.1',
+                    'action_label' => 'Cron',
+                ];
             }
             if (preg_match('/CMD\s+\((.*)\)/', $m, $cm2)) {
-                return ['human' => "[Cron] ejecutó: {$cm2[1]}", 'level' => 'info'];
+                return [
+                    'human' => "[Cron] ejecutó: {$cm2[1]}",
+                    'level' => 'info',
+                    'badge' => 'blue',
+                    'status' => 'OK',
+                    'ip' => '127.0.0.1',
+                    'action_label' => 'Cron',
+                ];
             }
-            return ['human' => '[Cron] ' . $m, 'level' => 'info'];
+            return [
+                'human' => '[Cron] ' . $m,
+                'level' => 'info',
+                'badge' => 'blue',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Cron',
+            ];
         }
 
-        // SSH: intentos fallidos
-        if ($u === 'sshd' && stripos($m, 'Failed') !== false) {
-            return ['human' => '[SSH] ' . $m, 'level' => 'warn'];
+        // SSH: intentos de acceso y sesiones
+        if ($u === 'sshd' || stripos($m, 'sshd') !== false || stripos($m, 'ssh') !== false) {
+            $sshIp = '127.0.0.1';
+            if (preg_match('/from\s+([0-9a-fA-F\.\:]+)/', $m, $mIp)) {
+                $sshIp = $mIp[1];
+            }
+            if (preg_match('/Failed\s+(?:password|publickey)\s+for\s+(?:invalid\s+user\s+)?(\S+)\s+from\s+(\S+)/i', $m, $sm)) {
+                return [
+                    'human' => "[SSH] Intento de acceso fallido para {$sm[1]} desde {$sm[2]}",
+                    'level' => 'warn',
+                    'badge' => 'err',
+                    'status' => 'FAILED',
+                    'ip' => $sm[2],
+                    'action_label' => 'SSH',
+                ];
+            }
+            if (preg_match('/Accepted\s+(?:password|publickey)\s+for\s+(\S+)\s+from\s+(\S+)/i', $m, $sm)) {
+                return [
+                    'human' => "[SSH] Acceso concedido a {$sm[1]} desde {$sm[2]}",
+                    'level' => 'info',
+                    'badge' => 'ok',
+                    'status' => 'OK',
+                    'ip' => $sm[2],
+                    'action_label' => 'SSH',
+                ];
+            }
+            if (stripos($m, 'Failed') !== false) {
+                return [
+                    'human' => '[SSH] ' . $m,
+                    'level' => 'warn',
+                    'badge' => 'err',
+                    'status' => 'FAILED',
+                    'ip' => $sshIp,
+                    'action_label' => 'SSH',
+                ];
+            }
+            return [
+                'human' => '[SSH] ' . $m,
+                'level' => 'info',
+                'badge' => 'blue',
+                'status' => 'OK',
+                'ip' => $sshIp,
+                'action_label' => 'SSH',
+            ];
         }
 
-        return ['human' => $m, 'level' => 'info'];
+        // Servicios del sistema (systemd)
+        if (preg_match('/^(?:Started|Iniciado)\s+(.*)\.$/i', $m, $sm)) {
+            return [
+                'human' => "[Servicio] {$sm[1]} iniciado con éxito",
+                'level' => 'info',
+                'badge' => 'ok',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+        if (preg_match('/^(?:Stopped|Detenido)\s+(.*)\.$/i', $m, $sm)) {
+            return [
+                'human' => "[Servicio] {$sm[1]} detenido",
+                'level' => 'info',
+                'badge' => 'gray',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+        if (preg_match('/^(?:Starting|Iniciando)\s+(.*)\.$/i', $m, $sm)) {
+            return [
+                'human' => "[Servicio] Iniciando {$sm[1]}",
+                'level' => 'info',
+                'badge' => 'blue',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+        if (preg_match('/^(?:Failed to start|Error al iniciar)\s+(.*)\.$/i', $m, $sm)) {
+            return [
+                'human' => "[Servicio] Falló el inicio de {$sm[1]}",
+                'level' => 'err',
+                'badge' => 'err',
+                'status' => 'FAILED',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+        if (preg_match('/^(?:Reloaded|Recargado)\s+(.*)\.$/i', $m, $sm)) {
+            return [
+                'human' => "[Servicio] Configuración de {$sm[1]} recargada",
+                'level' => 'info',
+                'badge' => 'ok',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+        if (stripos($m, 'Deactivated successfully') !== false) {
+            return [
+                'human' => "[Servicio] {$unit} finalizado con éxito",
+                'level' => 'info',
+                'badge' => 'gray',
+                'status' => 'OK',
+                'ip' => '127.0.0.1',
+                'action_label' => 'Servicio',
+            ];
+        }
+
+        // Sudo: comandos ejecutados como root
+        if (stripos($m, 'sudo:') !== false || stripos($u, 'sudo') !== false) {
+            if (preg_match('/COMMAND=(.*)$/', $m, $cm)) {
+                return [
+                    'human' => "[Sudo] Comando administrativo ejecutado: " . trim($cm[1]),
+                    'level' => 'info',
+                    'badge' => 'blue',
+                    'status' => 'OK',
+                    'ip' => '127.0.0.1',
+                    'action_label' => 'Sudo',
+                ];
+            }
+        }
+
+        // NTP / Sincronización horaria (timesyncd)
+        if ($u === 'systemd-timesyncd' || stripos($m, 'timesyncd') !== false) {
+            if (preg_match('/Contacted time server\s+(\S+)\s+\(([^)]+)\)/i', $m, $tm)) {
+                $ntpIp = filter_var($tm[1], FILTER_VALIDATE_IP) ? $tm[1] : '127.0.0.1';
+                return [
+                    'human' => "[NTP] Servidor de tiempo contactado: {$tm[2]} ({$tm[1]})",
+                    'level' => 'info',
+                    'badge' => 'ok',
+                    'status' => 'OK',
+                    'ip' => $ntpIp,
+                    'action_label' => 'NTP',
+                ];
+            }
+            if (preg_match('/Initial clock synchronization to\s+(.*)\./i', $m, $tm)) {
+                return [
+                    'human' => "[NTP] Reloj del sistema sincronizado a {$tm[1]}",
+                    'level' => 'info',
+                    'badge' => 'ok',
+                    'status' => 'OK',
+                    'ip' => '127.0.0.1',
+                    'action_label' => 'NTP',
+                ];
+            }
+        }
+
+        return [
+            'human' => $m,
+            'level' => 'info',
+            'badge' => 'gray',
+            'status' => 'OK',
+            'ip' => '127.0.0.1',
+            'action_label' => 'Sistema',
+        ];
     }
 
     /**
