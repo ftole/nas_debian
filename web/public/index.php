@@ -135,7 +135,7 @@ $router->get('/api/backups/{id}/status', [BackupController::class, 'status']);
 // Rutas API: Almacenamiento y Discos
 $router->get('/api/storage', [StorageController::class, 'overview']);
 $router->get('/api/storage/overview', [StorageController::class, 'overview']);
-$router->get('/api/storage/disks', [StorageController::class, 'overview']);
+$router->get('/api/storage/disks', [StorageController::class, 'disks']);
 $router->post('/api/storage/scrub', [StorageController::class, 'scrubStart']);
 $router->get('/api/storage/scrub', [StorageController::class, 'scrubStatus']);
 $router->post('/api/storage/trim', [StorageController::class, 'trim']);
