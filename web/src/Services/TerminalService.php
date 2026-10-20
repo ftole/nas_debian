@@ -309,6 +309,7 @@ class TerminalService
             $username = $_SESSION['nas_user']['username'] ?? 'sistemas';
             DatabaseService::insert('terminal_history', [
                 'command' => $command,
+                'executed_at' => date('Y-m-d H:i:s'),
                 'username' => (string) $username,
                 'cwd' => $cleanCwd,
                 'exit_code' => $exitCode,
@@ -389,6 +390,7 @@ class TerminalService
             try {
                 DatabaseService::insert('terminal_history', [
                     'command' => $data,
+                    'executed_at' => date('Y-m-d H:i:s'),
                     'username' => $this->sessionUser(),
                     'cwd' => self::DEFAULT_CWD,
                     'exit_code' => 0,
