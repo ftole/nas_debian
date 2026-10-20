@@ -32,17 +32,28 @@ class StorageController
         ]);
     }
 
+    public function disks(Request $request): void
+    {
+        $disks = $this->storage->getDisks();
+        $overview = $this->storage->getStorageOverview();
+
+        Response::success([
+            'disks' => $disks,
+            'overview' => $overview,
+        ]);
+    }
+
     public function scrubStart(Request $request): void
     {
         $res = $this->storage->startBtrfsScrub('/srv/nas');
         if (!$res['success']) {
             AuditService::log('scrub_start', '/srv/nas', 'FAILED', ['error' => $res['error'] ?? '']);
-            Response::error($res['error'] ?? 'Error al iniciar scrub BTRFS.');
+            Response::error($res['error'] ?? 'Error al iniciar scrub BTRFS.', 400, $res);
             return;
         }
 
         AuditService::log('scrub_start', '/srv/nas', 'SUCCESS');
-        Response::success(null, $res['message'] ?? 'Scrub iniciado.');
+        Response::success($res, $res['message'] ?? 'Scrub iniciado.');
     }
 
     public function scrubStatus(Request $request): void
@@ -56,12 +67,12 @@ class StorageController
         $res = $this->storage->runTrim('/srv/nas');
         if (!$res['success']) {
             AuditService::log('trim_start', '/srv/nas', 'FAILED', ['error' => $res['error'] ?? '']);
-            Response::error($res['error'] ?? 'Error al ejecutar fstrim.');
+            Response::error($res['error'] ?? 'Error al ejecutar fstrim.', 400, $res);
             return;
         }
 
-        AuditService::log('trim_start', '/srv/nas', 'SUCCESS');
-        Response::success(null, $res['message'] ?? 'fstrim completado.');
+        AuditService::log('trim_start', '/srv/nas', 'SUCCESS', ['trimmed' => $res['bytes_trimmed'] ?? '']);
+        Response::success($res, $res['message'] ?? 'fstrim completado.');
     }
 
     public function format(Request $request): void
