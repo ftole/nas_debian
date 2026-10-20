@@ -81,12 +81,14 @@ class BackupService
 
             $proto = 'Local';
             $src = 'N/A';
+            $ip = '127.0.0.1';
             $retention = 30;
 
             if (str_contains($content, 'SRC_SHARE=')) {
                 $proto = 'CIFS (Windows)';
                 preg_match('/SRC_IP=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mIp);
                 preg_match('/SRC_SHARE=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mSh);
+                $ip = $mIp[1] ?? '127.0.0.1';
                 $src = '//' . ($mIp[1] ?? 'IP') . '/' . ($mSh[1] ?? 'SHARE');
             } elseif (str_contains($content, 'SRC_PORT=') || str_contains($content, 'sshpass')) {
                 $proto = 'SSH (Linux)';
@@ -94,6 +96,7 @@ class BackupService
                 preg_match('/SRC_PATH=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mPt);
                 preg_match('/SRC_USER=[\'"]?([^\'"\r\n]+)[\'"]?/', $content, $mUs);
                 preg_match('/SRC_PORT=[\'"]?(\d+)[\'"]?/', $content, $mPort);
+                $ip = $mIp[1] ?? '127.0.0.1';
                 $portVal = (int) ($mPort[1] ?? 22);
                 $portSuffix = ($portVal > 0 && $portVal !== 22) ? (':' . $portVal) : '';
                 $src = ($mUs[1] ?? 'root') . '@' . ($mIp[1] ?? 'IP') . $portSuffix . ':' . ($mPt[1] ?? '/');
@@ -132,6 +135,7 @@ class BackupService
             $tasks[] = [
                 'id' => $taskId,
                 'protocol' => $proto,
+                'ip' => $ip,
                 'source' => $src,
                 'destination' => $src,
                 'cron' => $cronExpr,
@@ -1232,11 +1236,11 @@ log_backup_event() {
     local msg="\$3"
     local ts
     ts=\$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[\$ts] [\$TASK] [\$evt] [\$sev] \$msg"
+    local entry="[\$ts] [\$TASK] [\$SRC_IP] [\$evt] [\$sev] \$msg"
     echo "\$entry" >> "\$LOG_FILE"
     mkdir -p "\$(dirname "\$MASTER_LOG")" 2>/dev/null || true
     echo "\$entry" >> "\$MASTER_LOG"
-    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$evt] \$msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$SRC_IP] [\$evt] \$msg" 2>/dev/null || true
 }
 
 cleanup() {
@@ -1368,11 +1372,11 @@ log_backup_event() {
     local msg="\$3"
     local ts
     ts=\$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[\$ts] [\$TASK] [\$evt] [\$sev] \$msg"
+    local entry="[\$ts] [\$TASK] [\$SRC_IP] [\$evt] [\$sev] \$msg"
     echo "\$entry" >> "\$LOG_FILE"
     mkdir -p "\$(dirname "\$MASTER_LOG")" 2>/dev/null || true
     echo "\$entry" >> "\$MASTER_LOG"
-    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$evt] \$msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$SRC_IP] [\$evt] \$msg" 2>/dev/null || true
 }
 
 cleanup() {
@@ -1474,6 +1478,7 @@ BASH;
 #!/bin/bash
 set -e
 TASK=$escTask
+SRC_IP="127.0.0.1"
 SRC_PATH=$escPath
 BKP_DIR="{$this->bkpRoot}/\$TASK"
 LOG_FILE="{$this->logRoot}/backup_\${TASK}.log"
@@ -1490,11 +1495,11 @@ log_backup_event() {
     local msg="\$3"
     local ts
     ts=\$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[\$ts] [\$TASK] [\$evt] [\$sev] \$msg"
+    local entry="[\$ts] [\$TASK] [\$SRC_IP] [\$evt] [\$sev] \$msg"
     echo "\$entry" >> "\$LOG_FILE"
     mkdir -p "\$(dirname "\$MASTER_LOG")" 2>/dev/null || true
     echo "\$entry" >> "\$MASTER_LOG"
-    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$evt] \$msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.\$sev" "[\$TASK] [\$SRC_IP] [\$evt] \$msg" 2>/dev/null || true
 }
 
 cleanup() {
