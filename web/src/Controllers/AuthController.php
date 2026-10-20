@@ -93,7 +93,7 @@ class AuthController
         if (trim($username) === '' || trim($password) === '') {
             $err = 'Por favor ingresa tu usuario y contraseña.';
             $this->auth->recordFailedAttempt($clientIp, $safeUsername ?: 'desconocido');
-            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos']);
+            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => 'Campos vacíos', 'ip' => $clientIp]);
             if ($request->isJson()) {
                 Response::error($err, 400);
                 return;
@@ -108,7 +108,7 @@ class AuthController
         if (!$res['success']) {
             $err = $res['error'] ?? 'Usuario o contraseña incorrectos.';
             $this->auth->recordFailedAttempt($clientIp, $safeUsername ?: 'desconocido');
-            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => $err]);
+            AuditService::log('login_failure', $safeUsername ?: 'desconocido', 'FAILED', ['error' => $err, 'ip' => $clientIp]);
             if ($request->isJson()) {
                 Response::error($err, 401);
                 return;
@@ -123,7 +123,7 @@ class AuthController
         // Proteger contra Session Fixation
         session_regenerate_id(true);
         $_SESSION['nas_user'] = $res['user'];
-        AuditService::log('login_success', $safeUsername, 'SUCCESS', ['role' => $res['user']['role'] ?? 'Administrador']);
+        AuditService::log('login_success', $safeUsername, 'SUCCESS', ['role' => $res['user']['role'] ?? 'Administrador', 'ip' => $clientIp]);
 
         if ($request->isJson()) {
             Response::success($res['user'], 'Sesión iniciada con éxito.');
@@ -140,8 +140,9 @@ class AuthController
     public function logout(Request $request): void
     {
         $currentUser = $_SESSION['nas_user']['username'] ?? 'desconocido';
+        $clientIp = $request->getClientIp();
         $this->auth->logout();
-        AuditService::log('logout', $currentUser, 'SUCCESS');
+        AuditService::log('logout', $currentUser, 'SUCCESS', ['ip' => $clientIp]);
 
         if ($request->isJson()) {
             Response::success(null, 'Sesión finalizada con éxito.');
