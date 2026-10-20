@@ -823,6 +823,8 @@ async function deleteShare(name) {
 // ==============================================================================
 let _backupRefreshTimer = null;
 
+let _backupsData = [];
+
 async function loadBackups() {
   const tbody = document.getElementById('backups-table-body');
   if (!tbody) return;
@@ -830,6 +832,7 @@ async function loadBackups() {
   try {
     const res = await apiFetch('/api/backups');
     const tasks = res.data || [];
+    _backupsData = tasks;
 
     if (tasks.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
@@ -865,6 +868,9 @@ async function loadBackups() {
         <td style="text-align:right; white-space:nowrap;">
           <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
             <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
+          </button>
+          <button class="btn btn-secondary btn-sm" title="Editar tarea" onclick="openEditBackup('${escapeHtml(t.id)}')">
+            <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
           </button>
           <button class="btn btn-secondary btn-sm" title="Ver bitácora" onclick="viewBackupLogs('${escapeHtml(t.id)}')">
             <svg class="icon icon-sm"><use href="#icon-file"></use></svg>
@@ -977,6 +983,151 @@ async function submitNewBackup(event) {
       btn.disabled = false;
       btn.classList.remove('is-loading');
     }
+  }
+}
+
+function openEditBackup(id) {
+  const t = (_backupsData || []).find(x => x.id === id);
+  if (!t) return;
+
+  const idEl = document.getElementById('edit-bkp-id');
+  if (idEl) idEl.value = t.id;
+
+  const protoStr = (t.protocol || '').toLowerCase();
+  const isSsh = protoStr.includes('ssh') || protoStr.includes('linux');
+  const proto = isSsh ? 'ssh' : 'cifs';
+  const protoEl = document.getElementById('edit-bkp-proto');
+  if (protoEl) protoEl.value = proto;
+
+  let ip = t.ip || '';
+  let share = '';
+  let path = '';
+  let user = 'Administrador';
+
+  const src = t.source || t.destination || '';
+  if (!isSsh) {
+    const m = src.match(/^\/\/([^/]+)\/(.+)$/);
+    if (m) {
+      ip = m[1];
+      share = m[2];
+    }
+  } else {
+    const m = src.match(/^([^@]+)@([^:]+):(.*)$/);
+    if (m) {
+      user = m[1];
+      ip = m[2];
+      path = m[3];
+    }
+  }
+
+  const ipEl = document.getElementById('edit-bkp-ip');
+  if (ipEl) ipEl.value = ip;
+  const shareEl = document.getElementById('edit-bkp-share');
+  if (shareEl) shareEl.value = share;
+  const pathEl = document.getElementById('edit-bkp-path');
+  if (pathEl) pathEl.value = path;
+  const userEl = document.getElementById('edit-bkp-user');
+  if (userEl) userEl.value = user;
+  const passEl = document.getElementById('edit-bkp-pass');
+  if (passEl) passEl.value = '';
+
+  const cronEl = document.getElementById('edit-bkp-cron');
+  if (cronEl && t.cron) {
+    if (cronEl.querySelector(`option[value="${t.cron}"]`)) {
+      cronEl.value = t.cron;
+    } else {
+      let customOpt = cronEl.querySelector('option[data-custom="1"]');
+      if (!customOpt) {
+        customOpt = document.createElement('option');
+        customOpt.setAttribute('data-custom', '1');
+        cronEl.appendChild(customOpt);
+      }
+      customOpt.value = t.cron;
+      customOpt.textContent = `Personalizado (${t.cron})`;
+      cronEl.value = t.cron;
+    }
+  }
+
+  const retEl = document.getElementById('edit-bkp-retention');
+  if (retEl) retEl.value = t.retention || 30;
+
+  toggleEditBackupFields();
+  openModal('modal-edit-backup');
+}
+
+function toggleEditBackupFields() {
+  const proto = document.getElementById('edit-bkp-proto')?.value || 'cifs';
+  const fShare = document.getElementById('field-edit-bkp-share');
+  const fPath = document.getElementById('field-edit-bkp-path');
+  if (fShare) fShare.style.display = (proto === 'cifs') ? 'block' : 'none';
+  if (fPath) fPath.style.display = (proto === 'ssh') ? 'block' : 'none';
+}
+
+async function submitEditBackup(event) {
+  event.preventDefault();
+  const id = document.getElementById('edit-bkp-id').value;
+  const proto = document.getElementById('edit-bkp-proto').value;
+  const ip = document.getElementById('edit-bkp-ip').value;
+  const share = document.getElementById('edit-bkp-share')?.value || '';
+  const path = document.getElementById('edit-bkp-path')?.value || '';
+  const user = document.getElementById('edit-bkp-user').value;
+  const password = document.getElementById('edit-bkp-pass').value;
+  const cron = document.getElementById('edit-bkp-cron').value;
+  const retention = parseInt(document.getElementById('edit-bkp-retention').value, 10) || 30;
+
+  const btn = document.getElementById('btn-submit-edit-backup') || event.target.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+
+  try {
+    const res = await apiFetch('/api/backups/update', {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        proto,
+        ip,
+        share,
+        path,
+        user,
+        password,
+        cron,
+        retention,
+      }),
+    });
+    showToast(res.message || `Tarea de respaldo [${id}] actualizada con éxito.`, 'success');
+    closeModal('modal-edit-backup');
+    loadBackups();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
+}
+
+async function testEditBackupConnection() {
+  const btn = document.getElementById('btn-test-edit-backup');
+  const payload = {
+    proto: document.getElementById('edit-bkp-proto').value,
+    ip: document.getElementById('edit-bkp-ip').value,
+    share: document.getElementById('edit-bkp-share')?.value || '',
+    path: document.getElementById('edit-bkp-path')?.value || '',
+    port: 22,
+    user: document.getElementById('edit-bkp-user').value,
+    password: document.getElementById('edit-bkp-pass').value,
+  };
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/backups/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    showToast(res.message || 'Conexión exitosa con el origen de respaldo.', 'success');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
@@ -1762,16 +1913,55 @@ async function cyclePerm(kind, name, share) {
   }
 }
 
-async function repairAcls() {
-  if (!window.confirm('¿Recalcular las ACL POSIX de todos los recursos según smb.conf?\n\nEsto corrige accesos denegados por desajustes entre Samba y los permisos de disco.')) {
-    return;
-  }
+async function repairAcls(shareName = null) {
   try {
-    const res = await apiFetch('/api/shares/access/repair', { method: 'POST', body: JSON.stringify({}) });
-    showToast(res.message || 'ACL reparadas.', 'success');
+    showToast('Auditando consistencia de ACL contra smb.conf...', 'info');
+    const auditUrl = '/api/shares/access/audit' + (shareName ? `?share=${encodeURIComponent(shareName)}` : '');
+    const auditRes = await apiFetch(auditUrl);
+    const auditData = auditRes.data || auditRes;
+
+    const outOfSync = auditData.out_of_sync_count ?? 0;
+    const total = auditData.total ?? (auditData.shares ? Object.keys(auditData.shares).length : 0);
+    const sharesMap = auditData.shares || {};
+
+    let force = false;
+
+    if (shareName) {
+      const sAudit = sharesMap[shareName] || auditData;
+      if (sAudit && sAudit.in_sync) {
+        if (!window.confirm(`El recurso [${shareName}] ya tiene sus ACL perfectamente sincronizadas con smb.conf.\n\n¿Deseas forzar la reaplicación recursiva (setfacl -R) de todos modos?`)) {
+          return;
+        }
+        force = true;
+      } else {
+        const discList = ((sAudit && sAudit.discrepancies) || []).map(d => ` • ${d}`).join('\n');
+        if (!window.confirm(`Se detectaron desajustes en el recurso [${shareName}]:\n${discList || 'Discrepancias en permisos'}\n\n¿Proceder con la reparación de ACL?`)) {
+          return;
+        }
+      }
+    } else {
+      if (outOfSync === 0) {
+        if (!window.confirm(`Todas las ACL de los ${total} recurso(s) están sincronizadas con smb.conf (cero discrepancias).\n\n¿Deseas forzar la reaplicación recursiva en todos los recursos de todos modos?`)) {
+          return;
+        }
+        force = true;
+      } else {
+        const outList = Object.entries(sharesMap)
+          .filter(([_, v]) => !v.in_sync)
+          .map(([k, v]) => ` • [${k}]: ${(v.discrepancies || []).length} discrepancia(s)`)
+          .join('\n');
+        if (!window.confirm(`Auditoría de ACL: ${outOfSync} de ${total} recurso(s) requieren reparación:\n${outList}\n\n¿Proceder con la reparación inteligente (solo recursos con desajustes)?`)) {
+          return;
+        }
+      }
+    }
+
+    const payload = { share: shareName || '', force };
+    const res = await apiFetch('/api/shares/access/repair', { method: 'POST', body: JSON.stringify(payload) });
+    showToast(res.message || 'ACL procesadas correctamente.', 'success');
     loadAccessMatrix();
   } catch (e) {
-    // Ya mostrado
+    // Ya mostrado por apiFetch
   }
 }
 
@@ -2926,7 +3116,7 @@ function downloadFile(relPath) {
 
 let _zipDownloadInProgress = false;
 
-async function downloadFolderZip(relPath) {
+async function downloadFolderZip(relPath, force = false) {
   const cleanRel = String(relPath || '').replace(/^\/+|\/+$/g, '');
   if (!cleanRel) {
     showToast('Seleccione o ingrese a una carpeta específica para descargarla en formato ZIP.', 'warning');
@@ -2935,6 +3125,34 @@ async function downloadFolderZip(relPath) {
   if (_zipDownloadInProgress) {
     showToast('Ya hay una compresión ZIP en progreso, por favor espera a que finalice.', 'info');
     return;
+  }
+
+  // Alerta preventiva si hay respaldos en ejecución
+  if (!force) {
+    try {
+      const runRes = await apiFetch('/api/backups/running');
+      const runData = runRes.data || runRes;
+      if (runData && runData.running) {
+        const listEl = document.getElementById('zip-running-backups-list');
+        if (listEl) {
+          const taskNames = (runData.tasks && runData.tasks.length > 0)
+            ? runData.tasks.map(t => `<strong>${escapeHtml(t)}</strong>`).join(', ')
+            : 'Procesos de sincronización rsync activos';
+          listEl.innerHTML = `<svg class="icon icon-sm" style="color:var(--accent-warning); margin-right:4px;"><use href="#icon-alert-triangle"></use></svg> Tareas activas: ${taskNames}`;
+        }
+        const btnConfirm = document.getElementById('btn-confirm-zip-download');
+        if (btnConfirm) {
+          btnConfirm.onclick = () => {
+            closeModal('modal-zip-backup-warning');
+            downloadFolderZip(relPath, true);
+          };
+        }
+        openModal('modal-zip-backup-warning');
+        return;
+      }
+    } catch (e) {
+      console.warn('No se pudo verificar el estado de respaldos:', e);
+    }
   }
 
   _zipDownloadInProgress = true;
@@ -4282,10 +4500,24 @@ function initApp() {
     }
   });
 
-  // Cerrar modales al hacer clic fuera del diálogo
+  // Cerrar modales al hacer clic fuera del diálogo (excepto modales con formularios o .modal-static)
   document.querySelectorAll('.modal-backdrop, .modal-overlay').forEach(modal => {
     modal.addEventListener('click', (e) => {
       if (e.target === modal) {
+        const hasForm = modal.querySelector('form') !== null;
+        const isStatic = modal.classList.contains('modal-static') || hasForm;
+        if (isStatic) {
+          const dialog = modal.querySelector('.modal-dialog, .modal-dialog-preview');
+          if (dialog) {
+            dialog.classList.remove('modal-pulse');
+            void dialog.offsetWidth;
+            dialog.classList.add('modal-pulse');
+            setTimeout(() => {
+              dialog.classList.remove('modal-pulse');
+            }, 250);
+          }
+          return;
+        }
         closeModal(modal.id);
       }
     });
@@ -4297,10 +4529,24 @@ function initApp() {
     return types.includes ? types.includes('Files') : Array.from(types).includes('Files');
   }
 
-  // Cerrar modal y previsualizador de forma inmediata al presionar Escape
+  // Cerrar modal y previsualizador de forma inmediata al presionar Escape (excepto estáticos/formularios)
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open').forEach(modal => {
+        const hasForm = modal.querySelector('form') !== null;
+        const isStatic = modal.classList.contains('modal-static') || hasForm;
+        if (isStatic) {
+          const dialog = modal.querySelector('.modal-dialog, .modal-dialog-preview');
+          if (dialog) {
+            dialog.classList.remove('modal-pulse');
+            void dialog.offsetWidth;
+            dialog.classList.add('modal-pulse');
+            setTimeout(() => {
+              dialog.classList.remove('modal-pulse');
+            }, 250);
+          }
+          return;
+        }
         closeModal(modal.id);
       });
       const dz = document.getElementById('file-dropzone-container');
