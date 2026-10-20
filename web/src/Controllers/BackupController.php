@@ -51,6 +51,36 @@ class BackupController
         Response::success(null, $res['message'] ?? 'Tarea programada.');
     }
 
+    public function update(Request $request): void
+    {
+        $data = $request->getBody();
+        $id = trim($data['id'] ?? ($data['task_id'] ?? ''));
+        if (empty($id)) {
+            Response::error('El identificador de la tarea de backup es obligatorio.');
+            return;
+        }
+
+        $cleanId = strtolower(trim((string) $id));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $cleanId)) {
+            Response::error('Identificador de tarea inválido.');
+            return;
+        }
+
+        $res = $this->backup->updateTask($cleanId, $data);
+        if (!$res['success']) {
+            AuditService::log('backup_update', $cleanId, 'FAILED', ['error' => $res['error'] ?? '']);
+            Response::error($res['error'] ?? 'Error al actualizar tarea de backup.');
+            return;
+        }
+
+        AuditService::log('backup_update', $cleanId, 'SUCCESS', [
+            'proto' => $data['proto'] ?? ($data['source_type'] ?? 'cifs'),
+            'cron' => $data['cron'] ?? '',
+            'retention' => $data['retention'] ?? 30,
+        ]);
+        Response::success(null, $res['message'] ?? 'Tarea actualizada.');
+    }
+
     public function delete(Request $request, array $params = []): void
     {
         $id = $params['id'] ?? $request->get('id');
@@ -146,5 +176,11 @@ class BackupController
             return;
         }
         Response::success($this->backup->getTaskProgress($cleanId));
+    }
+
+    public function running(Request $request): void
+    {
+        $data = $this->backup->getRunningBackups();
+        Response::success($data);
     }
 }
