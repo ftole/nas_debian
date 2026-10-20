@@ -476,7 +476,10 @@ if [ -z "$PHP_POOL_DIR" ]; then
 fi
 mkdir -p "$PHP_POOL_DIR" /run/php
 
-cat << 'PHP_POOL_EOF' > "$PHP_POOL_DIR/nas-web.conf"
+SYS_TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "America/Mexico_City")
+[ -z "$SYS_TIMEZONE" ] && SYS_TIMEZONE="America/Mexico_City"
+
+cat << PHP_POOL_EOF > "$PHP_POOL_DIR/nas-web.conf"
 [nas-web]
 user = www-data
 group = www-data
@@ -493,7 +496,14 @@ php_admin_value[post_max_size] = 512M
 php_value[max_execution_time] = 300
 php_admin_value[max_input_time] = 300
 php_admin_value[memory_limit] = 512M
+php_admin_value[date.timezone] = $SYS_TIMEZONE
 PHP_POOL_EOF
+
+for _php_ini in /etc/php/*/fpm/php.ini /etc/php/*/cli/php.ini; do
+    if [ -f "$_php_ini" ]; then
+        sed -i "s|^;*date.timezone =.*|date.timezone = $SYS_TIMEZONE|" "$_php_ini" 2>/dev/null || true
+    fi
+done
 
 # 2. Directorio persistente para base de datos SQLite nativa y staging seguro
 mkdir -p /var/lib/nas/staging
