@@ -63,29 +63,84 @@ function showToast(message, type = 'info') {
 }
 
 // Reloj del Servidor en Vivo Sincronizado
-let _serverTimeDiffMs = 0;
-let _clockTimer = null;
+const _serverClock = {
+  timeDiffMs: 0,
+  tzIana: 'America/Mexico_City',
+  tzAbbr: 'CST',
+  tzOffsetSec: -21600,
+  formatter: null,
+  timer: null
+};
 
-function initServerClock(initialTimestampSec, serverTz) {
-  if (initialTimestampSec) {
-    _serverTimeDiffMs = (initialTimestampSec * 1000) - Date.now();
+function initServerClock(serverConfig) {
+  if (!serverConfig) return;
+  if (typeof serverConfig === 'object') {
+    const initialTimestampSec = serverConfig.timestamp || Math.floor(Date.now() / 1000);
+    _serverClock.timeDiffMs = (initialTimestampSec * 1000) - Date.now();
+    if (serverConfig.timezone) _serverClock.tzIana = serverConfig.timezone;
+    if (serverConfig.tz) _serverClock.tzAbbr = serverConfig.tz;
+    if (typeof serverConfig.offset === 'number') _serverClock.tzOffsetSec = serverConfig.offset;
+  } else {
+    const initialTimestampSec = Number(serverConfig) || Math.floor(Date.now() / 1000);
+    _serverClock.timeDiffMs = (initialTimestampSec * 1000) - Date.now();
+    if (arguments[1]) _serverClock.tzAbbr = arguments[1];
   }
-  updateServerClockDisplay(serverTz);
-  if (!_clockTimer) {
-    _clockTimer = setInterval(() => updateServerClockDisplay(serverTz), 1000);
+
+  try {
+    if (_serverClock.tzIana) {
+      _serverClock.formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: _serverClock.tzIana,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    }
+  } catch (e) {
+    _serverClock.formatter = null;
+  }
+
+  updateServerClockDisplay();
+  if (!_serverClock.timer) {
+    _serverClock.timer = setInterval(updateServerClockDisplay, 1000);
   }
 }
 
-function updateServerClockDisplay(serverTz) {
+function updateServerClockDisplay(newTzAbbr) {
   const clockEl = document.getElementById('header-server-clock');
   if (!clockEl) return;
-  const nowServer = new Date(Date.now() + _serverTimeDiffMs);
-  const pad = n => String(n).padStart(2, '0');
-  const timeStr = `${pad(nowServer.getHours())}:${pad(nowServer.getMinutes())}:${pad(nowServer.getSeconds())}`;
+
+  if (newTzAbbr && typeof newTzAbbr === 'string') {
+    _serverClock.tzAbbr = newTzAbbr;
+  }
+
+  let timeStr = '';
+  const nowServerMs = Date.now() + _serverClock.timeDiffMs;
+
+  if (_serverClock.formatter) {
+    try {
+      timeStr = _serverClock.formatter.format(new Date(nowServerMs));
+    } catch (e) {
+      timeStr = '';
+    }
+  }
+
+  if (!timeStr) {
+    const serverDate = new Date(nowServerMs + (_serverClock.tzOffsetSec * 1000));
+    const pad = n => String(n).padStart(2, '0');
+    timeStr = `${pad(serverDate.getUTCHours())}:${pad(serverDate.getUTCMinutes())}:${pad(serverDate.getUTCSeconds())}`;
+  }
+
   clockEl.textContent = timeStr;
-  if (serverTz) {
-    const tzEl = document.getElementById('header-server-tz');
-    if (tzEl) tzEl.textContent = serverTz;
+
+  const tzEl = document.getElementById('header-server-tz');
+  if (tzEl && _serverClock.tzAbbr) {
+    tzEl.textContent = _serverClock.tzAbbr;
+  }
+
+  const pillEl = document.getElementById('header-clock-pill');
+  if (pillEl) {
+    pillEl.title = `Hora local del servidor NAS: ${timeStr} ${_serverClock.tzAbbr} (${_serverClock.tzIana || 'Local'})`;
   }
 }
 
@@ -380,7 +435,24 @@ async function refreshDashboardMetrics() {
 
     if (d.system) {
       if (d.system.server_timestamp) {
-        _serverTimeDiffMs = (d.system.server_timestamp * 1000) - Date.now();
+        _serverClock.timeDiffMs = (d.system.server_timestamp * 1000) - Date.now();
+        if (d.system.timezone && d.system.timezone !== _serverClock.tzIana) {
+          _serverClock.tzIana = d.system.timezone;
+          try {
+            _serverClock.formatter = new Intl.DateTimeFormat('en-GB', {
+              timeZone: _serverClock.tzIana,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false
+            });
+          } catch (e) {
+            _serverClock.formatter = null;
+          }
+        }
+        if (typeof d.system.timezone_offset === 'number') {
+          _serverClock.tzOffsetSec = d.system.timezone_offset;
+        }
         updateServerClockDisplay(d.system.timezone_abbr);
       }
       const ramVal = document.getElementById('kpi-ram-val');
@@ -4173,7 +4245,7 @@ async function loadDiagnostics() {
 // ==============================================================================
 function initApp() {
   if (window.NAS_INITIAL_SERVER_TIME) {
-    initServerClock(window.NAS_INITIAL_SERVER_TIME.timestamp, window.NAS_INITIAL_SERVER_TIME.tz);
+    initServerClock(window.NAS_INITIAL_SERVER_TIME);
   }
   applyRoleUi();
 
