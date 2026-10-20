@@ -272,11 +272,11 @@ log_backup_event() {
     local msg="$3"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    local entry="[$ts] [$TASK] [$SRC_IP] [$evt] [$sev] $msg"
     echo "$entry" >> "$LOG_FILE"
     mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
     echo "$entry" >> "$MASTER_LOG"
-    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$SRC_IP] [$evt] $msg" 2>/dev/null || true
 }
 
 cleanup() {
@@ -542,11 +542,11 @@ log_backup_event() {
     local msg="$3"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    local entry="[$ts] [$TASK] [$SRC_IP] [$evt] [$sev] $msg"
     echo "$entry" >> "$LOG_FILE"
     mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
     echo "$entry" >> "$MASTER_LOG"
-    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$SRC_IP] [$evt] $msg" 2>/dev/null || true
 }
 
 cleanup() {
@@ -720,6 +720,7 @@ RUNNER_EOF
 #!/bin/bash
 set -e
 TASK="TASK_NAME_PLACEHOLDER"
+SRC_IP="127.0.0.1"
 SRC_PATH="LOC_SRC_PLACEHOLDER"
 BKP_DIR="/srv/nas/BACKUPS_HISTORICOS/$TASK"
 LOG_FILE="/srv/nas/LOGS_BACKUP/backup_${TASK}.log"
@@ -736,11 +737,11 @@ log_backup_event() {
     local msg="$3"
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
-    local entry="[$ts] [$TASK] [$evt] [$sev] $msg"
+    local entry="[$ts] [$TASK] [$SRC_IP] [$evt] [$sev] $msg"
     echo "$entry" >> "$LOG_FILE"
     mkdir -p "$(dirname "$MASTER_LOG")" 2>/dev/null || true
     echo "$entry" >> "$MASTER_LOG"
-    logger -t nas_backup -p "local4.$sev" "[$TASK] [$evt] $msg" 2>/dev/null || true
+    logger -t nas_backup -p "local4.$sev" "[$TASK] [$SRC_IP] [$evt] $msg" 2>/dev/null || true
 }
 
 cleanup() {
