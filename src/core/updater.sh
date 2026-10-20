@@ -304,6 +304,29 @@ _hook_post_actualizacion() {
             systemctl reload smbd 2>/dev/null || systemctl restart smbd 2>/dev/null || true
         fi
     fi
+
+    # 7. Sincronizar desactivación de IPv6 en sysctl y UFW
+    local sysctl_conf="/etc/sysctl.d/99-nas-tuning.conf"
+    if [ -f "$sysctl_conf" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$sysctl_conf" ]; }; then
+        if ! grep -q "disable_ipv6 = 1" "$sysctl_conf"; then
+            cat << 'SYSCTL_IPV6_EOF' >> "$sysctl_conf"
+
+# Desactivacion total de IPv6 en el entorno
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+SYSCTL_IPV6_EOF
+            if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+                sysctl -p "$sysctl_conf" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+    if [ -f /etc/default/ufw ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/default/ufw ]; }; then
+        sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw 2>/dev/null || true
+        if command -v ufw >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            ufw reload >/dev/null 2>&1 || true
+        fi
+    fi
 }
 
 actualizar_desde_git() {
