@@ -791,6 +791,7 @@ async function submitNewShare(event) {
 
   const selectedGroups = Array.from(document.querySelectorAll('input[name="share_group"]:checked'))
     .map(cb => cb.value);
+  const unit = document.getElementById('share-unit')?.value || 'principal';
 
   const btn = document.getElementById('btn-submit-new-share') || event.target.querySelector('button[type="submit"]');
   if (btn) {
@@ -806,6 +807,7 @@ async function submitNewShare(event) {
         comment,
         scheme,
         hidden,
+        unit,
         groups: selectedGroups,
         write_group: writeGroup,
       }),
@@ -974,6 +976,7 @@ async function submitNewBackup(event) {
   const password = document.getElementById('bkp-pass').value;
   const cron = document.getElementById('bkp-cron').value;
   const retention = parseInt(document.getElementById('bkp-retention').value, 10);
+  const dest_unit = document.getElementById('bkp-dest-unit')?.value || 'principal';
 
   const btn = document.getElementById('btn-submit-new-backup') || event.target.querySelector('button[type="submit"]');
   if (btn) {
@@ -994,6 +997,7 @@ async function submitNewBackup(event) {
         password,
         cron,
         retention,
+        dest_unit,
       }),
     });
 
@@ -1083,6 +1087,9 @@ function openEditBackup(id) {
   const retEl = document.getElementById('edit-bkp-retention');
   if (retEl) retEl.value = t.retention || 30;
 
+  const unitEl = document.getElementById('edit-bkp-dest-unit');
+  if (unitEl) unitEl.value = t.dest_unit || 'principal';
+
   toggleEditBackupFields();
   openModal('modal-edit-backup');
 }
@@ -1106,6 +1113,7 @@ async function submitEditBackup(event) {
   const password = document.getElementById('edit-bkp-pass').value;
   const cron = document.getElementById('edit-bkp-cron').value;
   const retention = parseInt(document.getElementById('edit-bkp-retention').value, 10) || 30;
+  const dest_unit = document.getElementById('edit-bkp-dest-unit')?.value || 'principal';
 
   const btn = document.getElementById('btn-submit-edit-backup') || event.target.querySelector('button[type="submit"]');
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
@@ -1121,6 +1129,7 @@ async function submitEditBackup(event) {
       password,
       cron,
       retention,
+      dest_unit,
     };
     if (proto === 'ssh' && _editBkpPort) {
       payload.port = _editBkpPort;
@@ -1436,11 +1445,75 @@ async function runStorageTrim() {
   }
 }
 
+let _currentDeviceInspection = null;
+
+async function onStorageDeviceChange() {
+  const sel = document.getElementById('stg-device');
+  const inspectBox = document.getElementById('stg-inspect-box');
+  const inspectDetails = document.getElementById('stg-inspect-details');
+  const confirmLabel = document.getElementById('stg-confirm-label');
+  const confirmInput = document.getElementById('stg-confirm');
+  const confirmHint = document.getElementById('stg-confirm-hint');
+
+  if (!sel || !sel.value) {
+    if (inspectBox) inspectBox.style.display = 'none';
+    _currentDeviceInspection = null;
+    return;
+  }
+
+  const dev = sel.value;
+  try {
+    if (inspectBox) {
+      inspectBox.style.display = 'block';
+      if (inspectDetails) inspectDetails.innerHTML = '<span style="color:var(--text-muted);">Inspeccionando particiones y firmas del disco...</span>';
+    }
+    const res = await apiFetch('/api/storage/inspect', {
+      method: 'POST',
+      body: JSON.stringify({ device: dev }),
+      silentToast: true,
+    });
+    const info = res.data || res;
+    _currentDeviceInspection = info;
+
+    let html = `<div>Dispositivo: <code>${escapeHtml(info.device || dev)}</code>`;
+    if (info.type) html += ` · Tipo: <strong>${escapeHtml(info.type)}</strong>`;
+    if (info.size) html += ` · Capacidad: <strong>${escapeHtml(info.size)}</strong>`;
+    html += '</div>';
+
+    if (info.has_data) {
+      html += `<div style="color:var(--accent-warning); margin-top:4px; font-weight:600;">⚠️ ATENCIÓN: El dispositivo contiene particiones o firmas preexistentes.</div>`;
+      if (info.signatures && info.signatures.length > 0) {
+        html += `<div style="margin-top:2px;">Firmas detectadas: <code>${info.signatures.map(s => escapeHtml(s.type || s.label || s.uuid || '')).filter(Boolean).join(', ')}</code></div>`;
+      }
+      if (info.partitions && info.partitions.length > 0) {
+        html += `<div style="margin-top:2px;">Particiones: ${info.partitions.map(p => `<code>${escapeHtml(p.name)} (${escapeHtml(p.size || '')})</code>`).join(', ')}</div>`;
+      }
+      html += `<div style="color:var(--accent-danger); margin-top:4px;">Se requiere escribir <strong>SI-DESTRUIR-DATOS</strong> para confirmar la eliminación irreversible.</div>`;
+      if (confirmLabel) confirmLabel.innerHTML = 'Confirmación obligatoria (escribe <code>SI-DESTRUIR-DATOS</code>):';
+      if (confirmInput) confirmInput.placeholder = 'SI-DESTRUIR-DATOS';
+      if (confirmHint) confirmHint.textContent = 'Este disco contiene datos. Escribe SI-DESTRUIR-DATOS para confirmar.';
+    } else {
+      html += `<div style="color:var(--accent-success-text); margin-top:4px;">✓ Dispositivo limpio sin firmas ni particiones previas detectadas.</div>`;
+      if (confirmLabel) confirmLabel.innerHTML = 'Confirmación (escribe <code>SI-FORMATEAR</code>):';
+      if (confirmInput) confirmInput.placeholder = 'SI-FORMATEAR';
+      if (confirmHint) confirmHint.textContent = 'Escribe SI-FORMATEAR para proceder.';
+    }
+    if (inspectDetails) inspectDetails.innerHTML = html;
+  } catch (err) {
+    if (inspectBox) inspectBox.style.display = 'block';
+    if (inspectDetails) inspectDetails.innerHTML = `<span style="color:var(--accent-warning);">No se pudo inspeccionar el dispositivo (${escapeHtml(err.message || 'error')}). Se aplicará verificación estricta.</span>`;
+  }
+}
+
 async function openStorageManage(preselectedDevice = null) {
+  openModal('modal-storage-manage');
+  const sel = document.getElementById('stg-device');
+  if (sel) {
+    sel.innerHTML = '<option value="">Cargando discos disponibles...</option>';
+  }
   try {
     const res = await apiFetch('/api/storage/disks');
     const disks = res.data?.disks || res.disks || [];
-    const sel = document.getElementById('stg-device');
     if (!sel) return;
 
     const usable = disks.filter(d => !d.protected);
@@ -1452,9 +1525,9 @@ async function openStorageManage(preselectedDevice = null) {
       }).join('')
       : '<option value="">(sin discos de datos disponibles)</option>';
     toggleStorageOp();
-    openModal('modal-storage-manage');
+    await onStorageDeviceChange();
   } catch (e) {
-    // Ya mostrado
+    showToast(e.message || 'Error al obtener la lista de discos.', 'error');
   }
 }
 
@@ -1466,28 +1539,46 @@ function toggleStorageOp() {
   const op = document.getElementById('stg-op').value;
   document.getElementById('stg-lvm-wrap').style.display = op === 'lvm' ? 'block' : 'none';
   document.getElementById('stg-subvol-wrap').style.display = op === 'subvolume' ? 'block' : 'none';
-  document.getElementById('stg-fs-wrap').style.display = op === 'subvolume' ? 'none' : 'block';
+  const unitWrap = document.getElementById('stg-unit-wrap');
+  if (unitWrap) unitWrap.style.display = op === 'add_unit' ? 'block' : 'none';
+  document.getElementById('stg-fs-wrap').style.display = (op === 'subvolume' || op === 'extend') ? 'none' : 'block';
 }
 
 async function submitStorageManage(event) {
   event.preventDefault();
   const op = document.getElementById('stg-op').value;
   const device = document.getElementById('stg-device').value;
-  const confirmText = document.getElementById('stg-confirm').value;
+  const confirmText = (document.getElementById('stg-confirm').value || '').trim();
   const fstype = document.getElementById('stg-fstype').value;
 
   if (!device) {
     showToast('No hay ningún disco de datos seleccionado.', 'warning');
     return;
   }
-  if (confirmText !== 'SI-FORMATEAR') {
-    showToast('Escribe SI-FORMATEAR para confirmar la operación.', 'warning');
+
+  const hasData = Boolean(_currentDeviceInspection?.has_data);
+  const validConfirms = ['SI-FORMATEAR', 'SI-DESTRUIR-DATOS'];
+  if (!validConfirms.includes(confirmText)) {
+    const required = hasData ? 'SI-DESTRUIR-DATOS' : 'SI-FORMATEAR';
+    showToast(`Escribe ${required} para confirmar la operación.`, 'warning');
     return;
   }
 
   let url = '/api/storage/format';
   let payload = { device, fstype, confirm: confirmText };
-  if (op === 'lvm') {
+
+  if (op === 'extend') {
+    url = '/api/storage/extend-pool';
+    payload = { device, confirm: confirmText };
+  } else if (op === 'add_unit') {
+    const unitId = (document.getElementById('stg-unit-id')?.value || '').trim();
+    if (!unitId || !/^[a-zA-Z0-9_-]{1,32}$/.test(unitId)) {
+      showToast('Ingresa un identificador válido para la unidad (1-32 caracteres alfanuméricos).', 'warning');
+      return;
+    }
+    url = '/api/storage/add-unit';
+    payload = { device, unit_id: unitId, fstype, confirm: confirmText };
+  } else if (op === 'lvm') {
     url = '/api/storage/lvm';
     payload = {
       disk: device,
@@ -1520,14 +1611,68 @@ async function submitStorageManage(event) {
         throw err;
       }
     }
-    showToast('Operación de almacenamiento completada.', 'success');
+    showToast('Operación de almacenamiento completada exitosamente.', 'success');
     closeModal('modal-storage-manage');
     document.getElementById('stg-confirm').value = '';
     loadStorage();
+    loadStorageUnits();
   } catch (e) {
     showToast(e.message || 'No se pudo completar la operación.', 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
+}
+
+let _storageUnitsData = [];
+
+async function loadStorageUnits() {
+  try {
+    const res = await apiFetch('/api/storage/units', { silentToast: true });
+    const units = res.data?.units || res.units || [];
+    _storageUnitsData = units;
+
+    // Poblar selector en modal-new-share
+    const shareUnitSel = document.getElementById('share-unit');
+    if (shareUnitSel) {
+      const curr = shareUnitSel.value || 'principal';
+      shareUnitSel.innerHTML = units.map(u => {
+        return `<option value="${escapeHtml(u.id)}" ${u.id === curr ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(u.path)})${u.total ? ' · ' + escapeHtml(u.used) + ' / ' + escapeHtml(u.total) : ''}</option>`;
+      }).join('');
+    }
+
+    // Poblar selectores en modal-new-backup y modal-edit-backup
+    const bkpDestSel = document.getElementById('bkp-dest-unit');
+    if (bkpDestSel) {
+      const curr = bkpDestSel.value || 'principal';
+      bkpDestSel.innerHTML = units.map(u => {
+        return `<option value="${escapeHtml(u.id)}" ${u.id === curr ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(u.path)})${u.total ? ' · ' + escapeHtml(u.used) + ' / ' + escapeHtml(u.total) : ''}</option>`;
+      }).join('');
+    }
+    const editBkpDestSel = document.getElementById('edit-bkp-dest-unit');
+    if (editBkpDestSel) {
+      const curr = editBkpDestSel.value || 'principal';
+      editBkpDestSel.innerHTML = units.map(u => {
+        return `<option value="${escapeHtml(u.id)}" ${u.id === curr ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(u.path)})${u.total ? ' · ' + escapeHtml(u.used) + ' / ' + escapeHtml(u.total) : ''}</option>`;
+      }).join('');
+    }
+
+    // Poblar optgroup en Explorador de Archivos
+    const filesUnitsOptgroup = document.getElementById('files-units-optgroup');
+    if (filesUnitsOptgroup) {
+      const additionalUnits = units.filter(u => u.id !== 'principal');
+      if (additionalUnits.length > 0) {
+        filesUnitsOptgroup.style.display = '';
+        filesUnitsOptgroup.innerHTML = additionalUnits.map(u => {
+          const rootKey = 'unidades/' + u.id;
+          return `<option value="${escapeHtml(rootKey)}">Unidad: ${escapeHtml(u.name)} (${escapeHtml(u.path)})</option>`;
+        }).join('');
+      } else {
+        filesUnitsOptgroup.style.display = 'none';
+        filesUnitsOptgroup.innerHTML = '';
+      }
+    }
+  } catch (e) {
+    // Silencioso
   }
 }
 
@@ -4868,6 +5013,17 @@ function initApp() {
   // Inicializar estado del explorador de archivos y papelera
   setFileViewMode(AppState.files.viewMode, false);
   updateTrashBadge();
+  loadStorageUnits();
+  initSystemNotifications();
+
+  // Cerrar drawer de notificaciones al hacer clic fuera
+  document.addEventListener('click', (e) => {
+    const drawer = document.getElementById('notifications-drawer');
+    const btn = document.getElementById('btn-notifications');
+    if (drawer && drawer.style.display !== 'none' && !drawer.contains(e.target) && !btn?.contains(e.target)) {
+      drawer.style.display = 'none';
+    }
+  });
 
   // Determinar vista inicial
   const hash = window.location.hash ? window.location.hash.slice(1) : '';
@@ -4885,6 +5041,127 @@ function initApp() {
       refreshDashboardMetrics();
     }
   }, 30000);
+}
+
+// ==============================================================================
+// 15. Notificaciones y Alertas Persistentes del Sistema
+// ==============================================================================
+let _systemNotifications = [];
+
+function initSystemNotifications() {
+  try {
+    const saved = localStorage.getItem('nas_system_notifications');
+    if (saved) {
+      _systemNotifications = JSON.parse(saved);
+    }
+  } catch (e) {}
+  renderSystemNotifications();
+}
+
+function toggleNotificationsDrawer() {
+  const drawer = document.getElementById('notifications-drawer');
+  if (!drawer) return;
+  const isHidden = (drawer.style.display === 'none' || !drawer.style.display);
+  drawer.style.display = isHidden ? 'block' : 'none';
+}
+
+function clearNotifications() {
+  _systemNotifications = [];
+  try {
+    localStorage.removeItem('nas_system_notifications');
+  } catch (e) {}
+  renderSystemNotifications();
+}
+
+function addSystemNotification(item) {
+  if (!item.id) item.id = 'notif_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+  if (!item.time) item.time = new Date().toLocaleTimeString();
+
+  const idx = _systemNotifications.findIndex(x => x.id === item.id);
+  if (idx >= 0) {
+    _systemNotifications[idx] = item;
+  } else {
+    _systemNotifications.unshift(item);
+  }
+  if (_systemNotifications.length > 25) {
+    _systemNotifications = _systemNotifications.slice(0, 25);
+  }
+  try {
+    localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
+  } catch (e) {}
+  renderSystemNotifications();
+}
+
+function renderSystemNotifications() {
+  const badge = document.getElementById('notifications-badge');
+  const list = document.getElementById('notifications-list');
+  const count = _systemNotifications.length;
+
+  if (badge) {
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+
+  if (list) {
+    if (count === 0) {
+      list.innerHTML = '<div style="text-align:center; padding:16px 0;">No hay notificaciones pendientes</div>';
+    } else {
+      list.innerHTML = _systemNotifications.map(n => {
+        const typeColor = n.type === 'danger' ? 'var(--accent-danger)' : (n.type === 'warning' ? 'var(--accent-warning)' : 'var(--accent-primary)');
+        return `
+          <div style="border-left:3px solid ${typeColor}; padding:6px 8px; background:rgba(255,255,255,0.03); border-radius:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong style="color:var(--text-primary); font-size:12px;">${escapeHtml(n.title)}</strong>
+              <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(n.time)}</span>
+            </div>
+            <div style="font-size:11px; margin-top:3px; color:var(--text-secondary);">${escapeHtml(n.message)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  renderSystemBanners();
+}
+
+function renderSystemBanners() {
+  const container = document.getElementById('system-banners');
+  if (!container) return;
+
+  const urgent = _systemNotifications.filter(n => n.sticky || n.type === 'danger' || n.type === 'warning');
+  if (urgent.length === 0) {
+    container.innerHTML = '';
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '8px';
+  container.innerHTML = urgent.map(n => {
+    const isDanger = n.type === 'danger';
+    const boxClass = isDanger ? 'alert-box-danger' : 'alert-box-warning';
+    const iconHref = isDanger ? '#icon-x-circle' : '#icon-alert-triangle';
+    return `
+      <div class="alert-box ${boxClass}" style="display:flex; justify-content:space-between; align-items:center; margin:0;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="${iconHref}"></use></svg>
+          <div>
+            <strong>${escapeHtml(n.title)}:</strong> <span>${escapeHtml(n.message)}</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-xs" onclick="dismissBanner('${escapeHtml(n.id)}')" style="padding:2px 8px; font-size:11px;">Entendido</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function dismissBanner(id) {
+  _systemNotifications = _systemNotifications.filter(n => n.id !== id);
+  try {
+    localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
+  } catch (e) {}
+  renderSystemNotifications();
 }
 
 if (document.readyState === 'loading') {
