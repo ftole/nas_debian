@@ -1566,6 +1566,15 @@ code, kbd, pre, samp {
   animation: modalIn 0.2s ease-out;
 }
 @keyframes modalIn { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes modalPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+.modal-dialog.modal-pulse,
+.modal-dialog-preview.modal-pulse {
+  animation: modalPulse 0.22s ease-in-out;
+}
 
 .modal-header {
   padding: 16px 22px;
