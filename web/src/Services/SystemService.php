@@ -274,6 +274,10 @@ class SystemService
             'ram_total_gb' => $memTotal,
             'ram_used_gb' => $memUsed,
             'ram_usage_pct' => $memTotal > 0 ? round(($memUsed / $memTotal) * 100, 1) : 0,
+            'server_time' => date('Y-m-d H:i:s'),
+            'server_timestamp' => time(),
+            'timezone' => date_default_timezone_get(),
+            'timezone_abbr' => date('T'),
         ];
     }
 
@@ -539,7 +543,7 @@ class SystemService
                 continue;
             }
 
-            $timestamp = $m[1];
+            $timestamp = $this->normalizeTimestamp($m[1]);
             $ip = $m[2];
             $user = $m[3];
             $action = $m[4];
@@ -1454,7 +1458,7 @@ class SystemService
         return function_exists('mb_strtolower') ? mb_strtolower($str, 'UTF-8') : strtolower($str);
     }
 
-    private function normalizeTimestamp(string $raw): string
+    public function normalizeTimestamp(string $raw): string
     {
         $trimmed = trim($raw);
         if (empty($trimmed)) {
@@ -1462,11 +1466,24 @@ class SystemService
         }
 
         if (preg_match('/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/', $trimmed)) {
+            $ts = strtotime($trimmed);
+            if ($ts !== false && $ts > time() + 300) {
+                $tzOffset = (int) date('Z');
+                if ($tzOffset < 0 && ($ts + $tzOffset) <= time() + 300) {
+                    return date('Y-m-d H:i:s', $ts + $tzOffset);
+                }
+            }
             return $trimmed;
         }
 
         $ts = strtotime($trimmed);
         if ($ts !== false && $ts > 0) {
+            if ($ts > time() + 300) {
+                $tzOffset = (int) date('Z');
+                if ($tzOffset < 0 && ($ts + $tzOffset) <= time() + 300) {
+                    return date('Y-m-d H:i:s', $ts + $tzOffset);
+                }
+            }
             return date('Y-m-d H:i:s', $ts);
         }
 
