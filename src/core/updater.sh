@@ -350,6 +350,31 @@ NTP_CONF
             systemctl restart systemd-timesyncd 2>/dev/null || true
         fi
     fi
+
+    # 9. Sincronizar zona horaria en la configuración de PHP (FPM y CLI)
+    local sys_tz php_pool_conf
+    sys_tz="$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo 'America/Mexico_City')"
+    [ -z "$sys_tz" ] && sys_tz="America/Mexico_City"
+    for _php_ini in /etc/php/*/fpm/php.ini /etc/php/*/cli/php.ini; do
+        if [ -f "$_php_ini" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$_php_ini" ]; }; then
+            sed -i "s|^;*date.timezone =.*|date.timezone = $sys_tz|" "$_php_ini" 2>/dev/null || true
+        fi
+    done
+    php_pool_conf="$(find /etc/php -maxdepth 4 -name 'nas-web.conf' 2>/dev/null | head -n1)"
+    if [ -n "$php_pool_conf" ] && [ -f "$php_pool_conf" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$php_pool_conf" ]; }; then
+        if grep -q "php_admin_value\[date.timezone\]" "$php_pool_conf"; then
+            sed -i "s|^php_admin_value\[date.timezone\].*|php_admin_value[date.timezone] = $sys_tz|" "$php_pool_conf" 2>/dev/null || true
+        else
+            echo "php_admin_value[date.timezone] = $sys_tz" >> "$php_pool_conf"
+        fi
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        local php_fpm_svc
+        php_fpm_svc="$(systemctl list-unit-files --type=service 'php*-fpm.service' 2>/dev/null | awk '/php.*-fpm/ {print $1; exit}')"
+        if [ -n "$php_fpm_svc" ]; then
+            systemctl reload "$php_fpm_svc" 2>/dev/null || systemctl restart "$php_fpm_svc" 2>/dev/null || true
+        fi
+    fi
 }
 
 actualizar_desde_git() {
