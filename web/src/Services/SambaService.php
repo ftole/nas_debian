@@ -738,26 +738,40 @@ class SambaService
      */
     public function auditShareAcls(string $name): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
-            return [
-                'success' => true,
-                'share' => $name,
-                'path' => '/srv/nas/' . $name,
-                'in_sync' => true,
-                'discrepancies' => [],
-                'expected_count' => 0,
-            ];
-        }
-
         $sections = $this->parseSmbConf();
         if (!isset($sections[$name])) {
-            return ['success' => false, 'share' => $name, 'path' => '', 'in_sync' => false, 'discrepancies' => ["El recurso [$name] no existe en smb.conf."], 'error' => "El recurso [$name] no existe en smb.conf."];
+            return [
+                'success' => false,
+                'share' => $name,
+                'path' => '',
+                'in_sync' => false,
+                'discrepancies' => ["El recurso [$name] no existe en smb.conf."],
+                'error' => "El recurso [$name] no existe en smb.conf.",
+            ];
         }
 
         $props = $sections[$name];
         $path = trim((string) ($props['path'] ?? ''));
         if ($path === '' || !str_starts_with($path, '/srv/nas')) {
-            return ['success' => false, 'share' => $name, 'path' => $path, 'in_sync' => false, 'discrepancies' => ['El recurso no apunta a una ruta administrada en /srv/nas.'], 'error' => 'El recurso no apunta a una ruta administrada en /srv/nas.'];
+            return [
+                'success' => false,
+                'share' => $name,
+                'path' => $path,
+                'in_sync' => false,
+                'discrepancies' => ['El recurso no apunta a una ruta administrada en /srv/nas.'],
+                'error' => 'El recurso no apunta a una ruta administrada en /srv/nas.',
+            ];
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [
+                'success' => true,
+                'share' => $name,
+                'path' => $path,
+                'in_sync' => true,
+                'discrepancies' => [],
+                'expected_count' => 0,
+            ];
         }
 
         if (!is_dir($path)) {
