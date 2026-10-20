@@ -278,6 +278,7 @@ class SystemService
             'server_timestamp' => time(),
             'timezone' => date_default_timezone_get(),
             'timezone_abbr' => date('T'),
+            'timezone_offset' => (int) date('Z'),
         ];
     }
 
@@ -648,7 +649,7 @@ class SystemService
                 $candSev = strtolower(trim($m5[5]));
                 // Formato de 5 corchetes: si el tercer grupo es IP válida o el quinto es severidad conocida
                 if (filter_var($candIp, FILTER_VALIDATE_IP) || in_array($candSev, $knownSeverities, true)) {
-                    $timestamp = $m5[1];
+                    $timestamp = $this->normalizeTimestamp($m5[1]);
                     $task = $m5[2];
                     if (filter_var($candIp, FILTER_VALIDATE_IP)) {
                         $ip = $candIp;
@@ -661,7 +662,7 @@ class SystemService
             }
 
             if (!$matched && preg_match('/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)$/', $trimmed, $m)) {
-                $timestamp = $m[1];
+                $timestamp = $this->normalizeTimestamp($m[1]);
                 $task = $m[2];
                 $event = $m[3];
                 $severity = strtolower(trim($m[4]));
