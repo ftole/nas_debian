@@ -706,13 +706,13 @@ class SystemService
                 $results = [];
 
                 foreach ($rawJournal as $j) {
+                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     if ($qLower !== null) {
-                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? ''));
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? ''));
                         if (!str_contains($searchable, $qLower)) {
                             continue;
                         }
                     }
-                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     $results[] = [
                         'source' => 'system',
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
@@ -744,13 +744,13 @@ class SystemService
                 $system = [];
                 $qLower = $query ? $this->toLower(trim($query)) : null;
                 foreach ($rawJournal as $j) {
+                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     if ($qLower !== null) {
-                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? ''));
+                        $searchable = $this->toLower(($j['unit'] ?? '') . ' ' . ($j['message'] ?? '') . ' ' . ($h['human'] ?? ''));
                         if (!str_contains($searchable, $qLower)) {
                             continue;
                         }
                     }
-                    $h = $this->humanizeSystemLog($j['unit'] ?? 'system', $j['message'] ?? '');
                     $system[] = [
                         'source' => 'system',
                         'timestamp' => $this->normalizeTimestamp($j['timestamp'] ?? ''),
@@ -791,13 +791,72 @@ class SystemService
 
         // Firewall UFW: bloques de paquetes y eventos de red
         if (stripos($m, 'UFW') !== false) {
-            $proto = preg_match('/PROTO=(\S+)/', $m, $p) ? strtoupper($p[1]) : '';
-            $src = preg_match('/SRC=(\S+)/', $m, $x) ? $x[1] : '?';
-            $dst = preg_match('/DST=(\S+)/', $m, $y) ? $y[1] : '?';
-            $spt = preg_match('/SPT=(\d+)/', $m, $w) ? $w[1] : '';
-            $dpt = preg_match('/DPT=(\d+)/', $m, $z) ? $z[1] : '';
-            $isBlock = stripos($m, 'BLOCK') !== false;
-            $accion = $isBlock ? 'Bloqueado' : ((stripos($m, 'ALLOW') !== false) ? 'Permitido' : 'Evento');
+            $isBlock = stripos($m, 'BLOCK') !== false || stripos($m, 'Bloqueado') !== false;
+            $accion = $isBlock ? 'Bloqueado' : ((stripos($m, 'ALLOW') !== false || stripos($m, 'Permitido') !== false) ? 'Permitido' : 'Evento');
+
+            // Helper para desacoplar puerto de IP cuando vienen combinados (ej. fe80:...:5678 o [fe80:...]:5678)
+            $splitIpPort = static function (string $rawIp, string $fallbackPort): array {
+                $rawIp = trim($rawIp);
+                $port = $fallbackPort;
+
+                // Si ya es una dirección IP válida (IPv4 o IPv6), mantenerla intacta
+                if (filter_var($rawIp, FILTER_VALIDATE_IP)) {
+                    return [$rawIp, $port];
+                }
+
+                if (preg_match('/^\[([a-fA-F0-9:]+)\]:(\d+)$/', $rawIp, $match)) {
+                    return [$match[1], $match[2]];
+                }
+                if (preg_match('/^(\d+\.\d+\.\d+\.\d+):(\d+)$/', $rawIp, $match)) {
+                    return [$match[1], $match[2]];
+                }
+                if (str_contains($rawIp, ':')) {
+                    $lastColon = strrpos($rawIp, ':');
+                    if ($lastColon !== false) {
+                        $possibleIp = substr($rawIp, 0, $lastColon);
+                        $possiblePort = substr($rawIp, $lastColon + 1);
+                        if (ctype_digit($possiblePort) && (int) $possiblePort >= 1 && (int) $possiblePort <= 65535) {
+                            if (filter_var($possibleIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                                return [$possibleIp, $possiblePort];
+                            }
+                            if (str_contains($possibleIp, ':0000')) {
+                                $condensed = (string) preg_replace('/:(?:0{1,4}:)+/', '::', $possibleIp, 1);
+                                if (filter_var($condensed, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                                    return [$condensed, $possiblePort];
+                                }
+                            }
+                        }
+                    }
+                }
+                return [$rawIp, $port];
+            };
+
+            // Lectura adaptable: formato sintetizado ([UFW] Bloqueado UDP de SRC:puerto → DST:puerto) o formato kernel (SRC=... DST=...)
+            if (preg_match('/\[UFW\]\s+(?:Bloqueado|Permitido|Evento)\s+(\w+)\s+de\s+(\S+)\s+(?:→|->)\s+(\S+)/iu', $m, $legacy)) {
+                $proto = strtoupper($legacy[1]);
+                $splitLegacy = static function (string $endpoint) use ($splitIpPort): array {
+                    if (str_contains($endpoint, ':')) {
+                        $lastColon = strrpos($endpoint, ':');
+                        if ($lastColon !== false) {
+                            $possiblePort = substr($endpoint, $lastColon + 1);
+                            if (ctype_digit($possiblePort) && (int) $possiblePort >= 1 && (int) $possiblePort <= 65535) {
+                                return [substr($endpoint, 0, $lastColon), $possiblePort];
+                            }
+                        }
+                    }
+                    return $splitIpPort($endpoint, '');
+                };
+                [$srcRaw, $spt] = $splitLegacy($legacy[2]);
+                [$dstRaw, $dpt] = $splitLegacy($legacy[3]);
+            } else {
+                $proto = preg_match('/PROTO=(\S+)/', $m, $p) ? strtoupper($p[1]) : '';
+                $rawSrc = preg_match('/SRC=(\S+)/', $m, $x) ? $x[1] : '?';
+                $rawDst = preg_match('/DST=(\S+)/', $m, $y) ? $y[1] : '?';
+                $spt = preg_match('/SPT=(\d+)/', $m, $w) ? $w[1] : '';
+                $dpt = preg_match('/DPT=(\d+)/', $m, $z) ? $z[1] : '';
+                [$srcRaw, $spt] = $splitIpPort($rawSrc, $spt);
+                [$dstRaw, $dpt] = $splitIpPort($rawDst, $dpt);
+            }
 
             // Normalización legible de direcciones IPv6 (comprime secuencias de ceros)
             $formatIp = static function (string $ip): string {
@@ -807,16 +866,37 @@ class SystemService
                         return (string) inet_ntop($packed);
                     }
                 }
+                if (str_contains($ip, ':0000')) {
+                    $condensed = (string) preg_replace('/:(?:0{1,4}:)+/', '::', $ip, 1);
+                    if (filter_var($condensed, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                        $packed = @inet_pton($condensed);
+                        if ($packed !== false) {
+                            return (string) inet_ntop($packed);
+                        }
+                    }
+                }
                 return $ip;
             };
 
-            $srcClean = $formatIp($src);
-            $dstClean = $formatIp($dst);
+            $srcClean = $formatIp($srcRaw);
+            $dstClean = $formatIp($dstRaw);
 
-            // Detección de naturaleza de red (multicast o broadcast)
-            $isMulticast = str_starts_with($dstClean, 'ff02:') || str_starts_with($dstClean, '224.') || str_starts_with($dstClean, '239.');
+            // Detección precisa de naturaleza de red (IPv6 Multicast, IPv4 Multicast o Broadcast)
+            $isIpv6Multi = str_starts_with($dstClean, 'ff02:') || str_starts_with($dstClean, 'ff00:') || str_starts_with($dstClean, 'ff01:') || str_starts_with($dstClean, 'ff05:');
+            $isIpv4Multi = str_starts_with($dstClean, '224.') || str_starts_with($dstClean, '239.');
             $isBroadcast = $dstClean === '255.255.255.255' || str_ends_with($dstClean, '.255');
-            $castType = $isMulticast ? ' [IPv6 Multicast]' : ($isBroadcast ? ' [Broadcast]' : '');
+            $castType = $isIpv6Multi ? ' [IPv6 Multicast]' : ($isIpv4Multi ? ' [IPv4 Multicast]' : ($isBroadcast ? ' [Broadcast]' : ''));
+
+            // Formateo estándar de extremos de red (RFC 3986 / RFC 5952 para IPv6 con puerto)
+            $formatEndpoint = static function (string $ip, string $port): string {
+                if ($port === '') {
+                    return $ip;
+                }
+                if (str_contains($ip, ':')) {
+                    return "[{$ip}]:{$port}";
+                }
+                return "{$ip}:{$port}";
+            };
 
             // Enriquecimiento semántico de servicios y protocolos de red
             $service = '';
@@ -840,14 +920,13 @@ class SystemService
                 $service = 'Acceso web HTTP/HTTPS';
             }
 
+            $origen = $formatEndpoint($srcClean, $spt);
+            $destino = $formatEndpoint($dstClean, $dpt);
+
             if ($service !== '') {
                 $verb = $isBlock ? 'Tráfico de red local descartado' : 'Tráfico de red permitido';
-                $origen = $srcClean . ($spt !== '' ? ':' . $spt : '');
-                $destino = $dstClean . ($dpt !== '' ? ':' . $dpt : '');
                 $human = "[Firewall UFW] {$verb}: {$service} ({$proto} {$origen} → {$destino})";
             } else {
-                $origen = $srcClean . ($spt !== '' ? ':' . $spt : '');
-                $destino = $dstClean . ($dpt !== '' ? ':' . $dpt : '');
                 $human = "[Firewall UFW] {$accion} {$proto} de {$origen} → {$destino}";
             }
 
