@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Core\AuthMiddleware;
 use App\Core\Request;
 use App\Core\Response;
 use App\Services\TerminalService;
@@ -23,34 +24,7 @@ class TerminalController
 
     private function isSuperAdminCaller(): bool
     {
-        $user = $_SESSION['nas_user'] ?? [];
-        if (!empty($user['is_superadmin']) || ($user['role'] ?? '') === 'superadmin') {
-            return true;
-        }
-
-        $username = strtolower(trim((string) ($user['username'] ?? '')));
-        if ($username === '') {
-            return false;
-        }
-
-        // Validación de pertenencia canónica contra /etc/nas/superadmin
-        if (is_readable('/etc/nas/superadmin')) {
-            $configuredSuper = strtolower(trim((string) @file_get_contents('/etc/nas/superadmin')));
-            if ($configuredSuper !== '' && $username === $configuredSuper) {
-                return true;
-            }
-        }
-
-        // Validación de pertenencia al grupo grp_superadmin
-        $grpRes = \App\Services\SystemService::runCommand(['id', '-Gn', $username]);
-        if ($grpRes['code'] === 0) {
-            $groups = preg_split('/\s+/', trim($grpRes['stdout']));
-            if (is_array($groups) && in_array('grp_superadmin', $groups, true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return AuthMiddleware::isSuperAdmin();
     }
 
     public function exec(Request $request): void
