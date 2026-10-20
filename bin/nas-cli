@@ -177,6 +177,53 @@ function ansiPad(string $str, int $targetWidth): string
     return $str . str_repeat(' ', $spacesNeeded);
 }
 
+function colorizeCell(string $colKey, string $val, array $row = []): string
+{
+    $vUpper = strtoupper(trim($val));
+    if ($colKey === 'status' || $colKey === 'ESTADO' || $colKey === 'last_status') {
+        if ($vUpper === 'SUCCESS' || $vUpper === 'OK' || $vUpper === 'EXITOSO') {
+            return CliTheme::GREEN . $val . CliTheme::RESET;
+        }
+        if ($vUpper === 'FAILED' || $vUpper === 'ERR' || $vUpper === 'ERROR' || $vUpper === 'FALLIDO' || $vUpper === 'BLOCK') {
+            return CliTheme::RED . $val . CliTheme::RESET;
+        }
+        if ($vUpper === 'WARN' || $vUpper === 'WARNING' || $vUpper === 'ADVERTENCIA') {
+            return CliTheme::YELLOW . $val . CliTheme::RESET;
+        }
+    }
+    if ($colKey === 'source' || $colKey === 'ORIGEN') {
+        if ($val === 'samba_audit' || $val === 'Samba') {
+            return CliTheme::MAGENTA . $val . CliTheme::RESET;
+        }
+        if ($val === 'admin' || $val === 'Admin') {
+            return CliTheme::CYAN . $val . CliTheme::RESET;
+        }
+        if ($val === 'backup' || $val === 'Backup') {
+            return CliTheme::GREEN . $val . CliTheme::RESET;
+        }
+        if ($val === 'system' || $val === 'Sistema') {
+            return CliTheme::GRAY . $val . CliTheme::RESET;
+        }
+    }
+    if ($colKey === 'severity' || $colKey === 'SEVERIDAD') {
+        if ($val === 'err' || $val === 'error') {
+            return CliTheme::RED . $val . CliTheme::RESET;
+        }
+        if ($val === 'warn' || $val === 'warning') {
+            return CliTheme::YELLOW . $val . CliTheme::RESET;
+        }
+        if ($val === 'notice' || $val === 'ok') {
+            return CliTheme::GREEN . $val . CliTheme::RESET;
+        }
+    }
+    // Contador anti-spam (xN) resaltado en amarillo brillante
+    if (preg_match('/\(x\d+\)$/', $val, $mCount)) {
+        $baseVal = substr($val, 0, -strlen($mCount[0]));
+        return $baseVal . CliTheme::YELLOW . CliTheme::BOLD . $mCount[0] . CliTheme::RESET;
+    }
+    return $val;
+}
+
 function renderTable(array $headers, array $rows): void
 {
     if (empty($rows)) {
@@ -223,7 +270,8 @@ function renderTable(array $headers, array $rows): void
             } elseif (is_bool($val)) {
                 $val = $val ? 'Sí' : 'No';
             }
-            $rowLine .= ansiPad((string) $val, $w);
+            $coloredVal = colorizeCell($colKey, (string) $val, $row);
+            $rowLine .= ansiPad($coloredVal, $w);
         }
         echo $rowLine . PHP_EOL;
     }
@@ -1443,6 +1491,7 @@ switch ($module) {
                     'timestamp' => 'FECHA / HORA',
                     'source'    => 'ORIGEN',
                     'user'      => 'USUARIO',
+                    'ip'        => 'IP ORIGEN',
                     'action'    => 'ACCIÓN',
                     'target'    => 'OBJETIVO',
                     'status'    => 'ESTADO',
@@ -1492,6 +1541,7 @@ switch ($module) {
                 renderTable([
                     'timestamp' => 'FECHA / HORA',
                     'task'      => 'TAREA',
+                    'ip'        => 'IP ORIGEN',
                     'event'     => 'EVENTO',
                     'severity'  => 'SEVERIDAD',
                     'message'   => 'MENSAJE',
@@ -1505,8 +1555,18 @@ switch ($module) {
                     outData($journal, true);
                 }
                 echo CliTheme::BOLD . "=== REGISTROS DE JOURNALD (SYSTEMD) ===" . CliTheme::RESET . PHP_EOL;
+                $reflection = new ReflectionClass($svc);
+                $humanizeMethod = $reflection->getMethod('humanizeSystemLog');
                 foreach ($journal as $line) {
-                    echo $line . PHP_EOL;
+                    if (is_array($line)) {
+                        $h = $humanizeMethod->invoke($svc, $line['unit'] ?? 'system', $line['message'] ?? '');
+                        $badge = ($h['level'] === 'warn' || $h['level'] === 'err') ? CliTheme::YELLOW : CliTheme::RESET;
+                        echo CliTheme::GRAY . "[" . ($line['timestamp'] ?? '') . "] " . CliTheme::RESET .
+                             CliTheme::CYAN . "[" . ($line['unit'] ?? 'system') . "] " . CliTheme::RESET .
+                             $badge . $h['human'] . CliTheme::RESET . PHP_EOL;
+                    } else {
+                        echo $line . PHP_EOL;
+                    }
                 }
                 break;
 
