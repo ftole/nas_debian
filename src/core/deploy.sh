@@ -1253,18 +1253,24 @@ if systemctl list-unit-files --type=service 'rsyslog.service' 2>/dev/null | grep
     systemctl restart rsyslog 2>/dev/null || true
 fi
 
-# Sincronización horaria (NTP) y RTC en UTC
+# Sincronización horaria (NTP) y RTC en UTC (systemd-timesyncd / chrony)
 if command -v timedatectl >/dev/null 2>&1; then
     timedatectl set-local-rtc 0 2>/dev/null || true
     timedatectl set-ntp true 2>/dev/null || true
 fi
-if [ -d /etc/systemd ]; then
+if systemctl is-active --quiet chrony 2>/dev/null || systemctl is-active --quiet chronyd 2>/dev/null; then
+    if command -v chronyc >/dev/null 2>&1; then
+        chronyc makestep 2>/dev/null || true
+    fi
+elif [ -d /etc/systemd ]; then
     mkdir -p /etc/systemd/timesyncd.conf.d
     cat << 'NTP_CONF' > /etc/systemd/timesyncd.conf.d/10-nas-ntp.conf
 [Time]
 NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org pool.ntp.org time.google.com
 FallbackNTP=0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com
 NTP_CONF
+    systemctl unmask systemd-timesyncd 2>/dev/null || true
+    systemctl enable systemd-timesyncd 2>/dev/null || true
     systemctl restart systemd-timesyncd 2>/dev/null || true
 fi
 
