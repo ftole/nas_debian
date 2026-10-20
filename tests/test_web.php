@@ -2212,6 +2212,66 @@ foreach (glob($bkpOriginDir . '/*') ?: [] as $f) {
 }
 @rmdir($bkpOriginDir);
 
+// ==============================================================================
+// 29. Confinamiento de Terminal a Superadmin y Humanización Firewall UFW
+// ==============================================================================
+
+// TerminalController exige privilegios estrictos de superadministrador
+$_SESSION['nas_user'] = [
+    'username' => 'admin_standar',
+    'is_admin' => true,
+    'is_superadmin' => false,
+    'role' => 'admin',
+];
+$termCtrlStrict = new TerminalController($termSvc);
+ob_start();
+$termCtrlStrict->exec($reqOperatorManage);
+$rawAdminTerm = ob_get_clean();
+$adminTermResp = json_decode($rawAdminTerm, true);
+assertTrue(is_array($adminTermResp) && empty($adminTermResp['success']) && str_contains($adminTermResp['error'] ?? '', 'superadministrador'),
+    'TerminalController::exec rechaza administrador normal con 403 (solo superadmin)');
+
+// Superadministrador tiene acceso concedido
+$_SESSION['nas_user'] = [
+    'username' => 'super_root',
+    'is_admin' => true,
+    'is_superadmin' => true,
+    'role' => 'superadmin',
+];
+ob_start();
+$termCtrlStrict->exec($reqOperatorManage);
+$rawSuperTerm = ob_get_clean();
+$superTermResp = json_decode($rawSuperTerm, true);
+assertTrue(is_array($superTermResp) && !empty($superTermResp['success']),
+    'TerminalController::exec autoriza a superadministrador');
+
+// AuthMiddleware::isSuperAdmin reconoce superadmin y rechaza admin u operador
+assertTrue(AuthMiddleware::isSuperAdmin(), 'AuthMiddleware::isSuperAdmin reconoce superadmin');
+$_SESSION['nas_user']['is_superadmin'] = false;
+$_SESSION['nas_user']['role'] = 'admin';
+assertTrue(!AuthMiddleware::isSuperAdmin(), 'AuthMiddleware::isSuperAdmin rechaza admin regular');
+
+// AuthMiddleware::check bloquea rutas de terminal a usuarios no superadmin
+$_SERVER['REQUEST_URI'] = '/api/terminal/session';
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['HTTP_ACCEPT'] = 'application/json';
+$_POST = ['csrf_token' => AuthMiddleware::getCsrfToken()];
+$reqTermBlocked = new Request();
+ob_start();
+$resMwBlocked = AuthMiddleware::check($reqTermBlocked);
+$rawMwOut = ob_get_clean();
+$mwJson = json_decode($rawMwOut, true);
+assertTrue(!$resMwBlocked && is_array($mwJson) && empty($mwJson['success']) && str_contains($mwJson['error'] ?? '', 'superadministrador'),
+    'AuthMiddleware::check bloquea /api/terminal/session ante admin regular con 403');
+
+// Humanización de logs UFW para MNDP MikroTik (UDP 5678)
+$ufwRawMndp = '[UFW BLOCK] IN=eth0 OUT= MAC=01:00:5e:00:00:01 SRC=fe80:0000:0000:0000:f61e:57ff:fe0c:31ac DST=ff02:0000:0000:0000:0000:0000:0001:5678 PROTO=UDP SPT=5678 DPT=5678';
+$reflection = new ReflectionClass(SystemService::class);
+$humanizeMethod = $reflection->getMethod('humanizeSystemLog');
+$humanLog = $humanizeMethod->invoke(new SystemService(), 'kernel', $ufwRawMndp);
+assertTrue(str_contains($humanLog['human'], 'MikroTik MNDP') && str_contains($humanLog['human'], 'fe80::f61e:57ff:fe0c:31ac'),
+    'SystemService::humanizeSystemLog traduce y enriquece log UFW de MikroTik MNDP con IPv6 comprimida');
+
 echo "\n==================================================\n";
 echo "RESULTADO: $passed pasadas, $failed fallidas.\n";
 echo "==================================================\n";
