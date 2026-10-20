@@ -333,7 +333,11 @@ SYSCTL_IPV6_EOF
         timedatectl set-local-rtc 0 2>/dev/null || true
         timedatectl set-ntp true 2>/dev/null || true
     fi
-    if [ -d /etc/systemd ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/systemd ]; }; then
+    if systemctl is-active --quiet chrony 2>/dev/null || systemctl is-active --quiet chronyd 2>/dev/null; then
+        if command -v chronyc >/dev/null 2>&1; then
+            chronyc makestep 2>/dev/null || true
+        fi
+    elif [ -d /etc/systemd ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w /etc/systemd ]; }; then
         mkdir -p /etc/systemd/timesyncd.conf.d 2>/dev/null || true
         cat << 'NTP_CONF' > /etc/systemd/timesyncd.conf.d/10-nas-ntp.conf
 [Time]
@@ -341,6 +345,8 @@ NTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org pool.ntp.o
 FallbackNTP=0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com
 NTP_CONF
         if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            systemctl unmask systemd-timesyncd 2>/dev/null || true
+            systemctl enable systemd-timesyncd 2>/dev/null || true
             systemctl restart systemd-timesyncd 2>/dev/null || true
         fi
     fi
