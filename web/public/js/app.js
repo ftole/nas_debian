@@ -1899,13 +1899,16 @@ async function loadLogs() {
     tbody.innerHTML = logs.map(l => {
       const srcBadge = matchSourceBadge(l.source);
       const userText = l.user || l.task || 'sistema';
-      const ipText = l.ip ? `<span class="table-logs-ip">${escapeHtml(l.ip)}</span>` : '';
+      const ipText = l.ip ? `<span class="table-logs-ip"><code>${escapeHtml(l.ip)}</code></span>` : '';
       const actionLabel = l.action_label || l.event_label || l.action || l.event || l.unit || 'registro';
       const badgeType = l.badge || 'blue';
       const targetText = l.target || l.task || l.unit || '-';
       const status = (l.status || 'OK').toUpperCase();
-      const statusBadge = (status === 'SUCCESS' || status === 'OK') ? 'badge-ok' : (status === 'FAILED' || status === 'ERR' ? 'badge-err' : 'badge-warn');
+      const statusBadge = (status === 'SUCCESS' || status === 'OK' || status === 'ALLOW') ? 'badge-ok' : ((status === 'FAILED' || status === 'ERR' || status === 'BLOCK') ? 'badge-err' : 'badge-warn');
       const isSystem = l.source === 'system';
+      const countBadge = (l.count && l.count > 1)
+        ? `<span class="badge badge-antispam" title="Evento idéntico repetido ${l.count} veces">x${l.count}</span>`
+        : '';
       const details = (isSystem && l.human)
         ? l.human
         : (l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-'));
@@ -1915,7 +1918,7 @@ async function loadLogs() {
           <td class="table-logs-timestamp"><code>${escapeHtml(l.timestamp || '-')}</code></td>
           <td>${srcBadge}</td>
           <td><span class="table-logs-user">${escapeHtml(userText)}</span>${ipText}</td>
-          <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span></td>
+          <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span>${countBadge}</td>
           <td class="table-logs-target"><code>${escapeHtml(targetText)}</code></td>
           <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
           <td class="${isSystem ? 'table-logs-details log-system' : 'table-logs-details'}">${escapeHtml(details)}</td>
@@ -1953,10 +1956,11 @@ function exportOrCopyLogs() {
     const src = (l.source || 'system').toUpperCase();
     const user = l.user || l.task || 'sistema';
     const ip = l.ip || '-';
-    const action = l.action_label || l.event_label || l.action || '-';
+    const countStr = (l.count && l.count > 1) ? ` [x${l.count}]` : '';
+    const action = (l.action_label || l.event_label || l.action || '-') + countStr;
     const target = l.target || '-';
     const status = l.status || 'OK';
-    const msg = l.message || (l.details ? JSON.stringify(l.details) : '-');
+    const msg = l.human || l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : '-');
     return `[${ts}] [${src}] [${user}@${ip}] [${action}] [${target}] [${status}] ${msg}`;
   });
 
