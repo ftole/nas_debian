@@ -2577,13 +2577,36 @@ file_put_contents($tmpAuditSmb, "[global]\nworkgroup = TEAM-JOFRATO\n\n[AUDIT_SH
 $sambaAuditSvc = new SambaService($tmpAuditSmb);
 
 $auditMissing = $sambaAuditSvc->auditShareAcls('NO_EXISTE');
-assertTrue(!$auditMissing['success'] || !$auditMissing['in_sync'], 'SambaService::auditShareAcls reporta error o fuera de sincronía para recurso inexistente');
+assertTrue(!$auditMissing['success'], 'SambaService::auditShareAcls reporta success=false para recurso inexistente');
+assertTrue(!$auditMissing['in_sync'], 'SambaService::auditShareAcls reporta in_sync=false para recurso inexistente');
 
 $auditSingle = $sambaAuditSvc->auditShareAcls('AUDIT_SHARE');
 assertTrue(isset($auditSingle['in_sync']) && isset($auditSingle['discrepancies']), 'SambaService::auditShareAcls devuelve campos in_sync y discrepancies');
 
 $auditAll = $sambaAuditSvc->auditAcls();
 assertTrue(isset($auditAll['shares']) && isset($auditAll['total']) && isset($auditAll['out_of_sync_count']), 'SambaService::auditAcls devuelve resumen estructurado');
+
+// Recuperación de credenciales previas en testConnection
+@mkdir($bkpTestSvc->credDir, 0700, true);
+file_put_contents($bkpTestSvc->credDir . '/test_conn_cred.cred', "username=AdminCorp\npassword=SecretPass123\ndomain=CORP\n");
+$testConnRes = $bkpTestSvc->testConnection(['task_id' => 'test_conn_cred', 'proto' => 'cifs', 'ip' => '10.10.1.50', 'share' => 'Ventas']);
+assertTrue(!empty($testConnRes['success']), 'BackupService::testConnection recupera credenciales almacenadas si password viene vacío');
+@unlink($bkpTestSvc->credDir . '/test_conn_cred.cred');
+
+// Rechazo de updateTask si la tarea está en curso
+$runningMockSvc = new class extends BackupService {
+    public function getTaskStatus(string $taskId): string {
+        return 'running';
+    }
+};
+$runningMockSvc->binDir = $bkpTestSvc->binDir;
+$runningMockSvc->cronDir = $bkpTestSvc->cronDir;
+$runningMockSvc->credDir = $bkpTestSvc->credDir;
+@mkdir($runningMockSvc->binDir, 0755, true);
+file_put_contents($runningMockSvc->binDir . '/backup_tarea_en_curso.sh', "#!/bin/bash\n");
+$updRunningRes = $runningMockSvc->updateTask('tarea_en_curso', ['proto' => 'cifs', 'ip' => '10.10.1.50', 'share' => 'Ventas']);
+assertTrue(empty($updRunningRes['success']) && str_contains($updRunningRes['error'] ?? '', 'ejecución'), 'BackupService::updateTask rechaza actualización si la tarea se encuentra en ejecución');
+@unlink($runningMockSvc->binDir . '/backup_tarea_en_curso.sh');
 
 // 27.5 SambaController::auditAccess
 $sambaCtrlTest = new \App\Controllers\SambaController();
@@ -2597,6 +2620,9 @@ assertTrue(!empty($jsonAuditAcc) && !empty($jsonAuditAcc['success']) && isset($j
 // 27.6 Verificaciones de Modales y Scripts en Frontend
 assertTrue(str_contains($layoutSrc, 'id="modal-edit-backup"'), 'layout.php contiene modal #modal-edit-backup');
 assertTrue(str_contains($layoutSrc, 'id="modal-zip-backup-warning"'), 'layout.php contiene modal #modal-zip-backup-warning');
+assertTrue(str_contains($layoutSrc, 'modal-backdrop modal-static" id="modal-zip-backup-warning"'), 'layout.php protege #modal-zip-backup-warning con modal-static');
+assertTrue(str_contains($layoutSrc, 'modal-backdrop modal-static" id="modal-delete-file"'), 'layout.php protege #modal-delete-file con modal-static');
+assertTrue(str_contains($layoutSrc, 'modal-backdrop modal-static" id="modal-edit-backup"'), 'layout.php protege #modal-edit-backup con modal-static');
 assertTrue(str_contains($layoutSrc, 'id="edit-bkp-id"'), 'layout.php contiene campo edit-bkp-id para edicion');
 assertTrue(str_contains($layoutSrc, 'id="edit-bkp-proto"'), 'layout.php contiene selector edit-bkp-proto');
 
