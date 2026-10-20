@@ -179,6 +179,11 @@ function switchView(viewName, updateHash = true) {
     viewName = 'dashboard';
   }
 
+  // La terminal web está confinada exclusivamente al superadministrador.
+  if (viewName === 'terminal' && window.NAS_IS_SUPER !== true) {
+    viewName = 'dashboard';
+  }
+
   AppState.activeView = viewName;
 
   if (updateHash && window.location.hash !== '#' + viewName) {
