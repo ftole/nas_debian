@@ -152,6 +152,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
       <symbol id="icon-restore" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></symbol>
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></symbol>
       <symbol id="icon-presentation" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="6" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="14" y2="12"/></symbol>
+      <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
     </defs>
   </svg>
 
@@ -199,6 +200,21 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         <span class="btn-text-responsive">Reiniciar</span>
       </button>
 <?php endif; ?>
+      <div class="notifications-wrapper" style="position:relative; display:inline-block;">
+        <button class="btn btn-secondary btn-sm" id="btn-notifications" onclick="toggleNotificationsDrawer()" title="Notificaciones del sistema" style="position:relative;">
+          <svg class="icon"><use href="#icon-bell"></use></svg>
+          <span class="badge badge-danger" id="notifications-badge" style="display:none; position:absolute; top:-4px; right:-4px; padding:1px 5px; font-size:10px; border-radius:10px; min-width:16px; text-align:center;">0</span>
+        </button>
+        <div id="notifications-drawer" class="notifications-drawer" style="display:none; position:absolute; right:0; top:calc(100% + 8px); width:320px; max-height:400px; overflow-y:auto; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,0.4); z-index:1050; padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid var(--border-color); padding-bottom:6px;">
+            <strong style="font-size:13px;">Notificaciones</strong>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="clearNotifications()" style="font-size:10px; padding:2px 6px;">Limpiar</button>
+          </div>
+          <div id="notifications-list" style="font-size:12px; color:var(--text-muted); display:flex; flex-direction:column; gap:6px;">
+            <div style="text-align:center; padding:16px 0;">No hay notificaciones pendientes</div>
+          </div>
+        </div>
+      </div>
       <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" onclick="refreshDashboardMetrics()" title="Refrescar métricas del servidor">
         <svg class="icon" id="icon-refresh-metrics"><use href="#icon-refresh"></use></svg>
       </button>
@@ -355,6 +371,9 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
          ÁREA DE CONTENIDO PRINCIPAL
          ============================================================================== -->
     <main class="main-content">
+
+      <!-- Contenedor de Alertas y Banners Persistentes del Sistema -->
+      <div id="system-banners" class="system-banners-container" style="margin-bottom:16px;"></div>
 
       <!-- 1. VISTA GENERAL (DASHBOARD) -->
       <section id="view-dashboard" class="view-section <?= $activeView === 'dashboard' ? 'active' : '' ?>">
@@ -797,6 +816,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                   <?php if ($serverRole !== 'ARCHIVOS'): ?>
                   <option value="backups">Repositorio de Backups (/srv/nas/BACKUPS_HISTORICOS)</option>
                   <?php endif; ?>
+                  <optgroup label="Unidades Adicionales" id="files-units-optgroup" style="display:none;"></optgroup>
                 </select>
               </div>
               <div class="file-breadcrumbs" id="files-breadcrumbs">
@@ -1305,6 +1325,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <small>Usa mayúsculas recomendadas sin espacios.</small>
           </div>
           <div class="form-group">
+            <label for="share-unit">Unidad de almacenamiento:</label>
+            <select id="share-unit" name="unit">
+              <option value="principal">Unidad Principal (/srv/nas)</option>
+            </select>
+            <small>Unidad física donde residirá el almacenamiento de la carpeta compartida.</small>
+          </div>
+          <div class="form-group">
             <label for="share-comment">Descripción / Comentario:</label>
             <input type="text" id="share-comment" placeholder="ej. Documentos contables y fiscales">
           </div>
@@ -1415,6 +1442,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </select>
           </div>
           <div class="form-group">
+            <label for="bkp-dest-unit">Unidad de destino para respaldos:</label>
+            <select id="bkp-dest-unit" name="dest_unit">
+              <option value="principal">Unidad Principal (/srv/nas/BACKUPS_HISTORICOS)</option>
+            </select>
+            <small>Unidad física donde se almacenarán los snapshots y versiones del respaldo.</small>
+          </div>
+          <div class="form-group">
             <label for="bkp-ip">Dirección IP o Nombre del Host Remoto:</label>
             <input type="text" id="bkp-ip" required placeholder="ej. 10.10.1.50">
           </div>
@@ -1478,6 +1512,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </select>
           </div>
           <div class="form-group">
+            <label for="edit-bkp-dest-unit">Unidad de destino para respaldos:</label>
+            <select id="edit-bkp-dest-unit" name="dest_unit">
+              <option value="principal">Unidad Principal (/srv/nas/BACKUPS_HISTORICOS)</option>
+            </select>
+            <small>Unidad física donde se almacenarán los snapshots y versiones del respaldo.</small>
+          </div>
+          <div class="form-group">
             <label for="edit-bkp-ip">Dirección IP o Nombre del Host Remoto:</label>
             <input type="text" id="edit-bkp-ip" required placeholder="ej. 10.10.1.50">
           </div>
@@ -1532,20 +1573,31 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-body">
         <div class="alert-box alert-box-warning">
           <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
-          <span>Operación destructiva. El disco del sistema está protegido y no se lista. Escribe <code>SI-FORMATEAR</code> para confirmar. Si el disco (o <code>/srv/nas</code>) está montado, se te ofrecerá desmontarlo antes de continuar.</span>
+          <span>Operación de almacenamiento. El disco del sistema operativo está protegido y no se lista. Si el disco contiene datos existentes, se requerirá escribir <code>SI-DESTRUIR-DATOS</code>. Si el disco o <code>/srv/nas</code> está montado, se solicitará confirmación previa.</span>
         </div>
         <form id="form-storage-manage" onsubmit="submitStorageManage(event)">
           <div class="form-group">
             <label for="stg-op">Operación:</label>
             <select id="stg-op" onchange="toggleStorageOp()">
-              <option value="format">Formatear y montar en /srv/nas (ext4/Btrfs)</option>
-              <option value="lvm">Crear volumen LVM (PV/VG/LV) y montar</option>
+              <option value="format">Formatear unidad principal y montar en /srv/nas (ext4/Btrfs)</option>
+              <option value="extend">Opción A: Sumar al Pool LVM/Btrfs existente</option>
+              <option value="add_unit">Opción B: Nueva Unidad Adicional independiente (/srv/nas/unidades/&lt;id&gt;)</option>
+              <option value="lvm">Crear nuevo volumen LVM (PV/VG/LV) y montar</option>
               <option value="subvolume">Crear subvolumen Btrfs</option>
             </select>
           </div>
           <div class="form-group">
             <label for="stg-device">Disco / partición (/dev/...):</label>
-            <select id="stg-device"></select>
+            <select id="stg-device" onchange="onStorageDeviceChange()"></select>
+          </div>
+          <div id="stg-inspect-box" style="display:none; margin:10px 0; padding:10px; border-radius:6px; font-size:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-color);">
+            <div style="font-weight:600; margin-bottom:4px;" id="stg-inspect-title">Inspección del dispositivo:</div>
+            <div id="stg-inspect-details" style="color:var(--text-muted);"></div>
+          </div>
+          <div class="form-group" id="stg-unit-wrap" style="display:none;">
+            <label for="stg-unit-id">Identificador de la unidad (ej. disco2, extra, multimedia):</label>
+            <input type="text" id="stg-unit-id" placeholder="disco2" pattern="[a-zA-Z0-9_-]+" autocomplete="off">
+            <small style="display:block; color:var(--text-muted); margin-top:4px;">Se montará en <code>/srv/nas/unidades/&lt;id&gt;</code> con fstab (UUID, nofail, noatime) y permisos <code>2770 root:grp_samba</code>.</small>
           </div>
           <div class="form-group" id="stg-fs-wrap">
             <label for="stg-fstype">Sistema de archivos:</label>
@@ -1564,8 +1616,9 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="stg-subvol" value="datos" pattern="[a-zA-Z0-9._-]+">
           </div>
           <div class="form-group">
-            <label for="stg-confirm">Confirmación (escribe SI-FORMATEAR):</label>
+            <label for="stg-confirm" id="stg-confirm-label">Confirmación (escribe SI-FORMATEAR):</label>
             <input type="text" id="stg-confirm" placeholder="SI-FORMATEAR" autocomplete="off">
+            <small id="stg-confirm-hint" style="display:block; color:var(--text-muted); margin-top:4px;"></small>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-manage')">Cancelar</button>
