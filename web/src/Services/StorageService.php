@@ -53,11 +53,19 @@ class StorageService
             // Detección de HDD vs SSD
             $devRes = SystemService::runCommand(['findmnt', '-n', '-o', 'SOURCE', $path]);
             if ($devRes['code'] === 0 && !empty($devRes['stdout'])) {
-                $dev = basename(trim($devRes['stdout']));
-                $diskBase = preg_replace('/[0-9p]+$/', '', $dev);
-                $rotPath = "/sys/block/$diskBase/queue/rotational";
-                if (file_exists($rotPath)) {
-                    $isHdd = trim((string) file_get_contents($rotPath)) === '1';
+                $rawDev = trim($devRes['stdout']);
+                // Detección directa mediante lsblk ROTA (0 = no rotacional / SSD, 1 = HDD)
+                $rotaRes = SystemService::runCommand(['lsblk', '-n', '-o', 'ROTA', $rawDev]);
+                if ($rotaRes['code'] === 0 && trim($rotaRes['stdout']) !== '') {
+                    $firstRota = trim(explode("\n", trim($rotaRes['stdout']))[0]);
+                    $isHdd = ($firstRota === '1');
+                } else {
+                    $dev = basename($rawDev);
+                    $diskBase = preg_replace('/[0-9p]+$/', '', $dev);
+                    $rotPath = "/sys/block/$diskBase/queue/rotational";
+                    if (file_exists($rotPath)) {
+                        $isHdd = trim((string) file_get_contents($rotPath)) === '1';
+                    }
                 }
             }
         } else {
@@ -822,7 +830,7 @@ class StorageService
         }
 
         // 2. Comprobar si ya hay un proceso fstrim en ejecución
-        $pgrep = SystemService::runCommand(['pgrep', '-f', 'fstrim']);
+        $pgrep = SystemService::runCommand(['pgrep', '-x', 'fstrim']);
         if ($pgrep['code'] === 0 && trim((string) $pgrep['stdout']) !== '') {
             return [
                 'success' => false,
@@ -843,9 +851,9 @@ class StorageService
 
         $out = trim((string) $res['stdout']);
         $bytesFreed = '';
-        if (preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+\(([0-9]+)\s+bytes\)\s+trimmed/i', $out, $m)) {
+        if (preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+\(([0-9]+)\s+bytes\)/i', $out, $m)) {
             $bytesFreed = $m[1] . " ({$m[2]} bytes)";
-        } elseif (preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)\s+trimmed/i', $out, $m)) {
+        } elseif (preg_match('/:\s+([0-9.]+\s+[A-Za-z]+)/i', $out, $m)) {
             $bytesFreed = $m[1];
         } else {
             $bytesFreed = $out;
