@@ -2640,6 +2640,44 @@ assertTrue(str_contains($appJsSrc, 'modal-pulse'), 'app.js aplica efecto modal-p
 assertTrue(str_contains($appJsSrc, 'modal-static'), 'app.js protege modales con clase .modal-static');
 assertTrue(str_contains($appJsSrc, '/api/shares/access/audit'), 'app.js audita previamente en repairAcls');
 
+// 28. Pruebas de Almacenamiento Inteligente (Btrfs Scrub, SSD TRIM) y Unificación de Vistas
+$storageCtrlTest = new \App\Controllers\StorageController();
+$reqDisks = new Request();
+ob_start();
+$storageCtrlTest->disks($reqDisks);
+$outDisks = ob_get_clean();
+$jsonDisks = json_decode((string) $outDisks, true);
+assertTrue(!empty($jsonDisks) && !empty($jsonDisks['success']) && isset($jsonDisks['data']['disks']) && isset($jsonDisks['data']['overview']), 'StorageController::disks devuelve discos y overview de almacenamiento');
+
+$storageSvcTest = new StorageService();
+$scrubExt4 = $storageSvcTest->startBtrfsScrub('/srv/ext4_mock');
+assertTrue(empty($scrubExt4['success']) && empty($scrubExt4['is_btrfs']) && str_contains($scrubExt4['error'] ?? '', 'Bit Rot'), 'StorageService::startBtrfsScrub rechaza sistemas de archivos ext4 y explica protección contra Bit Rot');
+
+$scrubBtrfs = $storageSvcTest->startBtrfsScrub('/srv/nas');
+assertTrue(!empty($scrubBtrfs['success']) && !empty($scrubBtrfs['is_btrfs']) && !empty($scrubBtrfs['running']), 'StorageService::startBtrfsScrub autoriza y arranca en sistemas Btrfs');
+
+$trimHdd = $storageSvcTest->runTrim('/srv/hdd_mock');
+assertTrue(empty($trimHdd['success']) && empty($trimHdd['is_ssd']) && str_contains($trimHdd['error'] ?? '', 'mecánico'), 'StorageService::runTrim rechaza discos mecánicos HDD y explica preservación de celdas flash');
+
+$trimSsd = $storageSvcTest->runTrim('/srv/nas');
+assertTrue(!empty($trimSsd['success']) && !empty($trimSsd['is_ssd']) && isset($trimSsd['bytes_trimmed']), 'StorageService::runTrim reporta bytes liberados en SSD');
+
+// Verificaciones de unificación de vistas en layout.php
+assertTrue(str_contains($layoutSrc, 'id="view-services"'), 'layout.php contiene la vista unificada view-services');
+assertTrue(str_contains($layoutSrc, 'id="view-applications"'), 'layout.php contiene la vista unificada view-applications');
+assertTrue(str_contains($layoutSrc, 'id="view-diagnostics" style="display:none;"'), 'layout.php preserva contenedor view-diagnostics oculto por compatibilidad');
+assertTrue(str_contains($layoutSrc, 'id="view-updates" style="display:none;"'), 'layout.php preserva contenedor view-updates oculto por compatibilidad');
+assertTrue(str_contains($layoutSrc, 'id="btn-scrub-storage"'), 'layout.php contiene botón inteligente de auditoría BTRFS Scrub');
+assertTrue(str_contains($layoutSrc, 'id="btn-trim-storage"'), 'layout.php contiene botón inteligente de optimización SSD TRIM');
+
+// Verificaciones de frontend app.js
+assertTrue(str_contains($appJsSrc, "viewName === 'diagnostics'"), 'app.js redirige vista diagnostics hacia services unificada');
+assertTrue(str_contains($appJsSrc, "viewName === 'updates'"), 'app.js redirige vista updates hacia applications unificada');
+assertTrue(str_contains($appJsSrc, 'pollBtrfsScrubProgress'), 'app.js implementa sondeo de progreso de BTRFS scrub');
+assertTrue(str_contains($appJsSrc, 'openStorageManage'), 'app.js define función openStorageManage con soporte para modal-format-disk');
+assertTrue(str_contains($appJsSrc, 'openFormatDisk'), 'app.js define función openFormatDisk como alias de openStorageManage');
+
+
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
 @rmdir($bkpTestSvc->binDir);
