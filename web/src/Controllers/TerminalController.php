@@ -21,17 +21,42 @@ class TerminalController
         $this->terminalService = $service ?? new TerminalService();
     }
 
-    private function isAdminCaller(): bool
+    private function isSuperAdminCaller(): bool
     {
-        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
-        return !empty($_SESSION['nas_user']['is_admin'])
-            || in_array($role, ['admin', 'superadmin'], true);
+        $user = $_SESSION['nas_user'] ?? [];
+        if (!empty($user['is_superadmin']) || ($user['role'] ?? '') === 'superadmin') {
+            return true;
+        }
+
+        $username = strtolower(trim((string) ($user['username'] ?? '')));
+        if ($username === '') {
+            return false;
+        }
+
+        // Validación de pertenencia canónica contra /etc/nas/superadmin
+        if (is_readable('/etc/nas/superadmin')) {
+            $configuredSuper = strtolower(trim((string) @file_get_contents('/etc/nas/superadmin')));
+            if ($configuredSuper !== '' && $username === $configuredSuper) {
+                return true;
+            }
+        }
+
+        // Validación de pertenencia al grupo grp_superadmin
+        $grpRes = \App\Services\SystemService::runCommand(['id', '-Gn', $username]);
+        if ($grpRes['code'] === 0) {
+            $groups = preg_split('/\s+/', trim($grpRes['stdout']));
+            if (is_array($groups) && in_array('grp_superadmin', $groups, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function exec(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -60,8 +85,8 @@ class TerminalController
 
     public function history(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -75,8 +100,8 @@ class TerminalController
 
     public function session(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -93,8 +118,8 @@ class TerminalController
 
     public function send(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -110,8 +135,8 @@ class TerminalController
 
     public function capture(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -125,8 +150,8 @@ class TerminalController
 
     public function resize(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
@@ -139,8 +164,8 @@ class TerminalController
 
     public function kill(Request $request): void
     {
-        if (!$this->isAdminCaller()) {
-            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+        if (!$this->isSuperAdminCaller()) {
+            Response::error('Acceso denegado: se requieren privilegios de superadministrador.', 403);
             return;
         }
 
