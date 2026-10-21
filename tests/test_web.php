@@ -2788,6 +2788,16 @@ assertTrue(str_contains($layoutSrc, 'id="stg-inspect-box"'), 'layout.php contien
 assertTrue(str_contains($appJsSrc, 'onStorageDeviceChange'), 'app.js implementa inspección reactiva de disco onStorageDeviceChange');
 assertTrue(str_contains($appJsSrc, 'loadStorageUnits'), 'app.js implementa carga dinámica de unidades loadStorageUnits');
 assertTrue(str_contains($appJsSrc, 'addSystemNotification'), 'app.js implementa sistema de notificaciones addSystemNotification');
+assertTrue(str_contains($appJsSrc, 'window.editBackup = openEditBackup'), 'app.js expone alias window.editBackup para compatibilidad');
+
+// 10. Verificaciones de deploy.sh y StorageService para ionice y sudoers multi-disco
+$deploySrc = file_get_contents(dirname(__DIR__) . '/src/core/deploy.sh');
+$storageSrc = file_get_contents(dirname(__DIR__) . '/web/src/Services/StorageService.php');
+assertTrue(str_contains($storageSrc, "ionice") && str_contains($storageSrc, "'-c', '3'"), 'StorageService ejecuta BTRFS scrub con ionice -c 3');
+assertTrue(str_contains($deploySrc, 'wipefs ^-n'), 'deploy.sh autoriza wipefs -n para inspección segura de discos');
+assertTrue(str_contains($deploySrc, 'vgextend') && str_contains($deploySrc, 'lvextend'), 'deploy.sh autoriza vgextend y lvextend para Opción A LVM');
+assertTrue(str_contains($deploySrc, 'btrfs device add') && str_contains($deploySrc, 'btrfs balance start'), 'deploy.sh autoriza btrfs device add y balance para Opción A Btrfs');
+assertTrue(str_contains($deploySrc, 'ionice ^-c\ 3'), 'deploy.sh autoriza ionice -c 3 para BTRFS scrub con prioridad ociosa');
 
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
