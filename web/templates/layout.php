@@ -161,7 +161,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
        ============================================================================== -->
   <header class="masthead">
     <div class="masthead-main">
-      <button class="mobile-toggle" id="mobile-menu-btn" title="Alternar menú de navegación">
+      <button class="mobile-toggle" id="mobile-menu-btn" onclick="toggleSidebar()" title="Alternar menú de navegación">
         <svg class="icon"><use href="#icon-menu"></use></svg>
       </button>
       <div class="masthead-brand">
