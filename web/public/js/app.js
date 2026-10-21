@@ -583,7 +583,7 @@ async function loadShares() {
         <td>${s.hidden ? '<span class="badge badge-gray">Oculto ($)</span>' : '<span class="badge badge-ok">Visible</span>'}</td>
         <td>${(s.valid_users || []).map(u => `<span class="tag-pill">${escapeHtml(u)}</span>`).join(' ') || (s.guest_ok ? '<em>Invitados</em>' : '<em>Sistemas</em>')}</td>
         <td style="text-align:right; white-space:nowrap;">
-          <button class="btn btn-secondary btn-sm" title="Copiar ruta UNC" onclick="copyUncPath('\\\\\\\\${window.NAS_HOSTNAME || 'SRV-NAS'}\\\\\\\\${escapeHtml(s.name)}')">
+          <button class="btn btn-secondary btn-sm" title="Copiar ruta UNC" onclick="copyShareUnc('${escapeHtml(s.name)}')">
             <svg class="icon icon-sm"><use href="#icon-file-text"></use></svg>
           </button>
           <button class="btn btn-secondary btn-sm" title="Permisos de acceso" onclick="openSharePermissions('${escapeHtml(s.name)}')">
@@ -1856,6 +1856,11 @@ function copyUncPath(customVal = null) {
   }
 }
 
+function copyShareUnc(shareName) {
+  const host = window.NAS_HOSTNAME || 'SRV-NAS';
+  copyUncPath(`\\\\${host}\\${shareName}`);
+}
+
 function filterGroupMembers() {
   const query = (document.getElementById('group-member-search')?.value || '').toLowerCase().trim();
   const rows = document.querySelectorAll('#group-members-list > div');
@@ -2647,6 +2652,7 @@ async function loadLogs() {
   const limitSelect = document.getElementById('logs-limit-select');
   const limit = limitSelect ? parseInt(limitSelect.value, 10) || 100 : 100;
   const searchInput = document.getElementById('logs-search-input');
+  const query = searchInput ? searchInput.value.trim() : '';
   const groupChk = document.getElementById('chk-group-logs');
   const grouped = groupChk ? (groupChk.checked ? 1 : 0) : 1;
 
@@ -5367,33 +5373,184 @@ function dismissBanner(id) {
     localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
   } catch (e) {}
   renderSystemNotifications();
+}
+
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (sidebar) sidebar.classList.toggle('open');
+  if (backdrop) backdrop.classList.toggle('active');
+}
+
 // ==============================================================================
 // 16. Aliases Globales para Compatibilidad y Eventos Onclick
 // ==============================================================================
+// Cabecera y Navegación
+window.toggleSidebar = toggleSidebar;
+window.toggleNotificationsDrawer = toggleNotificationsDrawer;
 window.toggleNotificationDrawer = toggleNotificationsDrawer;
+window.clearNotifications = clearNotifications;
+window.emptyNotifications = clearNotifications;
+window.markAllAsRead = clearNotifications;
+window.logout = logoutSession;
+window.logoutSession = logoutSession;
+window.refreshDashboardMetrics = refreshDashboardMetrics;
+window.toggleTheme = toggleTheme;
+
+// Almacenamiento
+window.openStorageManage = openStorageManage;
+window.openFormatDisk = openFormatDisk;
+window.runStorageScrub = runStorageScrub;
+window.runStorageTrim = runStorageTrim;
+window.loadStorage = loadStorage;
+window.loadStorageUnits = loadStorageUnits;
+window.submitStorageManage = submitStorageManage;
+window.toggleStorageOp = toggleStorageOp;
+window.onStorageDeviceChange = onStorageDeviceChange;
+
+// Recursos Compartidos (Samba)
+window.openNewShare = openNewShare;
 window.openNewShareModal = openNewShare;
-window.openNewBackupModal = () => openModal('modal-new-backup');
-window.openNewUserModal = openNewUser;
-window.openNewGroupModal = () => openModal('modal-new-group');
-window.openGroupMembersModal = openGroupMembers;
-window.runBackupNow = runBackupTask;
-window.stopBackup = stopBackupTask;
-window.viewBackupLog = viewBackupLogs;
-window.deleteBackup = deleteBackupTask;
-window.openEditBackup = openEditBackup;
-window.triggerFileUpload = triggerFileInput;
+window.openEditShare = openEditShare;
+window.openSharePermissions = openSharePermissions;
+window.deleteShare = deleteShare;
+window.copyUncPath = copyUncPath;
+window.copyShareUnc = copyShareUnc;
 window.repairSambaPermissions = repairSambaPermissions;
-window.repairUserAcls = repairAcls;
-window.triggerSystemUpdate = applySystemUpdate;
-window.checkSystemUpdates = loadUpdates;
-window.joinDomain = handleDomainJoin;
-window.leaveDomain = handleDomainLeave;
-window.testDomainConnection = handleDomainDiscover;
-window.reconnectTerminal = reconnectTerminal;
-window.resizeTerminal = resizeTerminal;
-window.runDiagnosticTest = runDiagnosticTest;
+window.repairAcls = repairAcls;
+window.submitNewShare = submitNewShare;
+window.submitEditShare = submitEditShare;
+window.toggleSchemeFields = toggleSchemeFields;
+window.toggleEditSchemeFields = toggleEditSchemeFields;
+
+// Central de Respaldos (Backups)
+window.openNewBackupModal = () => openModal('modal-new-backup');
+window.openNewBackup = () => openModal('modal-new-backup');
+window.openEditBackup = openEditBackup;
+window.editBackup = openEditBackup;
+window.runBackupNow = runBackupTask;
+window.runBackupTask = runBackupTask;
+window.stopBackup = stopBackupTask;
+window.stopBackupTask = stopBackupTask;
+window.viewBackupLog = viewBackupLogs;
+window.viewBackupLogs = viewBackupLogs;
+window.deleteBackup = deleteBackupTask;
+window.deleteBackupTask = deleteBackupTask;
+window.testBackupConnection = testBackupConnection;
+window.testEditBackupConnection = testEditBackupConnection;
+window.submitNewBackup = submitNewBackup;
+window.submitEditBackup = submitEditBackup;
+window.toggleBackupFields = toggleBackupFields;
+window.toggleEditBackupFields = toggleEditBackupFields;
+
+// Explorador de Archivos y Papelera
+window.triggerFileUpload = triggerFileInput;
+window.triggerFileInput = triggerFileInput;
+window.openNewFolderModal = openNewFolderModal;
+window.openNewFolder = openNewFolderModal;
+window.downloadFolderZip = downloadFolderZip;
+window.downloadCurrentFolderZip = downloadCurrentFolderZip;
+window.openEmptyTrashModal = openEmptyTrashModal;
+window.emptyTrash = openEmptyTrashModal;
+window.confirmEmptyTrash = confirmEmptyTrash;
+window.toggleTrashView = toggleTrashView;
+window.exitTrashView = exitTrashView;
+window.restoreTrashItem = restoreTrashItem;
+window.deleteTrashItem = deleteTrashItem;
+window.handleTrashAction = handleTrashAction;
+window.refreshCurrentFileView = refreshCurrentFileView;
+window.setFileViewMode = setFileViewMode;
+window.changeFilesRoot = changeFilesRoot;
+window.navigateToSubpath = navigateToSubpath;
+window.downloadFile = downloadFile;
+window.openRenameModal = openRenameModal;
+window.submitRenameFile = submitRenameFile;
 window.openMoveModal = openMoveModal;
 window.submitMoveFile = submitMoveFile;
+window.openDeleteModal = openDeleteModal;
+window.confirmDeleteFile = confirmDeleteFile;
+window.previewFile = previewFile;
+window.openFilePreview = previewFile;
+window.copyPreviewContent = copyPreviewContent;
+window.togglePreviewEditMode = togglePreviewEditMode;
+window.saveCurrentPreviewFile = saveCurrentPreviewFile;
+window.downloadPreviewFile = downloadPreviewFile;
+window.navigatePptxSlide = navigatePptxSlide;
+
+// Usuarios y Grupos
+window.openNewUser = openNewUser;
+window.openNewUserModal = openNewUser;
+window.openNewGroup = () => openModal('modal-new-group');
+window.openNewGroupModal = () => openModal('modal-new-group');
+window.repairUserAcls = repairAcls;
+window.openEditUser = openEditUser;
+window.toggleUser = toggleUser;
+window.deleteUser = deleteUser;
+window.openGroupMembers = openGroupMembers;
+window.openGroupMembersModal = openGroupMembers;
+window.openRenameGroup = openRenameGroup;
+window.deleteGroup = deleteGroup;
+window.generateAndSetPassword = generateAndSetPassword;
+window.togglePasswordVisibility = togglePasswordVisibility;
+window.setUsersFilter = setUsersFilter;
+window.applyUsersFilters = applyUsersFilters;
+window.submitNewUser = submitNewUser;
+window.submitUpdateUser = submitUpdateUser;
+window.submitEditUser = submitUpdateUser;
+window.submitNewGroup = submitNewGroup;
+window.submitRenameGroup = submitRenameGroup;
+window.addGroupMember = addGroupMember;
+window.submitAddGroupMember = addGroupMember;
+window.removeGroupMember = removeGroupMember;
+window.setPermTab = setPermTab;
+window.loadAccessMatrix = loadAccessMatrix;
+window.cyclePerm = cyclePerm;
+window.toggleAccessMatrixCell = cyclePerm;
+
+// Servicios y Diagnóstico
+window.loadServices = loadServices;
+window.loadDiagnostics = loadDiagnostics;
+window.startService = startService;
+window.stopService = stopService;
+window.reloadService = reloadService;
+window.restartService = restartService;
+window.manageServiceAction = manageServiceAction;
+window.runDiagnosticTest = runDiagnosticTest;
+
+// Aplicaciones y Actualizaciones
+window.loadUpdates = loadUpdates;
+window.checkSystemUpdates = loadUpdates;
+window.applySystemUpdate = applySystemUpdate;
+window.triggerSystemUpdate = applySystemUpdate;
+window.loadApplications = loadApplications;
+
+// Auditoría y Registros
+window.loadLogs = loadLogs;
+window.setLogSource = setLogSource;
+window.debounceLogSearch = debounceLogSearch;
+window.exportOrCopyLogs = exportOrCopyLogs;
+
+// Consola Terminal
+window.loadTerminal = loadTerminal;
+window.clearTerminal = clearTerminal;
+window.reconnectTerminal = reconnectTerminal;
+window.resizeTerminal = resizeTerminal;
+window.sendTerminalKey = sendTerminalKey;
+window.runQuickCommand = runQuickCommand;
+
+// Dominio Active Directory
+window.loadDomainStatus = loadDomainStatus;
+window.handleDomainDiscover = handleDomainDiscover;
+window.testDomainConnection = handleDomainDiscover;
+window.handleDomainJoin = handleDomainJoin;
+window.joinDomain = handleDomainJoin;
+window.handleDomainLeave = handleDomainLeave;
+window.leaveDomain = handleDomainLeave;
+
+// Modales Generales
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.confirmRebootServer = confirmRebootServer;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initApp);
