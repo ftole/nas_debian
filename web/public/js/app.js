@@ -583,7 +583,10 @@ async function loadShares() {
         <td>${s.hidden ? '<span class="badge badge-gray">Oculto ($)</span>' : '<span class="badge badge-ok">Visible</span>'}</td>
         <td>${(s.valid_users || []).map(u => `<span class="tag-pill">${escapeHtml(u)}</span>`).join(' ') || (s.guest_ok ? '<em>Invitados</em>' : '<em>Sistemas</em>')}</td>
         <td style="text-align:right; white-space:nowrap;">
-          <button class="btn btn-secondary btn-sm" title="Permisos de acceso" onclick="switchView('permissions')">
+          <button class="btn btn-secondary btn-sm" title="Copiar ruta UNC" onclick="copyUncPath('\\\\\\\\${window.NAS_HOSTNAME || 'SRV-NAS'}\\\\\\\\${escapeHtml(s.name)}')">
+            <svg class="icon icon-sm"><use href="#icon-file-text"></use></svg>
+          </button>
+          <button class="btn btn-secondary btn-sm" title="Permisos de acceso" onclick="openSharePermissions('${escapeHtml(s.name)}')">
             <svg class="icon icon-sm"><use href="#icon-shield"></use></svg>
           </button>
           <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditShare('${escapeHtml(s.name)}')">
@@ -845,6 +848,20 @@ async function deleteShare(name) {
   }
 }
 
+function openSharePermissions(shareName) {
+  switchView('users');
+  setTimeout(() => {
+    const permContainer = document.getElementById('perm-matrix-container') || document.querySelector('.perm-matrix-card');
+    if (permContainer) {
+      permContainer.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, 100);
+}
+
+function repairSambaPermissions(shareName = null) {
+  return repairAcls(shareName);
+}
+
 // ==============================================================================
 // 6. Módulo: Central de Respaldos (Backups)
 // ==============================================================================
@@ -893,9 +910,15 @@ async function loadBackups() {
           </div>
         </td>
         <td style="text-align:right; white-space:nowrap;">
-          <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
-            <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
-          </button>
+          ${t.running ? `
+            <button class="btn btn-secondary btn-sm" title="Detener respaldo en curso" style="color:var(--accent-danger);" onclick="stopBackupTask('${escapeHtml(t.id)}')">
+              <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-stop"></use></svg>
+            </button>
+          ` : `
+            <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
+              <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
+            </button>
+          `}
           <button class="btn btn-secondary btn-sm" title="Editar tarea" onclick="openEditBackup('${escapeHtml(t.id)}')">
             <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
           </button>
@@ -1196,6 +1219,19 @@ async function runBackupTask(taskId) {
     setTimeout(loadBackups, 1500);
   } catch (e) {
     // Ya mostrado
+  }
+}
+
+async function stopBackupTask(taskId) {
+  if (!window.confirm(`¿Deseas detener la ejecución en curso del respaldo [${taskId}]?`)) {
+    return;
+  }
+  try {
+    const res = await apiFetch(`/api/backups/${encodeURIComponent(taskId)}/stop`, { method: 'POST' });
+    showToast(res.message || `Proceso de respaldo [${taskId}] detenido.`, 'info');
+    setTimeout(loadBackups, 1000);
+  } catch (e) {
+    // Ya mostrado por apiFetch
   }
 }
 
@@ -1793,22 +1829,30 @@ function togglePasswordVisibility(inputId) {
   }
 }
 
-function copyUncPath() {
-  const input = document.getElementById('welcome-unc-path');
-  if (!input) return;
-  const val = input.value;
+function copyUncPath(customVal = null) {
+  const val = (customVal !== null && customVal !== undefined)
+    ? String(customVal)
+    : (document.getElementById('welcome-unc-path')?.value || '');
+  if (!val) return;
+
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(val).then(() => {
-      showToast('Ruta UNC copiada al portapapeles.', 'success');
+      showToast(`Ruta UNC copiada: ${val}`, 'success');
     }).catch(() => {
-      input.select();
-      document.execCommand('copy');
-      showToast('Ruta UNC copiada al portapapeles.', 'success');
+      const input = document.getElementById('welcome-unc-path');
+      if (input) {
+        input.select();
+        document.execCommand('copy');
+      }
+      showToast(`Ruta UNC copiada: ${val}`, 'success');
     });
   } else {
-    input.select();
-    document.execCommand('copy');
-    showToast('Ruta UNC copiada al portapapeles.', 'success');
+    const input = document.getElementById('welcome-unc-path');
+    if (input) {
+      input.select();
+      document.execCommand('copy');
+    }
+    showToast(`Ruta UNC: ${val}`, 'info');
   }
 }
 
@@ -2499,10 +2543,22 @@ async function loadServices() {
         <td><strong><code>${escapeHtml(s.service)}</code></strong></td>
         <td>${escapeHtml(s.name)}</td>
         <td>${s.active ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}</td>
-        <td style="text-align:right;">
-          <button class="btn btn-secondary btn-sm" onclick="restartService('${escapeHtml(s.service)}')">
-            <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar
-          </button>
+        <td style="text-align:right; white-space:nowrap;">
+          ${s.active ? `
+            <button class="btn btn-secondary btn-sm" onclick="reloadService('${escapeHtml(s.service)}')" title="Recargar configuración">
+              <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="restartService('${escapeHtml(s.service)}')" title="Reiniciar demonio">
+              <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar
+            </button>
+            <button class="btn btn-secondary btn-sm" style="color:var(--accent-danger);" onclick="stopService('${escapeHtml(s.service)}')" title="Detener demonio">
+              <svg class="icon icon-sm"><use href="#icon-stop"></use></svg> Detener
+            </button>
+          ` : `
+            <button class="btn btn-primary btn-sm" onclick="startService('${escapeHtml(s.service)}')" title="Iniciar demonio">
+              <svg class="icon icon-sm"><use href="#icon-play"></use></svg> Iniciar
+            </button>
+          `}
         </td>
       </tr>
     `).join('');
@@ -2511,17 +2567,55 @@ async function loadServices() {
   }
 }
 
-async function restartService(service) {
+async function manageServiceAction(service, action) {
   try {
     await apiFetch('/api/services/manage', {
       method: 'POST',
-      body: JSON.stringify({ service, action: 'restart' }),
+      body: JSON.stringify({ service, action }),
     });
 
-    showToast(`Servicio [${service}] reiniciado con éxito.`, 'success');
+    const labels = {
+      start: 'iniciado',
+      stop: 'detenido',
+      restart: 'reiniciado',
+      reload: 'recargado',
+    };
+    showToast(`Servicio [${service}] ${labels[action] || action} con éxito.`, 'success');
     loadServices();
   } catch (e) {
-    // Ya mostrado
+    // Ya mostrado por apiFetch
+  }
+}
+
+async function startService(service) { return manageServiceAction(service, 'start'); }
+async function stopService(service) { return manageServiceAction(service, 'stop'); }
+async function reloadService(service) { return manageServiceAction(service, 'reload'); }
+async function restartService(service) { return manageServiceAction(service, 'restart'); }
+
+async function runDiagnosticTest(type) {
+  const resultEl = document.getElementById('diag-test-result');
+  if (resultEl) {
+    resultEl.innerHTML = `<span style="color:var(--text-muted);"><svg class="icon icon-sm spin"><use href="#icon-refresh"></use></svg> Ejecutando prueba ${escapeHtml(type)}...</span>`;
+  }
+  showToast(`Ejecutando prueba ${type}...`, 'info');
+
+  try {
+    const res = await apiFetch('/api/diagnostics/run', {
+      method: 'POST',
+      body: JSON.stringify({ type }),
+    });
+
+    if (resultEl) {
+      const isOk = res.status === 'success';
+      const color = isOk ? 'var(--accent-success)' : 'var(--accent-danger)';
+      resultEl.innerHTML = `<span style="color:${color}; font-weight:600;">[${isOk ? 'OK' : 'FALLO'}] ${escapeHtml(res.message || 'Prueba completada')}</span>`;
+    }
+    showToast(res.message || 'Prueba de diagnóstico completada.', 'success');
+  } catch (e) {
+    if (resultEl) {
+      resultEl.innerHTML = `<span style="color:var(--accent-danger); font-weight:600;">[ERROR] ${escapeHtml(e.message)}</span>`;
+    }
+    showToast(`Error: ${e.message}`, 'error');
   }
 }
 
@@ -2553,10 +2647,11 @@ async function loadLogs() {
   const limitSelect = document.getElementById('logs-limit-select');
   const limit = limitSelect ? parseInt(limitSelect.value, 10) || 100 : 100;
   const searchInput = document.getElementById('logs-search-input');
-  const query = searchInput ? searchInput.value.trim() : '';
+  const groupChk = document.getElementById('chk-group-logs');
+  const grouped = groupChk ? (groupChk.checked ? 1 : 0) : 1;
 
   try {
-    let url = `/api/logs?source=${encodeURIComponent(source)}&limit=${limit}`;
+    let url = `/api/logs?source=${encodeURIComponent(source)}&limit=${limit}&grouped=${grouped}`;
     if (query) {
       url += `&q=${encodeURIComponent(query)}`;
     }
@@ -2795,6 +2890,42 @@ function runQuickCommand(cmd) {
   AppState.terminal.history.push(cmd);
   AppState.terminal.historyIndex = AppState.terminal.history.length;
   sendTerminalLine(cmd);
+}
+
+async function reconnectTerminal() {
+  stopTerminalPolling();
+  AppState.terminal.ptyStarted = false;
+  const output = document.getElementById('terminal-output');
+  if (output) {
+    output.textContent += '\n[Reconectando sesión interactiva de terminal PTY tmux...]\n';
+  }
+  try {
+    await apiFetch('/api/terminal/kill', { method: 'POST', silentToast: true });
+  } catch (e) {}
+  await startTerminalSession();
+  showToast('Sesión de terminal reconectada.', 'info');
+}
+
+async function resizeTerminal(cols, rows) {
+  const container = document.getElementById('terminal-output');
+  let c = cols;
+  let r = rows;
+  if (!c || !r) {
+    const width = container ? container.clientWidth : 800;
+    const height = container ? container.clientHeight : 400;
+    c = Math.max(80, Math.floor(width / 8.5));
+    r = Math.max(24, Math.floor(height / 18));
+  }
+  try {
+    await apiFetch('/api/terminal/resize', {
+      method: 'POST',
+      body: JSON.stringify({ cols: c, rows: r }),
+      silentToast: true,
+    });
+    showToast(`Dimensiones de terminal ajustadas (${c}x${r}).`, 'info');
+  } catch (e) {
+    // Silencioso
+  }
 }
 
 // ==============================================================================
@@ -3146,6 +3277,7 @@ function renderFileGrid(items) {
           ${previewBtn}
           ${downloadBtn}
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
+          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
           <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
         </div>
 
@@ -3200,6 +3332,8 @@ function handleCardAction(e, btn, action) {
     else downloadFile(relPath);
   } else if (action === 'rename') {
     openRenameModal(relPath, name);
+  } else if (action === 'move') {
+    openMoveModal(relPath, name);
   } else if (action === 'delete') {
     openDeleteModal(relPath, name);
   }
@@ -3267,6 +3401,7 @@ function renderFileTable(items) {
             ${previewAction}
             ${downloadAction}
             <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
             <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
           </div>
         </td>
@@ -3335,6 +3470,8 @@ function handleTableRowAction(btn, action) {
     else downloadFile(relPath);
   } else if (action === 'rename') {
     openRenameModal(relPath, name);
+  } else if (action === 'move') {
+    openMoveModal(relPath, name);
   } else if (action === 'delete') {
     openDeleteModal(relPath, name);
   }
@@ -3730,6 +3867,51 @@ async function submitRenameFile(e) {
 
     closeModal('modal-rename-file');
     showToast(`Elemento renombrado a "${newName}".`, 'success');
+    loadFiles();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
+}
+
+function openMoveModal(relPath, currentName) {
+  const sourceInput = document.getElementById('move-file-source');
+  const labelInput = document.getElementById('move-file-name-label');
+  const targetInput = document.getElementById('move-file-target');
+  if (sourceInput) sourceInput.value = relPath;
+  if (labelInput) labelInput.value = currentName || relPath;
+  if (targetInput) targetInput.value = AppState.files.currentPath || '';
+  openModal('modal-move-file');
+  if (targetInput) setTimeout(() => targetInput.focus(), 100);
+}
+
+async function submitMoveFile(e) {
+  e.preventDefault();
+  const source = document.getElementById('move-file-source')?.value;
+  const target = document.getElementById('move-file-target')?.value.trim() ?? '';
+  if (!source) return;
+
+  const btn = document.getElementById('btn-submit-move-file') || e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
+  try {
+    const res = await apiFetch('/api/files/move', {
+      method: 'POST',
+      body: JSON.stringify({
+        path: source,
+        target_dir: target,
+      }),
+    });
+
+    closeModal('modal-move-file');
+    showToast(res.message || 'Elemento movido exitosamente.', 'success');
     loadFiles();
   } catch (err) {
     // Ya mostrado por apiFetch
@@ -4870,6 +5052,12 @@ function initApp() {
     item.addEventListener('click', () => {
       const view = item.getAttribute('data-view');
       if (view) switchView(view);
+      const sidebar = document.querySelector('.sidebar');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      if (sidebar && backdrop) {
+        sidebar.classList.remove('open');
+        backdrop.classList.remove('active');
+      }
     });
   });
 
@@ -5179,7 +5367,33 @@ function dismissBanner(id) {
     localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
   } catch (e) {}
   renderSystemNotifications();
-}
+// ==============================================================================
+// 16. Aliases Globales para Compatibilidad y Eventos Onclick
+// ==============================================================================
+window.toggleNotificationDrawer = toggleNotificationsDrawer;
+window.openNewShareModal = openNewShare;
+window.openNewBackupModal = () => openModal('modal-new-backup');
+window.openNewUserModal = openNewUser;
+window.openNewGroupModal = () => openModal('modal-new-group');
+window.openGroupMembersModal = openGroupMembers;
+window.runBackupNow = runBackupTask;
+window.stopBackup = stopBackupTask;
+window.viewBackupLog = viewBackupLogs;
+window.deleteBackup = deleteBackupTask;
+window.openEditBackup = openEditBackup;
+window.triggerFileUpload = triggerFileInput;
+window.repairSambaPermissions = repairSambaPermissions;
+window.repairUserAcls = repairAcls;
+window.triggerSystemUpdate = applySystemUpdate;
+window.checkSystemUpdates = loadUpdates;
+window.joinDomain = handleDomainJoin;
+window.leaveDomain = handleDomainLeave;
+window.testDomainConnection = handleDomainDiscover;
+window.reconnectTerminal = reconnectTerminal;
+window.resizeTerminal = resizeTerminal;
+window.runDiagnosticTest = runDiagnosticTest;
+window.openMoveModal = openMoveModal;
+window.submitMoveFile = submitMoveFile;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initApp);
