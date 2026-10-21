@@ -889,7 +889,7 @@ async function loadBackups() {
       if (t.running) anyRunning = true;
       const statusBadge = t.last_status === 'OK' ? 'badge-ok'
         : (t.last_status === 'Error' ? 'badge-err'
-        : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
+          : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
       const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
       const fillColor = t.last_status === 'Error' ? 'var(--accent-danger)' : 'var(--accent-success)';
 
@@ -1425,9 +1425,6 @@ function pollBtrfsScrubProgress() {
 }
 
 async function runStorageScrub() {
-  const btn = document.getElementById('btn-scrub-storage');
-  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
-
   try {
     const stg = await apiFetch('/api/storage');
     const overview = stg.data?.overview || stg.overview || {};
@@ -1439,13 +1436,20 @@ async function runStorageScrub() {
       return;
     }
 
-    const proceed = window.confirm(
-      'Auditoría Criptográfica BTRFS Scrub\n\n' +
-      'Esta operación valida cada bloque del almacenamiento contra sus sumas de comprobación criptográficas SHA-256/blake2b para detectar y autorreparar corrupción silenciosa (Bit Rot).\n\n' +
-      '¿Deseas iniciar la auditoría en segundo plano ahora?'
-    );
-    if (!proceed) return;
+    openModal('modal-audit-btrfs');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  }
+}
 
+async function confirmAuditBtrfs() {
+  closeModal('modal-audit-btrfs');
+  const btn = document.getElementById('btn-scrub-storage');
+  const confirmBtn = document.getElementById('btn-confirm-audit-btrfs');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  if (confirmBtn) { confirmBtn.disabled = true; }
+
+  try {
     const res = await apiFetch('/api/storage/scrub', { method: 'POST' });
     showToast(res.message || 'Auditoría BTRFS scrub iniciada.', 'info');
     pollBtrfsScrubProgress();
@@ -1453,6 +1457,7 @@ async function runStorageScrub() {
     // Ya mostrado por apiFetch
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+    if (confirmBtn) { confirmBtn.disabled = false; }
   }
 }
 
@@ -1965,8 +1970,8 @@ async function loadUsersAndGroups() {
         const rol = u.is_superadmin
           ? '<span class="badge badge-err">Superadmin</span>'
           : (u.is_admin
-              ? '<span class="badge badge-warn">Admin</span>'
-              : (u.can_web ? '<span class="badge badge-blue">Operador</span>' : '<span class="badge badge-gray">Estándar</span>'));
+            ? '<span class="badge badge-warn">Admin</span>'
+            : (u.can_web ? '<span class="badge badge-blue">Operador</span>' : '<span class="badge badge-gray">Estándar</span>'));
         const netEnabled = !!(u.samba_enabled ?? u.enabled);
         const canManage = !isProtected && (isAdminCaller || !u.is_admin);
         return `
@@ -2445,8 +2450,8 @@ async function submitNewUser(event) {
       const roleBadge = isSuperadmin
         ? '<span class="badge badge-err">Superadministrador</span>'
         : (isAdmin
-            ? '<span class="badge badge-warn">Administrador</span>'
-            : (canWeb ? '<span class="badge badge-blue">Operador Web</span>' : '<span class="badge badge-gray">Empleado de Red</span>'));
+          ? '<span class="badge badge-warn">Administrador</span>'
+          : (canWeb ? '<span class="badge badge-blue">Operador Web</span>' : '<span class="badge badge-gray">Empleado de Red</span>'));
       infoEl.innerHTML = `
         <div style="margin-bottom:4px;"><strong>Usuario:</strong> ${escapeHtml(username)}</div>
         <div style="margin-bottom:4px;"><strong>Nombre:</strong> ${escapeHtml(full_name || 'N/A')}</div>
@@ -2907,7 +2912,7 @@ async function reconnectTerminal() {
   }
   try {
     await apiFetch('/api/terminal/kill', { method: 'POST', silentToast: true });
-  } catch (e) {}
+  } catch (e) { }
   await startTerminalSession();
   showToast('Sesión de terminal reconectada.', 'info');
 }
@@ -3162,7 +3167,7 @@ function setFileViewMode(mode, triggerRender = true) {
   AppState.files.viewMode = mode;
   try {
     localStorage.setItem('nas_file_view', mode);
-  } catch (e) {}
+  } catch (e) { }
 
   const btnGrid = document.getElementById('btn-view-grid');
   const btnList = document.getElementById('btn-view-list');
@@ -3726,7 +3731,7 @@ async function downloadFolderZip(relPath, force = false) {
             errMsg = text;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
       showToast(errMsg, 'error');
       return;
     }
@@ -5241,8 +5246,8 @@ function initApp() {
   const initialView = (hash && VALID_VIEWS.includes(hash))
     ? hash
     : (window.SERVER_ACTIVE_VIEW && VALID_VIEWS.includes(window.SERVER_ACTIVE_VIEW)
-        ? window.SERVER_ACTIVE_VIEW
-        : 'dashboard');
+      ? window.SERVER_ACTIVE_VIEW
+      : 'dashboard');
 
   switchView(initialView, false);
 
@@ -5265,7 +5270,7 @@ function initSystemNotifications() {
     if (saved) {
       _systemNotifications = JSON.parse(saved);
     }
-  } catch (e) {}
+  } catch (e) { }
   renderSystemNotifications();
 }
 
@@ -5280,7 +5285,7 @@ function clearNotifications() {
   _systemNotifications = [];
   try {
     localStorage.removeItem('nas_system_notifications');
-  } catch (e) {}
+  } catch (e) { }
   renderSystemNotifications();
 }
 
@@ -5299,7 +5304,7 @@ function addSystemNotification(item) {
   }
   try {
     localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
-  } catch (e) {}
+  } catch (e) { }
   renderSystemNotifications();
 }
 
@@ -5371,7 +5376,7 @@ function dismissBanner(id) {
   _systemNotifications = _systemNotifications.filter(n => n.id !== id);
   try {
     localStorage.setItem('nas_system_notifications', JSON.stringify(_systemNotifications));
-  } catch (e) {}
+  } catch (e) { }
   renderSystemNotifications();
 }
 
@@ -5401,6 +5406,7 @@ window.toggleTheme = toggleTheme;
 window.openStorageManage = openStorageManage;
 window.openFormatDisk = openFormatDisk;
 window.runStorageScrub = runStorageScrub;
+window.confirmAuditBtrfs = confirmAuditBtrfs;
 window.runStorageTrim = runStorageTrim;
 window.loadStorage = loadStorage;
 window.loadStorageUnits = loadStorageUnits;
