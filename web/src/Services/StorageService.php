@@ -723,8 +723,12 @@ class StorageService
             ];
         }
 
-        // 3. Iniciar scrub en segundo plano
-        $res = SystemService::sudo(['btrfs', 'scrub', 'start', $path]);
+        // 3. Iniciar scrub en segundo plano con ionice -c 3 (prioridad de E/S ociosa)
+        $ioniceBin = is_executable('/usr/bin/ionice') ? '/usr/bin/ionice' : (is_executable('/bin/ionice') ? '/bin/ionice' : 'ionice');
+        $res = SystemService::sudo([$ioniceBin, '-c', '3', 'btrfs', 'scrub', 'start', $path]);
+        if ($res['code'] !== 0) {
+            $res = SystemService::sudo(['btrfs', 'scrub', 'start', $path]);
+        }
         if ($res['code'] !== 0) {
             return [
                 'success' => false,
@@ -1112,6 +1116,10 @@ class StorageService
         if ($this->deviceInUseCritical($device)) {
             return ['success' => false, 'error' => 'Operación prohibida: el disco contiene un volumen LVM o miembro RAID activo.'];
         }
+        $inspect = $this->inspectDevice($device);
+        if (!empty($inspect['has_data']) && $confirm !== 'SI-DESTRUIR-DATOS') {
+            return ['success' => false, 'error' => 'El dispositivo contiene particiones o firmas preexistentes. Se exige confirmación estricta SI-DESTRUIR-DATOS.'];
+        }
 
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return [
@@ -1145,7 +1153,7 @@ class StorageService
             if ($addRes['code'] !== 0) {
                 return ['success' => false, 'error' => 'Fallo al añadir dispositivo al pool Btrfs: ' . ($addRes['stderr'] ?: $addRes['stdout'])];
             }
-            SystemService::sudo(['btrfs', 'balance', 'start', '/srv/nas']);
+            SystemService::sudo(['btrfs', 'balance', 'start', '--background', '/srv/nas']);
             return [
                 'success' => true,
                 'pool' => 'btrfs',
@@ -1223,8 +1231,24 @@ class StorageService
         if (!in_array($fstype, ['ext4', 'btrfs'], true)) {
             return ['success' => false, 'error' => 'Sistema de archivos no soportado (ext4|btrfs).'];
         }
+        $inspect = $this->inspectDevice($device);
+        if (!empty($inspect['has_data']) && $confirm !== 'SI-DESTRUIR-DATOS') {
+            return ['success' => false, 'error' => 'El dispositivo contiene particiones o firmas preexistentes. Se exige confirmación estricta SI-DESTRUIR-DATOS.'];
+        }
 
         $mountPoint = '/srv/nas/unidades/' . $unitId;
+
+        if (is_dir($mountPoint)) {
+            $chkMnt = SystemService::runCommand(['findmnt', '-n', '-o', 'TARGET', $mountPoint]);
+            if (trim($chkMnt['stdout'] ?? '') !== '') {
+                return ['success' => false, 'error' => "La unidad '$unitId' ya se encuentra montada en $mountPoint."];
+            }
+            $existingFiles = @scandir($mountPoint) ?: [];
+            $existingFiles = array_filter($existingFiles, fn($f) => $f !== '.' && $f !== '..');
+            if (count($existingFiles) > 0) {
+                return ['success' => false, 'error' => "El directorio destino $mountPoint ya existe y no está vacío."];
+            }
+        }
 
         if (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing') {
             return [
