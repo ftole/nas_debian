@@ -2799,6 +2799,52 @@ assertTrue(str_contains($deploySrc, 'vgextend') && str_contains($deploySrc, 'lve
 assertTrue(str_contains($deploySrc, 'btrfs device add') && str_contains($deploySrc, 'btrfs balance start'), 'deploy.sh autoriza btrfs device add y balance para Opción A Btrfs');
 assertTrue(str_contains($deploySrc, 'ionice ^-c\ 3'), 'deploy.sh autoriza ionice -c 3 para BTRFS scrub con prioridad ociosa');
 
+// 11. Verificaciones integrales de Aseguramiento de Calidad (QA) Web
+$bkpStopSvc = new BackupService();
+$resStopBad = $bkpStopSvc->stopTask('');
+assertTrue(!$resStopBad['success'], 'BackupService::stopTask rechaza identificador vacío');
+
+$resStopFake = $bkpStopSvc->stopTask('tarea_inexistente_123');
+assertTrue(is_array($resStopFake) && isset($resStopFake['success']), 'BackupService::stopTask responde estructura booleana para tarea inactiva');
+
+$feMoveSvc = new FileExplorerService();
+$resMoveBad = $feMoveSvc->moveItem('', 'destino');
+assertTrue(!$resMoveBad['success'], 'FileExplorerService::moveItem rechaza ruta de origen vacía');
+
+$resMoveTrav = $feMoveSvc->moveItem('../../etc/shadow', 'destino');
+assertTrue(!$resMoveTrav['success'], 'FileExplorerService::moveItem bloquea path traversal en origen');
+
+$sysDiagSvc = new SystemService();
+$resDiagBad = $sysDiagSvc->runDiagnosticTest('tipo_desconocido');
+assertTrue(!$resDiagBad['success'], 'SystemService::runDiagnosticTest rechaza tipo de diagnóstico no soportado');
+
+$resDiagPing = $sysDiagSvc->runDiagnosticTest('ping', '127.0.0.1');
+assertTrue(is_array($resDiagPing) && isset($resDiagPing['success']), 'SystemService::runDiagnosticTest ejecuta prueba de conectividad ping');
+
+$resDiagDns = $sysDiagSvc->runDiagnosticTest('dns', 'localhost');
+assertTrue(is_array($resDiagDns) && isset($resDiagDns['success']), 'SystemService::runDiagnosticTest ejecuta prueba de resolución DNS');
+
+$indexPhpSrc = file_get_contents(dirname(__DIR__) . '/web/public/index.php');
+assertTrue(str_contains($indexPhpSrc, '/api/backups/{id}/stop'), 'index.php registra ruta POST /api/backups/{id}/stop');
+assertTrue(str_contains($indexPhpSrc, '/api/files/move'), 'index.php registra ruta POST /api/files/move');
+assertTrue(str_contains($indexPhpSrc, '/api/diagnostics/run'), 'index.php registra ruta POST /api/diagnostics/run');
+
+$layoutPhpSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+assertTrue(str_contains($layoutPhpSrc, 'id="modal-move-file"'), 'layout.php contiene modal-move-file');
+assertTrue(str_contains($layoutPhpSrc, 'id="btn-repair-samba-permissions"'), 'layout.php contiene botón btn-repair-samba-permissions');
+assertTrue(str_contains($layoutPhpSrc, 'id="btn-diag-ping"'), 'layout.php contiene botón btn-diag-ping');
+assertTrue(str_contains($layoutPhpSrc, 'reconnectTerminal()'), 'layout.php contiene invocación a reconnectTerminal()');
+assertTrue(str_contains($layoutPhpSrc, 'resizeTerminal()'), 'layout.php contiene invocación a resizeTerminal()');
+
+assertTrue(str_contains($appJsSrc, 'function stopBackupTask'), 'app.js define función stopBackupTask');
+assertTrue(str_contains($appJsSrc, 'function reconnectTerminal'), 'app.js define función reconnectTerminal');
+assertTrue(str_contains($appJsSrc, 'function resizeTerminal'), 'app.js define función resizeTerminal');
+assertTrue(str_contains($appJsSrc, 'function runDiagnosticTest'), 'app.js define función runDiagnosticTest');
+assertTrue(str_contains($appJsSrc, 'function openMoveModal'), 'app.js define función openMoveModal');
+assertTrue(str_contains($appJsSrc, 'function submitMoveFile'), 'app.js define función submitMoveFile');
+assertTrue(str_contains($appJsSrc, 'window.openNewShareModal'), 'app.js expone alias window.openNewShareModal');
+
+
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
 @rmdir($bkpTestSvc->binDir);
