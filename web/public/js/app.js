@@ -1088,11 +1088,21 @@ function openEditBackup(id) {
   if (retEl) retEl.value = t.retention || 30;
 
   const unitEl = document.getElementById('edit-bkp-dest-unit');
-  if (unitEl) unitEl.value = t.dest_unit || 'principal';
+  if (unitEl) {
+    if (_storageUnitsData && _storageUnitsData.length > 0) {
+      const curr = t.dest_unit || 'principal';
+      unitEl.innerHTML = _storageUnitsData.map(u => {
+        return `<option value="${escapeHtml(u.id)}" ${u.id === curr ? 'selected' : ''}>${escapeHtml(u.name)} (${escapeHtml(u.path)})${u.total ? ' · ' + escapeHtml(u.used) + ' / ' + escapeHtml(u.total) : ''}</option>`;
+      }).join('');
+    }
+    unitEl.value = t.dest_unit || 'principal';
+  }
 
   toggleEditBackupFields();
   openModal('modal-edit-backup');
 }
+window.editBackup = openEditBackup;
+window.openEditBackup = openEditBackup;
 
 function toggleEditBackupFields() {
   const proto = document.getElementById('edit-bkp-proto')?.value || 'cifs';
@@ -1384,8 +1394,9 @@ async function runStorageScrub() {
 
   try {
     const stg = await apiFetch('/api/storage');
-    const isBtrfs = Boolean(stg.data?.overview?.is_btrfs);
-    const fsName = stg.data?.overview?.filesystem || 'ext4';
+    const overview = stg.data?.overview || stg.overview || {};
+    const isBtrfs = Boolean(overview.is_btrfs);
+    const fsName = overview.filesystem || 'ext4';
 
     if (!isBtrfs) {
       showToast('Operación cancelada: el volumen está en ' + fsName.toUpperCase() + '. BTRFS Scrub requiere un filesystem Btrfs.', 'warning');
@@ -1415,8 +1426,9 @@ async function runStorageTrim() {
 
   try {
     const stg = await apiFetch('/api/storage');
-    const supportsTrim = Boolean(stg.data?.overview?.supports_trim);
-    const devType = stg.data?.overview?.device_type || 'HDD (Mecánico)';
+    const overview = stg.data?.overview || stg.overview || {};
+    const supportsTrim = Boolean(overview.supports_trim);
+    const devType = overview.device_type || 'HDD (Mecánico)';
 
     if (!supportsTrim) {
       showToast('TRIM no ejecutable: el almacenamiento reside en un ' + devType + '. Solo aplica a unidades SSD / NVMe.', 'warning');
@@ -1557,11 +1569,16 @@ async function submitStorageManage(event) {
   }
 
   const hasData = Boolean(_currentDeviceInspection?.has_data);
-  const validConfirms = ['SI-FORMATEAR', 'SI-DESTRUIR-DATOS'];
-  if (!validConfirms.includes(confirmText)) {
-    const required = hasData ? 'SI-DESTRUIR-DATOS' : 'SI-FORMATEAR';
-    showToast(`Escribe ${required} para confirmar la operación.`, 'warning');
-    return;
+  if (hasData) {
+    if (confirmText !== 'SI-DESTRUIR-DATOS') {
+      showToast('Este disco contiene datos preexistentes. Debes escribir estrictamente SI-DESTRUIR-DATOS para confirmar la eliminación.', 'warning');
+      return;
+    }
+  } else {
+    if (confirmText !== 'SI-FORMATEAR' && confirmText !== 'SI-DESTRUIR-DATOS') {
+      showToast('Escribe SI-FORMATEAR para confirmar la operación.', 'warning');
+      return;
+    }
   }
 
   let url = '/api/storage/format';
