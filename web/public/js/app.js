@@ -1367,35 +1367,54 @@ function updateStorageIntelligence(overview) {
   }
 }
 
-async function checkBtrfsScrubStatus(isPolling = false) {
+/**
+ * Renderiza el estado "En curso" en la tarjeta de Auditoría BTRFS Scrub.
+ * Se reutiliza tanto en el sondeo periódico como en el refresco inmediato tras iniciar.
+ */
+function renderScrubRunning(rate = '', timeLeft = '') {
   const scrubBadge = document.getElementById('stg-scrub-badge');
   const scrubInfo = document.getElementById('stg-scrub-info');
 
+  if (scrubBadge) {
+    scrubBadge.className = 'badge badge-warn';
+    scrubBadge.textContent = 'En curso';
+  }
+
+  if (scrubInfo) {
+    scrubInfo.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
+        <div style="display:flex; justify-content:space-between; font-size:12px;">
+          <strong>Verificando sumas criptográficas bloque a bloque...</strong>
+          <span>${escapeHtml(rate || 'Analizando')}</span>
+        </div>
+        <div style="height:6px; background:var(--border-color); border-radius:3px; overflow:hidden;">
+          <div style="height:100%; width:100%; background:var(--accent-primary); animation:pulse 1.5s infinite;"></div>
+        </div>
+        <span class="text-muted" style="font-size:11px;">${timeLeft ? 'Tiempo restante estimado: ' + escapeHtml(timeLeft) : 'Examinando bloques de datos y metadatos...'}</span>
+      </div>
+    `;
+  }
+}
+
+async function checkBtrfsScrubStatus(isPolling = false) {
   try {
     const res = await apiFetch('/api/storage/scrub');
     const d = res.data || res;
 
     const isRunning = Boolean(d.running || d.status === 'running');
-    if (scrubBadge) {
-      scrubBadge.className = isRunning ? 'badge badge-warn' : 'badge badge-ok';
-      scrubBadge.textContent = isRunning ? 'En curso' : (d.status === 'finished' ? 'Completado' : 'Listo');
-    }
 
-    if (scrubInfo) {
-      if (isRunning) {
-        scrubInfo.innerHTML = `
-          <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
-            <div style="display:flex; justify-content:space-between; font-size:12px;">
-              <strong>Verificando sumas criptográficas bloque a bloque...</strong>
-              <span>${escapeHtml(d.rate || 'Analizando')}</span>
-            </div>
-            <div style="height:6px; background:var(--border-color); border-radius:3px; overflow:hidden;">
-              <div style="height:100%; width:100%; background:var(--accent-primary); animation:pulse 1.5s infinite;"></div>
-            </div>
-            <span class="text-muted" style="font-size:11px;">${d.time_left ? 'Tiempo restante estimado: ' + escapeHtml(d.time_left) : 'Examinando bloques de datos y metadatos...'}</span>
-          </div>
-        `;
-      } else {
+    if (isRunning) {
+      renderScrubRunning(d.rate || '', d.time_left || '');
+    } else {
+      const scrubBadge = document.getElementById('stg-scrub-badge');
+      const scrubInfo = document.getElementById('stg-scrub-info');
+
+      if (scrubBadge) {
+        scrubBadge.className = 'badge badge-ok';
+        scrubBadge.textContent = d.status === 'finished' ? 'Completado' : 'Listo';
+      }
+
+      if (scrubInfo) {
         scrubInfo.innerHTML = `
           <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
             <span>${escapeHtml(d.summary || 'Auditoría no iniciada recientemente.')}</span>
@@ -1404,10 +1423,24 @@ async function checkBtrfsScrubStatus(isPolling = false) {
         `;
       }
     }
+
     return !isRunning;
   } catch (e) {
     return true;
   }
+}
+
+/**
+ * Refresca la tarjeta de Auditoría BTRFS Scrub (badge + resultado) desde el servidor.
+ * Si el scrub acaba de iniciarse pero el kernel todavía no lo reporta como "running",
+ * conserva el estado "En curso" en lugar de sobrescribirlo con un resultado obsoleto.
+ */
+async function refreshScrubCard(started = false) {
+  const finished = await checkBtrfsScrubStatus();
+  if (started && finished) {
+    renderScrubRunning('Iniciando...');
+  }
+  return finished;
 }
 
 function pollBtrfsScrubProgress() {
@@ -1449,8 +1482,10 @@ async function confirmAuditBtrfs() {
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
   if (confirmBtn) { confirmBtn.disabled = true; }
 
+  let started = false;
   try {
     const res = await apiFetch('/api/storage/scrub', { method: 'POST' });
+    started = true;
     showToast(res.message || 'Auditoría BTRFS scrub iniciada.', 'info');
     pollBtrfsScrubProgress();
   } catch (e) {
@@ -1458,6 +1493,8 @@ async function confirmAuditBtrfs() {
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
     if (confirmBtn) { confirmBtn.disabled = false; }
+    // Refrescar la tarjeta de Auditoría BTRFS con el estado real del servidor
+    await refreshScrubCard(started);
   }
 }
 
