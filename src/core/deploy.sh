@@ -890,59 +890,76 @@ Cmnd_Alias NAS_USERS = /usr/sbin/useradd ^-m\ -s\ /bin/bash\ [a-z_][a-z0-9_.-]*$
     /usr/bin/gpasswd ^-a\ [a-z_][a-z0-9_.-]*\ grp_[a-z0-9_.-]*$, /usr/bin/gpasswd ^-d\ [a-z_][a-z0-9_.-]*\ grp_[a-z0-9_.-]*$, \\
     /usr/local/sbin/nas-admin-manage ^add\ [a-z_][a-z0-9_.-]*$, /usr/local/sbin/nas-admin-manage ^remove\ [a-z_][a-z0-9_.-]*$, \\
     /usr/bin/smbpasswd ^-d\ -s\ [a-z_][a-z0-9_.-]*$, /usr/bin/smbpasswd ^-e\ -s\ [a-z_][a-z0-9_.-]*$
-Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs ^scrub\ start\ /srv/nas$, /bin/btrfs ^scrub\ start\ /srv/nas$, \\
-    /usr/bin/btrfs ^scrub\ status\ /srv/nas$, /bin/btrfs ^scrub\ status\ /srv/nas$, \\
-    /sbin/fstrim ^-v\ /srv/nas$, /usr/sbin/fstrim ^-v\ /srv/nas$, \\
-    /usr/sbin/parted * /dev/[a-zA-Z0-9/]* *, /sbin/parted * /dev/[a-zA-Z0-9/]* *, \\
-    /usr/sbin/partprobe /dev/[a-zA-Z0-9/]*, /sbin/partprobe /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
-    /usr/bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /sbin/pvcreate * /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, /sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \\
-    /usr/sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \\
-    /usr/sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \\
-    /usr/sbin/pvs, /sbin/pvs, /usr/sbin/vgs, /sbin/vgs, /usr/sbin/lvs, /sbin/lvs, \\
-    /usr/sbin/blkid *, /sbin/blkid *, \\
-    /usr/bin/btrfs subvolume create /mnt/nas-btrfs-tmp/*, \\
-    /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \\
-    /bin/mkdir -p /srv/nas, /usr/bin/mkdir -p /srv/nas, \\
-    /bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, /usr/bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, /bin/mount /srv/nas, /usr/bin/mount /srv/nas, \\
-    /bin/umount ^/srv/nas$, /usr/bin/umount ^/srv/nas$, /bin/umount ^-l\ /srv/nas$, /usr/bin/umount ^-l\ /srv/nas$, \\
-    /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, /bin/umount -l /mnt/nas-btrfs-tmp, /usr/bin/umount -l /mnt/nas-btrfs-tmp, \\
-    /bin/umount /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount /dev/[a-zA-Z0-9/_-]*, /bin/umount -l /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount -l /dev/[a-zA-Z0-9/_-]*, \\
+Cmnd_Alias NAS_STORAGE = /usr/bin/btrfs ^scrub\ start.*$, /bin/btrfs ^scrub\ start.*$, \
+    /usr/bin/btrfs ^scrub\ status.*$, /bin/btrfs ^scrub\ status.*$, \
+    /usr/bin/btrfs ^scrub\ cancel.*$, /bin/btrfs ^scrub\ cancel.*$, \
+    /usr/bin/ionice ^-c\ 3\ (/usr)?/bin/btrfs\ scrub\ start\ /srv/nas.*$, /bin/ionice ^-c\ 3\ (/usr)?/bin/btrfs\ scrub\ start\ /srv/nas.*$, \
+    /sbin/fstrim ^-v\ /srv/nas.*$, /usr/sbin/fstrim ^-v\ /srv/nas.*$, \
+    /usr/sbin/parted * /dev/[a-zA-Z0-9/]* *, /sbin/parted * /dev/[a-zA-Z0-9/]* *, \
+    /usr/sbin/partprobe /dev/[a-zA-Z0-9/]*, /sbin/partprobe /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.ext4 * /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /sbin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \
+    /usr/bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, /bin/mkfs.btrfs * /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/pvcreate * /dev/[a-zA-Z0-9/]*, /sbin/pvcreate * /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, /sbin/vgcreate [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/vgextend [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, /sbin/vgextend [a-zA-Z0-9_]* /dev/[a-zA-Z0-9/]*, \
+    /usr/sbin/lvextend * /dev/[a-zA-Z0-9/]*, /sbin/lvextend * /dev/[a-zA-Z0-9/]*, \
+    /usr/bin/btrfs device add * /srv/nas*, /bin/btrfs device add * /srv/nas*, \
+    /usr/bin/btrfs balance start *, /bin/btrfs balance start *, \
+    /usr/bin/btrfs balance status *, /bin/btrfs balance status *, \
+    /usr/bin/btrfs balance cancel *, /bin/btrfs balance cancel *, \
+    /usr/sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -l [a-zA-Z0-9%_]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \
+    /usr/sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, /sbin/lvcreate -y -L [a-zA-Z0-9.]* -n [a-zA-Z0-9_]* [a-zA-Z0-9_]*, \
+    /usr/sbin/pvs, /sbin/pvs, /usr/sbin/vgs, /sbin/vgs, /usr/sbin/lvs, /sbin/lvs, \
+    /usr/sbin/blkid *, /sbin/blkid *, \
+    /usr/sbin/wipefs ^-n\ /dev/[a-zA-Z0-9/_-]+$, /sbin/wipefs ^-n\ /dev/[a-zA-Z0-9/_-]+$, \
+    /usr/bin/btrfs subvolume create /mnt/nas-btrfs-tmp/*, \
+    /bin/mkdir -p /mnt/nas-btrfs-tmp, /usr/bin/mkdir -p /mnt/nas-btrfs-tmp, \
+    /bin/mkdir -p /srv/nas*, /usr/bin/mkdir -p /srv/nas*, \
+    /bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, /usr/bin/mount /dev/[a-zA-Z0-9/_-]* /mnt/nas-btrfs-tmp, \
+    /bin/mount /srv/nas*, /usr/bin/mount /srv/nas*, \
+    /bin/umount /srv/nas*, /usr/bin/umount /srv/nas*, \
+    /bin/umount -l /srv/nas*, /usr/bin/umount -l /srv/nas*, \
+    /bin/umount /mnt/nas-btrfs-tmp, /usr/bin/umount /mnt/nas-btrfs-tmp, /bin/umount -l /mnt/nas-btrfs-tmp, /usr/bin/umount -l /mnt/nas-btrfs-tmp, \
+    /bin/umount /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount /dev/[a-zA-Z0-9/_-]*, /bin/umount -l /dev/[a-zA-Z0-9/_-]*, /usr/bin/umount -l /dev/[a-zA-Z0-9/_-]*, \
+    /bin/chown ^root\:grp_samba\ /srv/nas/unidades/[a-zA-Z0-9_-]+$, /usr/bin/chown ^root\:grp_samba\ /srv/nas/unidades/[a-zA-Z0-9_-]+$, \
+    /bin/chmod ^2770\ /srv/nas/unidades/[a-zA-Z0-9_-]+$, /usr/bin/chmod ^2770\ /srv/nas/unidades/[a-zA-Z0-9_-]+$, \
     /bin/cp /var/lib/nas/staging/nas_fstab_* /etc/fstab, /usr/bin/cp /var/lib/nas/staging/nas_fstab_* /etc/fstab
-Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
-    /bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
-    /bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
-    /bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
-    /bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, \\
-    /bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \\
-    /bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \\
-    /bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, /usr/bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, \\
-    /bin/mkdir -p /etc/backup-credentials, /usr/bin/mkdir -p /etc/backup-credentials, \\
-    /bin/mkdir -p /usr/local/bin, /usr/bin/mkdir -p /usr/local/bin, \\
-    /bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
-    /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
-    /bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \\
-    /bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
-Cmnd_Alias NAS_CONF = /bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, \\
-    /bin/mkdir ^-p\ /srv/nas/[a-zA-Z0-9_-]+$, /usr/bin/mkdir ^-p\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /bin/chown ^root\:grp_samba\ /srv/nas/[a-zA-Z0-9_-]+$, /usr/bin/chown ^root\:grp_samba\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /bin/chmod ^2770\ /srv/nas/[a-zA-Z0-9_-]+$, /usr/bin/chmod ^2770\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /bin/chmod ^2777\ /srv/nas/[a-zA-Z0-9_-]+$, /usr/bin/chmod ^2777\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-R\ -m\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -m\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-R\ -d\ -m\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -d\ -m\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-m\ u\:www-data\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-m\ u\:www-data\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-m\ u\:www-data\:rwx\,u\:nobody\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-m\ u\:www-data\:rwx\,u\:nobody\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-d\ -m\ u\:www-data\:rwx\,u\:nobody\:rwx\,g\:\:rwx\,o\:\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-d\ -m\ u\:www-data\:rwx\,u\:nobody\:rwx\,g\:\:rwx\,o\:\:rwx\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-R\ -x\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -x\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /usr/bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas/[a-zA-Z0-9_-]+$, \\
-    /bin/chmod o+x /srv/nas, /usr/bin/chmod o+x /srv/nas, \\
-    /bin/rm ^-rf\ /srv/nas/[a-zA-Z0-9_-]+$, /usr/bin/rm ^-rf\ /srv/nas/[a-zA-Z0-9_-]+$
+Cmnd_Alias NAS_BACKUP = /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \
+    /bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/cron.d/backup_[a-zA-Z0-9_-]*, \
+    /bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/cp /var/lib/nas/staging/nas_* /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \
+    /bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/cp /var/lib/nas/staging/nas_* /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \
+    /bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/chmod 0600 /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \
+    /bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/chmod 0755 /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \
+    /bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/chmod 0644 /etc/cron.d/backup_[a-zA-Z0-9_-]*, \
+    /bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, /usr/bin/rm -f /etc/cron.d/backup_[a-zA-Z0-9_-]*, \
+    /bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, /usr/bin/rm -f /usr/local/bin/backup_[a-zA-Z0-9_-]*.sh, \
+    /bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, /usr/bin/rm -f /etc/backup-credentials/[a-zA-Z0-9_-]*.cred, \
+    /bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, /usr/bin/rm -f /var/lock/backup_[a-zA-Z0-9_-]*.lock, \
+    /bin/mkdir -p /etc/backup-credentials, /usr/bin/mkdir -p /etc/backup-credentials, \
+    /bin/mkdir -p /usr/local/bin, /usr/bin/mkdir -p /usr/local/bin, \
+    /bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/mkdir -p /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/mkdir -p /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/rm -rf /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/rm -rf /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R -i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/chattr -R -i /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R -i /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R +i /srv/nas/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, \
+    /bin/chattr -R +i /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*, /usr/bin/chattr -R +i /srv/nas/unidades/[a-zA-Z0-9_-]*/BACKUPS_HISTORICOS/[a-zA-Z0-9_-]*
+Cmnd_Alias NAS_CONF = /bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, /usr/bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf, \
+    /bin/mkdir ^-p\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/mkdir ^-p\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /bin/chown ^root\:grp_samba\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/chown ^root\:grp_samba\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /bin/chmod ^2770\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/chmod ^2770\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /bin/chmod ^2777\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/chmod ^2777\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-R\ -m\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -m\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-R\ -d\ -m\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -d\ -m\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-m\ u\:www-data\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-m\ u\:www-data\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-m\ u\:www-data\:rwx\,u\:nobody\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-m\ u\:www-data\:rwx\,u\:nobody\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-d\ -m\ u\:www-data\:rwx\,u\:nobody\:rwx\,g\:\:rwx\,o\:\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-d\ -m\ u\:www-data\:rwx\,u\:nobody\:rwx\,g\:\:rwx\,o\:\:rwx\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-R\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /usr/bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
+    /bin/chmod o+x /srv/nas, /usr/bin/chmod o+x /srv/nas, \
+    /bin/rm ^-rf\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/rm ^-rf\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$
 
 www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
 SUDOERS_EOF
