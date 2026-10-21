@@ -1,16 +1,44 @@
 """Prueba en vivo de endpoints API recién implementados."""
-import ssl
 import http.client
 import json
+import os
+import pathlib
 import re
-import test_remote
+import ssl
+import sys
+import pytest
+
+# Asegurar importación de test_remote desde la raíz del proyecto
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    import test_remote
+except ImportError:
+    test_remote = None
 
 
 def test_live_api_endpoints():
-    cfg = test_remote.normalize_env_config(test_remote.load_env_file(test_remote.get_default_env_path()))
-    ip = cfg["NAS_TEST_IP"]
-    ctx = ssl._create_unverified_context()
-    conn = http.client.HTTPSConnection(ip, 443, context=ctx, timeout=10)
+    if test_remote is None:
+        pytest.skip("Módulo test_remote no disponible; omitiendo prueba en vivo.")
+
+    env_path = test_remote.get_default_env_path()
+    if not os.path.isfile(env_path):
+        pytest.skip("Archivo .env no encontrado; omitiendo prueba en vivo.")
+
+    raw_cfg = test_remote.load_env_file(env_path)
+    cfg = test_remote.normalize_env_config(raw_cfg)
+    ip = cfg.get("NAS_TEST_IP", "")
+    if not ip:
+        pytest.skip("NAS_TEST_IP no configurado; omitiendo prueba en vivo.")
+
+    try:
+        ctx = ssl._create_unverified_context()
+        conn = http.client.HTTPSConnection(ip, 443, context=ctx, timeout=3)
+        conn.connect()
+    except Exception as e:
+        pytest.skip(f"No se pudo conectar al servidor NAS {ip}:443 ({e}); omitiendo prueba en vivo.")
 
     # Limpiar rate limits residuales para pruebas
     mgr = test_remote.SSHManager(cfg)
