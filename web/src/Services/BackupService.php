@@ -1443,6 +1443,7 @@ class BackupService
 
     private function formatDuration(int $seconds): string
     {
+        $seconds = max(0, $seconds);
         $h = intdiv($seconds, 3600);
         $m = intdiv($seconds % 3600, 60);
         $s = $seconds % 60;
