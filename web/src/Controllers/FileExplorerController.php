@@ -141,6 +141,29 @@ class FileExplorerController
         Response::json($result);
     }
 
+    public function move(Request $request): void
+    {
+        $body = $request->getBody();
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['path'] ?? $body['source'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
+        $rawTarget = (string) ($body['target'] ?? $body['target_dir'] ?? '');
+        $targetDir = $this->resolveSubpath($root, $rawTarget);
+
+        if ($path === '') {
+            Response::error('Ruta de origen es obligatoria.', 400);
+            return;
+        }
+
+        $result = $this->fileService->moveItem($path, $targetDir);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'Fallo al mover el elemento.', 400);
+            return;
+        }
+
+        Response::json($result);
+    }
+
     public function delete(Request $request): void
     {
         $body = $request->getBody();
