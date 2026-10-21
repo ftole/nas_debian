@@ -73,7 +73,8 @@ class SystemController
             return;
         }
 
-        $logs = $this->system->getLogs($source, $limit, $qStr);
+        $grouped = $request->getQuery('grouped', '1') !== '0';
+        $logs = $this->system->getLogs($source, $limit, $qStr, $grouped);
         Response::success($logs);
     }
 
@@ -145,5 +146,20 @@ class SystemController
             'uptime' => $metrics['uptime'] ?? 'N/A',
             'kernel' => $metrics['kernel'] ?? php_uname('r'),
         ]);
+    }
+
+    public function runDiagnostic(Request $request): void
+    {
+        $body = $request->getBody();
+        $type = (string) ($body['type'] ?? $request->getQuery('type', 'ping'));
+        $target = isset($body['target']) ? (string) $body['target'] : null;
+
+        $res = $this->system->runDiagnosticTest($type, $target);
+        if (!$res['success']) {
+            Response::error($res['error'] ?? ($res['message'] ?? 'Fallo en la prueba diagnóstica.'));
+            return;
+        }
+
+        Response::success($res, $res['message'] ?? 'Prueba diagnóstica completada.');
     }
 }
