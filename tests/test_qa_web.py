@@ -128,7 +128,8 @@ def test_modals_div_balance():
         'modal-storage-manage', 'modal-new-user', 'modal-new-group', 'modal-edit-user',
         'modal-group-members', 'modal-rename-group', 'modal-user-welcome', 'modal-backup-logs',
         'modal-new-folder', 'modal-rename-file', 'modal-move-file', 'modal-delete-file',
-        'modal-zip-backup-warning', 'modal-file-preview', 'modal-empty-trash', 'modal-reboot-server'
+        'modal-zip-backup-warning', 'modal-file-preview', 'modal-empty-trash', 'modal-reboot-server',
+        'modal-audit-btrfs'
     ]
 
     imbalanced = []
