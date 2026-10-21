@@ -458,6 +458,39 @@ class BackupService
     }
 
     /**
+     * Detiene la ejecución en segundo plano de una tarea de respaldo en curso.
+     */
+    public function stopTask(string $taskId): array
+    {
+        $taskId = strtolower(trim($taskId));
+        if (!preg_match('/^[a-z0-9_-]{2,32}$/', $taskId)) {
+            return ['success' => false, 'error' => 'Identificador de tarea inválido.'];
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return ['success' => true, 'message' => "Tarea [$taskId] detenida (modo dev)."];
+        }
+
+        // Enviar señal TERM a los procesos del runner y sus subprocesos rsync
+        SystemService::sudo(['pkill', '-TERM', '-f', 'backup_' . $taskId . '\.sh']);
+        SystemService::sudo(['pkill', '-TERM', '-f', 'nas-runner-.*' . $taskId]);
+        usleep(150000); // 150ms
+
+        // Si persiste algún proceso de esta tarea, forzar terminación limpia
+        SystemService::sudo(['pkill', '-9', '-f', 'backup_' . $taskId . '\.sh']);
+
+        // Liberar lock si quedó huérfano
+        $lock = '/var/lock/backup_' . $taskId . '.lock';
+        if (file_exists($lock)) {
+            SystemService::sudo(['rm', '-f', $lock]);
+        }
+
+        AuditService::log('backup_stop', $taskId, 'SUCCESS', ['task' => $taskId]);
+
+        return ['success' => true, 'message' => "Ejecución de la tarea [$taskId] detenida."];
+    }
+
+    /**
      * Lee las últimas líneas del registro de una tarea específica.
      */
     public function getTaskLogs(string $taskId, int $lines = 100): string
