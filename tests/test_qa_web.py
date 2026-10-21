@@ -100,18 +100,24 @@ def test_app_js_api_fetch_endpoints_registered_in_routes():
 
 
 def test_all_modals_have_close_and_cancel_buttons():
-    """Todos los modales deben tener botones de cierre y clase modal-static."""
+    """Todos los modales deben tener botones de cierre, clase modal-static y botón de salida."""
     layout = read_file(LAYOUT_PHP)
     modals = re.findall(r'<div\s+class=[\"\']modal\b([^\"\']*)[\"\']\s+id=[\"\'](modal-[^\"\']+)[\"\']', layout)
 
     assert len(modals) > 0, "No se encontraron modales en layout.php"
 
     non_static = []
+    missing_close = []
     for classes, modal_id in modals:
         if "modal-static" not in classes:
             non_static.append(modal_id)
+        start = layout.find(f'id="{modal_id}"')
+        chunk = layout[start:start + 4000]
+        if "modal-close" not in chunk and "&times;" not in chunk:
+            missing_close.append(modal_id)
 
     assert non_static == [], f"Modales sin protección modal-static: {non_static}"
+    assert missing_close == [], f"Modales sin botón de cierre modal-close: {missing_close}"
 
 
 def test_modals_div_balance():
@@ -121,8 +127,8 @@ def test_modals_div_balance():
         'modal-new-share', 'modal-edit-share', 'modal-new-backup', 'modal-edit-backup',
         'modal-storage-manage', 'modal-new-user', 'modal-new-group', 'modal-edit-user',
         'modal-group-members', 'modal-rename-group', 'modal-user-welcome', 'modal-backup-logs',
-        'modal-new-folder', 'modal-rename-file', 'modal-delete-file', 'modal-zip-backup-warning',
-        'modal-file-preview', 'modal-empty-trash', 'modal-reboot-server'
+        'modal-new-folder', 'modal-rename-file', 'modal-move-file', 'modal-delete-file',
+        'modal-zip-backup-warning', 'modal-file-preview', 'modal-empty-trash', 'modal-reboot-server'
     ]
 
     imbalanced = []
@@ -148,3 +154,37 @@ def test_modals_div_balance():
             imbalanced.append((mid, opens, closes, opens - closes))
 
     assert imbalanced == [], f"Modales con divs desbalanceados: {imbalanced}"
+
+
+def test_app_js_syntax_with_node():
+    """Valida que app.js no contenga errores de sintaxis usando node -c."""
+    import shutil
+    import subprocess
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return
+    res = subprocess.run([node_bin, "-c", APP_JS], capture_output=True, text=True)
+    assert res.returncode == 0, f"Error de sintaxis en app.js:\n{res.stderr}"
+
+
+def test_app_js_eval_in_sandbox():
+    """Valida que app.js cargue y defina sus aliases sin lanzar ReferenceError."""
+    import shutil
+    import subprocess
+    node_bin = shutil.which("node")
+    if not node_bin:
+        return
+    eval_script = (
+        "const vm = require('vm'); const fs = require('fs'); "
+        "const code = fs.readFileSync(process.argv[1], 'utf8'); "
+        "const sandbox = { window: {}, location: { hash: '' }, "
+        "document: { readyState: 'complete', querySelector: () => null, "
+        "querySelectorAll: () => [], getElementById: () => null, addEventListener: () => {} }, "
+        "localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }, "
+        "console: { log: () => {}, warn: () => {}, error: () => {} }, "
+        "setTimeout: () => {}, clearTimeout: () => {}, setInterval: () => {}, clearInterval: () => {} }; "
+        "sandbox.window = sandbox; sandbox.addEventListener = () => {}; "
+        "vm.createContext(sandbox); vm.runInContext(code, sandbox);"
+    )
+    res = subprocess.run([node_bin, "-e", eval_script, APP_JS], capture_output=True, text=True)
+    assert res.returncode == 0, f"Error en runtime de app.js al evaluar:\n{res.stderr}"
