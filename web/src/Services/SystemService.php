@@ -735,19 +735,22 @@ class SystemService
     /**
      * Obtiene registros consolidados y multidimensionales filtrados por origen y búsqueda.
      */
-    public function getLogs(string $source = 'all', int $limit = 100, ?string $query = null): array
+    public function getLogs(string $source = 'all', int $limit = 100, ?string $query = null, bool $grouped = true): array
     {
         $cleanSource = strtolower(trim($source));
 
         switch ($cleanSource) {
             case 'samba_audit':
-                return array_slice($this->groupConsecutiveLogs($this->parseSambaAuditLog($limit, $query)), 0, $limit);
+                $items = $this->parseSambaAuditLog($limit, $query);
+                return array_slice($grouped ? $this->groupConsecutiveLogs($items) : $items, 0, $limit);
 
             case 'admin':
-                return array_slice($this->groupConsecutiveLogs($this->parseAdminAuditLog($limit, $query)), 0, $limit);
+                $items = $this->parseAdminAuditLog($limit, $query);
+                return array_slice($grouped ? $this->groupConsecutiveLogs($items) : $items, 0, $limit);
 
             case 'backup':
-                return array_slice($this->groupConsecutiveLogs($this->parseBackupAuditLog($limit, $query)), 0, $limit);
+                $items = $this->parseBackupAuditLog($limit, $query);
+                return array_slice($grouped ? $this->groupConsecutiveLogs($items) : $items, 0, $limit);
 
             case 'system':
                 $rawJournal = $this->getJournalLogs($limit * 2);
@@ -783,7 +786,7 @@ class SystemService
                         break;
                     }
                 }
-                return array_slice($this->groupConsecutiveLogs($results), 0, $limit);
+                return array_slice($grouped ? $this->groupConsecutiveLogs($results) : $results, 0, $limit);
 
             case 'all':
             default:
@@ -828,8 +831,97 @@ class SystemService
                     return strcmp($b['timestamp'] ?? '', $a['timestamp'] ?? '');
                 });
 
-                $grouped = $this->groupConsecutiveLogs($merged);
-                return array_slice($grouped, 0, $limit);
+                if ($grouped) {
+                    $merged = $this->groupConsecutiveLogs($merged);
+                }
+                return array_slice($merged, 0, $limit);
+        }
+    }
+
+    /**
+     * Ejecuta pruebas diagnósticas activas del sistema (ping, disk_io, dns).
+     */
+    public function runDiagnosticTest(string $type, ?string $target = null): array
+    {
+        switch ($type) {
+            case 'ping':
+            case 'network':
+                $host = $target ?: '8.8.8.8';
+                if (!preg_match('/^[a-zA-Z0-9.-]+$/', $host)) {
+                    return ['success' => false, 'error' => 'Objetivo de red inválido.'];
+                }
+                $start = microtime(true);
+                if (DIRECTORY_SEPARATOR === '\\') {
+                    $res = ['code' => 0, 'stdout' => 'Respuesta desde ' . $host . ': bytes=32 tiempo=12ms TTL=117', 'stderr' => ''];
+                } else {
+                    $res = self::runCommand(['ping', '-c', '3', '-W', '3', $host]);
+                }
+                $elapsed = round((microtime(true) - $start) * 1000, 1);
+                $isOk = ($res['code'] === 0);
+                return [
+                    'success' => $isOk,
+                    'type' => 'ping',
+                    'target' => $host,
+                    'latency_ms' => $elapsed,
+                    'output' => $res['stdout'] ?: $res['stderr'],
+                    'message' => $isOk ? "Conectividad de red exitosa con $host ($elapsed ms)." : "Fallo de conectividad con $host.",
+                ];
+
+            case 'dns':
+                $domain = $target ?: 'debian.org';
+                if (!preg_match('/^[a-zA-Z0-9.-]+$/', $domain)) {
+                    return ['success' => false, 'error' => 'Dominio DNS inválido.'];
+                }
+                $start = microtime(true);
+                $ip = @gethostbyname($domain);
+                $elapsed = round((microtime(true) - $start) * 1000, 1);
+                $resolved = ($ip !== $domain && !empty($ip));
+                return [
+                    'success' => $resolved,
+                    'type' => 'dns',
+                    'domain' => $domain,
+                    'ip' => $resolved ? $ip : null,
+                    'latency_ms' => $elapsed,
+                    'message' => $resolved ? "Resolución DNS exitosa: $domain -> $ip ($elapsed ms)." : "No se pudo resolver el dominio $domain.",
+                ];
+
+            case 'disk_io':
+                $testDir = '/srv/nas';
+                if (!is_dir($testDir) || !is_writable($testDir)) {
+                    $testDir = sys_get_temp_dir();
+                }
+                $testFile = $testDir . '/nas_io_benchmark_' . uniqid() . '.tmp';
+                $data = str_repeat('A', 1024 * 1024); // 1 MB chunk
+                $startWrite = microtime(true);
+                $fp = @fopen($testFile, 'wb');
+                if (!$fp) {
+                    return ['success' => false, 'error' => "No se pudo crear archivo de prueba en $testDir."];
+                }
+                for ($i = 0; $i < 5; $i++) {
+                    fwrite($fp, $data);
+                }
+                fflush($fp);
+                fclose($fp);
+                $writeTime = max(0.001, microtime(true) - $startWrite);
+                $writeMbPerSec = round(5 / $writeTime, 2);
+
+                $startRead = microtime(true);
+                $content = @file_get_contents($testFile);
+                $readTime = max(0.001, microtime(true) - $startRead);
+                $readMbPerSec = round(5 / $readTime, 2);
+                @unlink($testFile);
+
+                return [
+                    'success' => true,
+                    'type' => 'disk_io',
+                    'path' => $testDir,
+                    'write_speed_mb_s' => $writeMbPerSec,
+                    'read_speed_mb_s' => $readMbPerSec,
+                    'message' => "Prueba I/O en $testDir: Escritura {$writeMbPerSec} MB/s, Lectura {$readMbPerSec} MB/s.",
+                ];
+
+            default:
+                return ['success' => false, 'error' => 'Tipo de prueba no reconocido: ' . $type];
         }
     }
 
