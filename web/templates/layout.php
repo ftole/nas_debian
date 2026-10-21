@@ -2259,6 +2259,26 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+<!-- Modal: Confirmar AUDITORIA BTRFS-->
+  <div class="modal-backdrop modal-static" id="modal-audit-btrfs">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Iniciar Auditoria Btrfs-Fscrypt</h3>
+        <button class="modal-close" onclick="closeModal('modal-audit-btrfs')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Esta operación valida cada bloque del almacenamiento contra sus sumas de comprobación criptográficas SHA-256/blake2b para detectar y autorreparar corrupción silenciosa (Bit Rot).</p>
+        <p>¿Deseas iniciar la auditoría en segundo plano ahora?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-audit-btrfs')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-audit-btrfs" onclick="confirmAuditBtrfs()">Iniciar auditoría</button>
+      </div>
+    </div>
+  </div>
+
+
+
   <!-- Contenedor de Alertas Toast -->
   <div id="toast-container" style="position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
 
