@@ -105,6 +105,7 @@ $router->get('/api/metrics', [DashboardController::class, 'metrics']);
 
 // Rutas API: Diagnóstico Integral del Sistema
 $router->get('/api/diagnostics', [SystemController::class, 'diagnostics']);
+$router->post('/api/diagnostics/run', [SystemController::class, 'runDiagnostic']);
 
 // Rutas API: Recursos Compartidos (Samba)
 $router->get('/api/shares', [SambaController::class, 'list']);
@@ -129,6 +130,7 @@ $router->post('/api/backups/test', [BackupController::class, 'test']);
 $router->post('/api/backups/delete', [BackupController::class, 'delete']);
 $router->delete('/api/backups/{id}', [BackupController::class, 'delete']);
 $router->post('/api/backups/{id}/run', [BackupController::class, 'run']);
+$router->post('/api/backups/{id}/stop', [BackupController::class, 'stop']);
 $router->get('/api/backups/{id}/logs', [BackupController::class, 'logs']);
 $router->get('/api/backups/{id}/status', [BackupController::class, 'status']);
 
@@ -188,6 +190,7 @@ $router->get('/api/files/list', [FileExplorerController::class, 'list']);
 $router->post('/api/files/upload', [FileExplorerController::class, 'upload']);
 $router->post('/api/files/mkdir', [FileExplorerController::class, 'mkdir']);
 $router->post('/api/files/rename', [FileExplorerController::class, 'rename']);
+$router->post('/api/files/move', [FileExplorerController::class, 'move']);
 $router->post('/api/files/delete', [FileExplorerController::class, 'delete']);
 $router->get('/api/files/download', [FileExplorerController::class, 'download']);
 $router->get('/api/files/content', [FileExplorerController::class, 'content']);
