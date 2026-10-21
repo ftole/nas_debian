@@ -538,7 +538,11 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <button type="button" class="chip-btn" data-source="system" onclick="setLogSource('system')">Sistema (journald)</button>
           </div>
 
-          <div style="display:flex; align-items:center; gap:10px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; color:var(--text-secondary); user-select:none;">
+              <input type="checkbox" id="chk-group-logs" checked onchange="loadLogs()">
+              <span>Agrupar repetidos</span>
+            </label>
             <div class="search-box">
               <svg class="icon" style="color:var(--text-muted);"><use href="#icon-search"></use></svg>
               <input type="text" id="logs-search-input" placeholder="Buscar por usuario, IP, acción o recurso..." oninput="debounceLogSearch()">
@@ -746,6 +750,26 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           </div>
         </div>
 
+        <!-- Barra de Pruebas Diagnósticas Rápidas -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-wrench"></use></svg> Pruebas diagnósticas en vivo</h3>
+            <span class="badge badge-gray">Diagnóstico</span>
+          </div>
+          <div class="panel-card-body" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-diag-ping" onclick="runDiagnosticTest('ping')">
+              <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Prueba de Conectividad (Ping)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-diag-disk-io" onclick="runDiagnosticTest('disk_io')">
+              <svg class="icon icon-sm"><use href="#icon-hard-drive"></use></svg> Prueba I/O de Disco (/srv/nas)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-diag-dns" onclick="runDiagnosticTest('dns')">
+              <svg class="icon icon-sm"><use href="#icon-search"></use></svg> Prueba de Resolución DNS
+            </button>
+            <div id="diag-test-result" style="font-size:12.5px; color:var(--text-muted); margin-left:auto;"></div>
+          </div>
+        </div>
+
         <!-- Tabla: Demonios y Servicios del Sistema -->
         <div class="panel-card" style="margin-bottom:20px;">
           <div class="panel-card-head">
@@ -942,8 +966,14 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <p>Terminal PTY real (tmux) operando como su usuario, con soporte de sudo y comandos interactivos</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="clearTerminal()">
+            <button class="btn btn-secondary" onclick="clearTerminal()" title="Limpiar salida de la pantalla">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Limpiar consola
+            </button>
+            <button class="btn btn-secondary" onclick="reconnectTerminal()" title="Reconectar o reiniciar la sesión de terminal tmux">
+              <svg class="icon"><use href="#icon-power"></use></svg> Reconectar sesión
+            </button>
+            <button class="btn btn-secondary" onclick="resizeTerminal()" title="Ajustar dimensiones de pantalla PTY a la ventana">
+              <svg class="icon"><use href="#icon-grid"></use></svg> Redimensionar
             </button>
           </div>
         </div>
@@ -986,7 +1016,10 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <p>Recursos visibles y ocultos ($) con 4 esquemas de permisos y aceleración Office</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-primary" onclick="openNewShare()">
+            <button class="btn btn-secondary" id="btn-repair-samba-permissions" onclick="repairSambaPermissions()" title="Verificar y reparar permisos POSIX ACLs de recursos compartidos">
+              <svg class="icon"><use href="#icon-shield"></use></svg> Reparar permisos Samba / ACLs
+            </button>
+            <button class="btn btn-primary" id="btn-new-share" onclick="openNewShare()">
               <svg class="icon"><use href="#icon-plus"></use></svg> Crear recurso compartido
             </button>
           </div>
@@ -1311,7 +1344,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
        ============================================================================== -->
 
   <!-- Modal: Nuevo Recurso Compartido -->
-  <div class="modal-backdrop" id="modal-new-share">
+  <div class="modal-backdrop modal-static" id="modal-new-share">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Crear nueva carpeta compartida</h3>
@@ -1370,7 +1403,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Editar Recurso Compartido -->
-  <div class="modal-backdrop" id="modal-edit-share">
+  <div class="modal-backdrop modal-static" id="modal-edit-share">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Editar recurso compartido</h3>
@@ -1422,7 +1455,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 
 <?php if ($serverRole !== 'ARCHIVOS'): ?>
   <!-- Modal: Nueva Tarea de Backup -->
-  <div class="modal-backdrop" id="modal-new-backup">
+  <div class="modal-backdrop modal-static" id="modal-new-backup">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Programar nueva tarea de respaldo</h3>
@@ -1489,6 +1522,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </form>
       </div>
+    </div>
   </div>
 
   <!-- Modal: Editar Tarea de Backup -->
@@ -1564,7 +1598,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 <?php endif; ?>
 
   <!-- Modal: Gestión de Disco -->
-  <div class="modal-backdrop" id="modal-storage-manage" data-modal-alias="modal-format-disk">
+  <div class="modal-backdrop modal-static" id="modal-storage-manage" data-modal-alias="modal-format-disk">
     <div class="modal-dialog" style="max-width:640px;">
       <div class="modal-header">
         <h3>Gestión de disco</h3>
@@ -1630,7 +1664,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Nuevo Usuario -->
-  <div class="modal-backdrop" id="modal-new-user">
+  <div class="modal-backdrop modal-static" id="modal-new-user">
     <div class="modal-dialog" style="max-width:540px;">
       <div class="modal-header">
         <h3>Dar de alta usuario</h3>
@@ -1723,7 +1757,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Nuevo Grupo -->
-  <div class="modal-backdrop" id="modal-new-group">
+  <div class="modal-backdrop modal-static" id="modal-new-group">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Crear grupo departamental</h3>
@@ -1746,7 +1780,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Editar Usuario -->
-  <div class="modal-backdrop" id="modal-edit-user">
+  <div class="modal-backdrop modal-static" id="modal-edit-user">
     <div class="modal-dialog" style="max-width:540px;">
       <div class="modal-header">
         <h3>Editar usuario</h3>
@@ -1839,7 +1873,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Miembros de Grupo -->
-  <div class="modal-backdrop" id="modal-group-members">
+  <div class="modal-backdrop modal-static" id="modal-group-members">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3 id="modal-group-members-title">Miembros del grupo</h3>
@@ -1874,7 +1908,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Renombrar Grupo -->
-  <div class="modal-backdrop" id="modal-rename-group">
+  <div class="modal-backdrop modal-static" id="modal-rename-group">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Renombrar grupo</h3>
@@ -1900,7 +1934,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Bienvenida y Ruta UNC de Usuario -->
-  <div class="modal-backdrop" id="modal-user-welcome">
+  <div class="modal-backdrop modal-static" id="modal-user-welcome">
     <div class="modal-dialog" style="max-width:520px;">
       <div class="modal-header">
         <h3 style="display:flex; align-items:center; gap:8px;">
@@ -1933,7 +1967,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 
 <?php if ($serverRole !== 'ARCHIVOS'): ?>
   <!-- Modal: Registro de Tarea de Backup -->
-  <div class="modal-backdrop" id="modal-backup-logs">
+  <div class="modal-backdrop modal-static" id="modal-backup-logs">
     <div class="modal-dialog" style="max-width:700px;">
       <div class="modal-header">
         <h3 id="modal-backup-logs-title">Bitácora de respaldo</h3>
@@ -1950,7 +1984,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 <?php endif; ?>
 
   <!-- Modal: Nueva Carpeta en Explorador -->
-  <div class="modal-backdrop" id="modal-new-folder">
+  <div class="modal-backdrop modal-static" id="modal-new-folder">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Crear nueva carpeta</h3>
@@ -1973,7 +2007,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Renombrar Archivo o Carpeta -->
-  <div class="modal-backdrop" id="modal-rename-file">
+  <div class="modal-backdrop modal-static" id="modal-rename-file">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Renombrar elemento</h3>
@@ -1989,6 +2023,34 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-file')">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btn-submit-rename-file">Renombrar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Mover Archivo o Carpeta -->
+  <div class="modal-backdrop modal-static" id="modal-move-file">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Mover elemento</h3>
+        <button class="modal-close" onclick="closeModal('modal-move-file')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-move-file" onsubmit="submitMoveFile(event)">
+          <input type="hidden" id="move-file-source">
+          <div class="form-group">
+            <label for="move-file-name-label">Elemento a mover:</label>
+            <input type="text" id="move-file-name-label" readonly style="font-weight:600; background:var(--bg-surface);">
+          </div>
+          <div class="form-group">
+            <label for="move-file-target">Carpeta de destino (relativa a /srv/nas):</label>
+            <input type="text" id="move-file-target" placeholder="ej. CAMPANA_UNO o dejar vacío para raíz">
+            <small style="color:var(--text-muted); margin-top:4px; display:block;">Ruta relativa dentro de /srv/nas donde se moverá el elemento.</small>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-move-file')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-move-file">Mover</button>
           </div>
         </form>
       </div>
@@ -2060,7 +2122,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Previsualizador de Archivos 100% Offline -->
-  <div class="modal-backdrop" id="modal-file-preview">
+  <div class="modal-backdrop modal-static" id="modal-file-preview">
     <div class="modal-dialog modal-dialog-preview" style="max-width:1040px; width:95vw; max-height:90vh; display:flex; flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
         <div style="display:flex; align-items:center; gap:10px; overflow:hidden;">
