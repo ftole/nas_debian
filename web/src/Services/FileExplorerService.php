@@ -413,6 +413,51 @@ class FileExplorerService
     }
 
     /**
+     * Mueve un archivo o carpeta hacia un directorio destino dentro del confinamiento seguro.
+     */
+    public function moveItem(string $subpath, string $targetDir): array
+    {
+        $source = $this->resolveSafePath($subpath);
+        if ($source === null || !file_exists($source)) {
+            return ['success' => false, 'error' => 'El elemento de origen no existe o la ruta es inválida.'];
+        }
+
+        $rootDir = self::getRootDir();
+        if ($source === $rootDir) {
+            return ['success' => false, 'error' => 'Operación no permitida: No se puede mover la raíz del almacenamiento.'];
+        }
+
+        $target = $this->resolveSafePath($targetDir);
+        if ($target === null || !is_dir($target)) {
+            return ['success' => false, 'error' => 'El directorio de destino no existe o es inválido.'];
+        }
+
+        $baseName = basename($source);
+        $destination = rtrim($target, '/') . '/' . $baseName;
+
+        if (file_exists($destination)) {
+            return ['success' => false, 'error' => 'Ya existe un elemento con el mismo nombre en la carpeta de destino.'];
+        }
+
+        // Prevenir mover un directorio dentro de sí mismo
+        if (is_dir($source) && str_starts_with($destination . '/', $source . '/')) {
+            return ['success' => false, 'error' => 'No se puede mover un directorio dentro de sí mismo.'];
+        }
+
+        if (!@rename($source, $destination)) {
+            return ['success' => false, 'error' => 'No se pudo mover el elemento en el sistema de archivos.'];
+        }
+
+        AuditService::log('file_move', $subpath, 'SUCCESS', ['destination' => $targetDir . '/' . $baseName]);
+
+        return [
+            'success' => true,
+            'message' => 'Elemento movido exitosamente.',
+            'destination' => $destination,
+        ];
+    }
+
+    /**
      * Retorna la ruta absoluta del repositorio de papelera confinada (/srv/nas/.trash).
      */
     public static function getTrashDir(): string
