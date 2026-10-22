@@ -586,7 +586,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Almacenamiento y discos físicos</h2>
-            <p>Monitoreo de particiones, integridad de datos y mantenimiento BTRFS / TRIM</p>
+            <p>Monitoreo de particiones, unidades montadas, subvolúmenes Btrfs y mantenimiento de integridad</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-secondary" id="btn-refresh-storage" onclick="loadStorage()">
@@ -601,6 +601,50 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <button class="btn btn-secondary" id="btn-trim-storage" onclick="runStorageTrim()">
               <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar TRIM SSD
             </button>
+          </div>
+        </div>
+
+        <!-- Tarjeta Maestra: Pool Principal de Almacenamiento (/srv/nas) -->
+        <div class="panel-card" style="margin-bottom:20px;" id="stg-overview-card">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Pool Principal de Almacenamiento (<code id="stg-main-path">/srv/nas</code>)</h3>
+            <span id="stg-threshold-badge" class="badge badge-gray">Cargando</span>
+          </div>
+          <div class="panel-card-body">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:16px; margin-bottom:16px;">
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Capacidad Total</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px;" id="stg-stat-total">-- GB</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Espacio En Uso</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px;" id="stg-stat-used">-- GB</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Espacio Disponible</span>
+                <div style="font-size:20px; font-weight:700; color:var(--accent-success-text); margin-top:4px;" id="stg-stat-free">-- GB</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Filesystem / Medio</span>
+                <div style="font-size:14px; font-weight:600; margin-top:6px;" id="stg-stat-fs">--</div>
+              </div>
+            </div>
+
+            <!-- Barra de Ocupación -->
+            <div style="margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:5px;">
+                <span>Ocupación del volumen</span>
+                <span id="stg-stat-percent" style="font-weight:600;">0%</span>
+              </div>
+              <div style="height:10px; background:var(--bg-body); border:1px solid var(--border-color); border-radius:5px; overflow:hidden;">
+                <div id="stg-main-progress" style="height:100%; width:0%; background:var(--accent-primary); transition:width 0.4s ease, background-color 0.3s ease;"></div>
+              </div>
+            </div>
+
+            <div id="stg-threshold-alert" style="display:none; margin-top:12px;" class="alert-box alert-box-warning">
+              <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+              <span id="stg-threshold-text"></span>
+            </div>
           </div>
         </div>
 
@@ -637,6 +681,56 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
           </div>
         </div>
 
+        <!-- Unidades y Volúmenes Montados -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Unidades y volúmenes de almacenamiento montados</h3>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManage()"><svg class="icon icon-sm"><use href="#icon-plus"></use></svg> Añadir unidad</button>
+          </div>
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Nombre / Identificador</th>
+                  <th>Punto de montaje</th>
+                  <th>Filesystem</th>
+                  <th>Uso / Capacidad</th>
+                  <th>Espacio Libre</th>
+                  <th>Ocupación</th>
+                  <th style="width:100px; text-align:right;">Rol</th>
+                </tr>
+              </thead>
+              <tbody id="storage-units-body">
+                <tr><td colspan="7" style="text-align:center;">Cargando unidades montadas...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Subvolúmenes Btrfs (visible si BTRFS) -->
+        <div class="panel-card" id="stg-subvols-panel" style="margin-bottom:20px; display:none;">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-server"></use></svg> Subvolúmenes Btrfs (<code id="stg-subvols-path">/srv/nas</code>)</h3>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openCreateSubvolumeModal()"><svg class="icon icon-sm"><use href="#icon-plus"></use></svg> Nuevo subvolumen</button>
+          </div>
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th style="width:90px;">ID</th>
+                  <th>Nombre</th>
+                  <th>Ruta absoluta</th>
+                  <th>Tipo</th>
+                </tr>
+              </thead>
+              <tbody id="storage-subvols-body">
+                <tr><td colspan="4" style="text-align:center;">Cargando subvolúmenes Btrfs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Dispositivos de bloque reconocidos (lsblk) -->
         <div class="panel-card" style="margin-bottom:20px;">
           <div class="panel-card-head">
             <h3>Dispositivos de bloque reconocidos (lsblk)</h3>
@@ -2438,6 +2532,54 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-audit-btrfs')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-audit-btrfs" onclick="confirmAuditBtrfs()">Iniciar auditoría</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Descarte TRIM SSD -->
+  <div class="modal-backdrop modal-static" id="modal-trim-ssd">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-wrench"></use></svg> Optimización TRIM para SSD (fstrim)</h3>
+        <button class="modal-close" onclick="closeModal('modal-trim-ssd')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-secondary); margin-bottom:12px;">
+          Esta operación ejecutará el comando del kernel <code>fstrim</code> sobre el punto de montaje (<code id="trim-modal-path">/srv/nas</code>) para descartar bloques de memoria flash que ya no contienen datos activos.
+        </p>
+        <div class="alert-box alert-box-info" style="margin-bottom:12px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-info"></use></svg>
+          <span>Mantiene el rendimiento sostenido de escritura y prolonga la vida útil del almacenamiento SSD / NVMe.</span>
+        </div>
+        <p style="font-size:13px; font-weight:600;">¿Deseas iniciar la orden de optimización TRIM ahora?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-trim-ssd')">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-trim-ssd" onclick="confirmTrimSsd()">Ejecutar TRIM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmar Desmontaje Forzado y Destrucción de Datos -->
+  <div class="modal-backdrop modal-static" id="modal-storage-unmount-confirm">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 style="color:var(--accent-danger);"><svg class="icon" style="color:var(--accent-danger);"><use href="#icon-alert-triangle"></use></svg> Confirmar Desmontaje y Formateo</h3>
+        <button class="modal-close" onclick="closeModal('modal-storage-unmount-confirm')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-danger" style="margin-bottom:14px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+          <span><strong>¡ADVERTENCIA!</strong> El dispositivo seleccionado (o particiones hijas como <code>/srv/nas</code>) está montado en el sistema operativo.</span>
+        </div>
+        <p style="color:var(--text-secondary); margin-bottom:12px;">
+          Para proceder con la operación solicitada, el sistema debe <strong>desmontar el volumen forzosamente</strong> y formatear/modificar la estructura del disco. Los servicios que utilicen este almacenamiento se detendrán temporalmente y los datos existentes serán destruidos.
+        </p>
+        <p style="font-weight:600; font-size:13px;">¿Confirmas que deseas desmontar el dispositivo y proceder con la operación?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-unmount-confirm')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-unmount-storage" onclick="executeStorageUnmountAndProceed()">Desmontar y Continuar</button>
       </div>
     </div>
   </div>
