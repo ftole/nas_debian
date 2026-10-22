@@ -591,6 +591,19 @@ server {
 
     client_max_body_size 512M;
 
+    # Compresión de assets estáticos (el HTML ya se comprime por la configuración global)
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/css application/javascript application/json image/svg+xml text/plain text/xml;
+
+    # Caché de assets versionados por filemtime (?v=) durante 30 días
+    location ~* \.(js|css|svg|png|jpg|jpeg|gif|ico|woff2?)$ {
+        expires 30d;
+        access_log off;
+        try_files $uri =404;
+    }
+
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
@@ -612,6 +625,14 @@ server {
 NGINX_EOF
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
+
+# 4a. Habilitar HTTP/2 solo si la versión de Nginx lo soporta (>= 1.25.1)
+NGINX_VERSION=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+if [ -n "$NGINX_VERSION" ] && printf '%s\n%s\n' "1.25.1" "$NGINX_VERSION" | sort -V -C; then
+    if ! grep -q 'http2 on;' /etc/nginx/sites-available/nas-web; then
+        sed -i 's|^\(\s*\)listen 443 ssl default_server;|\1listen 443 ssl default_server;\n\1http2 on;|' /etc/nginx/sites-available/nas-web
+    fi
+fi
 
 # 4b. Helper de terminal web: ejecuta tmux directamente como el usuario autenticado (sin sudo)
 cat << 'NAS_TERM_EOF' > /usr/local/sbin/nas-terminal
