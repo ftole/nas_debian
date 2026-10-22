@@ -122,4 +122,32 @@ def test_live_api_endpoints():
     apps = json.loads(r.read().decode("utf-8")).get("data", {})
     assert "samba" in apps and "web" in apps and "btrfs" in apps and "security" in apps
 
+    # 8. Terminal PTY real: sesión, captura, envío y muerte
+    conn.request("POST", "/api/terminal/session", body=json.dumps({"cols": 80, "rows": 24}), headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Terminal session falló con status {r.status}"
+    r.read()
+
+    conn.request("GET", "/api/terminal/capture", headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Terminal capture falló con status {r.status}"
+    cap = json.loads(r.read().decode("utf-8")).get("data", {})
+    assert "output" in cap and "cwd" in cap and "user" in cap
+
+    conn.request("POST", "/api/terminal/send", body=json.dumps({"data": "echo LIVE_TERMINAL_OK"}), headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Terminal send falló con status {r.status}"
+    r.read()
+
+    conn.request("GET", "/api/terminal/history?limit=10", headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Terminal history falló con status {r.status}"
+    thist = json.loads(r.read().decode("utf-8")).get("data", [])
+    assert isinstance(thist, list)
+
+    conn.request("POST", "/api/terminal/kill", body="{}", headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Terminal kill falló con status {r.status}"
+    r.read()
+
     conn.close()
