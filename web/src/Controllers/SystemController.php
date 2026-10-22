@@ -27,6 +27,16 @@ class SystemController
         Response::success($services);
     }
 
+    /**
+     * Endpoint API con el inventario de red del servidor (interfaces, ruta, DNS,
+     * protocolos SMB, puertos en escucha y estado del cortafuegos).
+     */
+    public function network(Request $request): void
+    {
+        $fresh = (string) $request->get('fresh', '') === '1';
+        Response::success($this->system->getNetworkOverview($fresh ? 0 : 5));
+    }
+
     public function manageService(Request $request): void
     {
         $role = (string) ($_SESSION['nas_user']['role'] ?? '');
