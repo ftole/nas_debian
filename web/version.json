@@ -1,7 +1,7 @@
 {
-  "version": "0.1.1",
-  "commit": "v0.1.1",
-  "date": "2026-10-21",
-  "channel": "stable",
-  "notes": "v0.1.1: Servidor NAS Departamental, Almacenamiento Multi-Disco, Central de Respaldos Btrfs/CIFS/SSH y Panel Web Slate UI"
+  "version": "0.1.2",
+  "commit": "v0.1.2",
+  "date": "2026-10-22",
+  "channel": "dev",
+  "notes": "v0.1.2: Panel Web Slate UI - Arreglos críticos"
 }
