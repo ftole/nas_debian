@@ -85,6 +85,32 @@ assertTrue(is_array($services) && count($services) >= 5, 'SystemService::getServ
 $logs = $system->getJournalLogs(10);
 assertTrue(is_array($logs), 'SystemService::getJournalLogs devuelve un array estructurado');
 
+// 1.1 Pruebas de checkUpdates, getApplicationsStatus y runHotUpdate
+$updates = $system->checkUpdates();
+assertTrue(is_array($updates), 'SystemService::checkUpdates devuelve array');
+assertTrue(isset($updates['version'], $updates['latest_version'], $updates['has_updates'], $updates['channel'], $updates['gpg_verified'], $updates['release_notes']), 'SystemService::checkUpdates contiene todos los campos enriquecidos requeridos');
+assertTrue(is_bool($updates['has_updates']), 'SystemService::checkUpdates: has_updates es booleano');
+assertTrue(is_bool($updates['gpg_verified']), 'SystemService::checkUpdates: gpg_verified es booleano');
+assertTrue(!empty($updates['version']), 'SystemService::checkUpdates devuelve versión no vacía');
+
+$apps = $system->getApplicationsStatus();
+assertTrue(is_array($apps), 'SystemService::getApplicationsStatus devuelve array');
+assertTrue(isset($apps['samba'], $apps['web'], $apps['btrfs'], $apps['rsync'], $apps['wsdd2'], $apps['security']), 'SystemService::getApplicationsStatus incluye las 6 tarjetas de aplicaciones requeridas');
+assertTrue(isset($apps['samba']['version'], $apps['samba']['sessions'], $apps['samba']['vfs_modules']), 'SystemService::getApplicationsStatus: samba expone version, sesiones y vfs_modules');
+assertTrue(isset($apps['web']['php_version'], $apps['web']['pool_mode'], $apps['web']['memory_mb']), 'SystemService::getApplicationsStatus: web expone php_version, pool_mode y memory_mb');
+assertTrue(isset($apps['btrfs']['filesystem'], $apps['btrfs']['compression'], $apps['btrfs']['scrub_status']), 'SystemService::getApplicationsStatus: btrfs expone filesystem, compression y scrub_status');
+assertTrue(isset($apps['rsync']['tasks_count'], $apps['rsync']['deduplication'], $apps['rsync']['staging']), 'SystemService::getApplicationsStatus: rsync expone tasks_count, deduplication y staging');
+assertTrue(isset($apps['wsdd2']['protocol'], $apps['wsdd2']['wsdd_active'], $apps['wsdd2']['nmbd_active']), 'SystemService::getApplicationsStatus: wsdd2 expone protocol y estados');
+assertTrue(isset($apps['security']['auditd_active'], $apps['security']['aide_active'], $apps['security']['audit_rules']), 'SystemService::getApplicationsStatus: security expone auditd_active, aide_active y audit_rules');
+
+$hotUpdateRes = $system->runHotUpdate();
+assertTrue(is_array($hotUpdateRes) && isset($hotUpdateRes['success']), 'SystemService::runHotUpdate retorna resultado estructurado');
+
+$sysCtrl = new SystemController();
+assertTrue(method_exists($sysCtrl, 'updates'), 'SystemController define método updates');
+assertTrue(method_exists($sysCtrl, 'applications'), 'SystemController define método applications');
+assertTrue(method_exists($sysCtrl, 'runUpdate'), 'SystemController define método runUpdate');
+
 // 2. Pruebas de StorageService
 $storage = new StorageService();
 $overview = $storage->getStorageOverview();
@@ -2828,6 +2854,8 @@ $indexPhpSrc = file_get_contents(dirname(__DIR__) . '/web/public/index.php');
 assertTrue(str_contains($indexPhpSrc, '/api/backups/{id}/stop'), 'index.php registra ruta POST /api/backups/{id}/stop');
 assertTrue(str_contains($indexPhpSrc, '/api/files/move'), 'index.php registra ruta POST /api/files/move');
 assertTrue(str_contains($indexPhpSrc, '/api/diagnostics/run'), 'index.php registra ruta POST /api/diagnostics/run');
+assertTrue(str_contains($indexPhpSrc, '/api/system/update/run'), 'index.php registra ruta POST /api/system/update/run');
+assertTrue(str_contains($indexPhpSrc, '/api/system/applications'), 'index.php registra ruta GET /api/system/applications');
 
 $layoutPhpSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
 assertTrue(str_contains($layoutPhpSrc, 'id="modal-move-file"'), 'layout.php contiene modal-move-file');
@@ -2835,6 +2863,13 @@ assertTrue(str_contains($layoutPhpSrc, 'id="btn-repair-samba-permissions"'), 'la
 assertTrue(str_contains($layoutPhpSrc, 'id="btn-diag-ping"'), 'layout.php contiene botón btn-diag-ping');
 assertTrue(str_contains($layoutPhpSrc, 'reconnectTerminal()'), 'layout.php contiene invocación a reconnectTerminal()');
 assertTrue(str_contains($layoutPhpSrc, 'resizeTerminal()'), 'layout.php contiene invocación a resizeTerminal()');
+assertTrue(str_contains($layoutPhpSrc, 'id="modal-system-update"'), 'layout.php contiene modal interactivo modal-system-update');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-samba"'), 'layout.php contiene tarjeta dinámica app-card-samba');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-web"'), 'layout.php contiene tarjeta dinámica app-card-web');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-btrfs"'), 'layout.php contiene tarjeta dinámica app-card-btrfs');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-rsync"'), 'layout.php contiene tarjeta dinámica app-card-rsync');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-wsdd2"'), 'layout.php contiene tarjeta dinámica app-card-wsdd2');
+assertTrue(str_contains($layoutPhpSrc, 'id="app-card-security"'), 'layout.php contiene tarjeta dinámica app-card-security');
 
 assertTrue(str_contains($appJsSrc, 'function stopBackupTask'), 'app.js define función stopBackupTask');
 assertTrue(str_contains($appJsSrc, 'function reconnectTerminal'), 'app.js define función reconnectTerminal');
@@ -2843,6 +2878,12 @@ assertTrue(str_contains($appJsSrc, 'function runDiagnosticTest'), 'app.js define
 assertTrue(str_contains($appJsSrc, 'function openMoveModal'), 'app.js define función openMoveModal');
 assertTrue(str_contains($appJsSrc, 'function submitMoveFile'), 'app.js define función submitMoveFile');
 assertTrue(str_contains($appJsSrc, 'window.openNewShareModal'), 'app.js expone alias window.openNewShareModal');
+assertTrue(str_contains($appJsSrc, 'function loadApplications'), 'app.js define función loadApplications');
+assertTrue(str_contains($appJsSrc, 'function openSystemUpdateModal'), 'app.js define función openSystemUpdateModal');
+assertTrue(str_contains($appJsSrc, 'function startSystemUpdate'), 'app.js define función startSystemUpdate');
+assertTrue(str_contains($appJsSrc, 'window.openSystemUpdateModal'), 'app.js expone window.openSystemUpdateModal');
+assertTrue(str_contains($appJsSrc, 'window.startSystemUpdate'), 'app.js expone window.startSystemUpdate');
+assertTrue(str_contains($appJsSrc, 'window.loadApplications'), 'app.js expone window.loadApplications');
 
 
 // Limpieza de directorios temporales de prueba
