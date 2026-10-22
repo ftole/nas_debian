@@ -960,8 +960,9 @@ Cmnd_Alias NAS_CONF = /bin/cp /var/lib/nas/staging/smbconf_* /etc/samba/smb.conf
     /usr/bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /bin/setfacl ^-R\ -d\ -x\ .*\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, \
     /bin/chmod o+x /srv/nas, /usr/bin/chmod o+x /srv/nas, \
     /bin/rm ^-rf\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$, /usr/bin/rm ^-rf\ /srv/nas(/unidades/[a-zA-Z0-9_-]+)?/[a-zA-Z0-9_-]+$
+Cmnd_Alias NAS_UPDATE = /bin/bash /opt/nas_debian/src/core/updater.sh --yes, /usr/bin/bash /opt/nas_debian/src/core/updater.sh --yes
 
-www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN
+www-data ALL=(root) NOPASSWD: NAS_SERVICES, NAS_SERVICES_AD, NAS_SAMBA, NAS_USERS, NAS_STORAGE, NAS_BACKUP, NAS_CONF, NAS_DOMAIN, NAS_UPDATE
 SUDOERS_EOF
 if command -v visudo &>/dev/null && ! visudo -c -f /etc/sudoers.d/nas-web >/dev/null 2>&1; then
     # Un fragmento inválido rompería sudo de forma global: se descarta y se avisa.
