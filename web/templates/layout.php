@@ -1392,12 +1392,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <button type="button" class="chip-btn active" data-filter="all" onclick="setUsersFilter('all')">Todos (<span id="chip-count-all">0</span>)</button>
               <button type="button" class="chip-btn" data-filter="admin" onclick="setUsersFilter('admin')">Admin (<span id="chip-count-admin">0</span>)</button>
               <button type="button" class="chip-btn" data-filter="operator" onclick="setUsersFilter('operator')">Operadores (<span id="chip-count-operator">0</span>)</button>
+              <button type="button" class="chip-btn" data-filter="standard" onclick="setUsersFilter('standard')">Empleados (<span id="chip-count-standard">0</span>)</button>
               <button type="button" class="chip-btn" data-filter="blocked" onclick="setUsersFilter('blocked')">Bloqueados (<span id="chip-count-blocked">0</span>)</button>
               <button type="button" class="chip-btn" data-filter="samba" onclick="setUsersFilter('samba')">Samba (<span id="chip-count-samba">0</span>)</button>
             </div>
             <div class="search-box">
               <svg class="icon"><use href="#icon-search"></use></svg>
-              <input type="text" id="users-search" placeholder="Buscar usuario o nombre..." oninput="applyUsersFilters()">
+              <input type="text" id="users-search" placeholder="Buscar por usuario, nombre, grupo o UID..." oninput="applyUsersFilters()">
             </div>
           </div>
 
@@ -1409,15 +1410,23 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               </button>
             </div>
             <div class="table-responsive">
-              <table class="nas-table">
+              <table class="nas-table" id="users-table">
                 <thead>
                   <tr>
-                    <th>Usuario / Nombre real</th>
-                    <th style="width:70px;">UID</th>
-                    <th>Rol</th>
+                    <th style="cursor:pointer; user-select:none;" onclick="sortUsersTable('username')" title="Ordenar por usuario">
+                      Usuario / Nombre real <span id="sort-icon-username" style="font-size:11px; opacity:0.6;">↕</span>
+                    </th>
+                    <th style="width:80px; cursor:pointer; user-select:none;" onclick="sortUsersTable('uid')" title="Ordenar por UID">
+                      UID <span id="sort-icon-uid" style="font-size:11px; opacity:0.6;">↕</span>
+                    </th>
+                    <th style="cursor:pointer; user-select:none;" onclick="sortUsersTable('role')" title="Ordenar por rol">
+                      Rol <span id="sort-icon-role" style="font-size:11px; opacity:0.6;">↕</span>
+                    </th>
                     <th>Tipo de Acceso / Shell</th>
                     <th>Grupos Departamentales</th>
-                    <th>Estado Linux</th>
+                    <th style="cursor:pointer; user-select:none;" onclick="sortUsersTable('status')" title="Ordenar por estado">
+                      Estado Linux <span id="sort-icon-status" style="font-size:11px; opacity:0.6;">↕</span>
+                    </th>
                     <th>Samba</th>
                     <th style="width:170px; text-align:right;">Acciones</th>
                   </tr>
@@ -1486,10 +1495,21 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 </button>
               </div>
             </div>
-            <div class="filter-toolbar" style="margin:0; padding:12px 16px; border-bottom:1px solid var(--border-color);">
+            <div class="filter-toolbar" style="margin:0; padding:12px 16px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
               <div class="filter-chips" id="perm-filter-chips">
                 <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
                 <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
+              </div>
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <div class="search-box" style="width:220px;">
+                  <svg class="icon"><use href="#icon-search"></use></svg>
+                  <input type="text" id="perms-search" placeholder="Buscar en la matriz..." oninput="applyPermsSearch()">
+                </div>
+                <div style="font-size:11.5px; color:var(--text-muted); display:flex; gap:10px;">
+                  <span><strong style="color:var(--accent-success-text);">●</strong> Lectura y escritura</span>
+                  <span><strong style="color:var(--accent-primary);">●</strong> Solo lectura</span>
+                  <span><strong style="color:var(--text-muted);">●</strong> Sin acceso</span>
+                </div>
               </div>
             </div>
             <div class="table-responsive" id="perm-matrix-container">
@@ -2002,7 +2022,8 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <form id="form-new-user" onsubmit="submitNewUser(event)">
           <div class="form-group">
             <label for="user-uname">Nombre de usuario:</label>
-            <input type="text" id="user-uname" required placeholder="ej. operador1" pattern="[a-z0-9_-]+">
+            <input type="text" id="user-uname" required placeholder="ej. operador1" pattern="[a-z0-9_-]+" oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')">
+            <small style="color:var(--text-muted); font-size:11px;">Mínimo 3 caracteres, minúsculas, números, guion (-) o subrayado (_).</small>
           </div>
           <div class="form-group">
             <label for="user-fullname">Nombre real / cargo:</label>
@@ -2014,6 +2035,9 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <input type="password" id="user-pass" required minlength="6" placeholder="Contraseña segura...">
               <button type="button" class="btn btn-secondary btn-icon" title="Generar contraseña segura" onclick="generateAndSetPassword('user-pass')">
                 <svg class="icon"><use href="#icon-refresh"></use></svg>
+              </button>
+              <button type="button" class="btn btn-secondary btn-icon" title="Copiar contraseña" onclick="copyPasswordInput('user-pass')">
+                <svg class="icon"><use href="#icon-file-text"></use></svg>
               </button>
               <button type="button" class="btn btn-secondary btn-icon" title="Mostrar/ocultar contraseña" onclick="togglePasswordVisibility('user-pass')">
                 <svg class="icon" id="user-pass-eye"><use href="#icon-eye"></use></svg>
@@ -2130,6 +2154,9 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <input type="password" id="edit-user-pass" placeholder="Contraseña nueva (mín. 6)" minlength="6">
               <button type="button" class="btn btn-secondary btn-icon" title="Generar contraseña segura" onclick="generateAndSetPassword('edit-user-pass')">
                 <svg class="icon"><use href="#icon-refresh"></use></svg>
+              </button>
+              <button type="button" class="btn btn-secondary btn-icon" title="Copiar contraseña" onclick="copyPasswordInput('edit-user-pass')">
+                <svg class="icon"><use href="#icon-file-text"></use></svg>
               </button>
               <button type="button" class="btn btn-secondary btn-icon" title="Mostrar/ocultar contraseña" onclick="togglePasswordVisibility('edit-user-pass')">
                 <svg class="icon" id="edit-user-pass-eye"><use href="#icon-eye"></use></svg>
@@ -2286,7 +2313,10 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div class="form-group" id="welcome-user-info" style="background:var(--bg-body); padding:10px; border-radius:6px; font-size:13px;">
           <!-- Rellenado dinámicamente con usuario y rol -->
         </div>
-        <div class="modal-footer" style="padding:0; margin-top:20px;">
+        <div class="modal-footer" style="padding:0; margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+          <button type="button" class="btn btn-secondary" id="btn-copy-welcome-memo" onclick="copyUserWelcomeMemo()">
+            <svg class="icon"><use href="#icon-file-text"></use></svg> Copiar Ficha de Acceso
+          </button>
           <button type="button" class="btn btn-primary" onclick="closeModal('modal-user-welcome')">Aceptar</button>
         </div>
       </div>
