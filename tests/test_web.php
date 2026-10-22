@@ -2940,6 +2940,43 @@ assertTrue(substr_count($appJsSrc, 'function ansiToHtml(') === 1, 'app.js define
 assertTrue(str_contains($layoutNetSrc, "runQuickCommand('sudo smbstatus')"), 'layout.php chip smbstatus ejecuta sudo smbstatus');
 assertTrue(str_contains($layoutNetSrc, "runQuickCommand('systemctl --no-pager status smbd')"), 'layout.php chip status smbd incluye --no-pager');
 
+// 12. Pruebas de Mejoras de Almacenamiento (#storage)
+$storageSvcSubvol = new StorageService();
+$mockSubvols = $storageSvcSubvol->btrfsListSubvolumes('/srv/nas');
+assertTrue(is_array($mockSubvols), 'StorageService::btrfsListSubvolumes retorna un array');
+assertTrue(!empty($mockSubvols) && isset($mockSubvols[0]['id'], $mockSubvols[0]['name'], $mockSubvols[0]['path']),
+    'StorageService::btrfsListSubvolumes contiene claves id, name y path');
+
+// Validar StorageController::subvolumes
+$stgCtrl = new \App\Controllers\StorageController();
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_SERVER['REQUEST_URI'] = '/api/storage/subvolumes';
+$reqSubvol = new Request();
+ob_start();
+$stgCtrl->subvolumes($reqSubvol);
+$subvolJson = ob_get_clean();
+$subvolRes = json_decode((string)$subvolJson, true);
+assertTrue(is_array($subvolRes) && !empty($subvolRes['success']) && isset($subvolRes['data']['subvolumes']),
+    'StorageController::subvolumes expone subvolúmenes en formato JSON estándar');
+
+// Validar integración en layout.php
+$layoutStgSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+assertTrue(str_contains($layoutStgSrc, 'id="stg-overview-card"'), 'layout.php incluye tarjeta maestra stg-overview-card');
+assertTrue(str_contains($layoutStgSrc, 'id="stg-main-progress"'), 'layout.php incluye barra de progreso stg-main-progress');
+assertTrue(str_contains($layoutStgSrc, 'id="storage-units-body"'), 'layout.php incluye contenedor de unidades montadas storage-units-body');
+assertTrue(str_contains($layoutStgSrc, 'id="stg-subvols-panel"'), 'layout.php incluye panel de subvolúmenes Btrfs stg-subvols-panel');
+assertTrue(str_contains($layoutStgSrc, 'id="modal-trim-ssd"'), 'layout.php incluye modal interactivo modal-trim-ssd');
+assertTrue(str_contains($layoutStgSrc, 'id="modal-storage-unmount-confirm"'), 'layout.php incluye modal modal-storage-unmount-confirm');
+
+// Validar funciones en app.js
+$appJsStgSrc = file_get_contents(dirname(__DIR__) . '/web/public/js/app.js');
+assertTrue(str_contains($appJsStgSrc, 'function renderStorageOverview('), 'app.js define renderStorageOverview');
+assertTrue(str_contains($appJsStgSrc, 'function loadStorageSubvolumes('), 'app.js define loadStorageSubvolumes');
+assertTrue(str_contains($appJsStgSrc, 'function confirmTrimSsd('), 'app.js define confirmTrimSsd');
+assertTrue(str_contains($appJsStgSrc, 'function executeStorageUnmountAndProceed('), 'app.js define executeStorageUnmountAndProceed');
+assertTrue(str_contains($appJsStgSrc, 'window.confirmTrimSsd = confirmTrimSsd'), 'app.js exporta confirmTrimSsd en window');
+assertTrue(str_contains($appJsStgSrc, 'window.executeStorageUnmountAndProceed = executeStorageUnmountAndProceed'), 'app.js exporta executeStorageUnmountAndProceed en window');
+
 
 
 // Limpieza de directorios temporales de prueba
