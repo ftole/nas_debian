@@ -634,7 +634,7 @@ if [ -n "$NGINX_VERSION" ] && printf '%s\n%s\n' "1.25.1" "$NGINX_VERSION" | sort
     fi
 fi
 
-# 4b. Helper de terminal web: ejecuta tmux directamente como el usuario autenticado (sin sudo)
+# 4b. Helper de terminal web: ejecuta tmux con soporte para usuario autenticado y aislamiento
 cat << 'NAS_TERM_EOF' > /usr/local/sbin/nas-terminal
 #!/bin/bash
 set -euo pipefail
@@ -645,23 +645,32 @@ if [ "$#" -lt 1 ]; then
     exit 2
 fi
 
-if [ "$(id -u)" -eq 0 ]; then
-    echo "el helper de terminal no debe ejecutarse con privilegios de root" >&2
-    exit 1
+ACTION="${1:-}"; shift || true
+TARGET_USER="${NAS_TARGET_USER:-}"
+if [ -z "$TARGET_USER" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+        TARGET_USER="sistemas"
+    else
+        TARGET_USER="$(id -un)"
+    fi
 fi
 
-TARGET_USER="$(id -un)"
-ACTION="${1:-}"; shift || true
-SESSION="nas-web-term-${TARGET_USER}"
+# Sanitizar TARGET_USER
+TARGET_USER="$(printf '%s' "$TARGET_USER" | tr -cd 'a-zA-Z0-9_.-' | cut -c1-32)"
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+    TARGET_USER="$(id -un)"
+fi
 
-CLIENT_ID="${NAS_CLIENT_ID:-${CLIENT_ID:-}}"
+SESSION="nas-web-term-${TARGET_USER}"
+CLIENT_ID="${NAS_CLIENT_ID:-}"
+
 case "$ACTION" in
     start)
         COLS="${1:-200}"
         ROWS="${2:-50}"
         if [ -n "${3:-}" ]; then CLIENT_ID="$3"; fi
         ;;
-    keys|raw)
+    keys|raw|raw_enter)
         if [ -n "${2:-}" ]; then CLIENT_ID="$2"; fi
         ;;
     capture|kill)
@@ -682,7 +691,11 @@ if [ -n "$CLIENT_ID" ]; then
 fi
 
 run_as() {
-    "$@"
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$TARGET_USER" -- "$@"
+    else
+        "$@"
+    fi
 }
 
 case "$ACTION" in
@@ -693,12 +706,23 @@ case "$ACTION" in
         if [ ! -d "$TARGET_HOME" ]; then
             TARGET_HOME="$(pwd 2>/dev/null || echo /tmp)"
         fi
+        # Limpieza oportunista de sesiones web inactivas (>30 minutos sin actividad)
+        NOW=$(date +%s)
+        (run_as tmux list-sessions -F '#{session_name} #{session_activity}' 2>/dev/null || true) | while read -r sname sact; do
+            case "$sname" in
+                nas-web-term-*)
+                    if [ -n "$sact" ] && [ "$((NOW - sact))" -gt 1800 ]; then
+                        run_as tmux kill-session -t "$sname" 2>/dev/null || true
+                    fi
+                    ;;
+            esac
+        done
         if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
-            run_as tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME" /bin/bash
+            run_as env PAGER=cat SYSTEMD_PAGER=cat TERM=xterm-256color tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$TARGET_HOME" /bin/bash
         fi
         ;;
     keys)
-        DATA="$1"
+        DATA="${1:-}"
         case "$DATA" in
             CTRL_C) run_as tmux send-keys -t "$SESSION" C-c ;;
             CTRL_D) run_as tmux send-keys -t "$SESSION" C-d ;;
@@ -711,10 +735,16 @@ case "$ACTION" in
         esac
         ;;
     raw)
-        run_as tmux send-keys -t "$SESSION" -l -- "$1"
+        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
+        ;;
+    raw_enter)
+        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
+        run_as tmux send-keys -t "$SESSION" Enter
         ;;
     capture)
-        run_as tmux capture-pane -t "$SESSION" -p
+        run_as tmux capture-pane -e -t "$SESSION" -p
+        CWD=$(run_as tmux display-message -p -F '#{pane_current_path}' -t "$SESSION" 2>/dev/null || echo "/srv/nas")
+        echo "___NAS_CWD___${CWD}"
         ;;
     resize)
         run_as tmux resize-window -t "$SESSION" -x "${1:-200}" -y "${2:-50}" 2>/dev/null || true
@@ -730,6 +760,46 @@ esac
 NAS_TERM_EOF
 chmod 0755 /usr/local/sbin/nas-terminal
 chown root:root /usr/local/sbin/nas-terminal
+
+# 4b-bis. Helper dedicado de captura rápida de pantalla (sin generar eventos auditd cada 900ms)
+cat << 'NAS_CAPTURE_EOF' > /usr/local/bin/nas-terminal-capture
+#!/bin/bash
+set -euo pipefail
+export SHELL=/bin/bash
+
+TARGET_USER="${NAS_TARGET_USER:-${1:-sistemas}}"
+TARGET_USER="$(printf '%s' "$TARGET_USER" | tr -cd 'a-zA-Z0-9_.-' | cut -c1-32)"
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+    TARGET_USER="$(id -un)"
+fi
+
+SESSION="nas-web-term-${TARGET_USER}"
+CLIENT_ID="${NAS_CLIENT_ID:-${2:-}}"
+if [ -n "$CLIENT_ID" ]; then
+    CLEAN_CLIENT="$(printf '%s' "$CLIENT_ID" | tr -cd 'a-zA-Z0-9_-' | cut -c1-32)"
+    if [ -n "$CLEAN_CLIENT" ]; then
+        SESSION="${SESSION}-${CLEAN_CLIENT}"
+    fi
+fi
+
+run_as() {
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$TARGET_USER" -- "$@"
+    else
+        "$@"
+    fi
+}
+
+if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
+    exit 1
+fi
+
+run_as tmux capture-pane -e -t "$SESSION" -p
+CWD=$(run_as tmux display-message -p -F '#{pane_current_path}' -t "$SESSION" 2>/dev/null || echo "/srv/nas")
+echo "___NAS_CWD___${CWD}"
+NAS_CAPTURE_EOF
+chmod 0755 /usr/local/bin/nas-terminal-capture
+chown root:root /usr/local/bin/nas-terminal-capture
 
 # 4c. Helper seguro de contraseñas de usuarios Linux (restringido a UID >= 1000 y no root)
 cat << 'NAS_CHPASSWD_EOF' > /usr/local/sbin/nas-chpasswd
