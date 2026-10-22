@@ -111,3 +111,20 @@ jobs:
 
       - name: Ejecutar Suite de Pruebas PHP
         run: php tests/test_web.php
+
+  lint-js:
+    name: Validar Sintaxis JavaScript (node --check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verificar sintaxis de todo el JavaScript del panel
+        run: |
+          # Un error de sintaxis en app.js inutiliza por completo la interfaz web
+          find web/public/js src/web/mockup -type f -name "*.js" -print0 | xargs -0 -n1 node --check
