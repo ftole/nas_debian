@@ -1199,7 +1199,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <p>Control de versiones, actualización desde GitHub y componentes del servidor NAS Debian 13</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadUpdates()">
+            <button class="btn btn-secondary" onclick="loadUpdates(); loadApplications();">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Comprobar versión
             </button>
             <button class="btn btn-primary" onclick="openSystemUpdateModal()">
