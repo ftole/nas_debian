@@ -2239,6 +2239,144 @@ async function updateEffectiveAccessPreview(isEdit) {
   previewBox.innerHTML = html;
 }
 
+let _currentUsersTab = 'users';
+let _pendingUserActionCallback = null;
+
+function switchUsersTab(tab) {
+  _currentUsersTab = tab;
+  ['users', 'groups', 'perms'].forEach(t => {
+    const btn = document.getElementById(`usr-tab-btn-${t}`);
+    const panel = document.getElementById(`usr-panel-${t}`);
+    if (btn) btn.classList.toggle('active', t === tab);
+    if (panel) panel.style.display = (t === tab) ? 'block' : 'none';
+  });
+  if (tab === 'perms') {
+    loadAccessMatrix();
+  }
+}
+
+function updateUsersKpis(users, groups) {
+  const uList = users || [];
+  const gList = groups || [];
+
+  const kpiTotal = document.getElementById('usr-kpi-total');
+  if (kpiTotal) kpiTotal.textContent = `${uList.length} cuentas`;
+
+  const superadmins = uList.filter(u => u.is_superadmin).length;
+  const admins = uList.filter(u => u.is_admin && !u.is_superadmin).length;
+  const operators = uList.filter(u => u.can_web && !u.is_admin).length;
+  const standards = uList.filter(u => !u.is_admin && !u.can_web).length;
+
+  const descParts = [];
+  if (superadmins) descParts.push(`${superadmins} Superadmin`);
+  if (admins) descParts.push(`${admins} Admin`);
+  if (operators) descParts.push(`${operators} Operador`);
+  if (standards) descParts.push(`${standards} Empleado`);
+
+  const kpiTotalDesc = document.getElementById('usr-kpi-total-desc');
+  if (kpiTotalDesc) kpiTotalDesc.textContent = descParts.join(' · ') || 'Cuentas Linux / Samba';
+
+  const activeCount = uList.filter(u => (u.samba_enabled ?? u.enabled) !== false).length;
+  const blockedCount = uList.length - activeCount;
+
+  const kpiActive = document.getElementById('usr-kpi-active');
+  if (kpiActive) {
+    kpiActive.textContent = `${activeCount} Activas`;
+    kpiActive.style.color = blockedCount > 0 ? 'var(--accent-warning)' : 'var(--accent-success-text)';
+  }
+
+  const kpiBlockedDesc = document.getElementById('usr-kpi-blocked-desc');
+  if (kpiBlockedDesc) {
+    kpiBlockedDesc.textContent = blockedCount > 0 ? `${blockedCount} cuenta(s) suspendida(s)` : 'Todas las cuentas operativas';
+  }
+
+  const sambaCount = uList.filter(u => !!u.is_samba).length;
+  const noSambaCount = uList.length - sambaCount;
+
+  const kpiSamba = document.getElementById('usr-kpi-samba');
+  if (kpiSamba) kpiSamba.textContent = `${sambaCount} con SMB`;
+
+  const kpiNoSambaDesc = document.getElementById('usr-kpi-nosamba-desc');
+  if (kpiNoSambaDesc) kpiNoSambaDesc.textContent = noSambaCount > 0 ? `${noSambaCount} sin sincronización Samba` : '100% sincronizados en Samba';
+
+  const groupsWithMembers = gList.filter(g => (g.members || []).length > 0).length;
+  const kpiGroups = document.getElementById('usr-kpi-groups');
+  if (kpiGroups) kpiGroups.textContent = `${gList.length} grupos`;
+
+  const kpiGroupsDesc = document.getElementById('usr-kpi-groups-desc');
+  if (kpiGroupsDesc) kpiGroupsDesc.textContent = `${groupsWithMembers} con miembros asignados`;
+
+  const tabUserCount = document.getElementById('usr-tab-count');
+  if (tabUserCount) tabUserCount.textContent = String(uList.length);
+
+  const tabGroupCount = document.getElementById('grp-tab-count');
+  if (tabGroupCount) tabGroupCount.textContent = String(gList.length);
+
+  updateUserChipCounters(uList);
+}
+
+function updateUserChipCounters(users) {
+  const uList = users || [];
+  const cAll = document.getElementById('chip-count-all');
+  if (cAll) cAll.textContent = String(uList.length);
+
+  const cAdmin = document.getElementById('chip-count-admin');
+  if (cAdmin) cAdmin.textContent = String(uList.filter(u => u.is_admin || u.is_superadmin).length);
+
+  const cOperator = document.getElementById('chip-count-operator');
+  if (cOperator) cOperator.textContent = String(uList.filter(u => u.can_web && !u.is_admin).length);
+
+  const cBlocked = document.getElementById('chip-count-blocked');
+  if (cBlocked) cBlocked.textContent = String(uList.filter(u => (u.samba_enabled ?? u.enabled) === false).length);
+
+  const cSamba = document.getElementById('chip-count-samba');
+  if (cSamba) cSamba.textContent = String(uList.filter(u => !!u.is_samba).length);
+}
+
+function showUserActionConfirm({ title, icon = 'alert-triangle', alertText, alertType = 'warning', desc, prompt = '¿Deseas proceder con esta acción?', btnText = 'Confirmar', btnClass = 'btn-danger', onConfirm }) {
+  const titleEl = document.getElementById('user-action-confirm-title-text');
+  if (titleEl) titleEl.textContent = title || 'Confirmar acción';
+
+  const iconEl = document.getElementById('user-action-confirm-icon');
+  if (iconEl) {
+    iconEl.innerHTML = `<use href="#icon-${escapeHtml(icon)}"></use>`;
+    iconEl.style.color = alertType === 'danger' ? 'var(--accent-danger)' : 'var(--accent-warning)';
+  }
+
+  const alertBox = document.getElementById('user-action-confirm-alert');
+  const alertTextEl = document.getElementById('user-action-confirm-alert-text');
+  if (alertBox && alertTextEl) {
+    alertBox.className = `alert-box alert-box-${alertType}`;
+    alertTextEl.textContent = alertText || '';
+  }
+
+  const descEl = document.getElementById('user-action-confirm-desc');
+  if (descEl) descEl.textContent = desc || '';
+
+  const promptEl = document.getElementById('user-action-confirm-prompt');
+  if (promptEl) promptEl.textContent = prompt;
+
+  const submitBtn = document.getElementById('btn-user-action-confirm-submit');
+  if (submitBtn) {
+    submitBtn.textContent = btnText;
+    submitBtn.className = `btn ${btnClass}`;
+  }
+
+  _pendingUserActionCallback = onConfirm;
+  openModal('modal-user-action-confirm');
+}
+
+async function executeUserActionConfirm() {
+  if (typeof _pendingUserActionCallback !== 'function') {
+    closeModal('modal-user-action-confirm');
+    return;
+  }
+  const cb = _pendingUserActionCallback;
+  _pendingUserActionCallback = null;
+  closeModal('modal-user-action-confirm');
+  await cb();
+}
+
 async function loadUsersAndGroups() {
   const usersTbody = document.getElementById('users-table-body');
   const groupsTbody = document.getElementById('groups-table-body');
@@ -2252,6 +2390,9 @@ async function loadUsersAndGroups() {
     _usersData = uRes.data || [];
     _groupsData = gRes.data || [];
 
+    // Actualizar tarjetas de KPI de usuarios y grupos
+    updateUsersKpis(_usersData, _groupsData);
+
     if (usersTbody) {
       const isAdminCaller = window.NAS_IS_ADMIN !== false;
       usersTbody.innerHTML = _usersData.map(u => {
@@ -2263,14 +2404,20 @@ async function loadUsersAndGroups() {
             : (u.can_web ? '<span class="badge badge-blue">Operador</span>' : '<span class="badge badge-gray">Estándar</span>'));
         const netEnabled = !!(u.samba_enabled ?? u.enabled);
         const canManage = !isProtected && (isAdminCaller || !u.is_admin);
+
+        const shellBadge = (u.shell && u.shell.includes('nologin'))
+          ? '<span class="badge badge-gray" title="Sin acceso interactivo (cuenta de red Samba)">Solo Red (nologin)</span>'
+          : `<span class="badge badge-ok" title="Shell interactiva habilitada">Terminal (${escapeHtml(u.shell || '/bin/bash')})</span>`;
+
         return `
-        <tr data-username="${escapeHtml(u.username)}" data-admin="${u.is_admin ? '1' : '0'}" data-enabled="${netEnabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
-          <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.full_name || '')}</div></td>
-          <td>${u.uid}</td>
+        <tr data-username="${escapeHtml(u.username)}" data-fullname="${escapeHtml(u.full_name || '')}" data-admin="${(u.is_admin || u.is_superadmin) ? '1' : '0'}" data-operator="${(u.can_web && !u.is_admin) ? '1' : '0'}" data-enabled="${netEnabled ? '1' : '0'}" data-samba="${u.is_samba ? '1' : '0'}">
+          <td><strong>${escapeHtml(u.username)}</strong><div style="font-size:11px; color:var(--text-muted);">${escapeHtml(u.full_name || 'Sin nombre asignado')}</div></td>
+          <td><code>${u.uid}</code></td>
           <td>${rol}</td>
+          <td>${shellBadge}</td>
           <td>${renderUserGroupPills(u.username, u.groups)}</td>
           <td>${netEnabled ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Suspendido</span>'}</td>
-          <td>${u.is_samba ? '<span class="badge badge-ok">Sync</span>' : '<span class="badge badge-err">Sin SMB</span>'}</td>
+          <td>${u.is_samba ? (u.samba_enabled !== false ? '<span class="badge badge-ok">Sync</span>' : '<span class="badge badge-warn">SMB Deshab</span>') : '<span class="badge badge-gray">Sin SMB</span>'}</td>
           <td style="text-align:right; white-space:nowrap;">
             ${canManage ? `
               <button class="btn btn-secondary btn-sm" title="Editar" onclick="openEditUser('${escapeHtml(u.username)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
@@ -2279,7 +2426,7 @@ async function loadUsersAndGroups() {
             ` : `<span class="badge badge-gray">${isProtected ? (u.is_superadmin ? 'Inmutable' : 'Protegida') : 'Solo lectura'}</span>`}
           </td>
         </tr>`;
-      }).join('') || '<tr><td colspan="7" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
+      }).join('') || '<tr><td colspan="8" style="text-align:center;">Sin usuarios encontrados.</td></tr>';
       applyUsersFilters();
     }
 
@@ -2298,15 +2445,22 @@ async function loadUsersAndGroups() {
           canManageMembers = isAdminCaller;
         }
 
+        const membersHtml = (g.members || []).map(m => {
+          if (m === 'www-data') {
+            return `<span class="tag-pill" style="border:1px solid var(--accent-primary); color:var(--accent-primary); font-weight:600;" title="Cuenta del servicio web necesaria para el panel">www-data (sistema)</span>`;
+          }
+          return `<span class="tag-pill">${escapeHtml(m)}</span>`;
+        }).join(' ') || '<em style="color:var(--text-muted);">Sin miembros</em>';
+
         return `
-        <tr>
+        <tr data-group="${escapeHtml(g.name)}" data-members="${escapeHtml((g.members || []).join(' '))}">
           <td><strong>${escapeHtml(g.name)}</strong></td>
-          <td>${g.gid}</td>
-          <td>${(g.members || []).map(m => `<span class="tag-pill">${escapeHtml(m)}</span>`).join(' ') || '<em>Sin miembros</em>'}</td>
+          <td><code>${g.gid}</code></td>
+          <td>${isSpecial ? '<span class="badge badge-primary">Especial (Sistema)</span>' : '<span class="badge badge-gray">Departamental</span>'}</td>
+          <td>${membersHtml}</td>
           <td style="text-align:right; white-space:nowrap;">
-            ${isSpecial ? '<span class="badge badge-gray" style="margin-right:6px;">Especial</span>' : ''}
             ${canManageMembers ? `
-              <button class="btn btn-secondary btn-sm" title="Miembros" onclick="openGroupMembers('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-users"></use></svg></button>
+              <button class="btn btn-secondary btn-sm" title="Gestionar Miembros" onclick="openGroupMembers('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-users"></use></svg></button>
             ` : ''}
             ${!isSpecial && isAdminCaller ? `
               <button class="btn btn-secondary btn-sm" title="Renombrar" onclick="openRenameGroup('${escapeHtml(g.name)}')"><svg class="icon icon-sm"><use href="#icon-edit"></use></svg></button>
@@ -2316,7 +2470,8 @@ async function loadUsersAndGroups() {
           </td>
         </tr>
       `;
-      }).join('') || '<tr><td colspan="4" style="text-align:center;">Sin grupos creados.</td></tr>';
+      }).join('') || '<tr><td colspan="5" style="text-align:center;">Sin grupos creados.</td></tr>';
+      applyGroupsFilters();
     }
 
     populateUserGroupOptions(_groupsData);
@@ -2358,9 +2513,27 @@ function applyUsersFilters() {
   document.querySelectorAll('#users-table-body tr[data-username]').forEach(tr => {
     let ok = true;
     if (_usersFilter === 'admin') ok = tr.dataset.admin === '1';
+    else if (_usersFilter === 'operator') ok = tr.dataset.operator === '1';
     else if (_usersFilter === 'blocked') ok = tr.dataset.enabled !== '1';
     else if (_usersFilter === 'samba') ok = tr.dataset.samba === '1';
-    if (ok && q) ok = tr.dataset.username.includes(q);
+    if (ok && q) {
+      const uName = (tr.dataset.username || '').toLowerCase();
+      const fName = (tr.dataset.fullname || '').toLowerCase();
+      ok = uName.includes(q) || fName.includes(q);
+    }
+    tr.style.display = ok ? '' : 'none';
+  });
+}
+
+function applyGroupsFilters() {
+  const q = (document.getElementById('groups-search')?.value || '').toLowerCase().trim();
+  document.querySelectorAll('#groups-table-body tr[data-group]').forEach(tr => {
+    let ok = true;
+    if (q) {
+      const gname = (tr.dataset.group || '').toLowerCase();
+      const members = (tr.dataset.members || '').toLowerCase();
+      ok = gname.includes(q) || members.includes(q);
+    }
     tr.style.display = ok ? '' : 'none';
   });
 }
@@ -2441,19 +2614,31 @@ async function submitUpdateUser(event) {
 }
 
 async function toggleUser(username, enabled) {
-  const verb = enabled ? 'Desbloquear' : 'Bloquear';
-  if (!window.confirm(`¿${verb} la cuenta [${username}]?`)) return;
-
-  try {
-    await apiFetch('/api/users/toggle', {
-      method: 'POST',
-      body: JSON.stringify({ username, enabled }),
-    });
-    showToast(`Cuenta [${username}] ${enabled ? 'desbloqueada' : 'bloqueada'}.`, 'success');
-    loadUsersAndGroups();
-  } catch (e) {
-    // Ya mostrado
-  }
+  const verb = enabled ? 'Reactivar' : 'Suspender';
+  showUserActionConfirm({
+    title: `${verb} cuenta [${username}]`,
+    icon: enabled ? 'unlock' : 'lock',
+    alertType: enabled ? 'info' : 'warning',
+    alertText: enabled
+      ? `Se reanudará el acceso de red a carpetas compartidas Samba y servicios para [${username}].`
+      : `La cuenta [${username}] perderá acceso inmediato a recursos Samba y sesiones autenticadas.`,
+    desc: `El estado se actualizará tanto en el sistema operativo Linux como en la base de datos de usuarios Samba (smbpasswd).`,
+    prompt: `¿Confirmas que deseas ${verb.toLowerCase()} la cuenta [${username}]?`,
+    btnText: `${verb} cuenta`,
+    btnClass: enabled ? 'btn-primary' : 'btn-danger',
+    onConfirm: async () => {
+      try {
+        await apiFetch('/api/users/toggle', {
+          method: 'POST',
+          body: JSON.stringify({ username, enabled }),
+        });
+        showToast(`Cuenta [${username}] ${enabled ? 'reactivada exitosamente' : 'suspendida'}.`, 'success');
+        loadUsersAndGroups();
+      } catch (e) {
+        // Ya mostrado por apiFetch
+      }
+    },
+  });
 }
 
 function openGroupMembers(group) {
@@ -2500,18 +2685,29 @@ async function addGroupMember() {
 }
 
 async function removeGroupMember(username) {
-  if (!window.confirm(`¿Quitar a [${username}] del grupo ${_activeGroup}?`)) return;
-  try {
-    await apiFetch('/api/users/groups', {
-      method: 'POST',
-      body: JSON.stringify({ username, group: _activeGroup, action: 'remove' }),
-    });
-    showToast(`${username} quitado de ${_activeGroup}.`, 'success');
-    loadUsersAndGroups();
-    openGroupMembers(_activeGroup);
-  } catch (e) {
-    // Ya mostrado
-  }
+  showUserActionConfirm({
+    title: `Quitar miembro de grupo`,
+    icon: 'users',
+    alertType: 'warning',
+    alertText: `Se revocará la membresía del usuario [${username}] en el grupo departamental [${_activeGroup}].`,
+    desc: `El usuario perderá de inmediato los permisos de acceso y herencia ACL asociados a este grupo.`,
+    prompt: `¿Confirmas quitar a [${username}] del grupo [${_activeGroup}]?`,
+    btnText: 'Quitar del grupo',
+    btnClass: 'btn-danger',
+    onConfirm: async () => {
+      try {
+        await apiFetch('/api/users/groups', {
+          method: 'POST',
+          body: JSON.stringify({ username, group: _activeGroup, action: 'remove' }),
+        });
+        showToast(`${username} quitado de ${_activeGroup}.`, 'success');
+        loadUsersAndGroups();
+        openGroupMembers(_activeGroup);
+      } catch (e) {
+        // Ya mostrado por apiFetch
+      }
+    },
+  });
 }
 
 function openRenameGroup(name) {
@@ -2598,8 +2794,25 @@ function renderPermMatrix() {
 
   const shares = _permData.shares || [];
   const rows = _permTab === 'groups' ? (_permData.groups || []) : (_permData.users || []);
-  if (!shares.length || !rows.length) {
-    container.innerHTML = '<p style="padding:18px; color:var(--text-muted);">No hay recursos o entidades para mostrar.</p>';
+  if (!shares.length) {
+    container.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted);"><p>No hay recursos compartidos registrados en el sistema.</p></div>';
+    return;
+  }
+  if (!rows.length) {
+    if (_permTab === 'groups') {
+      container.innerHTML = `
+        <div style="padding:24px; text-align:center; color:var(--text-secondary);">
+          <svg class="icon icon-lg" style="color:var(--text-muted); margin-bottom:8px;"><use href="#icon-shield"></use></svg>
+          <div style="font-weight:600; font-size:14px; margin-bottom:4px;">No hay grupos asignados a los recursos compartidos</div>
+          <p style="font-size:12.5px; max-width:480px; margin:0 auto; color:var(--text-muted);">
+            Los grupos corporativos actuales no tienen permisos específicos asignados en las carpetas compartidas registradas.
+            Puedes asignar grupos directamente en la configuración de cada recurso compartido o alternar a la pestaña <strong>Usuarios × Recursos</strong>.
+          </p>
+        </div>
+      `;
+    } else {
+      container.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted);"><p>No hay usuarios registrados con acceso a estos recursos.</p></div>';
+    }
     return;
   }
 
@@ -2648,42 +2861,76 @@ async function repairAcls(shareName = null) {
     const total = auditData.total ?? (auditData.shares ? Object.keys(auditData.shares).length : 0);
     const sharesMap = auditData.shares || {};
 
-    let force = false;
+    const executeRepair = async (force) => {
+      try {
+        const payload = { share: shareName || '', force };
+        const res = await apiFetch('/api/shares/access/repair', { method: 'POST', body: JSON.stringify(payload) });
+        showToast(res.message || 'ACL procesadas correctamente.', 'success');
+        loadAccessMatrix();
+      } catch (e) {
+        // Ya mostrado por apiFetch
+      }
+    };
 
     if (shareName) {
       const sAudit = sharesMap[shareName] || auditData;
       if (sAudit && sAudit.in_sync) {
-        if (!window.confirm(`El recurso [${shareName}] ya tiene sus ACL perfectamente sincronizadas con smb.conf.\n\n¿Deseas forzar la reaplicación recursiva (setfacl -R) de todos modos?`)) {
-          return;
-        }
-        force = true;
+        showUserActionConfirm({
+          title: `Reaplicar ACL: [${shareName}]`,
+          icon: 'shield',
+          alertType: 'info',
+          alertText: `El recurso [${shareName}] ya tiene sus ACL perfectamente sincronizadas con smb.conf (cero discrepancias).`,
+          desc: `La reaplicación forzará la ejecución recursiva de setfacl -R en todas las carpetas y archivos dentro del recurso.`,
+          prompt: `¿Deseas forzar la reaplicación recursiva de ACL de todos modos?`,
+          btnText: 'Forzar reaplicación',
+          btnClass: 'btn-primary',
+          onConfirm: () => executeRepair(true),
+        });
       } else {
-        const discList = ((sAudit && sAudit.discrepancies) || []).map(d => ` • ${d}`).join('\n');
-        if (!window.confirm(`Se detectaron desajustes en el recurso [${shareName}]:\n${discList || 'Discrepancias en permisos'}\n\n¿Proceder con la reparación de ACL?`)) {
-          return;
-        }
+        const discList = ((sAudit && sAudit.discrepancies) || []).map(d => `• ${d}`).join('<br>');
+        showUserActionConfirm({
+          title: `Reparar ACL: [${shareName}]`,
+          icon: 'alert-triangle',
+          alertType: 'warning',
+          alertText: `Se detectaron desajustes entre smb.conf y las ACL del sistema en [${shareName}]:<br><div style="margin-top:6px; font-family:monospace; font-size:11.5px;">${discList || 'Discrepancias en permisos'}</div>`,
+          desc: `Se reajustarán las ACL POSIX y las máscaras efectivas para que coincidan con la definición del recurso.`,
+          prompt: `¿Proceder con la reparación automática de ACL?`,
+          btnText: 'Reparar ACL',
+          btnClass: 'btn-primary',
+          onConfirm: () => executeRepair(false),
+        });
       }
     } else {
       if (outOfSync === 0) {
-        if (!window.confirm(`Todas las ACL de los ${total} recurso(s) están sincronizadas con smb.conf (cero discrepancias).\n\n¿Deseas forzar la reaplicación recursiva en todos los recursos de todos modos?`)) {
-          return;
-        }
-        force = true;
+        showUserActionConfirm({
+          title: `Reaplicar ACL en todos los recursos`,
+          icon: 'shield',
+          alertType: 'info',
+          alertText: `Todas las ACL de los ${total} recurso(s) están perfectamente sincronizadas con smb.conf.`,
+          desc: `Se ejecutará una reaplicación recursiva total de permisos setfacl sobre todos los recursos compartidos.`,
+          prompt: `¿Deseas forzar la reaplicación recursiva en todos los recursos?`,
+          btnText: 'Forzar reaplicación total',
+          btnClass: 'btn-primary',
+          onConfirm: () => executeRepair(true),
+        });
       } else {
         const outList = Object.entries(sharesMap)
           .filter(([_, v]) => !v.in_sync)
-          .map(([k, v]) => ` • [${k}]: ${(v.discrepancies || []).length} discrepancia(s)`)
-          .join('\n');
-        if (!window.confirm(`Auditoría de ACL: ${outOfSync} de ${total} recurso(s) requieren reparación:\n${outList}\n\n¿Proceder con la reparación inteligente (solo recursos con desajustes)?`)) {
-          return;
-        }
+          .map(([k, v]) => `• <strong>${k}</strong>: ${(v.discrepancies || []).length} discrepancia(s)`)
+          .join('<br>');
+        showUserActionConfirm({
+          title: `Reparación de ACL del sistema`,
+          icon: 'alert-triangle',
+          alertType: 'warning',
+          alertText: `Auditoría: ${outOfSync} de ${total} recurso(s) requieren sincronización:<br><div style="margin-top:6px; font-size:12px;">${outList}</div>`,
+          desc: `La reparación inteligente procesará únicamente las carpetas compartidas con desajustes detectados.`,
+          prompt: `¿Proceder con la reparación inteligente de ACL?`,
+          btnText: 'Reparar desajustes',
+          btnClass: 'btn-primary',
+          onConfirm: () => executeRepair(false),
+        });
       }
     }
-
-    const payload = { share: shareName || '', force };
-    const res = await apiFetch('/api/shares/access/repair', { method: 'POST', body: JSON.stringify(payload) });
-    showToast(res.message || 'ACL procesadas correctamente.', 'success');
-    loadAccessMatrix();
   } catch (e) {
     // Ya mostrado por apiFetch
   }
@@ -2761,21 +3008,28 @@ async function submitNewUser(event) {
 }
 
 async function deleteUser(username) {
-  if (!window.confirm(`¿Confirmas la eliminación del usuario [${username}] y su directorio home?`)) {
-    return;
-  }
-
-  try {
-    await apiFetch('/api/users/delete', {
-      method: 'POST',
-      body: JSON.stringify({ username }),
-    });
-
-    showToast(`Usuario [${username}] eliminado.`, 'success');
-    loadUsersAndGroups();
-  } catch (e) {
-    // Ya mostrado
-  }
+  showUserActionConfirm({
+    title: `Eliminar usuario [${username}]`,
+    icon: 'trash',
+    alertType: 'danger',
+    alertText: `Esta acción eliminará de forma permanente la cuenta [${username}] de Linux, Samba y su directorio personal (/home/${username}).`,
+    desc: `Los datos en carpetas compartidas se preservarán, pero el usuario no podrá volver a autenticarse.`,
+    prompt: `¿Confirmas que deseas eliminar irreversiblemente al usuario [${username}]?`,
+    btnText: 'Eliminar usuario',
+    btnClass: 'btn-danger',
+    onConfirm: async () => {
+      try {
+        await apiFetch('/api/users/delete', {
+          method: 'POST',
+          body: JSON.stringify({ username }),
+        });
+        showToast(`Usuario [${username}] eliminado.`, 'success');
+        loadUsersAndGroups();
+      } catch (e) {
+        // Ya mostrado por apiFetch
+      }
+    },
+  });
 }
 
 async function submitNewGroup(event) {
@@ -2809,21 +3063,28 @@ async function submitNewGroup(event) {
 }
 
 async function deleteGroup(name) {
-  if (!window.confirm(`¿Confirmas la eliminación del grupo corporativo [${name}]?`)) {
-    return;
-  }
-
-  try {
-    await apiFetch('/api/groups/delete', {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    });
-
-    showToast(`Grupo [${name}] eliminado.`, 'success');
-    loadUsersAndGroups();
-  } catch (e) {
-    // Ya mostrado
-  }
+  showUserActionConfirm({
+    title: `Eliminar grupo [${name}]`,
+    icon: 'trash',
+    alertType: 'danger',
+    alertText: `El grupo corporativo [${name}] será eliminado del sistema operativo y de la configuración de carpetas compartidas.`,
+    desc: `Los usuarios mantendrán sus cuentas, pero perderán los permisos conferidos por este grupo en Samba y el sistema de archivos.`,
+    prompt: `¿Confirmas que deseas eliminar el grupo [${name}]?`,
+    btnText: 'Eliminar grupo',
+    btnClass: 'btn-danger',
+    onConfirm: async () => {
+      try {
+        await apiFetch('/api/groups/delete', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        });
+        showToast(`Grupo [${name}] eliminado.`, 'success');
+        loadUsersAndGroups();
+      } catch (e) {
+        // Ya mostrado por apiFetch
+      }
+    },
+  });
 }
 
 // ==============================================================================
@@ -6338,6 +6599,12 @@ window.downloadPreviewFile = downloadPreviewFile;
 window.navigatePptxSlide = navigatePptxSlide;
 
 // Usuarios y Grupos
+window.switchUsersTab = switchUsersTab;
+window.executeUserActionConfirm = executeUserActionConfirm;
+window.updateUsersKpis = updateUsersKpis;
+window.updateUserChipCounters = updateUserChipCounters;
+window.applyGroupsFilters = applyGroupsFilters;
+window.repairAcls = repairAcls;
 window.openNewUser = openNewUser;
 window.openNewUserModal = openNewUser;
 window.openNewGroup = () => openModal('modal-new-group');
