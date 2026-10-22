@@ -478,7 +478,7 @@ class TerminalService
 
     private function runCaptureHelper(): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if (DIRECTORY_SEPARATOR === '\\' || !file_exists(self::PTY_CAPTURE_HELPER)) {
             return [
                 'success' => true,
                 'output' => "Simulación PTY Capture\n___NAS_CWD___/srv/nas\n",
@@ -492,7 +492,7 @@ class TerminalService
 
     private function runHelper(array $args): array
     {
-        if (DIRECTORY_SEPARATOR === '\\') {
+        if (DIRECTORY_SEPARATOR === '\\' || !file_exists(self::PTY_HELPER)) {
             return [
                 'success' => true,
                 'output' => 'Simulación PTY: ' . implode(' ', $args) . "\n",
