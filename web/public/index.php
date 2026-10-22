@@ -107,6 +107,10 @@ $router->get('/api/metrics', [DashboardController::class, 'metrics']);
 $router->get('/api/diagnostics', [SystemController::class, 'diagnostics']);
 $router->post('/api/diagnostics/run', [SystemController::class, 'runDiagnostic']);
 
+// Rutas API: Configuración y visibilidad de red (Networking)
+$router->get('/api/network', [SystemController::class, 'network']);
+$router->get('/api/network/overview', [SystemController::class, 'network']);
+
 // Rutas API: Recursos Compartidos (Samba)
 $router->get('/api/shares', [SambaController::class, 'list']);
 $router->get('/api/shares/list', [SambaController::class, 'list']);
