@@ -1718,8 +1718,8 @@ class SystemService
             // Comprobación de firma GPG del tag local
             $tag = 'v' . ltrim($version, 'v');
             $catTag = self::runCommand(['git', '-C', $gitDir, 'cat-file', '-p', $tag]);
-            if ($catTag['code'] === 0 && str_contains($catTag['stdout'], 'BEGIN PGP SIGNATURE')) {
-                $gpgVerified = true;
+            if ($catTag['code'] === 0) {
+                $gpgVerified = str_contains($catTag['stdout'], 'BEGIN PGP SIGNATURE');
             }
         }
 
@@ -1747,9 +1747,11 @@ class SystemService
                     $sortedVers = array_keys($semverTags);
                     usort($sortedVers, 'version_compare');
                     $maxVer = end($sortedVers);
-                    $latestVersion = $maxVer;
-                    if (version_compare($latestVersion, ltrim($version, 'v'), '>')) {
+                    if (version_compare($maxVer, ltrim($version, 'v'), '>')) {
+                        $latestVersion = $maxVer;
                         $hasUpdates = true;
+                    } else {
+                        $latestVersion = $version;
                     }
                 }
             }
@@ -1771,12 +1773,14 @@ class SystemService
                 if (is_array($apiData) && !empty($apiData['tag_name'])) {
                     $tag = (string) $apiData['tag_name'];
                     $cleanVer = ltrim($tag, 'v');
-                    $latestVersion = $cleanVer;
-                    if (version_compare($latestVersion, ltrim($version, 'v'), '>')) {
+                    if (version_compare($cleanVer, ltrim($version, 'v'), '>')) {
+                        $latestVersion = $cleanVer;
                         $hasUpdates = true;
                         if (!empty($apiData['body'])) {
                             $releaseNotes = (string) $apiData['body'];
                         }
+                    } else {
+                        $latestVersion = $version;
                     }
                 }
             }
