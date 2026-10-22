@@ -22,7 +22,8 @@ class Response
         if (!headers_sent()) {
             http_response_code($statusCode);
             header('Content-Type: application/json; charset=utf-8');
-            header('X-Content-Type-Options: nosniff');
+            // Las cabeceras de seguridad (X-Frame-Options, X-Content-Type-Options, CSP)
+            // las emite Nginx en el host virtual para evitar duplicados.
         }
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if (getenv('APP_ENV') !== 'testing') {
@@ -54,8 +55,7 @@ class Response
         extract($data, EXTR_SKIP);
         if (!headers_sent()) {
             header('Content-Type: text/html; charset=utf-8');
-            header('X-Frame-Options: SAMEORIGIN');
-            header('X-Content-Type-Options: nosniff');
+            // Cabeceras de seguridad delegadas a Nginx (server block de nas-web).
         }
         
         if (file_exists($viewPath)) {
