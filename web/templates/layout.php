@@ -9,6 +9,7 @@ declare(strict_types=1);
  * @var array $metrics Métricas del sistema (hostname, CPU, RAM, uptime, kernel).
  * @var array $storage Resumen de almacenamiento (/srv/nas, fs, disco).
  * @var array $services Estado de los demonios clave del NAS.
+ * @var array|null $network Inventario de red (solo al renderizar el módulo Networking).
  */
 
 $hostname = htmlspecialchars((string) ($metrics['hostname'] ?? 'SRV-NAS'), ENT_QUOTES, 'UTF-8');
@@ -59,6 +60,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
   </script>
   <meta name="csrf-token" content="<?= htmlspecialchars(\App\Core\AuthMiddleware::getCsrfToken(), ENT_QUOTES, 'UTF-8') ?>">
   <script>window.NAS_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>; window.NAS_IS_SUPER = <?= $isSuper ? 'true' : 'false' ?>; window.NAS_ROLE = <?= json_encode($role) ?>; window.NAS_SERVER_ROLE = <?= json_encode($serverRole) ?>; window.NAS_INITIAL_SERVER_TIME = { timestamp: <?= time() ?>, time: '<?= htmlspecialchars(date('H:i:s'), ENT_QUOTES, 'UTF-8') ?>', datetime: '<?= htmlspecialchars(date('Y-m-d H:i:s'), ENT_QUOTES, 'UTF-8') ?>', timezone: '<?= htmlspecialchars(date_default_timezone_get(), ENT_QUOTES, 'UTF-8') ?>', tz: '<?= htmlspecialchars(date('T'), ENT_QUOTES, 'UTF-8') ?>', offset: <?= (int) date('Z') ?> };</script>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/css/app.css?v=<?= file_exists(__DIR__ . '/../public/css/app.css') ? filemtime(__DIR__ . '/../public/css/app.css') : '2' ?>">
   <style>
     .badge-antispam {
@@ -663,35 +665,180 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
 
       <!-- 4. REDES (NETWORKING) -->
       <section id="view-networking" class="view-section <?= $activeView === 'networking' ? 'active' : '' ?>">
+        <?php
+        $esc = static fn ($value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+        $net = is_array($network ?? null) ? $network : [];
+        $netInterfaces = is_array($net['interfaces'] ?? null) ? $net['interfaces'] : [];
+        $netSamba = is_array($net['samba'] ?? null) ? $net['samba'] : [];
+        $netServices = is_array($net['services'] ?? null) ? $net['services'] : [];
+        $netFirewall = is_array($net['firewall'] ?? null) ? $net['firewall'] : [];
+        $netListening = is_array($net['listening'] ?? null) ? $net['listening'] : [];
+        $netDns = is_array($net['dns'] ?? null) ? $net['dns'] : [];
+        $netPrimaryIp = $net['primary_ip'] ?? ($_SERVER['SERVER_ADDR'] ?? null);
+        $netNetbios = $net['netbios'] ?? ($net['hostname'] ?? $hostname);
+        $netWorkgroup = $net['workgroup'] ?? null;
+        $netMinProto = $netSamba['min_protocol'] ?? null;
+        $netMaxProto = $netSamba['max_protocol'] ?? null;
+        $netSigning = $netSamba['signing'] ?? null;
+        $netEncrypt = $netSamba['encrypt'] ?? null;
+        $netSessions = $net['smb_sessions'] ?? null;
+        $netGenerated = $net['generated_at'] ?? null;
+        $netSmbOn = !empty($netServices['smbd']) && !empty($netServices['nmbd']);
+        $netWsdOn = !empty($netServices['wsdd2']);
+        $netHealthOk = $netSmbOn && $netWsdOn;
+        $netWsdPorts = [];
+        foreach ($netListening as $netLp) {
+            if (in_array((int) ($netLp['port'] ?? 0), [3702, 5355], true)) {
+                $netWsdPorts[] = (int) $netLp['port'] . '/' . ($netLp['proto'] ?? 'udp');
+            }
+        }
+        $netProtocolLabel = static function (?string $raw): string {
+            if ($raw === null || $raw === '') {
+                return 'N/D';
+            }
+            $raw = strtoupper($raw);
+            $raw = str_replace('SMB2_02', 'SMB 2.02', $raw);
+            $raw = str_replace('SMB2_10', 'SMB 2.1', $raw);
+            $raw = str_replace('SMB3_00', 'SMB 3.0', $raw);
+            $raw = str_replace('SMB3_11', 'SMB 3.1.1', $raw);
+            $raw = str_replace('SMB3', 'SMB 3.1.1 (máx.)', $raw);
+            return $raw;
+        };
+        ?>
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-network"></use></svg> Configuración y visibilidad de red</h2>
-            <p>Protocolos de descubrimiento SMB 3.1.1, WSDD2 / LLMNR para clientes Windows 10/11</p>
+            <p>Interfaces, protocolos SMB 3.1.1, descubrimiento WSDD2 / LLMNR y puertos expuestos</p>
+          </div>
+          <div class="page-head-actions">
+            <span class="text-muted" id="net-updated" style="font-size:12px; align-self:center;">
+              <?= $netGenerated ? 'Actualizado ' . $esc($netGenerated) : 'Sin verificar' ?>
+            </span>
+            <button type="button" class="btn btn-secondary" onclick="loadNetworking(true)">
+              <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
+            </button>
           </div>
         </div>
 
         <div class="panel-card">
-          <div class="panel-card-body" style="display:flex; flex-direction:column; gap:16px;">
-            <div class="info-row">
-              <span class="info-label">NetBIOS Name:</span>
-              <strong class="info-val" id="net-info-hostname"><?= $hostname ?></strong>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Workgroup:</span>
-              <strong class="info-val"><?= htmlspecialchars(\App\Services\SystemService::getWorkgroup(), ENT_QUOTES, 'UTF-8') ?></strong>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Protocolo SMB:</span>
-              <strong class="info-val">SMB 3.1.1 (Min: SMB 2.02)</strong>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Descubrimiento WSD:</span>
-              <strong class="info-val" style="color:var(--accent-success-text);">WSDD2 Activo (Puertos 3702, 5355, 5357)</strong>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Ruta de Red Windows:</span>
-              <strong class="info-val" id="net-info-path"><code>\\<?= $hostname ?></code> o <code>\\<?= htmlspecialchars($_SERVER['SERVER_ADDR'] ?? '10.10.1.2', ENT_QUOTES, 'UTF-8') ?></code></strong>
-            </div>
+          <div class="panel-card-head">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-server"></use></svg> Identidad y protocolos</h3>
+            <span id="net-health-badge">
+              <?php if ($netHealthOk): ?>
+                <span class="badge badge-ok">Servicios de red activos</span>
+              <?php else: ?>
+                <span class="badge badge-warn">Revisar servicios de red</span>
+              <?php endif; ?>
+            </span>
+          </div>
+          <div class="panel-card-body" id="net-panel-body" aria-live="polite">
+            <dl class="info-list">
+              <div class="info-row">
+                <dt class="info-label">Nombre NetBIOS:</dt>
+                <dd class="info-val" id="net-netbios"><?= $esc($netNetbios) ?></dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Workgroup:</dt>
+                <dd class="info-val" id="net-workgroup"><?= $esc($netWorkgroup ?: \App\Services\SystemService::getWorkgroup()) ?></dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Interfaces:</dt>
+                <dd class="info-val" id="net-interfaces">
+                  <?php if (empty($netInterfaces)): ?>
+                    <span class="text-muted">Sin interfaces detectadas.</span>
+                  <?php else: ?>
+                    <?php foreach ($netInterfaces as $netIface): ?>
+                      <div class="net-iface">
+                        <strong><?= $esc($netIface['name'] ?? '') ?></strong>
+                        <span class="badge <?= ($netIface['state'] ?? '') === 'UP' ? 'badge-ok' : 'badge-warn' ?>"><?= $esc($netIface['state'] ?? 'N/D') ?></span>
+                        <code><?= $esc($netIface['ip'] ?? 'sin IPv4') ?><?= !empty($netIface['prefix']) ? '/' . (int) $netIface['prefix'] : '' ?></code>
+                        <span class="text-muted">
+                          <?= !empty($netIface['speed_mbps']) ? (int) $netIface['speed_mbps'] . ' Mbps' : 'velocidad N/D' ?>
+                          · MTU <?= (int) ($netIface['mtu'] ?? 0) ?>
+                          <?= !empty($netIface['mac']) ? '· ' . $esc($netIface['mac']) : '' ?>
+                        </span>
+                      </div>
+                    <?php endforeach; ?>
+                  <?php endif; ?>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Puerta de enlace:</dt>
+                <dd class="info-val" id="net-gateway">
+                  <code><?= $esc($net['gateway'] ?? 'N/D') ?></code>
+                  <?php if (($net['dhcp'] ?? null) !== null): ?>
+                    <span class="badge <?= !empty($net['dhcp']) ? 'badge-blue' : 'badge-gray' ?>"><?= !empty($net['dhcp']) ? 'DHCP' : 'Estática' ?></span>
+                  <?php endif; ?>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Servidores DNS:</dt>
+                <dd class="info-val" id="net-dns"><?= empty($netDns) ? '<span class="text-muted">N/D</span>' : $esc(implode(' · ', $netDns)) ?></dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Protocolo SMB:</dt>
+                <dd class="info-val" id="net-smb">
+                  <?= $esc($netProtocolLabel($netMinProto)) ?> — <?= $esc($netProtocolLabel($netMaxProto)) ?>
+                  <span class="badge badge-gray">Firma: <?= $esc($netSigning ?: 'N/D') ?></span>
+                  <span class="badge badge-gray">Cifrado: <?= $esc($netEncrypt ?: 'N/D') ?></span>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">NetBIOS / LLMNR:</dt>
+                <dd class="info-val" id="net-nmbd">
+                  <span class="badge <?= !empty($netServices['nmbd']) ? 'badge-ok' : 'badge-err' ?>">nmbd <?= !empty($netServices['nmbd']) ? 'activo' : 'inactivo' ?></span>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Descubrimiento WSD:</dt>
+                <dd class="info-val" id="net-wsd">
+                  <span class="badge <?= $netWsdOn ? 'badge-ok' : 'badge-err' ?>">wsdd2 <?= $netWsdOn ? 'activo' : 'inactivo' ?></span>
+                  <?php if (!empty($netWsdPorts)): ?>
+                    <span class="text-muted" style="font-size:12px;">puertos <?= $esc(implode(', ', $netWsdPorts)) ?></span>
+                  <?php endif; ?>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Cortafuegos UFW:</dt>
+                <dd class="info-val" id="net-firewall">
+                  <span class="badge <?= !empty($netFirewall['active']) ? 'badge-ok' : 'badge-err' ?>"><?= !empty($netFirewall['active']) ? 'Activo' : 'Inactivo' ?></span>
+                  <?php if (empty($netFirewall['rules_visible'])): ?>
+                    <span class="text-muted" style="font-size:12px;">reglas no verificables sin privilegios</span>
+                  <?php endif; ?>
+                </dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Sesiones SMB:</dt>
+                <dd class="info-val" id="net-sessions"><?= $netSessions === null ? '<span class="text-muted">No verificable</span>' : (int) $netSessions . ' activa(s)' ?></dd>
+              </div>
+              <div class="info-row">
+                <dt class="info-label">Ruta de Red Windows:</dt>
+                <dd class="info-val" id="net-info-path">
+                  <code>\\<?= $esc($netNetbios) ?></code> o <code>\\<?= $esc($netPrimaryIp ?? 'N/D') ?></code>
+                  <button type="button" class="btn btn-secondary btn-sm" title="Copiar ruta UNC" style="margin-left:6px;" onclick="copyNetUnc('<?= $esc($netNetbios) ?>')">
+                    <svg class="icon icon-sm"><use href="#icon-copy"></use></svg>
+                  </button>
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="panel-card" style="margin-top:20px;">
+          <div class="panel-card-head">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Puertos en escucha</h3>
+            <span class="badge badge-gray" id="net-ports-count"><?= count($netListening) ?> puerto(s)</span>
+          </div>
+          <div class="panel-card-body" id="net-ports-body" aria-live="polite">
+            <?php if (empty($netListening)): ?>
+              <span class="text-muted">Sin datos de puertos disponibles.</span>
+            <?php else: ?>
+              <div class="net-port-list">
+                <?php foreach ($netListening as $netPort): ?>
+                  <span class="net-port-chip"><strong><?= (int) ($netPort['port'] ?? 0) ?>/<?= $esc($netPort['proto'] ?? 'tcp') ?></strong><?= !empty($netPort['service']) ? ' ' . $esc($netPort['service']) : '' ?></span>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
           </div>
         </div>
       </section>
