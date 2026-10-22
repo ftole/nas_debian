@@ -105,6 +105,33 @@ class SystemController
         Response::success($info);
     }
 
+    public function applications(Request $request): void
+    {
+        $apps = $this->system->getApplicationsStatus();
+        Response::success($apps);
+    }
+
+    public function runUpdate(Request $request): void
+    {
+        $role = (string) ($_SESSION['nas_user']['role'] ?? '');
+        $isAdmin = !empty($_SESSION['nas_user']['is_admin'])
+            || in_array($role, ['admin', 'superadmin'], true);
+        if (!$isAdmin) {
+            Response::error('Acceso denegado: se requieren privilegios de administrador.', 403);
+            return;
+        }
+
+        $res = $this->system->runHotUpdate();
+        if (!$res['success']) {
+            AuditService::log('system_update', 'sistema', 'FAILED', ['error' => $res['error'] ?? '']);
+            Response::error($res['error'] ?? 'Error al ejecutar la actualización.', 500);
+            return;
+        }
+
+        AuditService::log('system_update', 'sistema', 'SUCCESS');
+        Response::success($res, $res['message'] ?? 'Actualización del sistema completada.');
+    }
+
     public function diagnostics(Request $request): void
     {
         $services = $this->system->getServicesStatus();
