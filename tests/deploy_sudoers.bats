@@ -139,4 +139,18 @@ _extraer_bloque_sudoers() {
     [ "$status" -eq 0 ]
 }
 
+@test "el fragmento sudoers autoriza el actualizador en caliente NAS_UPDATE acotado a updater.sh --yes" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q 'Cmnd_Alias NAS_UPDATE = /bin/bash /opt/nas_debian/src/core/updater.sh --yes, /usr/bin/bash /opt/nas_debian/src/core/updater.sh --yes' "$tmp"
+    [ "$status" -eq 0 ]
+    run grep -q 'NAS_UPDATE' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
 
