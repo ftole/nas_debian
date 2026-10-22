@@ -47,10 +47,14 @@ class DashboardController
             $activeView = 'users';
         }
 
+        // El inventario de red solo se recolecta al renderizar el módulo Networking
+        $network = $activeView === 'networking' ? $this->system->getNetworkOverview() : null;
+
         Response::html($templatePath, [
             'metrics' => $metrics,
             'storage' => $storage,
             'services' => $services,
+            'network' => $network,
             'activeView' => $activeView,
         ]);
     }
