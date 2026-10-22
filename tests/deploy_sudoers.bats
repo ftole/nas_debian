@@ -153,4 +153,17 @@ _extraer_bloque_sudoers() {
     rm -f "$tmp"
 }
 
+@test "el fragmento sudoers autoriza smbstatus -b en NAS_SAMBA para telemetria de sesiones" {
+    local tmp
+    tmp="$(mktemp)"
+    _extraer_bloque_sudoers > "$tmp"
+    [ -s "$tmp" ]
+
+    run grep -q '/usr/bin/smbstatus -b' "$tmp"
+    [ "$status" -eq 0 ]
+
+    rm -f "$tmp"
+}
+
+
 
