@@ -174,6 +174,8 @@ $router->post('/api/services/manage', [SystemController::class, 'manageService']
 $router->get('/api/logs', [SystemController::class, 'logs']);
 $router->post('/api/system/reboot', [SystemController::class, 'reboot']);
 $router->get('/api/system/updates', [SystemController::class, 'updates']);
+$router->post('/api/system/update/run', [SystemController::class, 'runUpdate']);
+$router->get('/api/system/applications', [SystemController::class, 'applications']);
 
 // Rutas API: Consola Terminal Web Real
 $router->post('/api/terminal/exec', [TerminalController::class, 'exec']);
