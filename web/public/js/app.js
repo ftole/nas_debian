@@ -3182,7 +3182,7 @@ async function startSystemUpdate() {
     if (footer) {
       footer.innerHTML = `
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-system-update')">Cerrar</button>
-        <button type="button" class="btn btn-primary" onclick="window.location.reload(true)">
+        <button type="button" class="btn btn-primary" onclick="window.location.reload()">
           <svg class="icon"><use href="#icon-refresh"></use></svg> Recargar panel (Ctrl+F5)
         </button>
       `;
@@ -3391,9 +3391,6 @@ function loadTerminal() {
   }
 }
 
-function loadApplications() {
-  // Vista informativa de tecnologías y componentes integrados
-}
 
 // ==============================================================================
 // 15. Módulo: Explorador de Archivos (Cuadrícula Windows, Previsualizador & Papelera)
