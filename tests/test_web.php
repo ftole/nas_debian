@@ -2889,6 +2889,40 @@ assertTrue(str_contains($appJsSrc, 'window.loadApplications'), 'app.js expone wi
 $deployShSrc = file_get_contents(dirname(__DIR__) . '/src/core/deploy.sh');
 assertTrue(str_contains($deployShSrc, '/usr/bin/smbstatus -b'), 'deploy.sh autoriza smbstatus -b en NAS_SAMBA');
 
+// -----------------------------------------------------------------------------
+// Módulo Networking: inventario de red, endpoint y vista data-driven
+// -----------------------------------------------------------------------------
+$netSvc = new App\Services\SystemService();
+$netOverview = $netSvc->getNetworkOverview(0);
+assertTrue(isset($netOverview['interfaces']) && is_array($netOverview['interfaces']), 'getNetworkOverview expone la lista de interfaces de red');
+assertTrue(!empty($netOverview['primary_ip']), 'getNetworkOverview informa la IPv4 primaria del servidor');
+assertTrue(isset($netOverview['samba']['min_protocol'], $netOverview['samba']['max_protocol']), 'getNetworkOverview lee los protocolos SMB mínimo y máximo');
+assertTrue(isset($netOverview['services']['smbd'], $netOverview['services']['nmbd'], $netOverview['services']['wsdd2']), 'getNetworkOverview informa el estado de smbd, nmbd y wsdd2');
+assertTrue(isset($netOverview['firewall']['active']), 'getNetworkOverview informa el estado del cortafuegos UFW');
+assertTrue(!empty($netOverview['generated_at']), 'getNetworkOverview incluye la marca de última verificación');
+assertTrue(!isset($netOverview['listening'][0]) || isset($netOverview['listening'][0]['port']), 'getNetworkOverview enumera puertos en escucha con estructura port/proto/service');
+
+$metricsWithIp = $netSvc->getSystemMetrics();
+assertTrue(array_key_exists('ip', $metricsWithIp), 'getSystemMetrics incluye la IPv4 primaria para evitar fallbacks fijos en el frontend');
+
+$indexPhpSrc = file_get_contents(dirname(__DIR__) . '/web/public/index.php');
+assertTrue(str_contains($indexPhpSrc, "'/api/network'"), 'index.php registra la ruta GET /api/network');
+
+$layoutNetSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+assertTrue(str_contains($layoutNetSrc, 'id="net-panel-body"'), 'layout.php expone el contenedor net-panel-body para el inventario de red');
+assertTrue(str_contains($layoutNetSrc, 'id="net-ports-body"'), 'layout.php expone el contenedor net-ports-body para los puertos en escucha');
+assertTrue(str_contains($layoutNetSrc, 'aria-live="polite"'), 'layout.php anuncia cambios dinámicos de red con aria-live');
+assertTrue(!str_contains($layoutNetSrc, 'WSDD2 Activo (Puertos 3702, 5355, 5357)'), 'layout.php no afirma un estado de WSDD2 hardcodeado con puertos inexistentes');
+assertTrue(str_contains($layoutNetSrc, 'rel="icon"'), 'layout.php declara un favicon local para evitar 404 en consola');
+
+assertTrue(str_contains($appJsSrc, "apiFetch('/api/network'"), 'app.js consume el endpoint /api/network');
+assertTrue(str_contains($appJsSrc, 'function renderNetworking'), 'app.js define renderNetworking para pintar el inventario de red');
+assertTrue(str_contains($appJsSrc, 'function copyNetUnc'), 'app.js define copyNetUnc para copiar la ruta UNC real');
+assertTrue(!str_contains($appJsSrc, "d.system.ip || '10.10.1.2'"), 'app.js ya no usa una IP fija como fallback');
+
+assertTrue(str_contains($deployShSrc, 'gzip_types'), 'deploy.sh habilita compresión gzip para JS/CSS en Nginx');
+assertTrue(str_contains($deployShSrc, 'expires 30d'), 'deploy.sh define caché de 30 días para assets estáticos');
+
 
 
 // Limpieza de directorios temporales de prueba
