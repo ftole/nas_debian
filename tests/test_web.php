@@ -630,6 +630,18 @@ assertTrue($llRes['success'] && $llRes['exit_code'] === 0, 'TerminalService sopo
 $history = $terminal->getHistory(5);
 assertTrue(is_array($history), 'TerminalService::getHistory retorna historial estructurado');
 
+// Pruebas de captura PTY enriquecida con CWD y usuario
+$terminal->startSession(80, 24);
+$ptyCap = $terminal->capture();
+assertTrue($ptyCap['success'] && isset($ptyCap['cwd']) && isset($ptyCap['user']), 'TerminalService::capture retorna cwd y user estructurados');
+$terminal->killSession();
+
+// Filtro de contraseñas en terminal_history
+$secretCmd = 'echo "my_secret_token" | sudo';
+$terminal->send($secretCmd);
+$histCheck = DatabaseService::query("SELECT COUNT(*) as c FROM terminal_history WHERE command = :cmd", ['cmd' => $secretCmd]);
+assertTrue(($histCheck[0]['c'] ?? 0) === 0, 'TerminalService::send filtra comandos con credenciales sensibles de terminal_history');
+
 // 22. Pruebas de FileExplorerService
 $fileExp = new FileExplorerService();
 
@@ -2922,6 +2934,11 @@ assertTrue(!str_contains($appJsSrc, "d.system.ip || '10.10.1.2'"), 'app.js ya no
 
 assertTrue(str_contains($deployShSrc, 'gzip_types'), 'deploy.sh habilita compresión gzip para JS/CSS en Nginx');
 assertTrue(str_contains($deployShSrc, 'expires 30d'), 'deploy.sh define caché de 30 días para assets estáticos');
+
+assertTrue(str_contains($appJsSrc, 'function ansiToHtml('), 'app.js define función ansiToHtml para renderizar colores ANSI de terminal');
+assertTrue(substr_count($appJsSrc, 'function ansiToHtml(') === 1, 'app.js define ansiToHtml de forma única');
+assertTrue(str_contains($layoutNetSrc, "runQuickCommand('sudo smbstatus')"), 'layout.php chip smbstatus ejecuta sudo smbstatus');
+assertTrue(str_contains($layoutNetSrc, "runQuickCommand('systemctl --no-pager status smbd')"), 'layout.php chip status smbd incluye --no-pager');
 
 
 
