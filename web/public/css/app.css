@@ -2113,3 +2113,84 @@ code, kbd, pre, samp {
   background-color: var(--accent-primary);
   color: #ffffff;
 }
+
+/* ==============================================================================
+   Módulo Networking: listas semánticas, interfaces y puertos en escucha
+   ============================================================================== */
+
+.info-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-list .info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.info-list .info-row:last-child {
+  border-bottom: none;
+}
+
+.info-list dt.info-label {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  min-width: 190px;
+  flex-shrink: 0;
+}
+
+.info-list dd.info-val {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-main);
+  word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.net-iface {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.net-port-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.net-port-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card-header);
+  color: var(--text-secondary);
+}
+
+.net-port-chip strong {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+@media (max-width: 960px) {
+  .info-list dt.info-label {
+    min-width: 0;
+    flex-basis: 40%;
+  }
+}
