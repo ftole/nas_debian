@@ -154,6 +154,25 @@ _hook_post_actualizacion() {
         rm -f "$tmp_term" 2>/dev/null || true
     fi
 
+    local cap_dest="${NAS_CAPTURE_DEST:-/usr/local/bin/nas-terminal-capture}"
+    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CAPTURE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local tmp_cap
+        tmp_cap="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal-capture.$$")"
+        if awk '
+            /^cat << '\''NAS_CAPTURE_EOF'\'' > \/usr\/local\/bin\/nas-terminal-capture$/ { capture=1; next }
+            capture && /^NAS_CAPTURE_EOF$/ { capture=0; exit }
+            capture { print }
+        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_cap" 2>/dev/null && [ -s "$tmp_cap" ]; then
+            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$cap_dest")" ]; then
+                mkdir -p "$(dirname "$cap_dest")" 2>/dev/null || true
+                cp -f "$tmp_cap" "$cap_dest" 2>/dev/null || true
+                chmod 0755 "$cap_dest" 2>/dev/null || true
+                chown root:root "$cap_dest" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$tmp_cap" 2>/dev/null || true
+    fi
+
     local chp_dest="${NAS_CHPASSWD_DEST:-/usr/local/sbin/nas-chpasswd}"
     if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CHPASSWD_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
         local tmp_chp
