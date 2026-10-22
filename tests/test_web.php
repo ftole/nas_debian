@@ -2995,6 +2995,11 @@ assertTrue(str_contains($layoutUsersSrc, 'id="usr-panel-groups"'), 'layout.php i
 assertTrue(str_contains($layoutUsersSrc, 'id="usr-panel-perms"'), 'layout.php incluye panel de vista usr-panel-perms');
 assertTrue(str_contains($layoutUsersSrc, 'id="modal-user-action-confirm"'), 'layout.php incluye modal interactivo modal-user-action-confirm');
 assertTrue(str_contains($layoutUsersSrc, 'id="btn-user-action-confirm-submit"'), 'layout.php incluye botón de acción btn-user-action-confirm-submit');
+assertTrue(str_contains($layoutUsersSrc, 'data-filter="standard"'), 'layout.php incluye chip de filtro para empleados standard');
+assertTrue(str_contains($layoutUsersSrc, 'id="chip-count-standard"'), 'layout.php incluye contador de chip para empleados standard');
+assertTrue(str_contains($layoutUsersSrc, 'id="users-table"'), 'layout.php asigna identificador users-table para ordenamiento');
+assertTrue(str_contains($layoutUsersSrc, 'id="btn-copy-welcome-memo"'), 'layout.php incluye botón btn-copy-welcome-memo');
+assertTrue(str_contains($layoutUsersSrc, 'id="perms-search"'), 'layout.php incluye campo perms-search en la matriz de acceso');
 
 assertTrue(str_contains($appJsUsersSrc, 'function switchUsersTab('), 'app.js define función switchUsersTab');
 assertTrue(str_contains($appJsUsersSrc, 'function updateUsersKpis('), 'app.js define función updateUsersKpis');
@@ -3002,11 +3007,21 @@ assertTrue(str_contains($appJsUsersSrc, 'function updateUserChipCounters('), 'ap
 assertTrue(str_contains($appJsUsersSrc, 'function showUserActionConfirm('), 'app.js define función showUserActionConfirm');
 assertTrue(str_contains($appJsUsersSrc, 'function executeUserActionConfirm('), 'app.js define función executeUserActionConfirm');
 assertTrue(str_contains($appJsUsersSrc, 'function applyGroupsFilters('), 'app.js define función applyGroupsFilters');
+assertTrue(str_contains($appJsUsersSrc, 'function sortUsersTable('), 'app.js define función sortUsersTable');
+assertTrue(str_contains($appJsUsersSrc, 'function renderUsersTableBody('), 'app.js define función renderUsersTableBody');
+assertTrue(str_contains($appJsUsersSrc, 'function copyPasswordInput('), 'app.js define función copyPasswordInput');
+assertTrue(str_contains($appJsUsersSrc, 'function copyUserWelcomeMemo('), 'app.js define función copyUserWelcomeMemo');
+assertTrue(str_contains($appJsUsersSrc, 'function applyPermsSearch('), 'app.js define función applyPermsSearch');
+assertTrue(str_contains($appJsUsersSrc, 'Sistema (Protegido)'), 'app.js protege la cuenta www-data en el gestor de miembros de grupo');
 assertTrue(str_contains($appJsUsersSrc, 'window.switchUsersTab = switchUsersTab'), 'app.js exporta switchUsersTab en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.executeUserActionConfirm = executeUserActionConfirm'), 'app.js exporta executeUserActionConfirm en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.updateUsersKpis = updateUsersKpis'), 'app.js exporta updateUsersKpis en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.applyGroupsFilters = applyGroupsFilters'), 'app.js exporta applyGroupsFilters en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.repairAcls = repairAcls'), 'app.js exporta repairAcls en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.sortUsersTable = sortUsersTable'), 'app.js exporta sortUsersTable en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.copyPasswordInput = copyPasswordInput'), 'app.js exporta copyPasswordInput en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.copyUserWelcomeMemo = copyUserWelcomeMemo'), 'app.js exporta copyUserWelcomeMemo en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.applyPermsSearch = applyPermsSearch'), 'app.js exporta applyPermsSearch en window');
 
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
