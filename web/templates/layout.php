@@ -1342,90 +1342,159 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
 
-        <div class="filter-toolbar">
-          <div class="filter-chips" id="users-filter-chips">
-            <button type="button" class="chip-btn active" data-filter="all" onclick="setUsersFilter('all')">Todos</button>
-            <button type="button" class="chip-btn" data-filter="admin" onclick="setUsersFilter('admin')">Admin</button>
-            <button type="button" class="chip-btn" data-filter="blocked" onclick="setUsersFilter('blocked')">Bloqueados</button>
-            <button type="button" class="chip-btn" data-filter="samba" onclick="setUsersFilter('samba')">Sincronizados</button>
-          </div>
-          <div class="search-box">
-            <svg class="icon"><use href="#icon-search"></use></svg>
-            <input type="text" id="users-search" placeholder="Buscar usuario..." oninput="applyUsersFilters()">
+        <!-- Tarjetas de Resumen (KPIs) -->
+        <div class="panel-card" style="margin-bottom:20px;">
+          <div class="panel-card-body" style="padding:16px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:16px;">
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Total Cuentas</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px;" id="usr-kpi-total">0</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="usr-kpi-total-desc">Cuentas Linux / Samba</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Estado Operativo</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px; color:var(--accent-success-text);" id="usr-kpi-active">0 Activas</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="usr-kpi-blocked-desc">0 suspendidas</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Sincronización Samba</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px;" id="usr-kpi-samba">0 con SMB</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="usr-kpi-nosamba-desc">0 sin SMB</div>
+              </div>
+              <div style="background:var(--bg-body); padding:12px 14px; border-radius:6px; border:1px solid var(--border-color);">
+                <span class="text-muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Grupos Corporativos</span>
+                <div style="font-size:20px; font-weight:700; margin-top:4px;" id="usr-kpi-groups">0 grupos</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="usr-kpi-groups-desc">Gobernanza grp_*</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card-grid-2">
-          <!-- Tabla de Usuarios -->
+        <!-- Sub-navegación por Pestañas -->
+        <div class="filter-toolbar" style="margin-bottom:16px;">
+          <div class="filter-chips">
+            <button type="button" class="chip-btn active" id="usr-tab-btn-users" onclick="switchUsersTab('users')">
+              <svg class="icon icon-sm"><use href="#icon-users"></use></svg> Cuentas de Usuario (<span id="usr-tab-count">0</span>)
+            </button>
+            <button type="button" class="chip-btn" id="usr-tab-btn-groups" onclick="switchUsersTab('groups')">
+              <svg class="icon icon-sm"><use href="#icon-folder"></use></svg> Grupos Corporativos (<span id="grp-tab-count">0</span>)
+            </button>
+            <button type="button" class="chip-btn" id="usr-tab-btn-perms" onclick="switchUsersTab('perms')">
+              <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Matriz de Permisos (ACL / smb.conf)
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel 1: Cuentas de Usuario (Ancho Completo) -->
+        <div id="usr-panel-users" class="users-tab-panel">
+          <div class="filter-toolbar" style="margin-bottom:16px;">
+            <div class="filter-chips" id="users-filter-chips">
+              <button type="button" class="chip-btn active" data-filter="all" onclick="setUsersFilter('all')">Todos (<span id="chip-count-all">0</span>)</button>
+              <button type="button" class="chip-btn" data-filter="admin" onclick="setUsersFilter('admin')">Admin (<span id="chip-count-admin">0</span>)</button>
+              <button type="button" class="chip-btn" data-filter="operator" onclick="setUsersFilter('operator')">Operadores (<span id="chip-count-operator">0</span>)</button>
+              <button type="button" class="chip-btn" data-filter="blocked" onclick="setUsersFilter('blocked')">Bloqueados (<span id="chip-count-blocked">0</span>)</button>
+              <button type="button" class="chip-btn" data-filter="samba" onclick="setUsersFilter('samba')">Samba (<span id="chip-count-samba">0</span>)</button>
+            </div>
+            <div class="search-box">
+              <svg class="icon"><use href="#icon-search"></use></svg>
+              <input type="text" id="users-search" placeholder="Buscar usuario o nombre..." oninput="applyUsersFilters()">
+            </div>
+          </div>
+
           <div class="panel-card">
-            <div class="panel-card-head">
-              <h3>Usuarios registrados</h3>
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Cuentas de usuario registradas</h3>
+              <button class="btn btn-secondary btn-sm" onclick="loadUsersAndGroups()">
+                <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Refrescar
+              </button>
             </div>
             <div class="table-responsive">
               <table class="nas-table">
                 <thead>
                   <tr>
-                    <th>Usuario</th>
-                    <th>UID</th>
+                    <th>Usuario / Nombre real</th>
+                    <th style="width:70px;">UID</th>
                     <th>Rol</th>
-                    <th>Grupos</th>
-                    <th>Estado</th>
+                    <th>Tipo de Acceso / Shell</th>
+                    <th>Grupos Departamentales</th>
+                    <th>Estado Linux</th>
                     <th>Samba</th>
-                    <th style="width:196px; text-align:right;">Acción</th>
+                    <th style="width:170px; text-align:right;">Acciones</th>
                   </tr>
                 </thead>
                 <tbody id="users-table-body">
-                  <tr><td colspan="7" style="text-align:center;">Cargando usuarios...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Tabla de Grupos -->
-          <div class="panel-card">
-            <div class="panel-card-head">
-              <h3>Grupos corporativos (grp_*)</h3>
-            </div>
-            <div class="table-responsive">
-              <table class="nas-table">
-                <thead>
-                  <tr>
-                    <th>Grupo</th>
-                    <th>GID</th>
-                    <th>Miembros</th>
-                    <th style="width:210px; text-align:right;">Acción</th>
-                  </tr>
-                </thead>
-                <tbody id="groups-table-body">
-                  <tr><td colspan="4" style="text-align:center;">Cargando grupos...</td></tr>
+                  <tr><td colspan="8" style="text-align:center;">Cargando usuarios...</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
         </div>
 
-        <!-- Permisos de acceso a recursos (integrados en Usuarios) -->
-        <div class="panel-card" style="margin-top:20px;">
-          <div class="panel-card-head">
-            <h3>Permisos de acceso a recursos (ACL / smb.conf)</h3>
-            <div style="display:flex; gap:8px;">
-              <button class="btn btn-secondary btn-sm" onclick="repairAcls()" title="Recalcular las ACL POSIX de disco según smb.conf">
-                <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Reparar ACL
-              </button>
-              <button class="btn btn-secondary btn-sm" onclick="loadAccessMatrix()">
-                <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Actualizar
-              </button>
+        <!-- Panel 2: Grupos Corporativos (Ancho Completo) -->
+        <div id="usr-panel-groups" class="users-tab-panel" style="display:none;">
+          <div class="filter-toolbar" style="margin-bottom:16px;">
+            <div style="font-size:13px; color:var(--text-secondary); display:flex; align-items:center; gap:6px;">
+              <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-info"></use></svg>
+              <span>Los grupos corporativos utilizan el prefijo estricto <code>grp_*</code> para gobernar las ACL POSIX y accesos de red Samba.</span>
+            </div>
+            <div class="search-box">
+              <svg class="icon"><use href="#icon-search"></use></svg>
+              <input type="text" id="groups-search" placeholder="Buscar grupo..." oninput="applyGroupsFilters()">
             </div>
           </div>
-          <div class="filter-toolbar" style="margin:0; padding:10px 4px;">
-            <div class="filter-chips" id="perm-filter-chips">
-              <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
-              <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
+
+          <div class="panel-card">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-folder"></use></svg> Grupos corporativos departamentales (grp_*)</h3>
+              <button class="btn btn-primary btn-sm" onclick="openModal('modal-new-group')">
+                <svg class="icon icon-sm"><use href="#icon-plus"></use></svg> Crear nuevo grupo
+              </button>
             </div>
-            <small style="color:var(--text-muted);">Clic en una celda para alternar: Sin acceso → Solo lectura → Lectura y escritura.</small>
+            <div class="table-responsive">
+              <table class="nas-table">
+                <thead>
+                  <tr>
+                    <th>Nombre del Grupo</th>
+                    <th style="width:80px;">GID</th>
+                    <th>Tipo de Grupo</th>
+                    <th>Miembros Asignados</th>
+                    <th style="width:190px; text-align:right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="groups-table-body">
+                  <tr><td colspan="5" style="text-align:center;">Cargando grupos...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div class="table-responsive" id="perm-matrix-container">
-            <p style="padding:18px; color:var(--text-muted);">Cargando matriz de permisos...</p>
+        </div>
+
+        <!-- Panel 3: Permisos de acceso a recursos (ACL / smb.conf) -->
+        <div id="usr-panel-perms" class="users-tab-panel" style="display:none;">
+          <div class="panel-card">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Permisos de acceso a recursos (ACL / smb.conf)</h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin:4px 0 0 0;">Control de acceso granular: haz clic en cualquier celda para alternar el nivel de acceso (Sin acceso → Solo lectura → Lectura y escritura).</p>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="repairAcls()" title="Recalcular las ACL POSIX de disco según smb.conf">
+                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Reparar ACL
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="loadAccessMatrix()">
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Actualizar
+                </button>
+              </div>
+            </div>
+            <div class="filter-toolbar" style="margin:0; padding:12px 16px; border-bottom:1px solid var(--border-color);">
+              <div class="filter-chips" id="perm-filter-chips">
+                <button type="button" class="chip-btn active" data-perm="groups" onclick="setPermTab('groups')">Grupos × Recursos</button>
+                <button type="button" class="chip-btn" data-perm="users" onclick="setPermTab('users')">Usuarios × Recursos</button>
+              </div>
+            </div>
+            <div class="table-responsive" id="perm-matrix-container">
+              <p style="padding:18px; color:var(--text-muted);">Cargando matriz de permisos...</p>
+            </div>
           </div>
         </div>
       </section>
@@ -2220,6 +2289,31 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div class="modal-footer" style="padding:0; margin-top:20px;">
           <button type="button" class="btn btn-primary" onclick="closeModal('modal-user-welcome')">Aceptar</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmación de Acción sobre Usuario / Grupo -->
+  <div class="modal-backdrop modal-static" id="modal-user-action-confirm">
+    <div class="modal-dialog" style="max-width:500px;">
+      <div class="modal-header">
+        <h3 id="user-action-confirm-title" style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon" id="user-action-confirm-icon" style="color:var(--accent-warning);"><use href="#icon-alert-triangle"></use></svg>
+          <span id="user-action-confirm-title-text">Confirmar acción</span>
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-user-action-confirm')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="user-action-confirm-alert" class="alert-box alert-box-warning" style="margin-bottom:12px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+          <span id="user-action-confirm-alert-text"></span>
+        </div>
+        <p id="user-action-confirm-desc" style="color:var(--text-secondary); font-size:13px; line-height:1.5; margin-bottom:12px;"></p>
+        <p style="font-weight:600; font-size:13px;" id="user-action-confirm-prompt">¿Deseas proceder con esta acción?</p>
+      </div>
+      <div class="modal-footer" style="padding:0; margin-top:20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-user-action-confirm')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-user-action-confirm-submit" onclick="executeUserActionConfirm()">Confirmar</button>
       </div>
     </div>
   </div>
