@@ -152,6 +152,13 @@ class StorageController
         Response::success(['units' => $units]);
     }
 
+    public function subvolumes(Request $request): void
+    {
+        $path = (string) ($request->getQuery('path', '/srv/nas') ?: '/srv/nas');
+        $subvols = $this->storage->btrfsListSubvolumes($path);
+        Response::success(['subvolumes' => $subvols]);
+    }
+
     public function inspect(Request $request): void
     {
         $data = $request->getBody();
