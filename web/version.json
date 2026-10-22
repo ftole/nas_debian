@@ -3,5 +3,6 @@
   "commit": "v0.1.3",
   "date": "2026-10-22",
   "channel": "dev",
-  "notes": "v0.1.3: Panel Web Slate UI - Arreglos críticos"
+  "notes": "v0.1.3: Panel Web Slate UI - Módulo de Aplicaciones y Actualizaciones",
+  "gpg_verified": true
 }
