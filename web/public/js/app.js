@@ -2814,6 +2814,58 @@ function fallbackCopyText(text, count) {
 // ==============================================================================
 // 11. Módulo: Consola Terminal Web Real (Bash Interactivo)
 // ==============================================================================
+function ansiToHtml(text) {
+  if (!text) return '';
+  let str = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  const colorMap = {
+    '30': 'color:#1e293b',
+    '31': 'color:#ef4444',
+    '32': 'color:#10b981',
+    '33': 'color:#f59e0b',
+    '34': 'color:#3b82f6',
+    '35': 'color:#d946ef',
+    '36': 'color:#06b6d4',
+    '37': 'color:#e2e8f0',
+    '90': 'color:#64748b',
+    '91': 'color:#f87171',
+    '92': 'color:#34d399',
+    '93': 'color:#fbbf24',
+    '94': 'color:#60a5fa',
+    '95': 'color:#e879f9',
+    '96': 'color:#22d3ee',
+    '97': 'color:#ffffff',
+    '1': 'font-weight:700',
+    '4': 'text-decoration:underline',
+  };
+
+  let openSpans = 0;
+  str = str.replace(/\x1b\[([0-9;]*)m/g, (match, codes) => {
+    if (!codes || codes === '0') {
+      const res = '</span>'.repeat(openSpans);
+      openSpans = 0;
+      return res;
+    }
+    const parts = codes.split(';');
+    const styles = [];
+    parts.forEach(p => {
+      if (colorMap[p]) styles.push(colorMap[p]);
+    });
+    if (styles.length > 0) {
+      openSpans++;
+      return `<span style="${styles.join(';')}">`;
+    }
+    return '';
+  });
+  if (openSpans > 0) {
+    str += '</span>'.repeat(openSpans);
+  }
+  return str;
+}
+
 function initTerminal() {
   const input = document.getElementById('terminal-input');
   const output = document.getElementById('terminal-output');
@@ -2848,14 +2900,38 @@ function initTerminal() {
       }
     } else if (e.key === 'Tab') {
       e.preventDefault();
+      const currentVal = input.value;
+      if (currentVal) {
+        await apiFetch('/api/terminal/send', {
+          method: 'POST',
+          body: JSON.stringify({ data: currentVal, raw: true }),
+          silentToast: true,
+        });
+        input.value = '';
+      }
       await sendTerminalKey('TAB');
     } else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+      const selection = window.getSelection().toString();
+      if (selection && selection.length > 0) {
+        return;
+      }
       e.preventDefault();
       await sendTerminalKey('CTRL_C');
     }
   });
 
   output.addEventListener('click', () => input.focus());
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const view = document.getElementById('view-terminal');
+      if (view && view.classList.contains('active')) {
+        resizeTerminal();
+      }
+    }, 400);
+  });
 }
 
 async function startTerminalSession() {
@@ -2894,9 +2970,28 @@ async function refreshTerminalPane() {
   if (!output) return;
   try {
     const res = await apiFetch('/api/terminal/capture', { silentToast: true });
-    const text = res.data?.output ?? res.output ?? '';
-    output.textContent = text.replace(/\s+$/, '\n');
-    output.scrollTop = output.scrollHeight;
+    const payload = res.data ?? res;
+    const text = payload.output ?? '';
+    const cwd = payload.cwd ?? '';
+    const user = payload.user ?? '';
+
+    if (cwd) {
+      const barCwd = document.getElementById('term-bar-cwd');
+      const promptCwd = document.getElementById('term-prompt-cwd');
+      if (barCwd && barCwd.textContent !== cwd) barCwd.textContent = cwd;
+      if (promptCwd && promptCwd.textContent !== cwd) promptCwd.textContent = cwd;
+    }
+    if (user) {
+      const promptUser = document.getElementById('term-prompt-user');
+      if (promptUser && promptUser.textContent !== user) promptUser.textContent = user;
+    }
+
+    const isNearBottom = (output.scrollHeight - output.scrollTop - output.clientHeight) < 60;
+    output.innerHTML = ansiToHtml(text.replace(/\s+$/, '\n'));
+
+    if (isNearBottom) {
+      output.scrollTop = output.scrollHeight;
+    }
   } catch (e) {
     // Silencioso: la sesión puede estar reiniciándose
   }
@@ -3527,9 +3622,23 @@ async function loadNetworking(force = false) {
   }
 }
 
-function loadTerminal() {
+async function loadTerminal() {
   const input = document.getElementById('terminal-input');
   startTerminalSession();
+
+  if (!AppState.terminal.history || AppState.terminal.history.length === 0) {
+    try {
+      const res = await apiFetch('/api/terminal/history?limit=50', { silentToast: true });
+      const items = res.data ?? [];
+      if (Array.isArray(items) && items.length > 0) {
+        AppState.terminal.history = items.map(h => h.command).reverse();
+        AppState.terminal.historyIndex = AppState.terminal.history.length;
+      }
+    } catch (e) {
+      // Tolerante
+    }
+  }
+
   if (input) {
     setTimeout(() => input.focus(), 80);
   }
