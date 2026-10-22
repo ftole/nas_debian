@@ -99,7 +99,8 @@ class TerminalController
 
         $body = $request->getBody();
         $data = (string) ($body['data'] ?? '');
-        $res = $this->terminalService->send($data);
+        $raw = !empty($body['raw']);
+        $res = $this->terminalService->send($data, $raw);
         if (!$res['success']) {
             Response::error($res['error'] ?? 'No se pudo enviar la entrada a la terminal.');
             return;
@@ -119,7 +120,11 @@ class TerminalController
             Response::error($res['error'] ?? 'No se pudo capturar la terminal.');
             return;
         }
-        Response::success(['output' => $res['output'] ?? '']);
+        Response::success([
+            'output' => $res['output'] ?? '',
+            'cwd' => $res['cwd'] ?? '/srv/nas',
+            'user' => $res['user'] ?? '',
+        ]);
     }
 
     public function resize(Request $request): void
