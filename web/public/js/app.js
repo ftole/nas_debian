@@ -1273,6 +1273,124 @@ async function deleteBackupTask(taskId) {
 // 7. Módulo: Almacenamiento & Mantenimiento
 // ==============================================================================
 let _scrubPollTimer = null;
+let _pendingStoragePayload = null;
+let _pendingStorageUrl = null;
+
+function renderStorageOverview(overview) {
+  if (!overview) return;
+  const pathEl = document.getElementById('stg-main-path');
+  if (pathEl) pathEl.textContent = overview.path || '/srv/nas';
+
+  const statTotal = document.getElementById('stg-stat-total');
+  if (statTotal) statTotal.textContent = (overview.total_gb !== undefined && overview.total_gb !== null) ? `${overview.total_gb} GB` : '-- GB';
+
+  const statUsed = document.getElementById('stg-stat-used');
+  if (statUsed) {
+    const usedGb = overview.used_gb ?? '--';
+    const pct = overview.usage_percent ?? 0;
+    statUsed.textContent = `${usedGb} GB (${pct}%)`;
+  }
+
+  const statFree = document.getElementById('stg-stat-free');
+  if (statFree) statFree.textContent = (overview.free_gb !== undefined && overview.free_gb !== null) ? `${overview.free_gb} GB` : '-- GB';
+
+  const statFs = document.getElementById('stg-stat-fs');
+  if (statFs) {
+    const fsName = (overview.filesystem || 'N/A').toUpperCase();
+    const devType = overview.device_type || 'HDD';
+    statFs.textContent = `${fsName} · ${devType}`;
+  }
+
+  const statPercent = document.getElementById('stg-stat-percent');
+  if (statPercent) statPercent.textContent = `${overview.usage_percent ?? 0}%`;
+
+  const progress = document.getElementById('stg-main-progress');
+  const badge = document.getElementById('stg-threshold-badge');
+  const alertBox = document.getElementById('stg-threshold-alert');
+  const alertText = document.getElementById('stg-threshold-text');
+
+  const pct = Number(overview.usage_percent ?? 0);
+  if (progress) {
+    progress.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+  }
+
+  if (pct >= 90) {
+    if (progress) progress.style.backgroundColor = 'var(--accent-danger)';
+    if (badge) {
+      badge.className = 'badge badge-err';
+      badge.textContent = `Crítico (${pct}%)`;
+    }
+    if (alertBox && alertText) {
+      alertBox.className = 'alert-box alert-box-danger';
+      alertBox.style.display = 'flex';
+      alertText.textContent = `Capacidad crítica superada (${pct}% en uso). A partir del 95% de uso las tareas de respaldo se cancelarán para proteger la integridad del sistema.`;
+    }
+  } else if (pct >= 80) {
+    if (progress) progress.style.backgroundColor = 'var(--accent-warning)';
+    if (badge) {
+      badge.className = 'badge badge-warn';
+      badge.textContent = `Alerta preventiva (${pct}%)`;
+    }
+    if (alertBox && alertText) {
+      alertBox.className = 'alert-box alert-box-warning';
+      alertBox.style.display = 'flex';
+      alertText.textContent = `Umbral preventivo del 80% superado (${pct}% en uso). Al superar el 85%, el subsistema de respaldos generará alertas operativas.`;
+    }
+  } else {
+    if (progress) progress.style.backgroundColor = 'var(--accent-primary)';
+    if (badge) {
+      badge.className = 'badge badge-ok';
+      badge.textContent = `Normal (${pct}%)`;
+    }
+    if (alertBox) alertBox.style.display = 'none';
+  }
+}
+
+async function loadStorageSubvolumes(overview) {
+  const panel = document.getElementById('stg-subvols-panel');
+  const tbody = document.getElementById('storage-subvols-body');
+  if (!panel || !tbody) return;
+
+  const isBtrfs = Boolean(overview?.is_btrfs);
+  if (!isBtrfs) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  const pathEl = document.getElementById('stg-subvols-path');
+  if (pathEl) pathEl.textContent = overview.path || '/srv/nas';
+
+  try {
+    const res = await apiFetch('/api/storage/subvolumes?path=' + encodeURIComponent(overview.path || '/srv/nas'), { silentToast: true });
+    const subvols = res.data?.subvolumes || res.subvolumes || [];
+
+    if (subvols.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No se detectaron subvolúmenes Btrfs secundarios en este volumen.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = subvols.map(sv => `
+      <tr>
+        <td><code>${escapeHtml(sv.id || '--')}</code></td>
+        <td><strong>${escapeHtml(sv.name || '')}</strong></td>
+        <td><code>${escapeHtml(sv.path || '')}</code></td>
+        <td><span class="badge badge-ok">Subvolumen Btrfs</span></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--accent-danger);">Error al consultar subvolúmenes: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function openCreateSubvolumeModal() {
+  openStorageManage();
+  const opSel = document.getElementById('stg-op');
+  if (opSel) {
+    opSel.value = 'subvolume';
+    toggleStorageOp();
+  }
+}
 
 async function loadStorage() {
   const tbody = document.getElementById('storage-disks-body');
@@ -1283,8 +1401,15 @@ async function loadStorage() {
     const disks = res.data?.disks ?? res.disks ?? [];
     const overview = res.data?.overview ?? res.overview ?? {};
 
+    // Actualizar tarjeta principal de capacidad y estado
+    renderStorageOverview(overview);
+
     // Actualizar tarjetas de inteligencia BTRFS y TRIM
     updateStorageIntelligence(overview);
+
+    // Cargar unidades montadas y subvolúmenes
+    loadStorageUnits();
+    loadStorageSubvolumes(overview);
 
     if (disks.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No se detectaron discos de bloque adicionales.</td></tr>';
@@ -1293,19 +1418,39 @@ async function loadStorage() {
 
     tbody.innerHTML = disks.map(d => {
       const devPath = d.device || ('/dev/' + d.name);
+      const isPart = d.type === 'part';
+      const nameHtml = isPart
+        ? `<span style="font-family:monospace; color:var(--text-muted); margin-right:4px;">└─</span> <strong>${escapeHtml(d.name)}</strong>`
+        : `<strong>${escapeHtml(d.name)}</strong>`;
+
+      let stateBadge = '';
+      if (d.mount === '/srv/nas') {
+        stateBadge = ' <span class="badge badge-ok">Pool NAS</span>';
+      } else if (d.protected) {
+        stateBadge = ` <span class="badge badge-err">SO · ${escapeHtml(d.mount || 'protegido')}</span>`;
+      } else if (d.in_use) {
+        stateBadge = ' <span class="badge badge-warn">En uso</span>';
+      } else {
+        stateBadge = ' <span class="badge badge-ok">Disponible</span>';
+      }
+
+      const typeBadge = isPart
+        ? '<span class="badge badge-gray">Partición</span>'
+        : '<span class="badge badge-gray">Disco</span>';
+
       return `
       <tr>
-        <td><strong>${escapeHtml(d.name)}</strong>${d.protected ? ' <span class="badge badge-err">SO · protegido</span>' : (d.in_use ? ' <span class="badge badge-warn">En uso</span>' : ' <span class="badge badge-ok">Disponible</span>')}</td>
-        <td>${escapeHtml(d.model)}</td>
+        <td>${nameHtml}${stateBadge}</td>
+        <td>${escapeHtml(d.model || 'Genérico')}</td>
         <td>${escapeHtml(d.size)}</td>
-        <td>${escapeHtml(d.type)}</td>
+        <td>${typeBadge}</td>
         <td><code>${escapeHtml(d.mount || 'Sin montar')}</code></td>
         <td>${escapeHtml(d.fstype || 'N/A')}</td>
         <td style="text-align:right;">
-          ${!d.protected ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManage('${escapeHtml(devPath)}')"><svg class="icon icon-sm"><use href="#icon-wrench"></use></svg> Gestionar</button>` : '<span class="text-muted" style="font-size:11px;">Protegido</span>'}
+          ${!d.protected ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManage('${escapeHtml(devPath)}')"><svg class="icon icon-sm"><use href="#icon-wrench"></use></svg> Gestionar</button>` : '<span class="text-muted" style="font-size:11px;">Protegido por SO</span>'}
         </td>
       </tr>
-    `}).join('');
+    `;}).join('');
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger);">Error al cargar inventario: ${escapeHtml(e.message)}</td></tr>`;
   }
@@ -1335,9 +1480,16 @@ function updateStorageIntelligence(overview) {
       scrubInfo.innerHTML = '<span style="color:var(--text-secondary);">El volumen <code>' + escapeHtml(overview?.path || '/srv/nas') + '</code> está formateado en <strong>' + escapeHtml(fsType) + '</strong>. La verificación criptográfica contra Bit Rot requiere BTRFS.</span>';
     }
     if (scrubBtn) {
+      scrubBtn.disabled = true;
+      scrubBtn.classList.add('disabled');
       scrubBtn.title = 'Requiere sistema de archivos BTRFS (actual: ' + fsType + ')';
     }
   } else {
+    if (scrubBtn) {
+      scrubBtn.disabled = false;
+      scrubBtn.classList.remove('disabled');
+      scrubBtn.title = 'Iniciar auditoría criptográfica BTRFS contra Bit Rot';
+    }
     checkBtrfsScrubStatus(false);
   }
 
@@ -1351,6 +1503,8 @@ function updateStorageIntelligence(overview) {
       trimInfo.innerHTML = '<span style="color:var(--text-secondary);">El volumen <code>' + escapeHtml(overview?.path || '/srv/nas') + '</code> reside en un <strong>' + escapeHtml(devType) + '</strong>. TRIM está reservado exclusivamente para unidades flash (SSD / NVMe) para evitar errores del controlador mecánico.</span>';
     }
     if (trimBtn) {
+      trimBtn.disabled = true;
+      trimBtn.classList.add('disabled');
       trimBtn.title = 'TRIM deshabilitado: el almacenamiento reside en un ' + devType;
     }
   } else {
@@ -1362,6 +1516,8 @@ function updateStorageIntelligence(overview) {
       trimInfo.innerHTML = '<span style="color:var(--accent-success-text);">Unidad de estado sólido SSD/NVMe detectada. Listo para descartar bloques de celdas flash eliminadas.</span>';
     }
     if (trimBtn) {
+      trimBtn.disabled = false;
+      trimBtn.classList.remove('disabled');
       trimBtn.title = 'Ejecutar orden discard fstrim para optimizar celdas flash';
     }
   }
@@ -1415,10 +1571,27 @@ async function checkBtrfsScrubStatus(isPolling = false) {
       }
 
       if (scrubInfo) {
+        const hasErrors = d.error_summary && !d.error_summary.includes('no errors') && !d.error_summary.includes('0');
+        const errBadge = hasErrors
+          ? `<span class="badge badge-err" style="margin-left:8px;">${escapeHtml(d.error_summary)}</span>`
+          : '<span class="badge badge-ok" style="margin-left:8px;">0 errores detectados</span>';
+
+        const metaParts = [];
+        if (d.rate) metaParts.push(`Velocidad: <strong>${escapeHtml(d.rate)}</strong>`);
+        if (d.duration) metaParts.push(`Duración: <strong>${escapeHtml(d.duration)}</strong>`);
+        if (d.total_to_scrub) metaParts.push(`Examinado: <strong>${escapeHtml(d.total_to_scrub)}</strong>`);
+
+        const metaHtml = metaParts.length
+          ? `<div style="display:flex; gap:12px; margin-top:6px; font-size:11px; color:var(--text-secondary);">${metaParts.join(' · ')}</div>`
+          : '';
+
         scrubInfo.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-            <span>${escapeHtml(d.summary || 'Auditoría no iniciada recientemente.')}</span>
-            ${d.duration ? `<small class="text-muted" style="margin-left:8px;">Duración: ${escapeHtml(d.duration)}</small>` : ''}
+          <div style="display:flex; flex-direction:column; width:100%;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>${escapeHtml(d.summary || 'Auditoría finalizada.')}</span>
+              ${errBadge}
+            </div>
+            ${metaHtml}
           </div>
         `;
       }
@@ -1513,13 +1686,24 @@ async function runStorageTrim() {
       return;
     }
 
-    const proceed = window.confirm(
-      'Optimización TRIM para SSD (fstrim)\n\n' +
-      'Esta operación envía comandos discard al controlador para liberar celdas de almacenamiento flash de bloques ya eliminados, manteniendo la velocidad sostenida y prolongando la vida útil del SSD.\n\n' +
-      '¿Deseas ejecutar TRIM ahora?'
-    );
-    if (!proceed) return;
+    const modalPath = document.getElementById('trim-modal-path');
+    if (modalPath) modalPath.textContent = overview.path || '/srv/nas';
+    openModal('modal-trim-ssd');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
+}
 
+async function confirmTrimSsd() {
+  closeModal('modal-trim-ssd');
+  const btn = document.getElementById('btn-trim-storage');
+  const confirmBtn = document.getElementById('btn-confirm-trim-ssd');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.classList.add('is-loading'); }
+
+  try {
     const res = await apiFetch('/api/storage/trim', { method: 'POST' });
     const freed = res.data?.bytes_trimmed || res.message || 'bloques descartados';
     showToast('TRIM SSD completado: ' + freed, 'success');
@@ -1532,6 +1716,7 @@ async function runStorageTrim() {
     // Ya mostrado por apiFetch
   } finally {
     if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.classList.remove('is-loading'); }
   }
 }
 
@@ -1696,12 +1881,10 @@ async function submitStorageManage(event) {
     } catch (err) {
       const msg = String(err.message || '');
       if (/montad|desmont/i.test(msg)) {
-        const proceed = window.confirm('El dispositivo (o una de sus particiones, como /srv/nas) está montado.\n\n¿Deseas DESMONTARLO y continuar con la operación? Los datos del disco serán destruidos.');
-        if (!proceed) {
-          showToast('Operación cancelada por el usuario.', 'warning');
-          return;
-        }
-        await apiFetch(url, { method: 'POST', body: JSON.stringify({ ...payload, unmount: true }), silentToast: true });
+        _pendingStorageUrl = url;
+        _pendingStoragePayload = payload;
+        openModal('modal-storage-unmount-confirm');
+        return;
       } else {
         throw err;
       }
@@ -1718,6 +1901,37 @@ async function submitStorageManage(event) {
   }
 }
 
+async function executeStorageUnmountAndProceed() {
+  closeModal('modal-storage-unmount-confirm');
+  if (!_pendingStorageUrl || !_pendingStoragePayload) return;
+
+  const btn = document.getElementById('btn-submit-storage');
+  const confirmBtn = document.getElementById('btn-confirm-unmount-storage');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.classList.add('is-loading'); }
+
+  try {
+    await apiFetch(_pendingStorageUrl, {
+      method: 'POST',
+      body: JSON.stringify({ ..._pendingStoragePayload, unmount: true }),
+      silentToast: true,
+    });
+    showToast('Dispositivo desmontado y operación completada exitosamente.', 'success');
+    closeModal('modal-storage-manage');
+    const confirmInput = document.getElementById('stg-confirm');
+    if (confirmInput) confirmInput.value = '';
+    loadStorage();
+    loadStorageUnits();
+  } catch (e) {
+    showToast(e.message || 'No se pudo completar la operación con desmontaje forzado.', 'error');
+  } finally {
+    _pendingStoragePayload = null;
+    _pendingStorageUrl = null;
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.classList.remove('is-loading'); }
+  }
+}
+
 let _storageUnitsData = [];
 
 async function loadStorageUnits() {
@@ -1725,6 +1939,44 @@ async function loadStorageUnits() {
     const res = await apiFetch('/api/storage/units', { silentToast: true });
     const units = res.data?.units || res.units || [];
     _storageUnitsData = units;
+
+    // Poblar tabla en la vista de almacenamiento (#storage-units-body)
+    const unitsTbody = document.getElementById('storage-units-body');
+    if (unitsTbody) {
+      if (units.length === 0) {
+        unitsTbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No hay unidades de almacenamiento montadas.</td></tr>';
+      } else {
+        unitsTbody.innerHTML = units.map(u => {
+          const used = u.used_gb ?? u.used ?? '0';
+          const total = u.total_gb ?? u.total ?? '0';
+          const free = u.free_gb ?? u.free ?? '0';
+          const pct = Math.round(Number(u.usage_percent ?? 0));
+          const roleBadge = u.is_main
+            ? '<span class="badge badge-primary">Principal</span>'
+            : '<span class="badge badge-info">Adicional</span>';
+
+          const progressColor = pct >= 90 ? 'var(--accent-danger)' : (pct >= 80 ? 'var(--accent-warning)' : 'var(--accent-primary)');
+
+          return `
+          <tr>
+            <td><strong>${escapeHtml(u.name || u.id)}</strong> <small class="text-muted">(${escapeHtml(u.id)})</small></td>
+            <td><code>${escapeHtml(u.path)}</code></td>
+            <td><span class="badge badge-gray">${escapeHtml((u.filesystem || 'ext4').toUpperCase())}</span></td>
+            <td>${escapeHtml(String(used))} GB / ${escapeHtml(String(total))} GB</td>
+            <td><strong style="color:var(--accent-success-text);">${escapeHtml(String(free))} GB</strong></td>
+            <td>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="flex:1; height:6px; background:var(--bg-body); border:1px solid var(--border-color); border-radius:3px; overflow:hidden; min-width:60px;">
+                  <div style="height:100%; width:${Math.min(100, Math.max(0, pct))}%; background:${progressColor};"></div>
+                </div>
+                <span style="font-size:11px; font-weight:600;">${pct}%</span>
+              </div>
+            </td>
+            <td style="text-align:right;">${roleBadge}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
 
     // Poblar selector en modal-new-share
     const shareUnitSel = document.getElementById('share-unit');
@@ -6005,6 +6257,11 @@ window.openFormatDisk = openFormatDisk;
 window.runStorageScrub = runStorageScrub;
 window.confirmAuditBtrfs = confirmAuditBtrfs;
 window.runStorageTrim = runStorageTrim;
+window.confirmTrimSsd = confirmTrimSsd;
+window.executeStorageUnmountAndProceed = executeStorageUnmountAndProceed;
+window.openCreateSubvolumeModal = openCreateSubvolumeModal;
+window.loadStorageSubvolumes = loadStorageSubvolumes;
+window.renderStorageOverview = renderStorageOverview;
 window.loadStorage = loadStorage;
 window.loadStorageUnits = loadStorageUnits;
 window.submitStorageManage = submitStorageManage;
