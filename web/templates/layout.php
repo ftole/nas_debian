@@ -1202,7 +1202,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <button class="btn btn-secondary" onclick="loadUpdates()">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Comprobar versión
             </button>
-            <button class="btn btn-primary" onclick="applySystemUpdate()">
+            <button class="btn btn-primary" onclick="openSystemUpdateModal()">
               <svg class="icon"><use href="#icon-download"></use></svg> Actualizar desde GitHub
             </button>
           </div>
@@ -1223,29 +1223,47 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <h3 style="font-size:16px;">Módulos y componentes integrados del servidor</h3>
         </div>
         <div class="card-grid-2">
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>Samba 4 & VFS</h3></div>
-            <div class="panel-card-body">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
+          <div class="panel-card" id="app-card-samba">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>Samba 4 & VFS</h3>
+              <span class="badge badge-gray" id="app-badge-samba">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-samba">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
           </div>
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>Nginx-light & PHP-FPM</h3></div>
-            <div class="panel-card-body">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
+          <div class="panel-card" id="app-card-web">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>Nginx-light & PHP-FPM</h3>
+              <span class="badge badge-gray" id="app-badge-web">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
           </div>
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>BTRFS con Zstandard</h3></div>
-            <div class="panel-card-body">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
+          <div class="panel-card" id="app-card-btrfs">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>BTRFS con Zstandard</h3>
+              <span class="badge badge-gray" id="app-badge-btrfs">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-btrfs">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
           </div>
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>Rsync Multiplataforma</h3></div>
-            <div class="panel-card-body">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
+          <div class="panel-card" id="app-card-rsync">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>Rsync Multiplataforma</h3>
+              <span class="badge badge-gray" id="app-badge-rsync">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-rsync">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
           </div>
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>WSDD2 & NetBIOS</h3></div>
-            <div class="panel-card-body">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
+          <div class="panel-card" id="app-card-wsdd2">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>WSDD2 & NetBIOS</h3>
+              <span class="badge badge-gray" id="app-badge-wsdd2">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-wsdd2">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
           </div>
-          <div class="panel-card">
-            <div class="panel-card-head"><h3>Seguridad Activa (AIDE & auditd)</h3></div>
-            <div class="panel-card-body">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
+          <div class="panel-card" id="app-card-security">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>Seguridad Activa (AIDE & auditd)</h3>
+              <span class="badge badge-gray" id="app-badge-security">Consultando...</span>
+            </div>
+            <div class="panel-card-body" id="app-body-security">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
           </div>
         </div>
       </section>
@@ -2277,7 +2295,46 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
-
+  <!-- Modal: Actualización del Sistema desde GitHub -->
+  <div class="modal-backdrop modal-static" id="modal-system-update">
+    <div class="modal-dialog" style="max-width:650px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-download"></use></svg> Actualización del Sistema NAS</h3>
+        <button class="modal-close" onclick="closeModal('modal-system-update')">&times;</button>
+      </div>
+      <div class="modal-body" id="system-update-body">
+        <p style="color:var(--text-secondary); margin-bottom:14px;">
+          Esta operación sincronizará la versión oficial más reciente desde el repositorio GitHub (rama <code>main</code>), validará la autenticidad criptográfica mediante firmas GPG, comprobará la sintaxis de todos los scripts y módulos, y sincronizará la interfaz web y reglas sudoers en caliente sin interrumpir el almacenamiento.
+        </p>
+        <div id="system-update-phases" style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:8px; padding:12px 16px; margin-bottom:16px;">
+          <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:8px;">Fases del proceso de actualización en caliente:</div>
+          <ol style="margin:0; padding-left:20px; font-size:12.5px; color:var(--text-secondary); line-height:1.6;">
+            <li>Respaldo preventivo del estado actual en <code>/tmp/backup_nas_*</code></li>
+            <li>Avance rápido (Fast-Forward) y verificación de firma GPG del tag de release</li>
+            <li>Validación estricta de sintaxis de scripts Bash y código PHP</li>
+            <li>Sincronización segura de archivos hacia <code>/var/www/nas-web</code> y sudoers</li>
+            <li>Recarga no disruptiva de demonios (Nginx, PHP-FPM, Samba)</li>
+          </ol>
+        </div>
+        <div id="system-update-progress" style="display:none; margin-top:16px;">
+          <div style="font-weight:600; font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+            <span id="system-update-step-label">Iniciando actualización...</span>
+            <span id="system-update-spinner" class="spinner"></span>
+          </div>
+          <div class="progress-bar-bg" style="height:8px; border-radius:4px; background:var(--bg-card); overflow:hidden; margin-bottom:12px;">
+            <div id="system-update-progress-bar" style="height:100%; width:15%; background:var(--accent-primary); transition:width 0.4s ease;"></div>
+          </div>
+          <pre id="system-update-log" style="background:#0f172a; color:#e2e8f0; padding:12px; border-radius:6px; font-size:12px; max-height:200px; overflow-y:auto; white-space:pre-wrap; font-family:monospace; display:none;"></pre>
+        </div>
+      </div>
+      <div class="modal-footer" id="system-update-footer">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-system-update" onclick="closeModal('modal-system-update')">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-start-system-update" onclick="startSystemUpdate()">
+          <svg class="icon"><use href="#icon-download"></use></svg> Iniciar actualización ahora
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Contenedor de Alertas Toast -->
   <div id="toast-container" style="position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
