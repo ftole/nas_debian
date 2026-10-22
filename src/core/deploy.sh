@@ -874,7 +874,7 @@ Cmnd_Alias NAS_DOMAIN = /usr/sbin/realm list, /usr/sbin/realm join *, /usr/sbin/
     /usr/bin/realm list, /usr/bin/realm join *, /usr/bin/realm leave, /usr/bin/realm leave *, \\
     /usr/sbin/adcli info *, /usr/bin/adcli info *, \\
     /usr/bin/kinit *, /usr/bin/klist
-Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstatus, /usr/bin/pdbedit -L -s, \\
+Cmnd_Alias NAS_SAMBA = /usr/bin/testparm -s, /usr/bin/testparm, /usr/bin/smbstatus, /usr/bin/smbstatus -b, /bin/smbstatus, /bin/smbstatus -b, /usr/bin/pdbedit -L -s, \\
     /usr/bin/pdbedit -L -v, /usr/bin/pdbedit ^-v\ -u\ [a-z_][a-z0-9_.-]*$, \\
     /usr/bin/smbpasswd ^-a\ -s\ [a-z_][a-z0-9_.-]*$, /usr/bin/smbpasswd ^-x\ [a-z_][a-z0-9_.-]*$, \\
     /usr/bin/smbclient ^//127\.0\.0\.1/IPC\$\ -U\ [a-z_][a-z0-9_.-]*\ -c\ exit$
