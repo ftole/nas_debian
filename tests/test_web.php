@@ -2979,6 +2979,35 @@ assertTrue(str_contains($appJsStgSrc, 'window.executeStorageUnmountAndProceed = 
 
 
 
+// 13. Pruebas de Mejoras de Gestión de Usuarios y Grupos (#users)
+$layoutUsersSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+$appJsUsersSrc = file_get_contents(dirname(__DIR__) . '/web/public/js/app.js');
+
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-kpi-total"'), 'layout.php incluye tarjeta KPI usr-kpi-total');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-kpi-active"'), 'layout.php incluye tarjeta KPI usr-kpi-active');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-kpi-samba"'), 'layout.php incluye tarjeta KPI usr-kpi-samba');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-kpi-groups"'), 'layout.php incluye tarjeta KPI usr-kpi-groups');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-tab-btn-users"'), 'layout.php incluye botón de pestaña usr-tab-btn-users');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-tab-btn-groups"'), 'layout.php incluye botón de pestaña usr-tab-btn-groups');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-tab-btn-perms"'), 'layout.php incluye botón de pestaña usr-tab-btn-perms');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-panel-users"'), 'layout.php incluye panel de vista usr-panel-users');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-panel-groups"'), 'layout.php incluye panel de vista usr-panel-groups');
+assertTrue(str_contains($layoutUsersSrc, 'id="usr-panel-perms"'), 'layout.php incluye panel de vista usr-panel-perms');
+assertTrue(str_contains($layoutUsersSrc, 'id="modal-user-action-confirm"'), 'layout.php incluye modal interactivo modal-user-action-confirm');
+assertTrue(str_contains($layoutUsersSrc, 'id="btn-user-action-confirm-submit"'), 'layout.php incluye botón de acción btn-user-action-confirm-submit');
+
+assertTrue(str_contains($appJsUsersSrc, 'function switchUsersTab('), 'app.js define función switchUsersTab');
+assertTrue(str_contains($appJsUsersSrc, 'function updateUsersKpis('), 'app.js define función updateUsersKpis');
+assertTrue(str_contains($appJsUsersSrc, 'function updateUserChipCounters('), 'app.js define función updateUserChipCounters');
+assertTrue(str_contains($appJsUsersSrc, 'function showUserActionConfirm('), 'app.js define función showUserActionConfirm');
+assertTrue(str_contains($appJsUsersSrc, 'function executeUserActionConfirm('), 'app.js define función executeUserActionConfirm');
+assertTrue(str_contains($appJsUsersSrc, 'function applyGroupsFilters('), 'app.js define función applyGroupsFilters');
+assertTrue(str_contains($appJsUsersSrc, 'window.switchUsersTab = switchUsersTab'), 'app.js exporta switchUsersTab en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.executeUserActionConfirm = executeUserActionConfirm'), 'app.js exporta executeUserActionConfirm en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.updateUsersKpis = updateUsersKpis'), 'app.js exporta updateUsersKpis en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.applyGroupsFilters = applyGroupsFilters'), 'app.js exporta applyGroupsFilters en window');
+assertTrue(str_contains($appJsUsersSrc, 'window.repairAcls = repairAcls'), 'app.js exporta repairAcls en window');
+
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
 @rmdir($bkpTestSvc->binDir);
