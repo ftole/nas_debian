@@ -1136,9 +1136,9 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <button type="button" class="terminal-chip" onclick="runQuickCommand('uptime')">uptime</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('df -h /srv/nas')">df -h</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('free -m')">free -m</button>
-            <button type="button" class="terminal-chip" onclick="runQuickCommand('smbstatus')">smbstatus</button>
-            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl status smbd')">status smbd</button>
-            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl status wsdd2')">status wsdd2</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('sudo smbstatus')">smbstatus</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl --no-pager status smbd')">status smbd</button>
+            <button type="button" class="terminal-chip" onclick="runQuickCommand('systemctl --no-pager status wsdd2')">status wsdd2</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('realm list')">realm list</button>
             <button type="button" class="terminal-chip" onclick="runQuickCommand('ls -la')">ls -la</button>
           </div>
@@ -1148,7 +1148,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 
 </div>
           <div class="terminal-input-row">
-            <span class="terminal-prompt-prefix" id="terminal-prompt-prefix"><?= $sessionUser ?>@<?= $hostname ?>:<span id="term-prompt-cwd">/srv/nas</span>$</span>
+            <span class="terminal-prompt-prefix" id="terminal-prompt-prefix"><span id="term-prompt-user"><?= $sessionUser ?></span>@<?= $hostname ?>:<span id="term-prompt-cwd">/srv/nas</span>$</span>
             <input type="text" id="terminal-input" class="terminal-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Escribe un comando bash y pulsa Enter (↑/↓ para historial)...">
           </div>
         </div>
