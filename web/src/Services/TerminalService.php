@@ -330,6 +330,7 @@ class TerminalService
     }
 
     private const PTY_HELPER = '/usr/local/sbin/nas-terminal';
+    private const PTY_CAPTURE_HELPER = '/usr/local/bin/nas-terminal-capture';
 
     private function safeUser(string $user): ?string
     {
@@ -338,6 +339,7 @@ class TerminalService
     }
 
     private ?string $clientId = null;
+    private ?string $lastPromptLine = null;
 
     public function setClientId(?string $clientId): void
     {
@@ -376,17 +378,40 @@ class TerminalService
     }
 
     /**
+     * Determina si la entrada corresponde a una credencial sensible que no debe persistirse en logs.
+     */
+    private function isSensitiveInput(string $data): bool
+    {
+        $trimmed = trim($data);
+        if ($trimmed === '') {
+            return true;
+        }
+        $lastLine = strtolower(trim((string) ($this->lastPromptLine ?? '')));
+        if ($lastLine !== '' && preg_match('/(password|contrase[nñ]a|clave|pin|token|passphrase|enter passphrase)[\s:]*$/i', $lastLine)) {
+            return true;
+        }
+        if (preg_match('/^\s*(sudo\s+-S|echo\s+["\'][^"\']+["\']\s*\|\s*sudo)/i', $data)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Envía texto a la sesión PTY. Los tokens especiales (CTRL_C, CTRL_D, ENTER, TAB)
      * se traducen a teclas; cualquier otro valor se escribe literalmente y se pulsa Enter.
      */
-    public function send(string $data): array
+    public function send(string $data, bool $raw = false): array
     {
         $special = ['CTRL_C', 'CTRL_D', 'ENTER', 'TAB'];
         $isSpecial = in_array($data, $special, true);
 
-        $res = $this->runHelper(['keys', $data]);
+        if ($raw) {
+            $res = $this->runHelper(['raw', $data]);
+        } else {
+            $res = $this->runHelper(['keys', $data]);
+        }
 
-        if ($res['success'] && !$isSpecial && trim($data) !== '') {
+        if ($res['success'] && !$isSpecial && !$this->isSensitiveInput($data)) {
             try {
                 DatabaseService::insert('terminal_history', [
                     'command' => $data,
@@ -407,7 +432,38 @@ class TerminalService
      */
     public function capture(): array
     {
-        return $this->runHelper(['capture']);
+        $res = is_executable(self::PTY_CAPTURE_HELPER)
+            ? $this->runCaptureHelper()
+            : $this->runHelper(['capture']);
+
+        if (!$res['success']) {
+            return $res;
+        }
+
+        $rawOut = (string) ($res['output'] ?? '');
+        $cwd = self::DEFAULT_CWD;
+
+        if (preg_match('/___NAS_CWD___(.*)$/s', $rawOut, $matches)) {
+            $detected = trim($matches[1]);
+            if ($detected !== '') {
+                $cwd = $detected;
+            }
+            $rawOut = substr($rawOut, 0, -strlen($matches[0]));
+        }
+
+        // Cachear la última línea visible para detectar prompts de contraseña en send()
+        $lines = preg_split('/\r?\n/', trim($rawOut));
+        if (!empty($lines)) {
+            $this->lastPromptLine = end($lines);
+        }
+
+        return [
+            'success' => true,
+            'output' => $rawOut,
+            'cwd' => $cwd,
+            'user' => $this->sessionUser(),
+            'exit_code' => 0,
+        ];
     }
 
     public function resizeSession(int $cols, int $rows): array
@@ -420,6 +476,20 @@ class TerminalService
         return $this->runHelper(['kill']);
     }
 
+    private function runCaptureHelper(): array
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return [
+                'success' => true,
+                'output' => "Simulación PTY Capture\n___NAS_CWD___/srv/nas\n",
+                'exit_code' => 0,
+            ];
+        }
+
+        $cmd = [self::PTY_CAPTURE_HELPER, $this->sessionUser(), $this->getClientId()];
+        return $this->executeHelperProcess($cmd);
+    }
+
     private function runHelper(array $args): array
     {
         if (DIRECTORY_SEPARATOR === '\\') {
@@ -430,8 +500,12 @@ class TerminalService
             ];
         }
 
-        // El helper se invoca directamente como el usuario web sin sudo
         $cmd = array_merge([self::PTY_HELPER], $args);
+        return $this->executeHelperProcess($cmd);
+    }
+
+    private function executeHelperProcess(array $cmd): array
+    {
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
@@ -444,6 +518,7 @@ class TerminalService
             'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
             'SHELL' => '/bin/bash',
             'NAS_CLIENT_ID' => $this->getClientId(),
+            'NAS_TARGET_USER' => $this->sessionUser(),
         ]);
 
         $process = @proc_open($cmd, $descriptors, $pipes, null, $env);
