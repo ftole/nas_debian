@@ -2879,11 +2879,16 @@ assertTrue(str_contains($appJsSrc, 'function openMoveModal'), 'app.js define fun
 assertTrue(str_contains($appJsSrc, 'function submitMoveFile'), 'app.js define función submitMoveFile');
 assertTrue(str_contains($appJsSrc, 'window.openNewShareModal'), 'app.js expone alias window.openNewShareModal');
 assertTrue(str_contains($appJsSrc, 'function loadApplications'), 'app.js define función loadApplications');
+assertTrue(substr_count($appJsSrc, 'function loadApplications') === 1, 'app.js no contiene definiciones duplicadas ni sombreadas de loadApplications');
 assertTrue(str_contains($appJsSrc, 'function openSystemUpdateModal'), 'app.js define función openSystemUpdateModal');
 assertTrue(str_contains($appJsSrc, 'function startSystemUpdate'), 'app.js define función startSystemUpdate');
 assertTrue(str_contains($appJsSrc, 'window.openSystemUpdateModal'), 'app.js expone window.openSystemUpdateModal');
 assertTrue(str_contains($appJsSrc, 'window.startSystemUpdate'), 'app.js expone window.startSystemUpdate');
 assertTrue(str_contains($appJsSrc, 'window.loadApplications'), 'app.js expone window.loadApplications');
+
+$deployShSrc = file_get_contents(dirname(__DIR__) . '/src/core/deploy.sh');
+assertTrue(str_contains($deployShSrc, '/usr/bin/smbstatus -b'), 'deploy.sh autoriza smbstatus -b en NAS_SAMBA');
+
 
 
 // Limpieza de directorios temporales de prueba
