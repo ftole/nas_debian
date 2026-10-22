@@ -152,6 +152,7 @@ $router->post('/api/storage/trim', [StorageController::class, 'trim']);
 $router->post('/api/storage/format', [StorageController::class, 'format']);
 $router->post('/api/storage/lvm', [StorageController::class, 'lvm']);
 $router->post('/api/storage/subvolume', [StorageController::class, 'subvolume']);
+$router->get('/api/storage/subvolumes', [StorageController::class, 'subvolumes']);
 
 // Rutas API: Usuarios y Grupos
 $router->get('/api/users', [UserController::class, 'users']);
