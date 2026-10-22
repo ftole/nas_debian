@@ -42,7 +42,8 @@ def test_live_api_endpoints():
 
     # Limpiar rate limits residuales para pruebas
     mgr = test_remote.SSHManager(cfg)
-    mgr.run_command("sqlite3 /var/lib/nas/nas.sqlite 'DELETE FROM login_attempts; DELETE FROM api_rate_limits;'", sudo=True)
+    mgr.run_command("sqlite3 /var/lib/nas/nas.sqlite 'DELETE FROM login_attempts; DELETE FROM api_rate_limits;' 2>/dev/null || true", sudo=True)
+    mgr.run_command("sqlite3 /var/www/nas-web/data/nas.sqlite 'DELETE FROM login_attempts; DELETE FROM api_rate_limits;' 2>/dev/null || true", sudo=True)
 
     # Obtener token CSRF
     conn.request("GET", "/login")
@@ -105,5 +106,20 @@ def test_live_api_endpoints():
     conn.request("POST", "/api/backups/tarea_test_inexistente/stop", body="{}", headers=headers)
     r = conn.getresponse()
     assert r.status == 200, f"Stop backup falló con status {r.status}"
+    r.read()
+
+    # 6. Consultar actualizaciones en caliente
+    conn.request("GET", "/api/system/updates", headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Updates falló con status {r.status}"
+    upd = json.loads(r.read().decode("utf-8")).get("data", {})
+    assert "version" in upd and "latest_version" in upd and "has_updates" in upd
+
+    # 7. Consultar métricas de aplicaciones en vivo
+    conn.request("GET", "/api/system/applications", headers=headers)
+    r = conn.getresponse()
+    assert r.status == 200, f"Applications falló con status {r.status}"
+    apps = json.loads(r.read().decode("utf-8")).get("data", {})
+    assert "samba" in apps and "web" in apps and "btrfs" in apps and "security" in apps
 
     conn.close()
