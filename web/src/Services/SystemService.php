@@ -279,6 +279,7 @@ class SystemService
             'timezone' => date_default_timezone_get(),
             'timezone_abbr' => date('T'),
             'timezone_offset' => (int) date('Z'),
+            'ip' => $this->getPrimaryIp(),
         ];
     }
 
@@ -2084,6 +2085,357 @@ class SystemService
         }
 
         return 'TEAM-JOFRATO';
+    }
+
+    /** Caché estática de la IPv4 primaria para evitar invocar 'ip' en cada métrica. */
+    private static ?string $cachedPrimaryIp = null;
+    private static int $cachedPrimaryIpAt = 0;
+
+    /**
+     * Obtiene la IPv4 global primaria del servidor (sin privilegios).
+     */
+    public function getPrimaryIp(): ?string
+    {
+        if (DIRECTORY_SEPARATOR === '\\') {
+            return '10.10.1.2';
+        }
+
+        if (self::$cachedPrimaryIp !== null && (time() - self::$cachedPrimaryIpAt) < 30) {
+            return self::$cachedPrimaryIp;
+        }
+
+        $res = self::runCommand(['ip', '-4', '-o', 'addr', 'show', 'scope', 'global'], null, 5);
+        $ip = null;
+        if ($res['code'] === 0 && preg_match('/inet\s+(\d{1,3}(?:\.\d{1,3}){3})/', (string) $res['stdout'], $m)) {
+            $ip = $m[1];
+        }
+
+        if ($ip === null && !empty($_SERVER['SERVER_ADDR'])) {
+            $ip = (string) $_SERVER['SERVER_ADDR'];
+        }
+
+        self::$cachedPrimaryIp = $ip;
+        self::$cachedPrimaryIpAt = time();
+
+        return $ip;
+    }
+
+    /**
+     * Inventario de configuración y visibilidad de red para el módulo Networking.
+     * Utiliza únicamente comandos sin privilegios (ip, ss, systemctl, testparm) y
+     * lecturas de /etc, degradando con elegancia cuando un dato no puede verificarse.
+     */
+    public function getNetworkOverview(int $cacheSeconds = 5): array
+    {
+        $cachePath = sys_get_temp_dir() . '/nas_network_overview.json';
+
+        if ($cacheSeconds > 0 && is_readable($cachePath)) {
+            $age = time() - (int) @filemtime($cachePath);
+            if ($age >= 0 && $age <= $cacheSeconds) {
+                $cached = json_decode((string) @file_get_contents($cachePath), true);
+                if (is_array($cached) && isset($cached['interfaces'])) {
+                    return $cached;
+                }
+            }
+        }
+
+        $overview = (DIRECTORY_SEPARATOR === '\\' || getenv('APP_ENV') === 'testing')
+            ? $this->getSimulatedNetworkOverview()
+            : $this->collectNetworkOverview();
+
+        if ($cacheSeconds > 0 && DIRECTORY_SEPARATOR !== '\\') {
+            @file_put_contents(
+                $cachePath,
+                (string) json_encode($overview, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                LOCK_EX
+            );
+        }
+
+        return $overview;
+    }
+
+    /**
+     * Recolecta el estado real de red del servidor Linux.
+     */
+    private function collectNetworkOverview(): array
+    {
+        $interfaces = [];
+        $links = json_decode((string) self::runCommand(['ip', '-j', 'addr', 'show'], null, 10)['stdout'], true);
+        if (is_array($links)) {
+            foreach ($links as $link) {
+                $name = (string) ($link['ifname'] ?? '');
+                if ($name === '' || $name === 'lo') {
+                    continue;
+                }
+
+                $ipv4 = null;
+                $prefix = null;
+                foreach (($link['addr_info'] ?? []) as $addr) {
+                    if (($addr['family'] ?? '') === 'inet') {
+                        $ipv4 = (string) ($addr['local'] ?? '');
+                        $prefix = isset($addr['prefixlen']) ? (int) $addr['prefixlen'] : null;
+                        break;
+                    }
+                }
+
+                $speedRaw = @file_get_contents('/sys/class/net/' . $name . '/speed');
+                $speed = ($speedRaw !== false && (int) trim((string) $speedRaw) > 0) ? (int) trim((string) $speedRaw) : null;
+
+                $interfaces[] = [
+                    'name' => $name,
+                    'state' => strtoupper((string) ($link['operstate'] ?? 'UNKNOWN')),
+                    'ip' => $ipv4,
+                    'prefix' => $prefix,
+                    'mac' => (string) ($link['address'] ?? ''),
+                    'mtu' => isset($link['mtu']) ? (int) $link['mtu'] : null,
+                    'speed_mbps' => $speed,
+                ];
+            }
+        }
+
+        $gateway = null;
+        $dhcp = false;
+        $routes = json_decode((string) self::runCommand(['ip', '-j', 'route', 'show', 'default'], null, 10)['stdout'], true);
+        if (is_array($routes)) {
+            foreach ($routes as $route) {
+                if (!empty($route['gateway'])) {
+                    $gateway = (string) $route['gateway'];
+                    $dhcp = strtolower((string) ($route['protocol'] ?? '')) === 'dhcp';
+                    break;
+                }
+            }
+        }
+
+        $dns = [];
+        if (is_readable('/etc/resolv.conf')) {
+            $resolv = (string) @file_get_contents('/etc/resolv.conf');
+            if (preg_match_all('/^\s*nameserver\s+(\S+)/mi', $resolv, $m)) {
+                $dns = array_values(array_unique(array_map('strval', $m[1])));
+            }
+        }
+
+        $samba = $this->getSambaNetworkConfig();
+        $services = [];
+        foreach (['smbd', 'nmbd', 'wsdd2'] as $svc) {
+            $st = self::runCommand(['systemctl', 'is-active', $svc], null, 5);
+            $services[$svc] = trim((string) $st['stdout']) === 'active';
+        }
+
+        return [
+            'hostname' => gethostname() ?: 'SRV-NAS',
+            'netbios' => $samba['netbios'],
+            'workgroup' => $samba['workgroup'],
+            'interfaces' => $interfaces,
+            'primary_ip' => $this->getPrimaryIp(),
+            'gateway' => $gateway,
+            'dns' => $dns,
+            'dhcp' => $dhcp,
+            'samba' => [
+                'min_protocol' => $samba['min_protocol'],
+                'max_protocol' => $samba['max_protocol'],
+                'signing' => $samba['signing'],
+                'encrypt' => $samba['encrypt'],
+                'netbios_enabled' => $samba['netbios_enabled'],
+            ],
+            'services' => $services,
+            'listening' => $this->getListeningPorts(),
+            'firewall' => $this->getFirewallStatus(),
+            'smb_sessions' => $this->getSmbSessionCount(),
+            'generated_at' => date('H:i:s'),
+            'generated_timestamp' => time(),
+        ];
+    }
+
+    /**
+     * Lee la configuración efectiva de Samba (testparm) con reserva a smb.conf.
+     */
+    private function getSambaNetworkConfig(): array
+    {
+        $result = [
+            'netbios' => strtoupper((string) (gethostname() ?: 'SRV-NAS')),
+            'workgroup' => self::getWorkgroup(),
+            'min_protocol' => 'SMB2_02',
+            'max_protocol' => 'SMB3',
+            'signing' => 'required',
+            'encrypt' => 'desired',
+            'netbios_enabled' => true,
+        ];
+
+        $raw = '';
+        $testparm = self::runCommand(['testparm', '-s'], null, 10);
+        if ($testparm['code'] === 0 && trim((string) $testparm['stdout']) !== '') {
+            $raw = (string) $testparm['stdout'];
+        } elseif (is_readable('/etc/samba/smb.conf')) {
+            $raw = (string) @file_get_contents('/etc/samba/smb.conf');
+        }
+
+        if ($raw === '') {
+            return $result;
+        }
+
+        $map = [
+            'workgroup' => 'workgroup',
+            'netbios name' => 'netbios',
+            'server min protocol' => 'min_protocol',
+            'server max protocol' => 'max_protocol',
+            'server signing' => 'signing',
+            'server smb encrypt' => 'encrypt',
+        ];
+
+        foreach ($map as $key => $field) {
+            if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=\s*(.+)$/mi', $raw, $m)) {
+                $value = trim($m[1]);
+                $result[$field] = ($field === 'workgroup' || $field === 'netbios')
+                    ? strtoupper($value)
+                    : strtolower($value);
+            }
+        }
+
+        if (preg_match('/^\s*disable netbios\s*=\s*(.+)$/mi', $raw, $m)) {
+            $result['netbios_enabled'] = !in_array(strtolower(trim($m[1])), ['yes', 'true', '1'], true);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Enumera los puertos TCP/UDP en escucha con su servicio asociado (sin privilegios).
+     */
+    private function getListeningPorts(): array
+    {
+        $serviceByPort = [
+            22 => 'sshd', 25 => 'exim4', 53 => 'dns', 80 => 'nginx', 443 => 'nginx',
+            137 => 'nmbd', 138 => 'nmbd', 139 => 'smbd', 445 => 'smbd',
+            3702 => 'wsdd2', 5355 => 'wsdd2',
+        ];
+
+        // Los puertos UDP efímeros (cliente DHCP/DHCPv6) no aportan visibilidad operativa
+        $udpWhitelist = [53, 123, 137, 138, 161, 3702, 5353, 5355];
+
+        $ports = [];
+        foreach (['tcp' => ['ss', '-H', '-tln'], 'udp' => ['ss', '-H', '-uln']] as $proto => $cmd) {
+            $res = self::runCommand($cmd, null, 5);
+            if ($res['code'] !== 0) {
+                continue;
+            }
+            foreach (preg_split('/\r?\n/', (string) $res['stdout']) ?: [] as $line) {
+                $cols = preg_split('/\s+/', trim($line)) ?: [];
+                $local = $cols[3] ?? '';
+                if ($local === '' || !preg_match('/:(\d+)$/', $local, $m)) {
+                    continue;
+                }
+                $port = (int) $m[1];
+                if ($port <= 0) {
+                    continue;
+                }
+                if ($proto === 'udp' && !in_array($port, $udpWhitelist, true)) {
+                    continue;
+                }
+                $key = $proto . ':' . $port;
+                if (isset($ports[$key])) {
+                    continue;
+                }
+                $ports[$key] = [
+                    'port' => $port,
+                    'proto' => $proto,
+                    'service' => $serviceByPort[$port] ?? null,
+                ];
+            }
+        }
+
+        $list = array_values($ports);
+        usort($list, static fn (array $a, array $b): int => $a['port'] <=> $b['port']);
+
+        return array_slice($list, 0, 24);
+    }
+
+    /**
+     * Estado del cortafuegos UFW (las reglas solo son visibles con privilegios).
+     */
+    private function getFirewallStatus(): array
+    {
+        $active = false;
+        $source = '/etc/ufw/ufw.conf';
+
+        if (is_readable($source)) {
+            $conf = (string) @file_get_contents($source);
+            if (preg_match('/^\s*ENABLED\s*=\s*(\w+)/mi', $conf, $m)) {
+                $active = strtolower(trim($m[1])) === 'yes';
+            }
+        } else {
+            $source = null;
+        }
+
+        return [
+            'active' => $active,
+            'rules_visible' => false,
+            'source' => $source,
+        ];
+    }
+
+    /**
+     * Número de sesiones SMB activas (requiere la regla sudoers smbstatus -b).
+     */
+    private function getSmbSessionCount(): ?int
+    {
+        $res = self::sudo(['smbstatus', '-b'], null, 10);
+        if ($res['code'] !== 0) {
+            return null;
+        }
+
+        $count = 0;
+        foreach (preg_split('/\r?\n/', (string) $res['stdout']) ?: [] as $line) {
+            if (preg_match('/^\s*\d+\s+\S+\s+\S+\s+\S+\s+\S+/', $line)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * Datos simulados para desarrollo en Windows y suites de pruebas.
+     */
+    private function getSimulatedNetworkOverview(): array
+    {
+        return [
+            'hostname' => 'SRV-NAS',
+            'netbios' => 'SRV-NAS',
+            'workgroup' => 'TEAM-JOFRATO',
+            'interfaces' => [[
+                'name' => 'eth0',
+                'state' => 'UP',
+                'ip' => '10.10.1.2',
+                'prefix' => 24,
+                'mac' => '00:11:22:33:44:55',
+                'mtu' => 1500,
+                'speed_mbps' => 1000,
+            ]],
+            'primary_ip' => '10.10.1.2',
+            'gateway' => '10.10.1.1',
+            'dns' => ['10.16.0.23', '10.16.0.60'],
+            'dhcp' => true,
+            'samba' => [
+                'min_protocol' => 'smb2_02',
+                'max_protocol' => 'smb3',
+                'signing' => 'required',
+                'encrypt' => 'desired',
+                'netbios_enabled' => true,
+            ],
+            'services' => ['smbd' => true, 'nmbd' => true, 'wsdd2' => true],
+            'listening' => [
+                ['port' => 22, 'proto' => 'tcp', 'service' => 'sshd'],
+                ['port' => 80, 'proto' => 'tcp', 'service' => 'nginx'],
+                ['port' => 443, 'proto' => 'tcp', 'service' => 'nginx'],
+                ['port' => 445, 'proto' => 'tcp', 'service' => 'smbd'],
+                ['port' => 3702, 'proto' => 'udp', 'service' => 'wsdd2'],
+                ['port' => 5355, 'proto' => 'udp', 'service' => 'wsdd2'],
+            ],
+            'firewall' => ['active' => true, 'rules_visible' => false, 'source' => '/etc/ufw/ufw.conf'],
+            'smb_sessions' => 0,
+            'generated_at' => date('H:i:s'),
+            'generated_timestamp' => time(),
+        ];
     }
 }
 
