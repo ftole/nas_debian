@@ -3,10 +3,13 @@
 //! Sustituye a `bin/nas-cli` (PHP) manteniendo el contrato `--json` con la
 //! envoltura `{success, message, data}` que consumen el panel y los scripts.
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use nas_core::shell::quote_all;
 use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
+use nas_engine::tasks::BackupTask;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
@@ -42,6 +45,29 @@ enum Command {
     Audit {
         #[command(subcommand)]
         action: AuditAction,
+    },
+    /// Tareas de respaldo instaladas en el servidor.
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BackupAction {
+    /// Lista las tareas de respaldo instaladas (`backup_*.sh`).
+    List {
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        dir: PathBuf,
+    },
+    /// Muestra el plan de ejecución de una tarea.
+    Plan {
+        /// Identificador de la tarea (sin prefijo `backup_`).
+        id: String,
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        dir: PathBuf,
     },
 }
 
@@ -93,7 +119,125 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         Command::Audit { action } => match action {
             AuditAction::Verify => audit_verify(cli.json),
         },
+        Command::Backup { action } => match action {
+            BackupAction::List { dir } => backup_list(&dir, cli.json),
+            BackupAction::Plan { id, dir } => backup_plan(&dir, &id, cli.json),
+        },
     }
+}
+
+fn discover_tasks(dir: &Path) -> NasResult<Vec<BackupTask>> {
+    if !dir.exists() {
+        return Err(NasError::NotFound(format!(
+            "directorio de tareas inexistente: {}",
+            dir.display()
+        )));
+    }
+    BackupTask::discover(dir)
+}
+
+fn backup_list(dir: &Path, json: bool) -> NasResult<ExitCode> {
+    let tasks = discover_tasks(dir)?;
+
+    if json {
+        print_json(&ApiResponse::ok(&tasks, "Tareas de respaldo"))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("TAREAS DE RESPALDO ({})", tasks.len());
+    if tasks.is_empty() {
+        println!("No se encontraron runners backup_*.sh en {}", dir.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    for task in &tasks {
+        let origin = match task.kind {
+            nas_engine::SourceKind::Cifs => format!(
+                "//{}/{}",
+                task.source_ip.as_deref().unwrap_or("?"),
+                task.share.as_deref().unwrap_or("?")
+            ),
+            nas_engine::SourceKind::Ssh => format!(
+                "{}@{}:{}",
+                task.user.as_deref().unwrap_or("?"),
+                task.source_ip.as_deref().unwrap_or("?"),
+                task.path.as_deref().unwrap_or("?")
+            ),
+            nas_engine::SourceKind::Local => task.path.clone().unwrap_or_else(|| "?".to_string()),
+        };
+        println!(
+            "{:<20} {:<10} {:<40} retención={}",
+            task.id,
+            task.kind.label(),
+            origin,
+            task.retention
+        );
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn last_snapshot(task: &BackupTask) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(task.task_dir()).ok()?;
+    let mut snapshots: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("snapshot_"))
+        })
+        .collect();
+    snapshots.sort();
+    snapshots.pop()
+}
+
+fn backup_plan(dir: &Path, id: &str, json: bool) -> NasResult<ExitCode> {
+    let tasks = discover_tasks(dir)?;
+    let task = tasks.iter().find(|task| task.id == id).ok_or_else(|| {
+        NasError::NotFound(format!("tarea '{id}' no encontrada en {}", dir.display()))
+    })?;
+
+    let problems = task.validate();
+    if !problems.is_empty() {
+        return Err(NasError::Invalid(format!(
+            "tarea '{id}' inválida: {}",
+            problems.join("; ")
+        )));
+    }
+
+    let previous = last_snapshot(task);
+    let plan = task.plan(previous.as_deref(), &chrono::Local::now());
+    let rendered: Vec<String> = plan.iter().map(|step| quote_all(step)).collect();
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "task": task,
+                "last_snapshot": previous.as_ref().map(|p| p.display().to_string()),
+                "steps": rendered,
+            }),
+            "Plan de respaldo",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("PLAN DE RESPALDO: {}", task.id);
+    println!("Origen    : {}", task.kind.label());
+    println!("Retención : {} snapshots", task.retention);
+    println!(
+        "Anterior  : {}",
+        previous.as_ref().map_or_else(
+            || "sin snapshots previos".to_string(),
+            |p| p.display().to_string()
+        )
+    );
+    println!();
+    for (index, step) in rendered.iter().enumerate() {
+        println!("{:>2}. {step}", index + 1);
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn print_json<T: Serialize>(payload: &ApiResponse<T>) -> NasResult<()> {
