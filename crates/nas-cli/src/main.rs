@@ -12,7 +12,9 @@ use clap::{Parser, Subcommand};
 use nas_core::shell::quote_all;
 use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
 use nas_engine::backup::{evaluate_space, retention_victims, snapshot_dir_name, SpaceDecision};
+use nas_engine::deploy::{DeployParams, FileSystem};
 use nas_engine::tasks::BackupTask;
+use nas_engine::update::ReleaseManifest;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::{CommandOutput, CommandSpec, Runner, SudoMode};
 use serde::Serialize;
@@ -53,6 +55,79 @@ enum Command {
     Backup {
         #[command(subcommand)]
         action: BackupAction,
+    },
+    /// Verificación y planificación de actualizaciones firmadas.
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
+    /// Planificación del despliegue del servidor.
+    Deploy {
+        #[command(subcommand)]
+        action: DeployAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum UpdateAction {
+    /// Verifica SHA-256 y firma Ed25519 del manifiesto.
+    Verify {
+        /// Manifiesto JSON de la release.
+        manifest: PathBuf,
+        /// Artefacto a verificar (por defecto, el declarado en el manifiesto).
+        #[arg(long)]
+        artifact: Option<PathBuf>,
+        /// Clave pública Ed25519 en hexadecimal.
+        #[arg(long)]
+        pubkey: String,
+    },
+    /// Genera el plan A/B de la actualización.
+    Plan {
+        /// Manifiesto JSON de la release.
+        manifest: PathBuf,
+        /// Artefacto descargado.
+        #[arg(long)]
+        artifact: PathBuf,
+        /// Raíz del despliegue.
+        #[arg(long, default_value = "/opt/nas_debian")]
+        root: String,
+        /// Versión instalada actualmente (para el rollback).
+        #[arg(long)]
+        previous: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DeployAction {
+    /// Muestra el plan de despliegue validado.
+    Plan {
+        /// Disco dedicado (`/dev/sdb`) o `LOCAL`.
+        #[arg(long)]
+        disk: String,
+        /// Grupo de trabajo.
+        #[arg(long)]
+        workgroup: String,
+        /// Nombre NetBIOS.
+        #[arg(long)]
+        netbios: String,
+        /// Usuario administrador.
+        #[arg(long)]
+        admin: String,
+        /// Rol del servidor.
+        #[arg(long, default_value = "ARCHIVOS")]
+        role: String,
+        /// Reutiliza datos existentes sin formatear.
+        #[arg(long)]
+        keep_data: bool,
+        /// Fuerza ext4 (por defecto se deriva del rol).
+        #[arg(long)]
+        ext4: bool,
+        /// Fuerza Btrfs (por defecto se deriva del rol).
+        #[arg(long)]
+        btrfs: bool,
+        /// El disco es SSD (afecta a las opciones de montaje).
+        #[arg(long)]
+        ssd: bool,
     },
 }
 
@@ -160,6 +235,45 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                     confirmed: yes,
                     sudo,
                     lock_dir,
+                },
+                cli.json,
+            ),
+        },
+        Command::Update { action } => match action {
+            UpdateAction::Verify {
+                manifest,
+                artifact,
+                pubkey,
+            } => update_verify(&manifest, artifact.as_deref(), &pubkey, cli.json),
+            UpdateAction::Plan {
+                manifest,
+                artifact,
+                root,
+                previous,
+            } => update_plan(&manifest, &artifact, &root, previous.as_deref(), cli.json),
+        },
+        Command::Deploy { action } => match action {
+            DeployAction::Plan {
+                disk,
+                workgroup,
+                netbios,
+                admin,
+                role,
+                keep_data,
+                ext4,
+                btrfs,
+                ssd,
+            } => deploy_plan(
+                DeployRequest {
+                    disk,
+                    workgroup,
+                    netbios,
+                    admin,
+                    role,
+                    keep_data,
+                    ext4,
+                    btrfs,
+                    ssd,
                 },
                 cli.json,
             ),
@@ -778,4 +892,206 @@ fn audit_verify(json: bool) -> NasResult<ExitCode> {
     }
 
     result.map(|_| ExitCode::SUCCESS)
+}
+
+fn update_verify(
+    manifest_path: &Path,
+    artifact: Option<&Path>,
+    public_key: &str,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let manifest = ReleaseManifest::load(manifest_path)?;
+    let artifact = artifact
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(&manifest.artifact));
+
+    let artifact_check = manifest.verify_artifact(&artifact);
+    let signature_check = manifest.verify_signature(public_key);
+    let ok = artifact_check.is_ok() && signature_check.is_ok();
+
+    let mut detail: Vec<String> = Vec::new();
+    if let Err(error) = &artifact_check {
+        detail.push(error.to_string());
+    }
+    if let Err(error) = &signature_check {
+        detail.push(error.to_string());
+    }
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "version": manifest.version,
+                "artifact": artifact.display().to_string(),
+                "sha256_ok": artifact_check.is_ok(),
+                "signature_ok": signature_check.is_ok(),
+                "detail": detail,
+            }),
+            "Verificación de release",
+        ))?;
+    } else {
+        println!("VERIFICACIÓN DE RELEASE {}", manifest.version);
+        println!("Artefacto : {}", artifact.display());
+        println!(
+            "SHA-256   : {}",
+            if artifact_check.is_ok() {
+                "OK"
+            } else {
+                "FALLO"
+            }
+        );
+        println!(
+            "Firma     : {}",
+            if signature_check.is_ok() {
+                "OK"
+            } else {
+                "FALLO"
+            }
+        );
+        if let Err(error) = &artifact_check {
+            println!("  ↳ {error}");
+        }
+        if let Err(error) = &signature_check {
+            println!("  ↳ {error}");
+        }
+    }
+
+    if ok {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(3))
+    }
+}
+
+fn update_plan(
+    manifest_path: &Path,
+    artifact: &Path,
+    root: &str,
+    previous: Option<&str>,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let manifest = ReleaseManifest::load(manifest_path)?;
+    let plan =
+        nas_engine::build_update_plan(&manifest, root, &artifact.to_string_lossy(), previous);
+
+    let steps: Vec<String> = plan.steps.iter().map(|step| quote_all(step)).collect();
+    let rollback: Vec<String> = plan.rollback.iter().map(|step| quote_all(step)).collect();
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "version": plan.version,
+                "release_dir": plan.release_dir,
+                "steps": steps,
+                "rollback": rollback,
+            }),
+            "Plan de actualización",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("PLAN DE ACTUALIZACIÓN A/B: {}", plan.version);
+    println!("Release   : {}", plan.release_dir);
+    for (index, step) in steps.iter().enumerate() {
+        println!("{:>2}. {step}", index + 1);
+    }
+    if rollback.is_empty() {
+        println!();
+        println!("Sin versión previa declarada: no hay rollback automático.");
+    } else {
+        println!();
+        println!("ROLLBACK:");
+        for (index, step) in rollback.iter().enumerate() {
+            println!("{:>2}. {step}", index + 1);
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Debug, Default)]
+struct DeployRequest {
+    disk: String,
+    workgroup: String,
+    netbios: String,
+    admin: String,
+    role: String,
+    keep_data: bool,
+    ext4: bool,
+    btrfs: bool,
+    ssd: bool,
+}
+
+fn deploy_plan(request: DeployRequest, json: bool) -> NasResult<ExitCode> {
+    if request.ext4 && request.btrfs {
+        return Err(NasError::Invalid(
+            "--ext4 y --btrfs son mutuamente excluyentes".into(),
+        ));
+    }
+
+    let role = ServerRole::parse(&request.role)
+        .ok_or_else(|| NasError::Invalid(format!("rol inválido: {}", request.role)))?;
+
+    let mut params = DeployParams::new(
+        request.disk,
+        request.workgroup,
+        request.netbios,
+        request.admin,
+        role,
+    );
+    params.keep_data = request.keep_data;
+    params.rotational = !request.ssd;
+    if request.ext4 {
+        params.filesystem = FileSystem::Ext4;
+    } else if request.btrfs {
+        params.filesystem = FileSystem::Btrfs;
+    }
+
+    let problems = params.validate();
+    if !problems.is_empty() {
+        return Err(NasError::Invalid(problems.join("; ")));
+    }
+
+    let plan = params.plan();
+    let steps: Vec<String> = plan.iter().map(|step| quote_all(step)).collect();
+    let invocation = params.deploy_sh_invocation("/opt/nas_debian", "-");
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "role": params.role.as_str(),
+                "filesystem": params.filesystem.as_str(),
+                "mount_options": params.mount_options(),
+                "partition": params.partition_path(),
+                "steps": steps,
+                "deploy_sh": quote_all(&invocation),
+            }),
+            "Plan de despliegue",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("PLAN DE DESPLIEGUE");
+    println!(
+        "Rol        : {} ({})",
+        params.role.as_str(),
+        params.role.label()
+    );
+    println!("Filesystem : {}", params.filesystem.label());
+    println!("Montaje    : {}", params.mount_options());
+    println!("Disco      : {}", params.disk);
+    println!(
+        "Partición  : {}",
+        params
+            .partition_path()
+            .unwrap_or_else(|| "(disco del sistema)".into())
+    );
+    println!();
+    for (index, step) in steps.iter().enumerate() {
+        println!("{:>2}. {step}", index + 1);
+    }
+    println!();
+    println!("Ejecución transitoria (deploy.sh auditado):");
+    println!("  {}", quote_all(&invocation));
+
+    Ok(ExitCode::SUCCESS)
 }
