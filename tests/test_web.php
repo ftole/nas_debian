@@ -735,6 +735,38 @@ $emptyRes = $fileExp->emptyTrash();
 assertTrue($emptyRes['success'] && $emptyRes['deleted_count'] >= 2, 'FileExplorerService::emptyTrash vacía papelera por completo');
 assertTrue($fileExp->getTrashCount() === 0, 'getTrashCount retorna 0 tras vaciar papelera');
 
+// Creación de nuevos archivos con createFile
+$createFileRes = $fileExp->createFile('', 'notas_equipo.txt', "Línea 1\nLínea 2");
+assertTrue($createFileRes['success'], 'FileExplorerService::createFile crea archivo de texto en directorio raíz');
+assertTrue(file_exists($tempExpDir . '/notas_equipo.txt'), 'Archivo creado existe físicamente en el disco');
+assertTrue(file_get_contents($tempExpDir . '/notas_equipo.txt') === "Línea 1\nLínea 2", 'Archivo creado preserva el contenido exacto');
+
+$createDupRes = $fileExp->createFile('', 'notas_equipo.txt', 'Sobreescritura');
+assertTrue(!$createDupRes['success'] && str_contains($createDupRes['error'], 'Ya existe'), 'createFile previene sobreescritura si el archivo ya existe');
+
+$createInvalidName = $fileExp->createFile('', '..', '');
+assertTrue(!$createInvalidName['success'], 'createFile rechaza nombres con caracteres no autorizados o reservados');
+
+$createTravRes = $fileExp->createFile('../../etc', 'passwd.txt', '');
+assertTrue(!$createTravRes['success'], 'createFile bloquea path traversal en subpath');
+
+// Restauración masiva de papelera: restoreAllTrash y cálculo de tamaño total en listTrash
+file_put_contents($tempExpDir . '/res1.txt', 'abc');
+file_put_contents($tempExpDir . '/res2.txt', 'defgh');
+$fileExp->moveToTrash('res1.txt', 'admin');
+$fileExp->moveToTrash('res2.txt', 'admin');
+$trashWithTotals = $fileExp->listTrash();
+assertTrue(isset($trashWithTotals['total_size_bytes']) && $trashWithTotals['total_size_bytes'] >= 8, 'listTrash reporta total_size_bytes acumulado');
+assertTrue(isset($trashWithTotals['total_size_formatted']), 'listTrash reporta total_size_formatted legible');
+
+$restoreAllRes = $fileExp->restoreAllTrash();
+assertTrue($restoreAllRes['success'] && ($restoreAllRes['restored_count'] ?? 0) >= 2, 'FileExplorerService::restoreAllTrash restaura todos los elementos');
+assertTrue(file_exists($tempExpDir . '/res1.txt') && file_exists($tempExpDir . '/res2.txt'), 'Archivos restaurados existen en destino original');
+assertTrue($fileExp->getTrashCount() === 0, 'Papelera queda vacía tras restoreAllTrash');
+@unlink($tempExpDir . '/res1.txt');
+@unlink($tempExpDir . '/res2.txt');
+@unlink($tempExpDir . '/notas_equipo.txt');
+
 // Eliminación permanente directa con deleteItem(..., permanent: true)
 file_put_contents($tempExpDir . '/archivo_directo.txt', 'inmediato');
 $delDirect = $fileExp->deleteItem('archivo_directo.txt', true);
@@ -3052,6 +3084,50 @@ assertTrue(str_contains($appJsUsersSrc, 'window.sortUsersTable = sortUsersTable'
 assertTrue(str_contains($appJsUsersSrc, 'window.copyPasswordInput = copyPasswordInput'), 'app.js exporta copyPasswordInput en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.copyUserWelcomeMemo = copyUserWelcomeMemo'), 'app.js exporta copyUserWelcomeMemo en window');
 assertTrue(str_contains($appJsUsersSrc, 'window.applyPermsSearch = applyPermsSearch'), 'app.js exporta applyPermsSearch en window');
+
+// 14. Pruebas de Mejoras del Explorador de Archivos y Recursos (#files)
+$layoutFilesSrc = file_get_contents(dirname(__DIR__) . '/web/templates/layout.php');
+$appJsFilesSrc = file_get_contents(dirname(__DIR__) . '/web/public/js/app.js');
+
+assertTrue(str_contains($layoutFilesSrc, 'id="btn-new-file"'), 'layout.php incluye botón btn-new-file');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-filter-input"'), 'layout.php incluye campo de filtrado files-filter-input');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-sort-select"'), 'layout.php incluye selector de orden files-sort-select');
+assertTrue(str_contains($layoutFilesSrc, 'id="btn-copy-unc"'), 'layout.php incluye botón btn-copy-unc');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-status-bar"'), 'layout.php incluye barra de estado files-status-bar');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-status-total"'), 'layout.php incluye files-status-total');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-status-size"'), 'layout.php incluye files-status-size');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-status-selected"'), 'layout.php incluye files-status-selected');
+assertTrue(str_contains($layoutFilesSrc, 'id="files-status-storage-info"'), 'layout.php incluye files-status-storage-info');
+assertTrue(str_contains($layoutFilesSrc, 'id="trash-filter-input"'), 'layout.php incluye campo de filtrado trash-filter-input');
+assertTrue(str_contains($layoutFilesSrc, 'id="btn-restore-all-trash"'), 'layout.php incluye botón btn-restore-all-trash');
+assertTrue(str_contains($layoutFilesSrc, 'id="trash-kpi-badge"'), 'layout.php incluye badge de KPI trash-kpi-badge');
+assertTrue(str_contains($layoutFilesSrc, 'id="modal-new-file"'), 'layout.php incluye modal-new-file');
+assertTrue(str_contains($layoutFilesSrc, 'id="modal-restore-all-trash"'), 'layout.php incluye modal-restore-all-trash');
+
+assertTrue(str_contains($appJsFilesSrc, 'function formatBytesLocal('), 'app.js define función formatBytesLocal');
+assertTrue(str_contains($appJsFilesSrc, 'function updateFilesStatusBar('), 'app.js define función updateFilesStatusBar');
+assertTrue(str_contains($appJsFilesSrc, 'function filterCurrentFiles('), 'app.js define función filterCurrentFiles');
+assertTrue(str_contains($appJsFilesSrc, 'function setFilesSort('), 'app.js define función setFilesSort');
+assertTrue(str_contains($appJsFilesSrc, 'function toggleTableSort('), 'app.js define función toggleTableSort');
+assertTrue(str_contains($appJsFilesSrc, 'function copyCurrentUncPath('), 'app.js define función copyCurrentUncPath');
+assertTrue(str_contains($appJsFilesSrc, 'function copyItemUncPath('), 'app.js define función copyItemUncPath');
+assertTrue(str_contains($appJsFilesSrc, 'function openNewFileModal('), 'app.js define función openNewFileModal');
+assertTrue(str_contains($appJsFilesSrc, 'function submitNewFile('), 'app.js define función submitNewFile');
+assertTrue(str_contains($appJsFilesSrc, 'function filterTrashItems('), 'app.js define función filterTrashItems');
+assertTrue(str_contains($appJsFilesSrc, 'function openRestoreAllTrashModal('), 'app.js define función openRestoreAllTrashModal');
+assertTrue(str_contains($appJsFilesSrc, 'function confirmRestoreAllTrash('), 'app.js define función confirmRestoreAllTrash');
+assertTrue(str_contains($appJsFilesSrc, 'function initFilesKeyboardShortcuts('), 'app.js define función initFilesKeyboardShortcuts');
+
+assertTrue(str_contains($appJsFilesSrc, 'window.filterCurrentFiles = filterCurrentFiles'), 'app.js exporta filterCurrentFiles en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.setFilesSort = setFilesSort'), 'app.js exporta setFilesSort en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.toggleTableSort = toggleTableSort'), 'app.js exporta toggleTableSort en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.copyCurrentUncPath = copyCurrentUncPath'), 'app.js exporta copyCurrentUncPath en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.openNewFileModal = openNewFileModal'), 'app.js exporta openNewFileModal en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.submitNewFile = submitNewFile'), 'app.js exporta submitNewFile en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.filterTrashItems = filterTrashItems'), 'app.js exporta filterTrashItems en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.openRestoreAllTrashModal = openRestoreAllTrashModal'), 'app.js exporta openRestoreAllTrashModal en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.confirmRestoreAllTrash = confirmRestoreAllTrash'), 'app.js exporta confirmRestoreAllTrash en window');
+assertTrue(str_contains($appJsFilesSrc, 'window.loadFiles = loadFiles'), 'app.js exporta loadFiles en window');
 
 // Limpieza de directorios temporales de prueba
 @unlink($tmpAuditSmb);
