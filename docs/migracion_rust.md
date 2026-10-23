@@ -11,7 +11,7 @@
 | **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `nasctl` | ✅ Completado |
-| **F2** | Motor de respaldos (modelo, validación y plan), deploy/update/storage/usuarios | 🟡 Parcial: `nas backup list` y `nas backup plan` |
+| **F2** | Motor de respaldos (modelo, plan y ejecución con guardas), deploy/update/storage/usuarios | 🟡 Parcial: `nas backup list`, `plan` y `run` |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
@@ -62,6 +62,7 @@ cargo run -p nas-dev -- --inventory inventory.example.yaml sync --host lab-dev -
 cargo run -p nasctl -- --inventory inventory.example.yaml check
 cargo run -p nas-cli -- backup list --dir /usr/local/bin
 cargo run -p nas-cli -- backup plan contabilidad --dir /usr/local/bin
+cargo run -p nas-cli -- backup run contabilidad --dry-run --dir /usr/local/bin
 ```
 
 > **Nota para Windows:** el toolchain `x86_64-pc-windows-msvc` requiere Visual
@@ -128,8 +129,27 @@ con argumentos separados:
 - **SSH**: `sshpass -e rsync ... -e 'ssh -p <puerto> -o BatchMode=yes ...'` (la contraseña viaja por variable de entorno, nunca en `argv`).
 - **Local**: `rsync` con `--link-dest` cuando existe snapshot previo.
 
-El plan es puramente determinista y está cubierto por pruebas; la ejecución
-programada seguirá a cargo de los runners actuales hasta completar F2.
+El plan es puramente determinista y está cubierto por pruebas.
+
+### Ejecución (`nas backup run`)
+
+`nas backup run <tarea>` aplica las mismas guardas que los runners Bash, pero
+desde un binario tipado:
+
+1. **Validación** de la tarea (origen, credenciales, retención).
+2. **Control de espacio** con `df -Pk` y `evaluate_space`: aborta si queda menos
+   de 2 GiB o la ocupación supera el 95 % (82–95 % sólo advierte).
+3. **Bloqueo exclusivo** por tarea (`/var/lock/backup_<id>.lock`) con detección
+   de bloqueos huérfanos; se libera automáticamente al salir del proceso.
+4. **Ejecución** de los pasos con timeouts (120 s montajes, 3600 s rsync) y
+   limpieza de montaje (`umount`) si algo falla.
+5. **Retención** calculada sobre los snapshots existentes + el nuevo, eliminando
+   únicamente los más antiguos.
+6. **Bitácora** en `<log_dir>/backup_<id>.log` y **auditoría encadenada** con los
+   eventos `START`, `SUCCESS` o `FAILED`.
+
+`--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
+la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
 ## 7. Mapa de migración
 
@@ -168,9 +188,7 @@ programada seguirá a cargo de los runners actuales hasta completar F2.
 
 ## 9. Siguientes pasos (F2)
 
-1. `nas backup run`: ejecución real del plan con `flock`, control de espacio y
-   retención automática (reutilizando `nas-engine::backup`).
-2. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
+1. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
    Samba, Nginx, hardening) con pruebas de paridad contra el script actual.
 3. `nas-engine::update`: verificación de firma GPG (sequoia), swap A/B y
    rollback automático.
