@@ -1588,7 +1588,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               </div>
               <div class="panel-card-body" id="app-body-btrfs">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
               <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="navigateTo('storage')">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="switchView('storage')">
                   <svg class="icon icon-sm"><use href="#icon-storage"></use></svg> Ver almacenamiento
                 </button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-scrub-btrfs" onclick="triggerBtrfsScrub(this)">
@@ -1603,7 +1603,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               </div>
               <div class="panel-card-body" id="app-body-rsync">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
               <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="navigateTo('backups')">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="switchView('backups')">
                   <svg class="icon icon-sm"><use href="#icon-backup"></use></svg> Gestionar respaldos
                 </button>
               </div>
@@ -2842,7 +2842,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   </div>
 
   <!-- Modal: Sesiones Concurrentes de Samba -->
-  <div class="modal-backdrop" id="modal-samba-sessions">
+  <div class="modal-backdrop modal-static" id="modal-samba-sessions">
     <div class="modal-dialog" style="max-width:850px;">
       <div class="modal-header">
         <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Sesiones SMB Concurrentes</h3>
