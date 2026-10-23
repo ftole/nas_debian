@@ -63,3 +63,74 @@ fn version_responde_sin_tocar_el_sistema() {
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("nas"));
 }
+
+fn fixture_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "nas-cli-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&dir).expect("fixture dir");
+    dir
+}
+
+#[test]
+fn backup_run_exige_confirmacion_explicita() {
+    let dir = fixture_dir("backup-guard");
+    std::fs::write(
+        dir.join("backup_demo.sh"),
+        "SOURCE_TYPE=\"local\"
+SRC_PATH=\"/datos\"
+RETENTION=3
+",
+    )
+    .expect("runner");
+
+    let output = nas()
+        .args(["backup", "run", "demo", "--dir", &dir.to_string_lossy()])
+        .output()
+        .expect("ejecuta");
+
+    assert_eq!(output.status.code(), Some(3));
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json de error");
+    assert_eq!(payload["success"], false);
+    assert!(payload["error"].as_str().unwrap_or("").contains("--yes"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backup_run_dry_run_no_modifica_nada() {
+    let dir = fixture_dir("backup-dry");
+    std::fs::write(
+        dir.join("backup_demo.sh"),
+        "SOURCE_TYPE=\"local\"
+SRC_PATH=\"/datos\"
+RETENTION=2
+",
+    )
+    .expect("runner");
+
+    let output = nas()
+        .args([
+            "--json",
+            "backup",
+            "run",
+            "demo",
+            "--dir",
+            &dir.to_string_lossy(),
+            "--dry-run",
+        ])
+        .output()
+        .expect("ejecuta");
+
+    let payload = json_of(&output);
+    assert_eq!(payload["success"], true);
+    assert!(payload["data"]["steps"].is_array());
+    assert_eq!(payload["data"]["retention"]["keep"], 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
