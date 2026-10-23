@@ -92,6 +92,30 @@ enum Command {
         #[arg(long)]
         known_hosts: Option<PathBuf>,
     },
+    /// Verifica los requisitos del host de desarrollo antes de sincronizar.
+    Doctor {
+        /// Alias del host en el inventario.
+        #[arg(long)]
+        host: String,
+
+        /// Usuario SSH (sobrescribe el inventario).
+        #[arg(long)]
+        user: Option<String>,
+
+        /// Clave privada SSH.
+        #[arg(long)]
+        identity: Option<PathBuf>,
+
+        /// Archivo known_hosts dedicado.
+        #[arg(long)]
+        known_hosts: Option<PathBuf>,
+    },
+    /// Imprime el procedimiento de alta del host de desarrollo (no ejecuta nada).
+    Onboard {
+        /// Alias del host en el inventario.
+        #[arg(long)]
+        host: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -205,6 +229,13 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             },
             cli.json,
         ),
+        Command::Doctor {
+            host,
+            user,
+            identity,
+            known_hosts,
+        } => doctor(&host, cli.inventory, user, identity, known_hosts, cli.json),
+        Command::Onboard { host } => onboard(&host, cli.inventory, cli.json),
     }
 }
 
@@ -496,28 +527,14 @@ fn sync(
 ) -> NasResult<ExitCode> {
     let inventory = load_inventory(inventory_path)?;
     let host = inventory.resolve(alias)?;
+    ensure_development(&host)?;
 
-    if !host.is_development() {
-        return Err(NasError::Denied(format!(
-            "el host '{}' pertenece al entorno '{}': nas-dev sólo sincroniza entornos de desarrollo",
-            host.alias, host.env
-        )));
-    }
-
-    let mut target = SshTarget::new(
-        host.address.clone(),
-        host.port,
-        options.user.clone().unwrap_or_else(|| host.user.clone()),
-    )
-    .with_connect_timeout(host.timeout_secs);
-    if let Some(identity) = &options.identity {
-        target = target.with_identity(identity.clone());
-    }
-    if let Some(known_hosts) = &options.known_hosts {
-        target = target.with_known_hosts(known_hosts.clone());
-    } else {
-        target = target.with_known_hosts(default_known_hosts(&host.alias));
-    }
+    let target = target_for(
+        &host,
+        options.user.clone(),
+        options.identity.clone(),
+        options.known_hosts.clone(),
+    );
 
     if options.dry_run {
         return render_dry_run(&host, &target, options.sudo, json);
@@ -712,6 +729,263 @@ fn render_dry_run(
     );
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// Verificación remota de un requisito del host de desarrollo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DoctorCheck {
+    name: String,
+    argv: Vec<String>,
+    sudo: bool,
+    hint: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorResult {
+    name: String,
+    ok: bool,
+    detail: String,
+    hint: String,
+}
+
+fn ensure_development(host: &ResolvedHost) -> NasResult<()> {
+    if host.is_development() {
+        Ok(())
+    } else {
+        Err(NasError::Denied(format!(
+            "el host '{}' pertenece al entorno '{}': nas-dev sólo opera en desarrollo",
+            host.alias, host.env
+        )))
+    }
+}
+
+fn target_for(
+    host: &ResolvedHost,
+    user: Option<String>,
+    identity: Option<PathBuf>,
+    known_hosts: Option<PathBuf>,
+) -> SshTarget {
+    let mut target = SshTarget::new(
+        host.address.clone(),
+        host.port,
+        user.unwrap_or_else(|| host.user.clone()),
+    )
+    .with_connect_timeout(host.timeout_secs);
+
+    if let Some(identity) = identity {
+        target = target.with_identity(identity);
+    }
+
+    target.with_known_hosts(known_hosts.unwrap_or_else(|| default_known_hosts(&host.alias)))
+}
+
+fn build_doctor_checks(host: &ResolvedHost) -> Vec<DoctorCheck> {
+    let plain = |name: &str, argv: &[&str], sudo: bool, hint: &str| DoctorCheck {
+        name: name.to_string(),
+        argv: argv.iter().map(|arg| (*arg).to_string()).collect(),
+        sudo,
+        hint: hint.to_string(),
+    };
+
+    vec![
+        plain(
+            "usuario-ssh",
+            &["id", "-un"],
+            false,
+            "el usuario SSH debe existir en el host",
+        ),
+        plain(
+            "sudo-sin-password",
+            &["true"],
+            true,
+            "configure /etc/sudoers.d/nas-dev con NOPASSWD para el usuario",
+        ),
+        plain(
+            "rsync",
+            &["rsync", "--version"],
+            false,
+            "instale rsync (apt-get install rsync)",
+        ),
+        plain("tar", &["tar", "--version"], false, "instale tar"),
+        plain(
+            "curl",
+            &["curl", "--version"],
+            false,
+            "instale curl para el healthcheck posterior al cambio",
+        ),
+        DoctorCheck {
+            name: "docroot".to_string(),
+            argv: vec!["test".into(), "-d".into(), host.web.clone()],
+            sudo: true,
+            hint: format!("cree el docroot de desarrollo {}", host.web),
+        },
+        DoctorCheck {
+            name: "docroot-escribible".to_string(),
+            argv: vec!["test".into(), "-w".into(), host.web.clone()],
+            sudo: true,
+            hint: "ajuste propietario y permisos del docroot".to_string(),
+        },
+        DoctorCheck {
+            name: "estado".to_string(),
+            argv: vec!["test".into(), "-d".into(), host.state.clone()],
+            sudo: true,
+            hint: format!("cree el directorio de estado {}", host.state),
+        },
+        plain(
+            "nginx-config",
+            &["nginx", "-t"],
+            true,
+            "corrija la configuración de nginx",
+        ),
+        plain(
+            "nginx-activo",
+            &["systemctl", "is-active", "--quiet", "nginx"],
+            true,
+            "inicie nginx en el host",
+        ),
+    ]
+}
+
+fn doctor(
+    alias: &str,
+    inventory_path: Option<PathBuf>,
+    user: Option<String>,
+    identity: Option<PathBuf>,
+    known_hosts: Option<PathBuf>,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let inventory = load_inventory(inventory_path)?;
+    let host = inventory.resolve(alias)?;
+    ensure_development(&host)?;
+
+    let target = target_for(&host, user, identity, known_hosts);
+    ensure_known_hosts_dir(&target)?;
+
+    let executor = OpenSsh::new();
+    let mut results = Vec::new();
+
+    for check in build_doctor_checks(&host) {
+        let argv = if check.sudo {
+            with_sudo(&check.argv)
+        } else {
+            check.argv.clone()
+        };
+
+        let (ok, detail) = match executor.run(&target, &argv) {
+            Ok(output) if output.is_success() => (true, "OK".to_string()),
+            Ok(output) => (
+                false,
+                if output.stderr.is_empty() {
+                    output.stdout
+                } else {
+                    output.stderr
+                },
+            ),
+            Err(error) => (false, error.to_string()),
+        };
+
+        results.push(DoctorResult {
+            name: check.name,
+            ok,
+            detail,
+            hint: check.hint,
+        });
+    }
+
+    let failures = results.iter().filter(|result| !result.ok).count();
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&ApiResponse::ok(
+                serde_json::json!({ "host": host.alias, "failures": failures, "checks": results }),
+                "Diagnóstico del host de desarrollo"
+            ))?
+        );
+    } else {
+        println!(
+            "DIAGNÓSTICO DEL HOST DE DESARROLLO: {} ({})",
+            host.alias, host.env
+        );
+        println!("Destino: {}", target.destination());
+        println!();
+        for result in &results {
+            let mark = if result.ok { "PASS" } else { "FAIL" };
+            println!("[{mark}] {:<20} {}", result.name, result.detail);
+            if !result.ok {
+                println!("       ↳ {}", result.hint);
+            }
+        }
+        println!();
+        println!("Fallos: {failures}");
+    }
+
+    if failures == 0 {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(1))
+    }
+}
+
+fn onboard(alias: &str, inventory_path: Option<PathBuf>, json: bool) -> NasResult<ExitCode> {
+    let inventory = load_inventory(inventory_path)?;
+    let host = inventory.resolve(alias)?;
+    ensure_development(&host)?;
+
+    let script = onboard_script(&host);
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&ApiResponse::ok(
+                serde_json::json!({ "host": host.alias, "script": script }),
+                "Procedimiento de alta del host"
+            ))?
+        );
+    } else {
+        println!(
+            "# Procedimiento de alta para '{}' ({})",
+            host.alias, host.env
+        );
+        println!("# Ejecutar como root en el servidor destino. Revisar antes de aplicar.\n");
+        println!("{script}");
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn onboard_script(host: &ResolvedHost) -> String {
+    let user = &host.user;
+    format!(
+        r#"set -euo pipefail
+
+# 1. Usuario de desarrollo sin shell de sistema
+id -u {user} >/dev/null 2>&1 || useradd -m -s /bin/bash {user}
+
+# 2. Clave pública (pegue la clave del operador)
+install -d -m 700 -o {user} -g {user} /home/{user}/.ssh
+touch /home/{user}/.ssh/authorized_keys
+chown {user}:{user} /home/{user}/.ssh/authorized_keys
+chmod 600 /home/{user}/.ssh/authorized_keys
+
+# 3. Sudo acotado a los comandos del plan (revisar y endurecer antes de usar)
+cat > /etc/sudoers.d/nas-dev <<'SUDO'
+{user} ALL=(root) NOPASSWD: /usr/bin/mkdir, /usr/bin/rm, /usr/bin/tar, /usr/bin/mv, /usr/bin/rsync, /usr/bin/curl, /usr/bin/test, /usr/bin/systemctl reload nginx, /usr/bin/systemctl reload php8.4-fpm
+SUDO
+chmod 0440 /etc/sudoers.d/nas-dev
+visudo -cf /etc/sudoers.d/nas-dev
+
+# 4. Docroot y estado aislados de producción
+install -d -m 775 -o www-data -g www-data {web}
+install -d -m 750 -o {user} -g {user} {state}/dev-sync/incoming {state}/dev-sync/stage {state}/dev-sync/backups
+
+# 5. Verificación
+sudo -u {user} sudo -n true && echo 'sudo sin contraseña OK'
+"#,
+        web = host.web,
+        state = host.state,
+        user = user
+    )
 }
 
 fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> SyncPlan {
@@ -975,6 +1249,40 @@ mod tests {
             ("/var/www".to_string(), "nas-web-dev".to_string())
         );
         assert_eq!(split_path("/web"), ("/".to_string(), "web".to_string()));
+    }
+
+    #[test]
+    fn guarda_de_entorno_rechaza_produccion() {
+        let mut prod = host("/var/www/nas-web-dev");
+        prod.env = "prod".to_string();
+        assert!(super::ensure_development(&prod).is_err());
+        assert!(super::ensure_development(&host("/var/www/nas-web-dev")).is_ok());
+    }
+
+    #[test]
+    fn doctor_incluye_comprobaciones_criticas() {
+        let checks = super::build_doctor_checks(&host("/var/www/nas-web-dev"));
+        let names: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+
+        assert!(names.contains(&"sudo-sin-password"));
+        assert!(names.contains(&"docroot-escribible"));
+        assert!(names.contains(&"nginx-config"));
+        let docroot = checks
+            .iter()
+            .find(|check| check.name == "docroot")
+            .expect("comprobación de docroot");
+        assert!(docroot.argv.contains(&"/var/www/nas-web-dev".to_string()));
+        assert!(docroot.sudo);
+    }
+
+    #[test]
+    fn onboard_genera_sudoers_acotado_y_rutas_propias() {
+        let script = super::onboard_script(&host("/var/www/nas-web-dev"));
+        assert!(script.contains("/etc/sudoers.d/nas-dev"));
+        assert!(script.contains("NOPASSWD"));
+        assert!(script.contains("/var/www/nas-web-dev"));
+        assert!(script.contains("/var/lib/nas-dev/dev-sync"));
+        assert!(script.contains("visudo -cf"));
     }
 
     #[test]
