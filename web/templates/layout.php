@@ -1063,6 +1063,9 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
             <button class="btn btn-secondary" id="btn-new-folder" onclick="openNewFolderModal()">
               <svg class="icon"><use href="#icon-plus"></use></svg> Nueva carpeta
             </button>
+            <button class="btn btn-secondary" id="btn-new-file" onclick="openNewFileModal()" title="Crear un nuevo archivo de texto en blanco">
+              <svg class="icon"><use href="#icon-file-text"></use></svg> Nuevo archivo
+            </button>
             <button class="btn btn-primary" id="btn-upload-files" onclick="triggerFileInput()">
               <svg class="icon"><use href="#icon-upload"></use></svg> Subir archivos
             </button>
@@ -1087,7 +1090,23 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
               <div class="file-breadcrumbs" id="files-breadcrumbs">
                 <span class="file-breadcrumb-current">/srv/nas</span>
               </div>
-              <div style="display:flex; align-items:center; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto;">
+                <!-- Buscador en tiempo real en la carpeta actual -->
+                <div style="position:relative; min-width:180px; max-width:240px;">
+                  <input type="search" id="files-filter-input" placeholder="Filtrar archivos..." oninput="filterCurrentFiles(this.value)" style="width:100%; padding:5px 10px 5px 28px; font-size:12.5px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-surface); color:var(--text-main);">
+                  <svg class="icon" style="position:absolute; left:8px; top:50%; transform:translateY(-50%); width:13px; height:13px; color:var(--text-muted); pointer-events:none;"><use href="#icon-search"></use></svg>
+                </div>
+
+                <!-- Selector de Ordenamiento -->
+                <select id="files-sort-select" onchange="setFilesSort(this.value)" style="width:auto; padding:5px 8px; font-size:12px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-surface); color:var(--text-main);" title="Criterio de ordenamiento">
+                  <option value="name_asc">Nombre (A &rarr; Z)</option>
+                  <option value="name_desc">Nombre (Z &rarr; A)</option>
+                  <option value="size_desc">Tamaño (Mayor primero)</option>
+                  <option value="size_asc">Tamaño (Menor primero)</option>
+                  <option value="date_desc">Fecha (Más reciente)</option>
+                  <option value="date_asc">Fecha (Más antiguo)</option>
+                </select>
+
                 <!-- Selector de Vista: Cuadrícula Windows / Lista Detallada -->
                 <div class="view-toggle-group">
                   <button type="button" class="view-toggle-btn active" id="btn-view-grid" onclick="setFileViewMode('grid')" title="Vista en cuadrícula (iconos grandes estilo Windows)">
@@ -1097,6 +1116,13 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                     <svg class="icon"><use href="#icon-list"></use></svg>
                   </button>
                 </div>
+
+                <!-- Botón Copiar Ruta UNC -->
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-unc" onclick="copyCurrentUncPath()" title="Copiar ruta de red Windows (UNC) al portapapeles">
+                  <svg class="icon"><use href="#icon-copy"></use></svg> Ruta UNC
+                </button>
+
+                <!-- Botón Descargar ZIP -->
                 <button class="btn btn-secondary btn-sm" id="btn-download-zip" onclick="downloadCurrentFolderZip()" title="Descargar la carpeta actual completa comprimida en archivo .zip">
                   <svg class="icon"><use href="#icon-download"></use></svg> Descargar ZIP
                 </button>
@@ -1137,12 +1163,20 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                   <thead>
                     <tr>
                       <th style="width:36px;"></th>
-                      <th>Nombre</th>
-                      <th>Tamaño</th>
-                      <th>Permisos</th>
+                      <th style="cursor:pointer; user-select:none;" onclick="toggleTableSort('name')" title="Ordenar por nombre">
+                        Nombre <span id="sort-indicator-name" class="sort-indicator"></span>
+                      </th>
+                      <th style="cursor:pointer; user-select:none;" onclick="toggleTableSort('size')" title="Ordenar por tamaño">
+                        Tamaño <span id="sort-indicator-size" class="sort-indicator"></span>
+                      </th>
+                      <th style="cursor:pointer; user-select:none;" onclick="toggleTableSort('permissions')" title="Ordenar por permisos">
+                        Permisos <span id="sort-indicator-permissions" class="sort-indicator"></span>
+                      </th>
                       <th>Propietario / Grupo</th>
-                      <th>Última modificación</th>
-                      <th style="width:170px; text-align:right;">Acciones</th>
+                      <th style="cursor:pointer; user-select:none;" onclick="toggleTableSort('date')" title="Ordenar por fecha de modificación">
+                        Última modificación <span id="sort-indicator-date" class="sort-indicator"></span>
+                      </th>
+                      <th style="width:190px; text-align:right;">Acciones</th>
                     </tr>
                   </thead>
                   <tbody id="files-table-body">
@@ -1151,12 +1185,25 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                 </table>
               </div>
             </div>
+
+            <!-- Barra de estado del explorador (elementos, tamaño, selección y almacenamiento) -->
+            <div class="files-status-bar" id="files-status-bar" style="display:flex; justify-content:space-between; align-items:center; padding:8px 14px; background:var(--bg-surface); border-top:1px solid var(--border-color); font-size:12px; color:var(--text-muted); border-bottom-left-radius:var(--radius-sm); border-bottom-right-radius:var(--radius-sm); flex-wrap:wrap; gap:8px;">
+              <div id="files-status-counts" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span id="files-status-total">0 elementos</span>
+                <span id="files-status-size">Tamaño total: 0 B</span>
+                <span id="files-status-selected" style="color:var(--text-main); font-weight:500;"></span>
+              </div>
+              <div id="files-status-storage" style="display:flex; align-items:center; gap:6px;">
+                <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-storage"></use></svg>
+                <span id="files-status-storage-info">Almacenamiento /srv/nas</span>
+              </div>
+            </div>
           </div>
 
           <!-- Vista de Papelera de Reciclaje -->
           <div id="files-trash-view" style="display:none;">
             <div class="trash-toolbar">
-              <div style="display:flex; align-items:center; gap:10px;">
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <button class="btn btn-secondary btn-sm" onclick="exitTrashView()" title="Regresar al explorador de archivos">
                   <svg class="icon"><use href="#icon-restore"></use></svg> Volver a Archivos
                 </button>
@@ -1164,16 +1211,27 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                   <svg class="icon"><use href="#icon-trash"></use></svg> Papelera de Reciclaje Confinada (/srv/nas/.trash)
                 </div>
               </div>
-              <div style="display:flex; align-items:center; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto;">
+                <!-- Buscador en papelera -->
+                <div style="position:relative; min-width:160px; max-width:220px;">
+                  <input type="search" id="trash-filter-input" placeholder="Filtrar en papelera..." oninput="filterTrashItems(this.value)" style="width:100%; padding:4px 8px 4px 26px; font-size:12px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-surface); color:var(--text-main);">
+                  <svg class="icon" style="position:absolute; left:7px; top:50%; transform:translateY(-50%); width:12px; height:12px; color:var(--text-muted); pointer-events:none;"><use href="#icon-search"></use></svg>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-restore-all-trash" onclick="openRestoreAllTrashModal()" title="Restaurar todos los elementos a sus rutas originales">
+                  <svg class="icon"><use href="#icon-restore"></use></svg> Restaurar todo
+                </button>
                 <button class="btn btn-danger btn-sm" id="btn-empty-trash" onclick="openEmptyTrashModal()" title="Eliminar definitivamente todos los elementos">
                   <svg class="icon"><use href="#icon-trash"></use></svg> Vaciar papelera
                 </button>
               </div>
             </div>
 
-            <div style="padding:12px 20px; background:rgba(245, 158, 11, 0.08); border-bottom:1px solid var(--border-color); font-size:12.5px; color:var(--text-secondary); display:flex; align-items:center; gap:8px;">
-              <svg class="icon" style="color:var(--accent-warning); flex-shrink:0;"><use href="#icon-info"></use></svg>
-              <span>Los archivos eliminados se protegen aquí. Puedes restaurarlos en cualquier momento a su ubicación original o purgarlos definitivamente.</span>
+            <div style="padding:10px 18px; background:rgba(245, 158, 11, 0.08); border-bottom:1px solid var(--border-color); font-size:12.5px; color:var(--text-secondary); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <svg class="icon" style="color:var(--accent-warning); flex-shrink:0;"><use href="#icon-info"></use></svg>
+                <span id="trash-summary-text">Los archivos eliminados se protegen aquí. Puedes restaurarlos en cualquier momento a su ubicación original o purgarlos definitivamente.</span>
+              </div>
+              <span class="badge badge-warn" id="trash-kpi-badge">0 elementos (0 B)</span>
             </div>
 
             <div class="table-responsive">
@@ -2522,6 +2580,31 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Modal: Crear Nuevo Archivo de Texto -->
+  <div class="modal-backdrop modal-static" id="modal-new-file">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-file-text"></use></svg> Crear nuevo archivo de texto</h3>
+        <button class="modal-close" onclick="closeModal('modal-new-file')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-new-file" onsubmit="submitNewFile(event)">
+          <div class="form-group">
+            <label for="new-file-name">Nombre del archivo (con extensión):</label>
+            <input type="text" id="new-file-name" required placeholder="ej. notas.txt, script.sh, config.json" pattern="[A-Za-z0-9._-]+">
+            <small style="color:var(--text-muted); font-size:12px; margin-top:4px; display:block;">
+              Extensiones compatibles: <code>.txt</code>, <code>.sh</code>, <code>.ps1</code>, <code>.json</code>, <code>.csv</code>, <code>.conf</code>. El archivo se abrirá en el editor web.
+            </small>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-file')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-new-file">Crear y abrir</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Renombrar Archivo o Carpeta -->
   <div class="modal-backdrop modal-static" id="modal-rename-file">
     <div class="modal-dialog">
@@ -2754,6 +2837,24 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-empty-trash')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-empty-trash" onclick="confirmEmptyTrash()">Vaciar papelera permanentemente</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Restaurar Todos los Elementos de la Papelera -->
+  <div class="modal-backdrop modal-static" id="modal-restore-all-trash">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar papelera completa</h3>
+        <button class="modal-close" onclick="closeModal('modal-restore-all-trash')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>¿Estás seguro de que deseas restaurar <strong id="restore-all-trash-count">todos los elementos</strong> a sus ubicaciones originales?</p>
+        <p style="color:var(--text-secondary); font-size:12.5px; margin-top:8px;">Si algún elemento ya existe en el destino, se restaurará agregando un sufijo temporal numérico para evitar pérdida o sobreescritura de datos.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-restore-all-trash')">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-restore-all" onclick="confirmRestoreAllTrash()">Restaurar todo</button>
       </div>
     </div>
   </div>
