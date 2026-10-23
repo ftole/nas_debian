@@ -11,7 +11,7 @@
 | **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
-| **F2** | Motor de respaldos, actualizaciones firmadas y planificación de despliegue; storage/usuarios | 🟡 Parcial: `backup`, `update verify/plan`, `deploy plan` |
+| **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
@@ -140,6 +140,8 @@ Confirmaciones y seguridad:
 
 ## 6. Actualizaciones firmadas (`nas update`)
 
+- `nas update apply <manifiesto> --artifact <tgz> --pubkey <hex> --yes` aplica
+  la release tras verificar firma y hash, con rollback automático.
 - `nas update verify <manifiesto> --pubkey <hex>` comprueba **SHA-256 del
   artefacto** y **firma Ed25519** sobre la carga canónica
   `version|commit|artifact|sha256|published_at`. Devuelve código 3 si algo falla.
@@ -156,8 +158,12 @@ Confirmaciones y seguridad:
   sistema de archivos (ext4 para `ARCHIVOS`, Btrfs con zstd para `BACKUP` e
   híbrido), calcula la partición (`sdb1` vs `nvme0n1p1`) y las opciones de
   montaje según HDD/SSD.
-- Emite el plan de referencia y la invocación equivalente a `deploy.sh`
-  (ejecución transitoria auditada) hasta completar la paridad en Rust.
+- Emite el plan de referencia y la invocación equivalente a `deploy.sh`.
+- `nas deploy apply` ejecuta el plan con guardas: `--format-token SI-FORMATEAR`
+  para formatear, detección de disco en uso con `findmnt -R`, `--ignore-in-use`
+  explícito, `--yes`, bloqueo `/var/lock/nas-deploy.lock` y auditoría.
+- `nas update apply` verifica SHA-256 + firma antes de tocar nada, aplica el
+  swap A/B, valida el healthcheck y **revierte automáticamente** si falla.
 
 ## 8. Tareas de respaldo (`nas backup`)
 
@@ -192,7 +198,14 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 9. Mapa de migración
+## 9. Almacenamiento y usuarios (`nas storage` / `nas users`)
+
+- `nas storage list` usa `lsblk -J` y el parser tipado (tipo, tamaño, fstype,
+  montaje, HDD/SSD).
+- `nas users list` lee `/etc/passwd` y `/etc/group` y separa cuentas de sistema
+  de las administrables, listando además los grupos `grp_*`.
+
+## 10. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -209,7 +222,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 10. Seguridad implementada
+## 11. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -227,11 +240,13 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 11. Siguientes pasos
+## 12. Siguientes pasos
 
-1. `nas-engine::deploy`: ejecución nativa del plan (particionado, montaje,
-   Samba, Nginx y hardening) con paridad respecto a `deploy.sh`.
-2. `nas-engine::update`: descarga, verificación de firma y aplicación A/B con
-   rollback automático desde la CLI (hoy solo se planifica y verifica).
-3. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
-   contrato JSON, con paridad de HTML y cabeceras.
+F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
+
+1. **F3 — `nas-web`**: axum + askama + sqlx, 70 rutas, sesiones, uploads,
+   terminal WS y paridad de HTML/cabeceras.
+2. **F4 — `nas-tui`**: ratatui con los 13 módulos del asistente.
+3. **F5 — `nasctl` remoto**: ejecución sobre releases firmados por SSH.
+4. **F6 — empaquetado**: `.deb`, unidades systemd endurecidas y cutover.
+5. **F7 — retirada** de PHP/Bash/Python.
