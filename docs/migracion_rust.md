@@ -11,7 +11,7 @@
 | **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `nasctl` | ✅ Completado |
-| **F2** | Motor completo: deploy, update firmado, backups, storage/LVM/Btrfs, usuarios/ACL, dominio | ⏳ Pendiente |
+| **F2** | Motor de respaldos (modelo, validación y plan), deploy/update/storage/usuarios | 🟡 Parcial: `nas backup list` y `nas backup plan` |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
@@ -29,7 +29,7 @@ crates/
 ├── nas-exec/       ejecución segura (argv, sudo, timeout) y redacción de secretos
 ├── nas-inventory/  inventario multi-servidor: validación y perfiles dev/prod
 ├── nas-ssh/        transporte OpenSSH, cotización de argumentos y host keys
-├── nas-engine/     parsers del SO, métricas, red, políticas de respaldo
+├── nas-engine/     parsers del SO, métricas, red, respaldos y tareas
 ├── nas-audit/      bitácora JSONL con encadenamiento de hashes
 ├── nas-cli/        binario `nas`     (estado, red, servicios, diagnóstico, auditoría)
 ├── nas-dev/        binario `nas-dev` (preflight, plan, pack, sync sin push)
@@ -60,6 +60,8 @@ cargo run -p nas-cli -- --json network
 cargo run -p nas-dev -- --source . preflight
 cargo run -p nas-dev -- --inventory inventory.example.yaml sync --host lab-dev --dry-run
 cargo run -p nasctl -- --inventory inventory.example.yaml check
+cargo run -p nas-cli -- backup list --dir /usr/local/bin
+cargo run -p nas-cli -- backup plan contabilidad --dir /usr/local/bin
 ```
 
 > **Nota para Windows:** el toolchain `x86_64-pc-windows-msvc` requiere Visual
@@ -115,7 +117,21 @@ Confirmaciones y seguridad:
 - Cada ejecución se registra en `~/.local/state/nas-dev/audit.jsonl`
   (`%LOCALAPPDATA%\nas-dev\audit.jsonl` en Windows) con cadena de hashes.
 
-## 6. Mapa de migración
+## 6. Tareas de respaldo (`nas backup`)
+
+`nas-engine::tasks` lee los runners generados por el asistente Bash
+(`/usr/local/bin/backup_<tarea>.sh`) sin modificarlos, detecta el tipo de origen
+(CIFS, SSH o local), normaliza la retención y **genera el plan de comandos**
+con argumentos separados:
+
+- **CIFS**: `mkdir` → `mount -t cifs ... -o credentials=...,ro,vers=3.1.1,noserverino,cache=none,soft,nobrl` → `rsync -aAXH --numeric-ids` → `umount` → `mv` atómico.
+- **SSH**: `sshpass -e rsync ... -e 'ssh -p <puerto> -o BatchMode=yes ...'` (la contraseña viaja por variable de entorno, nunca en `argv`).
+- **Local**: `rsync` con `--link-dest` cuando existe snapshot previo.
+
+El plan es puramente determinista y está cubierto por pruebas; la ejecución
+programada seguirá a cargo de los runners actuales hasta completar F2.
+
+## 7. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -125,13 +141,14 @@ Confirmaciones y seguridad:
 | `getSystemMetrics` (PHP) | `nas-engine::status` | ✅ |
 | Vista de red (PHP + JS) | `nas-engine::network` | ✅ |
 | Política de snapshots/retención/espacio (Bash) | `nas-engine::backup` | ✅ |
+| Tareas de respaldo (`backup_*.sh` del asistente) | `nas-engine::tasks` | ✅ lectura, validación y plan |
 | `test_remote.py` (SSH/SFTP) | `nas-ssh` + `nas-dev` | ✅ transporte OpenSSH, upload y sincronización |
 | `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
 | `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ⏳ F3 |
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 7. Seguridad implementada
+## 8. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -149,13 +166,15 @@ Confirmaciones y seguridad:
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 8. Siguientes pasos (F2)
+## 9. Siguientes pasos (F2)
 
-1. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
+1. `nas backup run`: ejecución real del plan con `flock`, control de espacio y
+   retención automática (reutilizando `nas-engine::backup`).
+2. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
    Samba, Nginx, hardening) con pruebas de paridad contra el script actual.
-2. `nas-engine::update`: verificación de firma GPG (sequoia), swap A/B y
+3. `nas-engine::update`: verificación de firma GPG (sequoia), swap A/B y
    rollback automático.
-3. `nas-engine::backup`: pipeline `rsync --link-dest` con staging atómico,
+4. `nas-engine::backup`: pipeline `rsync --link-dest` con staging atómico,
    `flock` y retención (las funciones puras ya están probadas).
-4. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
+5. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
    contrato JSON, con paridad de HTML y cabeceras.
