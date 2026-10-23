@@ -1818,25 +1818,57 @@ class SystemService
 
             // Sesiones concurrentes vía smbstatus
             $resStatus = self::sudo(['/usr/bin/smbstatus', '-b']);
+            $sessionsList = [];
             if ($resStatus['code'] === 0 && !empty($resStatus['stdout'])) {
                 $lines = explode("\n", trim($resStatus['stdout']));
-                $count = 0;
                 $afterHeader = false;
                 foreach ($lines as $l) {
-                    if (str_starts_with($l, '---')) {
+                    $trimmed = trim($l);
+                    if (str_starts_with($trimmed, '---')) {
                         $afterHeader = true;
                         continue;
                     }
-                    if ($afterHeader && trim($l) !== '') {
-                        $count++;
+                    if ($afterHeader && $trimmed !== '') {
+                        $parts = preg_split('/\s{2,}/', $trimmed);
+                        if (count($parts) >= 4) {
+                            $sessionsList[] = [
+                                'pid' => $parts[0] ?? '',
+                                'username' => $parts[1] ?? '',
+                                'group' => $parts[2] ?? '',
+                                'machine' => $parts[3] ?? '',
+                                'protocol' => $parts[4] ?? 'SMB3',
+                                'encryption' => $parts[5] ?? '-',
+                                'signing' => $parts[6] ?? '-',
+                            ];
+                        }
                     }
                 }
-                $sambaSessions = $count;
+                $sambaSessions = count($sessionsList);
             }
         } else {
             $sambaVer = 'Samba 4.22.11 (Simulado)';
             $sambaActive = true;
-            $sambaSessions = 2;
+            $sessionsList = [
+                [
+                    'pid' => '1042',
+                    'username' => 'operador1',
+                    'group' => 'grp_samba',
+                    'machine' => '10.10.1.50 (ipv4:10.10.1.50:52410)',
+                    'protocol' => 'SMB3_11',
+                    'encryption' => 'AES-128-GCM',
+                    'signing' => 'AES-128-CMAC',
+                ],
+                [
+                    'pid' => '1088',
+                    'username' => 'sistemas',
+                    'group' => 'grp_samba',
+                    'machine' => '10.10.1.250 (ipv4:10.10.1.250:52488)',
+                    'protocol' => 'SMB3_11',
+                    'encryption' => '-',
+                    'signing' => 'AES-128-CMAC',
+                ],
+            ];
+            $sambaSessions = count($sessionsList);
         }
 
         // 2. Nginx & PHP-FPM
@@ -1920,6 +1952,7 @@ class SystemService
                 'active' => $sambaActive,
                 'status' => $sambaActive ? 'activo' : 'inactivo',
                 'sessions' => $sambaSessions,
+                'sessions_list' => $sessionsList,
                 'vfs_modules' => ['acl_xattr', 'streams_xattr'],
             ],
             'web' => [
