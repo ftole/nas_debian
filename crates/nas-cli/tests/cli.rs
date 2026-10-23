@@ -1,0 +1,65 @@
+//! Pruebas de integración de la CLI `nas`.
+
+use std::process::Command;
+
+fn nas() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_nas"))
+}
+
+fn json_of(output: &std::process::Output) -> serde_json::Value {
+    assert!(
+        output.status.success(),
+        "la CLI falló: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("salida JSON válida")
+}
+
+#[test]
+fn status_json_respeta_el_contrato() {
+    let output = nas().args(["--json", "status"]).output().expect("ejecuta");
+    let payload = json_of(&output);
+
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["message"], "Métricas del sistema");
+    assert!(payload["data"]["hostname"].is_string());
+    assert!(payload["data"]["ram_total_gb"].is_number());
+    assert!(payload["data"]["server_time"].is_string());
+}
+
+#[test]
+fn network_json_expone_puertos_e_interfaces() {
+    let output = nas().args(["--json", "network"]).output().expect("ejecuta");
+    let payload = json_of(&output);
+
+    assert_eq!(payload["success"], true);
+    assert!(payload["data"]["interfaces"].is_array());
+    assert!(payload["data"]["listening"].is_array());
+    assert!(payload["data"]["samba"]["min_protocol"].is_string());
+}
+
+#[test]
+fn services_json_lista_los_demonios_clave() {
+    let output = nas()
+        .args(["--json", "services"])
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+
+    let services = payload["data"].as_array().expect("arreglo de servicios");
+    assert_eq!(services.len(), 4);
+    let names: Vec<&str> = services
+        .iter()
+        .filter_map(|service| service["service"].as_str())
+        .collect();
+    assert!(names.contains(&"smbd"));
+    assert!(names.contains(&"nginx"));
+}
+
+#[test]
+fn version_responde_sin_tocar_el_sistema() {
+    let output = nas().arg("--version").output().expect("ejecuta");
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("nas"));
+}
