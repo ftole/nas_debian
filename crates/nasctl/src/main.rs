@@ -4,13 +4,13 @@
 //! está pensada para acompañar releases firmados. Nunca lee el árbol de
 //! desarrollo ni ejecuta código local sin validar.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use nas_core::{ApiResponse, NasError, NasResult, ServerRole};
-use serde::{Deserialize, Serialize};
+use nas_core::{ApiResponse, NasError, NasResult};
+use nas_inventory::{Inventory, ResolvedHost};
+use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -48,58 +48,29 @@ enum Command {
     },
 }
 
-/// Valores por defecto aplicables a todos los hosts.
-#[derive(Debug, Clone, Deserialize, Default)]
-struct Defaults {
-    port: Option<u16>,
-    user: Option<String>,
-    timeout_secs: Option<u64>,
-}
-
-/// Grupo de hosts (dev o prod) con sus rutas.
-#[derive(Debug, Clone, Deserialize)]
-struct Group {
-    env: String,
-    #[serde(default)]
-    paths: BTreeMap<String, String>,
-}
-
-/// Host declarado en el inventario.
-#[derive(Debug, Clone, Deserialize)]
-struct Host {
-    host: String,
-    group: String,
-    #[serde(default)]
-    role: Option<String>,
-    #[serde(default)]
-    port: Option<u16>,
-    #[serde(default)]
-    user: Option<String>,
-}
-
-/// Inventario completo.
-#[derive(Debug, Clone, Deserialize, Default)]
-struct Inventory {
-    #[serde(default)]
-    defaults: Defaults,
-    #[serde(default)]
-    groups: BTreeMap<String, Group>,
-    #[serde(default)]
-    hosts: BTreeMap<String, Host>,
-}
-
-/// Perfil resuelto de un host concreto.
-#[derive(Debug, Clone, Serialize)]
-struct ResolvedHost {
+#[derive(Debug, Serialize)]
+struct HostSummary {
     alias: String,
-    host: String,
+    address: String,
     group: String,
     env: String,
     role: String,
     port: u16,
     user: String,
-    repo: String,
-    timeout_secs: u64,
+}
+
+impl From<&ResolvedHost> for HostSummary {
+    fn from(host: &ResolvedHost) -> Self {
+        Self {
+            alias: host.alias.clone(),
+            address: host.address.clone(),
+            group: host.group.clone(),
+            env: host.env.clone(),
+            role: host.role.clone(),
+            port: host.port,
+            user: host.user.clone(),
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -119,10 +90,10 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> NasResult<ExitCode> {
     let path = inventory_path(cli.inventory);
-    let inventory = load_inventory(&path)?;
+    let inventory = Inventory::load(&path)?;
 
     match cli.command {
-        Command::Hosts => hosts(&inventory, cli.json),
+        Command::Hosts => hosts(&inventory, &path, cli.json),
         Command::Check => check(&inventory, &path, cli.json),
         Command::Status { host } => status(&inventory, &host, cli.json),
     }
@@ -134,24 +105,20 @@ fn inventory_path(explicit: Option<PathBuf>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("inventory.yaml"))
 }
 
-fn load_inventory(path: &Path) -> NasResult<Inventory> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|_| NasError::NotFound(format!("inventario no encontrado: {}", path.display())))?;
-    serde_yaml::from_str(&raw)
-        .map_err(|error| NasError::Invalid(format!("inventario inválido: {error}")))
-}
-
-fn hosts(inventory: &Inventory, json: bool) -> NasResult<ExitCode> {
-    let list: Vec<ResolvedHost> = inventory
-        .hosts
-        .keys()
-        .filter_map(|alias| resolve(inventory, alias).ok())
+fn hosts(inventory: &Inventory, path: &std::path::Path, json: bool) -> NasResult<ExitCode> {
+    let list: Vec<HostSummary> = inventory
+        .resolve_all()
+        .iter()
+        .map(HostSummary::from)
         .collect();
 
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&ApiResponse::ok(&list, "Hosts del inventario"))?
+            serde_json::to_string_pretty(&ApiResponse::ok(
+                serde_json::json!({ "inventory": path.display().to_string(), "hosts": list }),
+                "Hosts del inventario"
+            ))?
         );
         return Ok(ExitCode::SUCCESS);
     }
@@ -159,28 +126,33 @@ fn hosts(inventory: &Inventory, json: bool) -> NasResult<ExitCode> {
     println!("HOSTS DECLARADOS ({})", list.len());
     for host in &list {
         println!(
-            "{:<14} {:<16} grupo={:<6} env={:<5} rol={:<16} {}@{}:{}",
-            host.alias, host.host, host.group, host.env, host.role, host.user, host.host, host.port
+            "{:<14} {:<16} grupo={:<6} env={:<5} rol={:<16} {}:{}",
+            host.alias, host.address, host.group, host.env, host.role, host.user, host.port
         );
     }
 
     Ok(ExitCode::SUCCESS)
 }
 
-fn check(inventory: &Inventory, path: &Path, json: bool) -> NasResult<ExitCode> {
-    let problems = validate(inventory);
+fn check(inventory: &Inventory, path: &std::path::Path, json: bool) -> NasResult<ExitCode> {
+    let problems = inventory.validate();
+    let ok = problems.is_empty();
 
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&ApiResponse::ok(
-                serde_json::json!({ "inventory": path, "ok": problems.is_empty(), "problems": problems }),
+                serde_json::json!({
+                    "inventory": path.display().to_string(),
+                    "ok": ok,
+                    "problems": problems,
+                }),
                 "Validación del inventario"
             ))?
         );
     } else {
         println!("VALIDACIÓN DEL INVENTARIO: {}", path.display());
-        if problems.is_empty() {
+        if ok {
             println!("[OK] Inventario válido ({} hosts)", inventory.hosts.len());
         } else {
             for problem in &problems {
@@ -189,7 +161,7 @@ fn check(inventory: &Inventory, path: &Path, json: bool) -> NasResult<ExitCode> 
         }
     }
 
-    if problems.is_empty() {
+    if ok {
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::from(1))
@@ -197,7 +169,7 @@ fn check(inventory: &Inventory, path: &Path, json: bool) -> NasResult<ExitCode> 
 }
 
 fn status(inventory: &Inventory, alias: &str, json: bool) -> NasResult<ExitCode> {
-    let host = resolve(inventory, alias)?;
+    let host = inventory.resolve(alias)?;
 
     if json {
         println!(
@@ -210,143 +182,28 @@ fn status(inventory: &Inventory, alias: &str, json: bool) -> NasResult<ExitCode>
     println!("PERFIL DEL HOST: {}", host.alias);
     println!(
         "Destino         : {}@{}:{}",
-        host.user, host.host, host.port
+        host.user, host.address, host.port
     );
     println!("Grupo / entorno : {} ({})", host.group, host.env);
     println!("Rol             : {}", host.role);
     println!("Repositorio     : {}", host.repo);
-    println!();
-    println!("Nota: el transporte SSH y la ejecución remota se habilitan en la fase F3.");
+    println!("Docroot web     : {}", host.web);
+    println!("Estado          : {}", host.state);
+    println!("Timeout         : {}s", host.timeout_secs);
+
+    if !host.is_production() {
+        println!();
+        println!(
+            "Aviso: este host pertenece al entorno '{}'; use `nas-dev` para desarrollo.",
+            host.env
+        );
+    }
 
     Ok(ExitCode::SUCCESS)
 }
 
-fn validate(inventory: &Inventory) -> Vec<String> {
-    let mut problems = Vec::new();
-
-    if inventory.hosts.is_empty() {
-        problems.push("el inventario no declara ningún host".to_string());
-    }
-
-    for (alias, host) in &inventory.hosts {
-        if host.host.trim().is_empty() {
-            problems.push(format!("{alias}: 'host' vacío"));
-        }
-        match inventory.groups.get(&host.group) {
-            None => problems.push(format!("{alias}: grupo '{}' no definido", host.group)),
-            Some(group) => {
-                if !matches!(group.env.as_str(), "dev" | "prod") {
-                    problems.push(format!(
-                        "{alias}: el grupo '{}' usa env '{}' (debe ser dev o prod)",
-                        host.group, group.env
-                    ));
-                }
-            }
-        }
-        if let Some(role) = &host.role {
-            if ServerRole::parse(role).is_none() {
-                problems.push(format!("{alias}: rol '{role}' inválido"));
-            }
-        }
-        let port = host.port.or(inventory.defaults.port).unwrap_or(22);
-        if port == 0 {
-            problems.push(format!("{alias}: puerto inválido"));
-        }
-    }
-
-    problems
-}
-
-fn resolve(inventory: &Inventory, alias: &str) -> NasResult<ResolvedHost> {
-    let host = inventory
-        .hosts
-        .get(alias)
-        .ok_or_else(|| NasError::NotFound(format!("host '{alias}' no está en el inventario")))?;
-
-    let group = inventory
-        .groups
-        .get(&host.group)
-        .ok_or_else(|| NasError::Invalid(format!("grupo '{}' no definido", host.group)))?;
-
-    let role = host
-        .role
-        .as_deref()
-        .and_then(ServerRole::parse)
-        .unwrap_or(ServerRole::ArquivosBackup);
-
-    Ok(ResolvedHost {
-        alias: alias.to_string(),
-        host: host.host.clone(),
-        group: host.group.clone(),
-        env: group.env.clone(),
-        role: role.as_str().to_string(),
-        port: host.port.or(inventory.defaults.port).unwrap_or(22),
-        user: host
-            .user
-            .clone()
-            .or_else(|| inventory.defaults.user.clone())
-            .unwrap_or_else(|| "nasadmin".to_string()),
-        repo: group
-            .paths
-            .get("repo")
-            .cloned()
-            .unwrap_or_else(|| "/opt/nas_debian".to_string()),
-        timeout_secs: inventory.defaults.timeout_secs.unwrap_or(30),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{validate, Inventory};
-
-    const YAML: &str = r#"
-defaults:
-  port: 22
-  user: nasadmin
-groups:
-  dev:
-    env: dev
-    paths: { repo: /opt/nas_debian-dev }
-  prod:
-    env: prod
-    paths: { repo: /opt/nas_debian }
-hosts:
-  lab-dev:
-    host: 10.10.1.222
-    group: dev
-    role: ARCHIVOS_BACKUP
-  srv-nas:
-    host: 10.10.1.2
-    group: prod
-    role: ARCHIVOS
-"#;
-
-    #[test]
-    fn inventario_valido_no_reporta_problemas() {
-        let inventory: Inventory = serde_yaml::from_str(YAML).expect("yaml válido");
-        assert!(validate(&inventory).is_empty());
-    }
-
-    #[test]
-    fn detecta_grupo_inexistente() {
-        let yaml = "hosts:\n  h1:\n    host: 1.2.3.4\n    group: inexistente\n";
-        let inventory: Inventory = serde_yaml::from_str(yaml).expect("yaml válido");
-        let problems = validate(&inventory);
-        assert!(problems.iter().any(|p| p.contains("no definido")));
-    }
-
-    #[test]
-    fn detecta_rol_invalido() {
-        let yaml = "groups:\n  g:\n    env: dev\nhosts:\n  h1:\n    host: 1.2.3.4\n    group: g\n    role: OTRO\n";
-        let inventory: Inventory = serde_yaml::from_str(yaml).expect("yaml válido");
-        assert!(validate(&inventory).iter().any(|p| p.contains("rol")));
-    }
-
-    #[test]
-    fn detecta_entorno_invalido() {
-        let yaml =
-            "groups:\n  g:\n    env: staging\nhosts:\n  h1:\n    host: 1.2.3.4\n    group: g\n";
-        let inventory: Inventory = serde_yaml::from_str(yaml).expect("yaml válido");
-        assert!(validate(&inventory).iter().any(|p| p.contains("env")));
-    }
+/// Error reservado para la fase F3 (transporte remoto de producción).
+#[allow(dead_code)]
+fn remote_not_available() -> NasError {
+    NasError::Denied("la ejecución remota de producción se habilita en la fase F3".into())
 }
