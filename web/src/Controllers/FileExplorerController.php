@@ -119,6 +119,29 @@ class FileExplorerController
         Response::json($result);
     }
 
+    public function createFile(Request $request): void
+    {
+        $body = $request->getBody();
+        $root = (string) ($body['root'] ?? 'nas');
+        $rawPath = (string) ($body['path'] ?? '');
+        $path = $this->resolveSubpath($root, $rawPath);
+        $name = (string) ($body['name'] ?? '');
+        $content = (string) ($body['content'] ?? '');
+
+        if ($name === '') {
+            Response::error('El nombre del archivo es obligatorio.', 400);
+            return;
+        }
+
+        $result = $this->fileService->createFile($path, $name, $content);
+        if (!($result['success'] ?? false)) {
+            Response::error($result['error'] ?? 'Fallo al crear el archivo.', 400);
+            return;
+        }
+
+        Response::json($result);
+    }
+
     public function rename(Request $request): void
     {
         $body = $request->getBody();
@@ -191,15 +214,21 @@ class FileExplorerController
     {
         $result = $this->fileService->listTrash();
         $count = $this->fileService->getTrashCount();
+        $totalBytes = (int) ($result['total_size_bytes'] ?? 0);
+        $totalFormatted = (string) ($result['total_size_formatted'] ?? '0 B');
         $payload = [
             'success' => true,
             'items' => $result['items'] ?? [],
             'total' => $count,
             'count' => $count,
+            'total_size_bytes' => $totalBytes,
+            'total_size_formatted' => $totalFormatted,
             'data' => [
                 'items' => $result['items'] ?? [],
                 'total' => $count,
                 'count' => $count,
+                'total_size_bytes' => $totalBytes,
+                'total_size_formatted' => $totalFormatted,
             ],
         ];
         Response::json($payload);
@@ -220,6 +249,12 @@ class FileExplorerController
             return;
         }
 
+        Response::json($result);
+    }
+
+    public function trashRestoreAll(Request $request): void
+    {
+        $result = $this->fileService->restoreAllTrash();
         Response::json($result);
     }
 
