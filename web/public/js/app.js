@@ -6853,6 +6853,7 @@ function toggleSidebar() {
 // 16. Aliases Globales para Compatibilidad y Eventos Onclick
 // ==============================================================================
 // Cabecera y Navegación
+window.switchView = switchView;
 window.toggleSidebar = toggleSidebar;
 window.toggleNotificationsDrawer = toggleNotificationsDrawer;
 window.toggleNotificationDrawer = toggleNotificationsDrawer;
