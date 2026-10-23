@@ -196,6 +196,7 @@ $router->get('/api/files', [FileExplorerController::class, 'list']);
 $router->get('/api/files/list', [FileExplorerController::class, 'list']);
 $router->post('/api/files/upload', [FileExplorerController::class, 'upload']);
 $router->post('/api/files/mkdir', [FileExplorerController::class, 'mkdir']);
+$router->post('/api/files/create', [FileExplorerController::class, 'createFile']);
 $router->post('/api/files/rename', [FileExplorerController::class, 'rename']);
 $router->post('/api/files/move', [FileExplorerController::class, 'move']);
 $router->post('/api/files/delete', [FileExplorerController::class, 'delete']);
@@ -207,6 +208,7 @@ $router->get('/api/files/raw', [FileExplorerController::class, 'raw']);
 // Rutas API: Papelera de Reciclaje Confinada (/srv/nas/.trash)
 $router->get('/api/files/trash', [FileExplorerController::class, 'trashList']);
 $router->post('/api/files/trash/restore', [FileExplorerController::class, 'trashRestore']);
+$router->post('/api/files/trash/restore-all', [FileExplorerController::class, 'trashRestoreAll']);
 $router->post('/api/files/trash/delete', [FileExplorerController::class, 'trashDelete']);
 $router->post('/api/files/trash/empty', [FileExplorerController::class, 'trashEmpty']);
 
