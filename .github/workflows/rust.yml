@@ -1,0 +1,49 @@
+name: Rust NAS
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Formato, Clippy y Pruebas (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Preparar toolchain estable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Verificar formato
+        run: cargo fmt --all --check
+
+      - name: Analizar con Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Ejecutar pruebas
+        run: cargo test --workspace --locked
+
+      - name: Compilar en modo release
+        run: cargo build --workspace --release --locked
