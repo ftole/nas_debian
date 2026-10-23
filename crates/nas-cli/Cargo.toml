@@ -1,0 +1,25 @@
+[package]
+name = "nas-cli"
+description = "CLI unificada del servidor NAS (sustituye a bin/nas-cli en PHP)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nas"
+path = "src/main.rs"
+
+[dependencies]
+nas-core = { workspace = true }
+nas-exec = { workspace = true }
+nas-engine = { workspace = true }
+nas-audit = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+[lints]
+workspace = true
