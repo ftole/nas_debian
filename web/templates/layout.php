@@ -1529,7 +1529,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <p>Control de versiones, actualización desde GitHub y componentes del servidor NAS Debian 13</p>
           </div>
           <div class="page-head-actions">
-            <button class="btn btn-secondary" onclick="loadUpdates(); loadApplications();">
+            <button class="btn btn-secondary" id="btn-refresh-applications" onclick="triggerSystemUpdatesCheck(this)">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Comprobar versión
             </button>
             <button class="btn btn-primary" onclick="openSystemUpdateModal()">
@@ -1538,62 +1538,195 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
 
-        <!-- Tarjeta de Control de Versiones -->
-        <div class="panel-card" style="margin-bottom:20px;">
-          <div class="panel-card-head">
-            <h3>Estado de versiones y repositorio</h3>
-          </div>
-          <div class="panel-card-body" id="updates-container">
-            <p>Cargando información de versiones...</p>
+        <!-- Pestañas de Navegación Slate UI -->
+        <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
+          <button type="button" class="chip-btn active" id="apps-tab-btn-components" onclick="switchApplicationsTab('components')">
+            <svg class="icon icon-sm"><use href="#icon-apps"></use></svg> Componentes del Servidor (<span id="apps-count-components">6</span>)
+          </button>
+          <button type="button" class="chip-btn" id="apps-tab-btn-updates" onclick="switchApplicationsTab('updates')">
+            <svg class="icon icon-sm"><use href="#icon-download"></use></svg> Repositorio y Actualizaciones
+          </button>
+          <button type="button" class="chip-btn" id="apps-tab-btn-security" onclick="switchApplicationsTab('security')">
+            <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Hardening & Ciberseguridad Kernel
+          </button>
+        </div>
+
+        <!-- Panel 1: Componentes y Tecnologías Integradas -->
+        <div id="apps-panel-components">
+          <div class="card-grid-2">
+            <div class="panel-card" id="app-card-samba">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Samba 4 & VFS</h3>
+                <span class="badge badge-gray" id="app-badge-samba">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-samba">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-view-samba-sessions" onclick="openSambaSessionsModal()">
+                  <svg class="icon icon-sm"><use href="#icon-users"></use></svg> Ver sesiones (<span id="app-samba-session-count">0</span>)
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-samba" onclick="reloadSambaService(this)">
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar smbd
+                </button>
+              </div>
+            </div>
+            <div class="panel-card" id="app-card-web">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Nginx-light & PHP-FPM</h3>
+                <span class="badge badge-gray" id="app-badge-web">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar PHP-FPM
+                </button>
+              </div>
+            </div>
+            <div class="panel-card" id="app-card-btrfs">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>BTRFS con Zstandard</h3>
+                <span class="badge badge-gray" id="app-badge-btrfs">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-btrfs">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="navigateTo('storage')">
+                  <svg class="icon icon-sm"><use href="#icon-storage"></use></svg> Ver almacenamiento
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-scrub-btrfs" onclick="triggerBtrfsScrub(this)">
+                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Ejecutar Scrub Bit Rot
+                </button>
+              </div>
+            </div>
+            <div class="panel-card" id="app-card-rsync">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Rsync Multiplataforma</h3>
+                <span class="badge badge-gray" id="app-badge-rsync">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-rsync">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="navigateTo('backups')">
+                  <svg class="icon icon-sm"><use href="#icon-backup"></use></svg> Gestionar respaldos
+                </button>
+              </div>
+            </div>
+            <div class="panel-card" id="app-card-wsdd2">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>WSDD2 & NetBIOS</h3>
+                <span class="badge badge-gray" id="app-badge-wsdd2">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-wsdd2">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-restart-wsdd" onclick="restartWsddService(this)">
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar WSDD2
+                </button>
+              </div>
+            </div>
+            <div class="panel-card" id="app-card-security">
+              <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Seguridad Activa (AIDE & auditd)</h3>
+                <span class="badge badge-gray" id="app-badge-security">Consultando...</span>
+              </div>
+              <div class="panel-card-body" id="app-body-security">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="switchApplicationsTab('security')">
+                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Ver hardening y auditoría
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Componentes y Tecnologías Integradas -->
-        <div class="panel-card-head" style="margin-bottom:12px; padding:0;">
-          <h3 style="font-size:16px;">Módulos y componentes integrados del servidor</h3>
+        <!-- Panel 2: Repositorio y Actualizaciones -->
+        <div id="apps-panel-updates" style="display:none;">
+          <div class="panel-card" style="margin-bottom:20px;">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+              <h3>Estado de versiones y repositorio</h3>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="loadUpdates()">
+                <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Refrescar repositorio
+              </button>
+            </div>
+            <div class="panel-card-body" id="updates-container">
+              <p>Cargando información de versiones...</p>
+            </div>
+          </div>
         </div>
-        <div class="card-grid-2">
-          <div class="panel-card" id="app-card-samba">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>Samba 4 & VFS</h3>
-              <span class="badge badge-gray" id="app-badge-samba">Consultando...</span>
+
+        <!-- Panel 3: Hardening & Ciberseguridad Kernel -->
+        <div id="apps-panel-security" style="display:none;">
+          <div class="card-grid-2">
+            <!-- Tarjeta sysctl -->
+            <div class="panel-card">
+              <div class="panel-card-head">
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Parámetros sysctl (99-nas-tuning.conf)</h3>
+              </div>
+              <div class="panel-card-body">
+                <div style="display:flex; flex-direction:column; gap:8px; font-size:12.5px;">
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>fs.inotify.max_user_watches</code></span>
+                    <span class="badge badge-ok">524,288 watches</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>net.ipv4.tcp_keepalive_time</code></span>
+                    <span class="badge badge-blue">120s (purga 3 min)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>vm.dirty_bytes</code></span>
+                    <span class="badge badge-teal">268,435,456 (256 MB)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>net.ipv4.conf.all.rp_filter</code></span>
+                    <span class="badge badge-ok">1 (Strict RFC 3704)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>net.ipv4.tcp_syncookies</code></span>
+                    <span class="badge badge-ok">1 (Anti SYN-Flood)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>kernel.kptr_restrict / dmesg</code></span>
+                    <span class="badge badge-purple">2 / 1 (Oculto)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>kernel.yama.ptrace_scope</code></span>
+                    <span class="badge badge-ok">2 (Bloqueo ptrace)</span>
+                  </div>
+                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+                    <span><code>disable_ipv6 / UFW IPV6=no</code></span>
+                    <span class="badge badge-ok">1 (IPv6 Desactivado)</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="panel-card-body" id="app-body-samba">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
-          </div>
-          <div class="panel-card" id="app-card-web">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>Nginx-light & PHP-FPM</h3>
-              <span class="badge badge-gray" id="app-badge-web">Consultando...</span>
+
+            <!-- Tarjetas auditd & AIDE -->
+            <div style="display:flex; flex-direction:column; gap:16px;">
+              <div class="panel-card">
+                <div class="panel-card-head">
+                  <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-logs"></use></svg> Auditoría del Kernel (auditd)</h3>
+                </div>
+                <div class="panel-card-body" style="font-size:12.5px;">
+                  <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas activas en <code>/etc/audit/rules.d/nas.rules</code>:</p>
+                  <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
+                    <li>Vigilancia estricta de cambios en <code>/etc/sudoers*</code></li>
+                    <li>Detección de modificaciones en <code>/etc/samba/smb.conf</code></li>
+                    <li>Auditoría de accesos a credenciales <code>/etc/backup-credentials/</code></li>
+                    <li>Registro de ejecuciones del helper <code>/usr/local/sbin/nas-terminal</code></li>
+                  </ul>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="panel-card-head">
+                  <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Integridad Criptográfica Offline (AIDE)</h3>
+                </div>
+                <div class="panel-card-body" style="font-size:12.5px;">
+                  <p style="margin-bottom:8px; color:var(--text-secondary);">Monitoreo de integridad de archivos (FIM):</p>
+                  <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
+                    <li>Base criptográfica en <code>/var/lib/aide/aide.db</code></li>
+                    <li>Temporizador de verificación diaria: <code>dailyaidecheck.timer</code></li>
+                    <li>Protección contra modificaciones maliciosas y rootkits offline</li>
+                  </ul>
+                </div>
+              </div>
             </div>
-            <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
-          </div>
-          <div class="panel-card" id="app-card-btrfs">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>BTRFS con Zstandard</h3>
-              <span class="badge badge-gray" id="app-badge-btrfs">Consultando...</span>
-            </div>
-            <div class="panel-card-body" id="app-body-btrfs">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
-          </div>
-          <div class="panel-card" id="app-card-rsync">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>Rsync Multiplataforma</h3>
-              <span class="badge badge-gray" id="app-badge-rsync">Consultando...</span>
-            </div>
-            <div class="panel-card-body" id="app-body-rsync">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
-          </div>
-          <div class="panel-card" id="app-card-wsdd2">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>WSDD2 & NetBIOS</h3>
-              <span class="badge badge-gray" id="app-badge-wsdd2">Consultando...</span>
-            </div>
-            <div class="panel-card-body" id="app-body-wsdd2">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
-          </div>
-          <div class="panel-card" id="app-card-security">
-            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-              <h3>Seguridad Activa (AIDE & auditd)</h3>
-              <span class="badge badge-gray" id="app-badge-security">Consultando...</span>
-            </div>
-            <div class="panel-card-body" id="app-body-security">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
           </div>
         </div>
       </section>
@@ -2708,6 +2841,51 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Modal: Sesiones Concurrentes de Samba -->
+  <div class="modal-backdrop" id="modal-samba-sessions">
+    <div class="modal-dialog" style="max-width:850px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-users"></use></svg> Sesiones SMB Concurrentes</h3>
+        <button class="modal-close" onclick="closeModal('modal-samba-sessions')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+          <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+            Conexiones SMB activas en tiempo real reportadas por <code>smbstatus -b</code>:
+          </p>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadApplications()">
+            <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Actualizar sesiones
+          </button>
+        </div>
+        <div class="table-container" style="max-height:360px; overflow-y:auto;">
+          <table class="data-table" id="table-samba-sessions">
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>Usuario</th>
+                <th>Grupo</th>
+                <th>Máquina / IP</th>
+                <th>Protocolo</th>
+                <th>Cifrado</th>
+                <th>Firma</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-samba-sessions">
+              <tr>
+                <td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">
+                  Cargando sesiones...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-samba-sessions')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Actualización del Sistema desde GitHub -->
   <div class="modal-backdrop modal-static" id="modal-system-update">
     <div class="modal-dialog" style="max-width:650px;">
@@ -2716,6 +2894,10 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <button class="modal-close" onclick="closeModal('modal-system-update')">&times;</button>
       </div>
       <div class="modal-body" id="system-update-body">
+        <div id="system-update-uptodate-notice" style="display:none; background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.3); border-radius:8px; padding:10px 14px; margin-bottom:14px; color:#22c55e; font-size:13px; display:flex; align-items:center; gap:8px;">
+          <svg class="icon" style="width:18px;height:18px;flex-shrink:0;"><use href="#icon-check"></use></svg>
+          <span>El servidor ya se encuentra en la versión más reciente. Ejecutar la actualización resincronizará los archivos y permisos del panel web de forma segura.</span>
+        </div>
         <p style="color:var(--text-secondary); margin-bottom:14px;">
           Esta operación sincronizará la versión oficial más reciente desde el repositorio GitHub (rama <code>main</code>), validará la autenticidad criptográfica mediante firmas GPG, comprobará la sintaxis de todos los scripts y módulos, y sincronizará la interfaz web y reglas sudoers en caliente sin interrumpir el almacenamiento.
         </p>
