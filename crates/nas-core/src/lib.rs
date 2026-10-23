@@ -13,6 +13,8 @@ pub mod config;
 pub mod contract;
 /// Errores del dominio.
 pub mod error;
+/// Cotización segura de argumentos para shells remotos.
+pub mod shell;
 
 pub use config::{NasPaths, ServerRole};
 pub use contract::ApiResponse;
