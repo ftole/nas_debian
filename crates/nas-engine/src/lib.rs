@@ -9,6 +9,8 @@
 
 /// Políticas de respaldo: snapshots, retención y espacio.
 pub mod backup;
+/// Planificación del despliegue del servidor.
+pub mod deploy;
 /// Bloqueo exclusivo por tarea.
 pub mod lock;
 /// Inventario agregado de red.
@@ -19,12 +21,16 @@ pub mod parsers;
 pub mod status;
 /// Tareas de respaldo y sus planes de ejecución.
 pub mod tasks;
+/// Verificación y planificación de actualizaciones firmadas.
+pub mod update;
 
 pub use backup::{
     evaluate_space, parse_df, retention_victims, snapshot_dir_name, staging_dir_name, DfUsage,
     SpaceDecision,
 };
+pub use deploy::{DeployParams, FileSystem};
 pub use lock::TaskLock;
 pub use network::{collect as collect_network, NetworkOverview};
 pub use status::{collect as collect_status, SystemMetrics};
 pub use tasks::{BackupTask, SourceKind};
+pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
