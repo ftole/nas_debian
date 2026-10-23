@@ -85,11 +85,37 @@ pub fn evaluate_space(free_bytes: u64, used_percent: f64) -> SpaceDecision {
     SpaceDecision::Ok
 }
 
+/// Uso del sistema de archivos según `df -Pk`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DfUsage {
+    /// Bytes libres.
+    pub free_bytes: u64,
+    /// Porcentaje de ocupación.
+    pub used_percent: f64,
+}
+
+/// Interpreta la salida de `df -Pk <ruta>` (segunda línea).
+pub fn parse_df(output: &str) -> Option<DfUsage> {
+    let line = output.lines().nth(1)?;
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 5 {
+        return None;
+    }
+
+    let available_kb: u64 = fields[3].parse().ok()?;
+    let used_percent: f64 = fields[4].trim_end_matches('%').parse().ok()?;
+
+    Some(DfUsage {
+        free_bytes: available_kb.saturating_mul(1024),
+        used_percent,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_space, retention_victims, snapshot_dir_name, staging_dir_name, SpaceDecision,
-        MIN_FREE_BYTES,
+        evaluate_space, parse_df, retention_victims, snapshot_dir_name, staging_dir_name,
+        SpaceDecision, MIN_FREE_BYTES,
     };
     use chrono::TimeZone;
 
@@ -141,6 +167,47 @@ mod tests {
             evaluate_space(50 * 1024 * 1024 * 1024, 88.0),
             SpaceDecision::Warn { used_percent: 88.0 }
         );
+    }
+
+    #[test]
+    fn interpreta_df_con_espacio_suficiente() {
+        let output = "S.ficheros  bloques de 1024  Usados  Disponibles  Capacidad  Montado
+/dev/sdb1  1921800000  900000000  1021800000  47%  /srv/nas
+";
+        let usage = parse_df(output).expect("df válido");
+        assert_eq!(usage.free_bytes, 1021800000 * 1024);
+        assert!((usage.used_percent - 47.0).abs() < f64::EPSILON);
+        assert_eq!(
+            evaluate_space(usage.free_bytes, usage.used_percent),
+            SpaceDecision::Ok
+        );
+    }
+
+    #[test]
+    fn df_critico_aborta_la_copia() {
+        let output = "F 1024-blocks Used Available Capacity Mounted
+/dev/sdb1 1000 960 40 96% /srv/nas
+";
+        let usage = parse_df(output).expect("df válido");
+        assert!(matches!(
+            evaluate_space(usage.free_bytes, usage.used_percent),
+            SpaceDecision::Abort { .. }
+        ));
+    }
+
+    #[test]
+    fn df_invalido_devuelve_none() {
+        assert!(parse_df("").is_none());
+        assert!(parse_df(
+            "solo cabecera
+"
+        )
+        .is_none());
+        assert!(parse_df(
+            "a b c d e f
+"
+        )
+        .is_none());
     }
 
     #[test]
