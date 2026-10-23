@@ -379,10 +379,15 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "hex",
+ "nas-audit",
  "nas-core",
  "nas-exec",
+ "nas-inventory",
+ "nas-ssh",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -406,14 +411,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "nas-inventory"
+version = "0.1.0"
+dependencies = [
+ "nas-core",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "nas-ssh"
+version = "0.1.0"
+dependencies = [
+ "nas-core",
+ "nas-exec",
+]
+
+[[package]]
 name = "nasctl"
 version = "0.1.0"
 dependencies = [
  "clap",
  "nas-core",
+ "nas-inventory",
  "serde",
  "serde_json",
- "serde_yaml",
 ]
 
 [[package]]
