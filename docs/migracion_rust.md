@@ -12,7 +12,7 @@
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
-| **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
+| **F3** | `nas-web` (axum) con sesión firmada, dashboard y API | 🟡 Rebanada 1: login, `/`, `/api/metrics`, `/api/network` |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
@@ -198,14 +198,40 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 9. Almacenamiento y usuarios (`nas storage` / `nas users`)
+## 9. Panel web (`nas-web`)
+
+Primera rebanada vertical del sustituto de PHP-FPM:
+
+- **Rutas**: `GET /healthz`, `GET/POST /login`, `POST /logout`, `GET /`,
+  `GET /api/metrics`, `GET /api/network`.
+- **Sesión sin estado**: cookie `nas_session` firmada con HMAC-SHA256 sobre
+  `usuario|expiración`, `HttpOnly`, `SameSite=Strict`, `Secure` por defecto.
+- **Contraseña**: comparación de SHA-256 en tiempo constante.
+- **Cabeceras**: CSP, `X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy` y `Permissions-Policy` inyectadas en cada respuesta.
+- **Contrato JSON**: idéntico al panel PHP (`success`/`message`/`data`).
+- **Configuración**: `NAS_WEB_BIND`, `NAS_WEB_USER`, `NAS_WEB_SECRET` (≥16),
+  `NAS_WEB_PASSWORD_SHA256` (o `NAS_WEB_DEV_PASSWORD` en desarrollo),
+  `NAS_WEB_INSECURE_COOKIE=1` para HTTP local, `NAS_WEB_TTL_SECS`.
+
+```bash
+cargo run -p nas-web --bin nas-web
+# o con credenciales de desarrollo:
+NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE_COOKIE=1 NAS_WEB_BIND=127.0.0.1:8080 cargo run -p nas-web
+```
+
+Pendiente de F3: plantillas askama del resto de vistas, SQLite/sesiones
+persistentes, uploads, explorador de archivos, terminal WS y las ~65 rutas
+restantes del contrato.
+
+## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
 - `nas storage list` usa `lsblk -J` y el parser tipado (tipo, tamaño, fstype,
   montaje, HDD/SSD).
 - `nas users list` lee `/etc/passwd` y `/etc/group` y separa cuentas de sistema
   de las administrables, listando además los grupos `grp_*`.
 
-## 10. Mapa de migración
+## 11. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -222,7 +248,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 11. Seguridad implementada
+## 12. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -240,12 +266,12 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 12. Siguientes pasos
+## 13. Siguientes pasos
 
 F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
 
-1. **F3 — `nas-web`**: axum + askama + sqlx, 70 rutas, sesiones, uploads,
-   terminal WS y paridad de HTML/cabeceras.
+1. **F3 — `nas-web` (resto)**: plantillas askama de las 14 vistas, SQLite de
+   sesiones/auditoría, uploads, explorador, terminal WS y las rutas restantes.
 2. **F4 — `nas-tui`**: ratatui con los 13 módulos del asistente.
 3. **F5 — `nasctl` remoto**: ejecución sobre releases firmados por SSH.
 4. **F6 — empaquetado**: `.deb`, unidades systemd endurecidas y cutover.
