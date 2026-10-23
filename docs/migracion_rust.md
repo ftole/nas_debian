@@ -8,13 +8,13 @@
 
 | Fase | Alcance | Estado |
 | :--- | :--- | :--- |
-| **F0** | Contratos, workspace, CI de Rust, golden tests de la CLI | ✅ Completado |
+| **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
-| **F1b** | `nas` (CLI), `nas-dev` (preflight/plan/pack), `nasctl` (inventario multi-servidor) | ✅ Base funcional |
+| **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `nasctl` | ✅ Completado |
 | **F2** | Motor completo: deploy, update firmado, backups, storage/LVM/Btrfs, usuarios/ACL, dominio | ⏳ Pendiente |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
-| **F5** | `nas-dev sync` real y `nasctl` sobre releases firmados con SSH | ⏳ Pendiente |
+| **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
 | **F7** | Retirada de PHP/Bash/Python y limpieza del árbol | ⏳ Pendiente |
 
@@ -25,13 +25,15 @@ Mientras no se complete F7, **el sistema en producción sigue siendo el actual**
 
 ```text
 crates/
-├── nas-core/     tipos, errores, contrato JSON, rol del servidor y rutas
-├── nas-exec/     ejecución segura (argv, sudo, timeout) y redacción de secretos
-├── nas-engine/   parsers del SO, métricas, red, políticas de respaldo
-├── nas-audit/    bitácora JSONL con encadenamiento de hashes
-├── nas-cli/      binario `nas`   (estado, red, servicios, diagnóstico, auditoría)
-├── nas-dev/      binario `nas-dev` (preflight, plan, pack, sync --dry-run)
-└── nasctl/       binario `nasctl`  (inventario multi-servidor y perfil resuelto)
+├── nas-core/       tipos, errores, contrato JSON, rol del servidor y rutas
+├── nas-exec/       ejecución segura (argv, sudo, timeout) y redacción de secretos
+├── nas-inventory/  inventario multi-servidor: validación y perfiles dev/prod
+├── nas-ssh/        transporte OpenSSH, cotización de argumentos y host keys
+├── nas-engine/     parsers del SO, métricas, red, políticas de respaldo
+├── nas-audit/      bitácora JSONL con encadenamiento de hashes
+├── nas-cli/        binario `nas`     (estado, red, servicios, diagnóstico, auditoría)
+├── nas-dev/        binario `nas-dev` (preflight, plan, pack, sync sin push)
+└── nasctl/         binario `nasctl`  (inventario y perfiles de producción)
 ```
 
 ## 3. Compilación y pruebas
@@ -55,7 +57,8 @@ Binarios de desarrollo:
 ```bash
 cargo run -p nas-cli -- status
 cargo run -p nas-cli -- --json network
-cargo run -p nas-dev -- --source . plan
+cargo run -p nas-dev -- --source . preflight
+cargo run -p nas-dev -- --inventory inventory.example.yaml sync --host lab-dev --dry-run
 cargo run -p nasctl -- --inventory inventory.example.yaml check
 ```
 
@@ -87,7 +90,32 @@ Códigos de salida (`nas_core::NasError::exit_code`):
 | 4 | Recurso o dependencia ausente |
 | 5 | Timeout de comando |
 
-## 5. Mapa de migración
+## 5. Sincronización de desarrollo (`nas-dev sync`)
+
+Flujo implementado, **sin publicar en el repositorio remoto**:
+
+1. **Guarda de entorno**: si el host no es `dev`, aborta con código 3.
+2. **Preflight**: `git status`, `node --check` de los JS y `bash -n` de los scripts.
+3. **Pack**: `tar.gz` con exclusiones (`.git`, `target`, `scratch`, `.venv`…) y
+   **manifiesto SHA-256** que nombra el paquete.
+4. **Upload**: `scp` con `BatchMode=yes`, `accept-new` y `known_hosts.d/<alias>`.
+5. **Stage**: extracción en `/var/lib/nas-dev/dev-sync/stage/<sha>`.
+6. **Snapshot**: respaldo del docroot actual en `.../backups/<timestamp>.tar.gz`.
+7. **Switch**: `rsync -a --delete --exclude=data/` hacia el docroot de desarrollo.
+8. **Reload**: `systemctl reload nginx` y `php8.4-fpm` (tolerante a fallos).
+9. **Health**: `curl` a `https://127.0.0.1/login` (200/302).
+10. **Rollback automático**: si el healthcheck falla, restaura el snapshot y
+    devuelve error con auditoría.
+
+Confirmaciones y seguridad:
+
+- `--dry-run` imprime el plan completo (con prefijo `sudo -n --`) sin tocar nada.
+- La ejecución real exige `--yes`.
+- `--no-sudo` permite operar sin elevación (cuando el usuario es propietario).
+- Cada ejecución se registra en `~/.local/state/nas-dev/audit.jsonl`
+  (`%LOCALAPPDATA%\nas-dev\audit.jsonl` en Windows) con cadena de hashes.
+
+## 6. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -97,29 +125,31 @@ Códigos de salida (`nas_core::NasError::exit_code`):
 | `getSystemMetrics` (PHP) | `nas-engine::status` | ✅ |
 | Vista de red (PHP + JS) | `nas-engine::network` | ✅ |
 | Política de snapshots/retención/espacio (Bash) | `nas-engine::backup` | ✅ |
-| `nas_admin.py` (keyring, perfiles) | `nasctl` | 🟡 inventario y perfiles; SSH en F5 |
-| `test_remote.py` (SSH/SFTP) | `nas-ssh` (pendiente) | ⏳ F5 |
+| `test_remote.py` (SSH/SFTP) | `nas-ssh` + `nas-dev` | ✅ transporte OpenSSH, upload y sincronización |
+| `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
 | `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ⏳ F3 |
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 6. Seguridad implementada (F1)
+## 7. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
+- **SSH con cotización individual:** `nas-ssh::quote` aplica comillas POSIX a
+  cada token antes de unirlos; el shell remoto no recibe texto libre.
+- **Host keys dedicadas:** `~/.ssh/known_hosts.d/<alias>` con `accept-new` y
+  rechazo ante cambio de clave por parte de OpenSSH.
 - **Secretos fuera de `argv`:** viajan por `stdin` (`SecretInput`) y nunca se
   serializan (`Debug` enmascarado).
-- **Redacción:** todo `stdout`/`stderr` capturado pasa por `Redactor`
-  (secretos registrados + patrones `password=`, `token:`…).
-- **Timeouts con muerte del proceso** y `env_clear()` con `PATH` y `LC_ALL`
-  fijos para evitar influencias del entorno.
-- **Auditoría encadenada:** `nas-audit` sella cada entrada con SHA-256 del
-  registro anterior y `verify` detecta cualquier manipulación del histórico.
-- **Rutas separadas dev/prod:** `NasPaths::development()` jamás apunta al
-  docroot ni al repositorio de producción.
+- **Redacción:** todo `stdout`/`stderr` capturado pasa por `Redactor`.
+- **Timeouts con muerte del proceso**, `env_clear()` y `LC_ALL=C`.
+- **Auditoría encadenada:** SHA-256 del registro anterior; `nas audit verify`
+  detecta manipulación.
+- **Separación dev/prod:** `NasPaths::development()` y la guarda de `nas-dev`
+  impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 7. Siguientes pasos (F2)
+## 8. Siguientes pasos (F2)
 
 1. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
    Samba, Nginx, hardening) con pruebas de paridad contra el script actual.
@@ -127,6 +157,5 @@ Códigos de salida (`nas_core::NasError::exit_code`):
    rollback automático.
 3. `nas-engine::backup`: pipeline `rsync --link-dest` con staging atómico,
    `flock` y retención (las funciones puras ya están probadas).
-4. `nas-ssh` (russh): transporte, `known_hosts` por host y ejecución remota.
-5. `nas-dev sync`: upload → stage → verify → snapshot → switch → health →
-   rollback, reutilizando `nas-audit` para cada paso.
+4. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
+   contrato JSON, con paridad de HTML y cabeceras.
