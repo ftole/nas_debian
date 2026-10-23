@@ -114,26 +114,7 @@ impl SshTarget {
     }
 }
 
-/// Cotiza un argumento para el shell remoto usando comillas simples POSIX.
-pub fn quote(arg: &str) -> String {
-    if !arg.is_empty()
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c))
-    {
-        return arg.to_string();
-    }
-
-    format!("'{}'", arg.replace('\'', "'\\''"))
-}
-
-/// Cotiza y une una lista de argumentos en una línea de comandos remota.
-pub fn quote_all(args: &[String]) -> String {
-    args.iter()
-        .map(|arg| quote(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+pub use nas_core::shell::{quote, quote_all};
 
 /// Antepone `sudo -n --` a una invocación remota.
 pub fn with_sudo(args: &[String]) -> Vec<String> {
