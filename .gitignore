@@ -26,3 +26,7 @@ venv/
 scratch/
 nas-debian_d219/
 config.json
+
+# Artefactos de compilación Rust
+/target/
+**/target/
