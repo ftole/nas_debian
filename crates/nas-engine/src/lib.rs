@@ -15,9 +15,12 @@ pub mod network;
 pub mod parsers;
 /// Métricas de estado del sistema.
 pub mod status;
+/// Tareas de respaldo y sus planes de ejecución.
+pub mod tasks;
 
 pub use backup::{
     evaluate_space, retention_victims, snapshot_dir_name, staging_dir_name, SpaceDecision,
 };
 pub use network::{collect as collect_network, NetworkOverview};
 pub use status::{collect as collect_status, SystemMetrics};
+pub use tasks::{BackupTask, SourceKind};
