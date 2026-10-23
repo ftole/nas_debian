@@ -21,6 +21,8 @@ struct RawDevice {
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
+    fstype: Option<String>,
+    #[serde(default)]
     rota: Option<RotaValue>,
     #[serde(default)]
     children: Vec<RawDevice>,
@@ -61,6 +63,8 @@ pub struct BlockDevice {
     pub mountpoint: Option<String>,
     /// Modelo del hardware, si aplica.
     pub model: Option<String>,
+    /// Sistema de archivos detectado.
+    pub fstype: Option<String>,
     /// Indica si el dispositivo es mecánico (`Some(true)`) o flash (`Some(false)`).
     pub rotational: Option<bool>,
     /// Dispositivos hijos (particiones, volúmenes).
@@ -99,6 +103,7 @@ fn convert(raw: RawDevice) -> BlockDevice {
             .model
             .map(|m| m.trim().to_string())
             .filter(|m| !m.is_empty()),
+        fstype: raw.fstype.filter(|f| !f.is_empty()),
         rotational: raw.rota.and_then(|r| r.as_bool()),
         children: raw.children.into_iter().map(convert).collect(),
     }
