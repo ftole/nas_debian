@@ -1,0 +1,15 @@
+[package]
+name = "nas-exec"
+description = "Ejecución segura de comandos del sistema (argv, timeouts, sudo y redacción)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nas-core = { workspace = true }
+regex = { workspace = true }
+
+[lints]
+workspace = true
