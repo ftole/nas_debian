@@ -1,0 +1,46 @@
+# ==============================================================================
+# Inventario de servidores NAS (ejemplo)
+# ==============================================================================
+# Los secretos NUNCA se declaran aquí: se guardan en el llavero del sistema
+# (Credential Manager / Secret Service) con la clave `nas/<alias>/<usuario>`.
+#
+# Perfiles:
+#   dev  -> rutas aisladas (/opt/nas_debian-dev, /var/www/nas-web-dev)
+#   prod -> rutas del despliegue oficial
+# ==============================================================================
+
+defaults:
+  port: 22
+  user: nasadmin
+  timeout_secs: 30
+
+groups:
+  dev:
+    env: dev
+    paths:
+      repo: /opt/nas_debian-dev
+      web: /var/www/nas-web-dev
+      state: /var/lib/nas-dev
+  prod:
+    env: prod
+    paths:
+      repo: /opt/nas_debian
+      web: /var/www/nas-web
+      state: /var/lib/nas
+
+hosts:
+  lab-dev:
+    host: 10.10.1.222
+    group: dev
+    role: ARCHIVOS_BACKUP
+
+  srv-nas:
+    host: 10.10.1.2
+    group: prod
+    role: ARCHIVOS
+
+  srv-bkp:
+    host: 10.10.1.3
+    group: prod
+    role: BACKUP
+    port: 22
