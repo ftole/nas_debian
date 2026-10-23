@@ -1,0 +1,22 @@
+[package]
+name = "nasctl"
+description = "Herramienta de producción: inventario multi-servidor y operación sobre releases firmados"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nasctl"
+path = "src/main.rs"
+
+[dependencies]
+nas-core = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+[lints]
+workspace = true
