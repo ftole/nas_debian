@@ -1,0 +1,15 @@
+[package]
+name = "nas-ssh"
+description = "Transporte SSH/SFTP sobre OpenSSH con cotización segura y política de host keys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nas-core = { workspace = true }
+nas-exec = { workspace = true }
+
+[lints]
+workspace = true
