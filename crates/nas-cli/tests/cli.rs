@@ -134,3 +134,48 @@ RETENTION=2
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn users_list_json_es_estable() {
+    let output = nas()
+        .args(["--json", "users", "list"])
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+
+    assert_eq!(payload["success"], true);
+    assert!(payload["data"]["users"].is_array());
+    assert!(payload["data"]["groups"].is_array());
+}
+
+#[test]
+fn update_apply_rechaza_manifiesto_sin_firma() {
+    let dir = fixture_dir("update-unsigned");
+    let manifest = dir.join("manifest.json");
+    std::fs::write(
+        &manifest,
+        r#"{"version":"1.0.0","commit":"abc","artifact":"a.tar.gz","sha256":"00","published_at":"2026-01-01T00:00:00Z"}"#,
+    )
+    .expect("manifest");
+    let artifact = dir.join("a.tar.gz");
+    std::fs::write(&artifact, b"x").expect("artifact");
+
+    let output = nas()
+        .args([
+            "update",
+            "apply",
+            &manifest.to_string_lossy(),
+            "--artifact",
+            &artifact.to_string_lossy(),
+            "--pubkey",
+            &"11".repeat(32),
+        ])
+        .output()
+        .expect("ejecuta");
+
+    assert_eq!(output.status.code(), Some(3));
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json de error");
+    assert_eq!(payload["success"], false);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
