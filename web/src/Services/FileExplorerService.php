@@ -362,6 +362,53 @@ class FileExplorerService
     }
 
     /**
+     * Crea un nuevo archivo de texto vacío o con contenido inicial dentro del confinamiento seguro.
+     */
+    public function createFile(string $parentSubpath, string $fileName, string $initialContent = ''): array
+    {
+        $cleanFileName = preg_replace('/[^\p{L}\p{N}._-]/u', '_', trim($fileName));
+        if ($cleanFileName === '' || $cleanFileName === '.' || $cleanFileName === '..') {
+            return ['success' => false, 'error' => 'Nombre de archivo inválido.'];
+        }
+
+        $parent = $this->resolveSafePath($parentSubpath);
+        if ($parent === null || !is_dir($parent)) {
+            return ['success' => false, 'error' => 'Directorio padre no encontrado o inaccesible.'];
+        }
+
+        $target = $parent . '/' . $cleanFileName;
+        if (file_exists($target)) {
+            return ['success' => false, 'error' => 'Ya existe un archivo o carpeta con ese nombre.'];
+        }
+
+        $written = @file_put_contents($target, $initialContent);
+        if ($written === false) {
+            return ['success' => false, 'error' => 'No se pudo crear el archivo en el sistema de archivos.'];
+        }
+
+        $parentPerms = @fileperms($parent);
+        $fileMode = ($parentPerms !== false && ($parentPerms & 0007) === 0007) ? 0666 : 0660;
+        @chmod($target, $fileMode);
+
+        $parentGid = @filegroup($parent);
+        if ($parentGid !== false && function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+            @chgrp($target, $parentGid);
+        } elseif (function_exists('chgrp') && DIRECTORY_SEPARATOR !== '\\') {
+            @chgrp($target, 'grp_samba');
+        }
+
+        $rel = ($parentSubpath !== '' ? $parentSubpath . '/' : '') . $cleanFileName;
+        AuditService::log('file_create', $rel, 'SUCCESS');
+
+        return [
+            'success' => true,
+            'message' => 'Archivo creado correctamente.',
+            'name' => $cleanFileName,
+            'path' => $rel,
+        ];
+    }
+
+    /**
      * Renombra un archivo o carpeta dentro del confinamiento seguro.
      */
     public function renameItem(string $subpath, string $newName): array
@@ -644,11 +691,48 @@ class FileExplorerService
             error_log('Error listando papelera: ' . $e->getMessage());
         }
 
+        $totalBytes = 0;
+        foreach ($items as $it) {
+            $totalBytes += (int) ($it['size_bytes'] ?? 0);
+        }
+
         return [
             'success' => true,
             'items' => $items,
             'total' => count($items),
             'count' => count($items),
+            'total_size_bytes' => $totalBytes,
+            'total_size_formatted' => $this->formatBytes($totalBytes, false),
+        ];
+    }
+
+    /**
+     * Restaura todos los elementos de la papelera a sus ubicaciones originales.
+     */
+    public function restoreAllTrash(): array
+    {
+        try {
+            $rows = DatabaseService::query('SELECT id FROM trash_items ORDER BY id ASC');
+        } catch (Throwable $e) {
+            return ['success' => false, 'error' => 'Error al consultar la papelera: ' . $e->getMessage()];
+        }
+
+        $restored = 0;
+        $failed = 0;
+        foreach ($rows as $r) {
+            $res = $this->restoreTrashItem((int) $r['id']);
+            if (!empty($res['success'])) {
+                $restored++;
+            } else {
+                $failed++;
+            }
+        }
+
+        return [
+            'success' => true,
+            'message' => "Restauración completada: {$restored} elementos restaurados" . ($failed > 0 ? ", {$failed} con error." : "."),
+            'restored_count' => $restored,
+            'failed_count' => $failed,
         ];
     }
 
