@@ -11,7 +11,7 @@
 | **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
-| **F2** | Motor de respaldos (modelo, plan y ejecución con guardas), deploy/update/storage/usuarios | 🟡 Parcial: `nas backup list`, `plan` y `run` |
+| **F2** | Motor de respaldos, actualizaciones firmadas y planificación de despliegue; storage/usuarios | 🟡 Parcial: `backup`, `update verify/plan`, `deploy plan` |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
@@ -65,6 +65,9 @@ cargo run -p nasctl -- --inventory inventory.example.yaml check
 cargo run -p nas-cli -- backup list --dir /usr/local/bin
 cargo run -p nas-cli -- backup plan contabilidad --dir /usr/local/bin
 cargo run -p nas-cli -- backup run contabilidad --dry-run --dir /usr/local/bin
+cargo run -p nas-cli -- update verify manifest.json --pubkey <hex>
+cargo run -p nas-cli -- update plan manifest.json --artifact nas.tar.gz --previous 1.2.2
+cargo run -p nas-cli -- deploy plan --disk /dev/sdb --workgroup TEAM-JOFRATO   --netbios SRV-NAS --admin admin --role BACKUP --ssd
 ```
 
 > **Nota para Windows:** el toolchain `x86_64-pc-windows-msvc` requiere Visual
@@ -135,7 +138,28 @@ Confirmaciones y seguridad:
 > `/usr/local/sbin/nas-dev-apply` con acciones fijas, igual que el patrón
 > `nas-terminal`, para no conceder `rm`/`mv` arbitrarios al usuario de desarrollo.
 
-## 6. Tareas de respaldo (`nas backup`)
+## 6. Actualizaciones firmadas (`nas update`)
+
+- `nas update verify <manifiesto> --pubkey <hex>` comprueba **SHA-256 del
+  artefacto** y **firma Ed25519** sobre la carga canónica
+  `version|commit|artifact|sha256|published_at`. Devuelve código 3 si algo falla.
+- `nas update plan <manifiesto> --artifact <tgz> [--previous <ver>]` genera el
+  plan A/B: extracción en `releases/<version>`, `nginx -t`, cambio atómico del
+  enlace `current` (`ln -sfn` + `mv -T`), recarga de servicios y healthcheck,
+  con **rollback** a `releases/<anterior>` si se declara.
+- La ejecución real sigue delegada en `updater.sh` (tags GPG) hasta F3; el
+  verificador Rust permite validar releases antes de aplicarlas.
+
+## 7. Despliegue (`nas deploy`)
+
+- `nas deploy plan` valida disco, NetBIOS, workgroup, usuario y rol, deriva el
+  sistema de archivos (ext4 para `ARCHIVOS`, Btrfs con zstd para `BACKUP` e
+  híbrido), calcula la partición (`sdb1` vs `nvme0n1p1`) y las opciones de
+  montaje según HDD/SSD.
+- Emite el plan de referencia y la invocación equivalente a `deploy.sh`
+  (ejecución transitoria auditada) hasta completar la paridad en Rust.
+
+## 8. Tareas de respaldo (`nas backup`)
 
 `nas-engine::tasks` lee los runners generados por el asistente Bash
 (`/usr/local/bin/backup_<tarea>.sh`) sin modificarlos, detecta el tipo de origen
@@ -168,7 +192,7 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 7. Mapa de migración
+## 9. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -185,7 +209,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 8. Seguridad implementada
+## 10. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -203,13 +227,11 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 9. Siguientes pasos (F2)
+## 11. Siguientes pasos
 
-1. `nas-engine::deploy`: puerto de `deploy.sh` (roles, sistema de archivos,
-   Samba, Nginx, hardening) con pruebas de paridad contra el script actual.
-3. `nas-engine::update`: verificación de firma GPG (sequoia), swap A/B y
-   rollback automático.
-4. `nas-engine::backup`: pipeline `rsync --link-dest` con staging atómico,
-   `flock` y retención (las funciones puras ya están probadas).
-5. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
+1. `nas-engine::deploy`: ejecución nativa del plan (particionado, montaje,
+   Samba, Nginx y hardening) con paridad respecto a `deploy.sh`.
+2. `nas-engine::update`: descarga, verificación de firma y aplicación A/B con
+   rollback automático desde la CLI (hoy solo se planifica y verifica).
+3. `nas-web` (F3): axum + askama + sqlx reutilizando `nas-engine` y el mismo
    contrato JSON, con paridad de HTML y cabeceras.
