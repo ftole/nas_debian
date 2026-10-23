@@ -23,6 +23,8 @@ pub mod status;
 pub mod tasks;
 /// Verificación y planificación de actualizaciones firmadas.
 pub mod update;
+/// Inventario de usuarios y grupos locales.
+pub mod users;
 
 pub use backup::{
     evaluate_space, parse_df, retention_victims, snapshot_dir_name, staging_dir_name, DfUsage,
@@ -34,3 +36,4 @@ pub use network::{collect as collect_network, NetworkOverview};
 pub use status::{collect as collect_status, SystemMetrics};
 pub use tasks::{BackupTask, SourceKind};
 pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
+pub use users::{GroupEntry, UserEntry};
