@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/nas-core",
     "crates/nas-exec",
+    "crates/nas-inventory",
+    "crates/nas-ssh",
     "crates/nas-engine",
     "crates/nas-audit",
     "crates/nas-cli",
@@ -31,6 +33,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 nas-core = { path = "crates/nas-core" }
 nas-exec = { path = "crates/nas-exec" }
+nas-inventory = { path = "crates/nas-inventory" }
+nas-ssh = { path = "crates/nas-ssh" }
 nas-engine = { path = "crates/nas-engine" }
 nas-audit = { path = "crates/nas-audit" }
 
