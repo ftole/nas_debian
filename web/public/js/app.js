@@ -3767,6 +3767,9 @@ async function loadUpdates() {
   try {
     const res = await apiFetch('/api/system/updates');
     const u = res.data || res;
+    if (!u) return;
+
+    window.LAST_UPDATE_INFO = u;
 
     // Versión SemVer destacada
     const verTag = u.version ? (u.version.startsWith('v') ? u.version : `v${u.version}`) : 'v0.1.3';
@@ -3859,6 +3862,11 @@ async function loadUpdates() {
 }
 
 function openSystemUpdateModal() {
+  const uptodateNotice = document.getElementById('system-update-uptodate-notice');
+  if (uptodateNotice) {
+    uptodateNotice.style.display = (window.LAST_UPDATE_INFO && !window.LAST_UPDATE_INFO.has_updates) ? 'flex' : 'none';
+  }
+
   const progressDiv = document.getElementById('system-update-progress');
   const bar = document.getElementById('system-update-progress-bar');
   const log = document.getElementById('system-update-log');
@@ -4006,6 +4014,13 @@ async function loadApplications() {
     const a = res.data || res;
     if (!a || !a.samba) return;
 
+    window.LAST_SAMBA_SESSIONS = a.samba.sessions_list || [];
+    renderSambaSessionsTable(window.LAST_SAMBA_SESSIONS);
+    const sambaCountSpan = document.getElementById('app-samba-session-count');
+    if (sambaCountSpan) {
+      sambaCountSpan.textContent = a.samba.sessions || 0;
+    }
+
     // 1. Samba 4 & VFS
     const badgeSamba = document.getElementById('app-badge-samba');
     const bodySamba = document.getElementById('app-body-samba');
@@ -4113,6 +4128,170 @@ async function loadApplications() {
     }
   } catch (e) {
     // Silencioso ante errores menores de red
+  }
+}
+
+/**
+ * Alterna entre las pestañas de Aplicaciones y Actualizaciones:
+ * 'components' | 'updates' | 'security'
+ */
+function switchApplicationsTab(tabName) {
+  const tabs = ['components', 'updates', 'security'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`apps-tab-btn-${t}`);
+    const panel = document.getElementById(`apps-panel-${t}`);
+    if (btn) {
+      btn.classList.toggle('active', t === tabName);
+    }
+    if (panel) {
+      panel.style.display = (t === tabName) ? 'block' : 'none';
+    }
+  });
+}
+
+/**
+ * Comprueba de forma interactiva las actualizaciones y el estado de componentes,
+ * con feedback visual en el botón y notificación toast.
+ */
+async function triggerSystemUpdatesCheck(btn) {
+  const targetBtn = btn || document.getElementById('btn-refresh-applications');
+  if (targetBtn) {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('is-loading');
+  }
+  try {
+    await Promise.all([loadUpdates(), loadApplications()]);
+    showToast('Estado de componentes y repositorio actualizado.', 'info');
+  } catch (e) {
+    showToast('Error al comprobar versiones: ' + (e?.message || e), 'error');
+  } finally {
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('is-loading');
+    }
+  }
+}
+
+/**
+ * Renderiza la tabla de sesiones SMB concurrentes en el modal.
+ */
+function renderSambaSessionsTable(sessions) {
+  const tbody = document.getElementById('tbody-samba-sessions');
+  if (!tbody) return;
+  if (!sessions || sessions.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">
+          No hay sesiones SMB activas en este momento.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td><code>${escapeHtml(String(s.pid || '-'))}</code></td>
+      <td><strong>${escapeHtml(String(s.username || '-'))}</strong></td>
+      <td><code>${escapeHtml(String(s.group || '-'))}</code></td>
+      <td><span style="font-family:monospace; font-size:12px;">${escapeHtml(String(s.machine || '-'))}</span></td>
+      <td><span class="badge badge-blue">${escapeHtml(String(s.protocol || 'SMB3'))}</span></td>
+      <td>${s.encryption && s.encryption !== '-' ? `<span class="badge badge-ok">${escapeHtml(String(s.encryption))}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+      <td>${s.signing && s.signing !== '-' ? `<span class="badge badge-teal">${escapeHtml(String(s.signing))}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+    </tr>
+  `).join('');
+}
+
+/**
+ * Abre el modal de sesiones SMB concurrentes y refresca la información.
+ */
+function openSambaSessionsModal() {
+  if (window.LAST_SAMBA_SESSIONS) {
+    renderSambaSessionsTable(window.LAST_SAMBA_SESSIONS);
+  } else {
+    loadApplications();
+  }
+  openModal('modal-samba-sessions');
+}
+
+/**
+ * Recarga de forma rápida y segura el servicio Samba smbd sin interrumpir conexiones.
+ */
+async function reloadSambaService(btn) {
+  const targetBtn = btn || document.getElementById('btn-reload-samba');
+  if (targetBtn) {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('is-loading');
+  }
+  try {
+    await manageServiceAction('smbd', 'reload');
+    await loadApplications();
+  } finally {
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('is-loading');
+    }
+  }
+}
+
+/**
+ * Recarga el servicio PHP-FPM bajo demanda para aplicar cambios de configuración.
+ */
+async function reloadPhpService(btn) {
+  const targetBtn = btn || document.getElementById('btn-reload-php');
+  if (targetBtn) {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('is-loading');
+  }
+  try {
+    await manageServiceAction('php8.4-fpm', 'reload');
+    await loadApplications();
+  } finally {
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('is-loading');
+    }
+  }
+}
+
+/**
+ * Reinicia el servicio de descubrimiento de red WSDD2 en clientes Windows 10/11.
+ */
+async function restartWsddService(btn) {
+  const targetBtn = btn || document.getElementById('btn-restart-wsdd');
+  if (targetBtn) {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('is-loading');
+  }
+  try {
+    await manageServiceAction('wsdd2', 'restart');
+    await loadApplications();
+  } finally {
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('is-loading');
+    }
+  }
+}
+
+/**
+ * Inicia o audita el proceso de BTRFS Scrub contra Bit Rot directamente desde la tarjeta.
+ */
+async function triggerBtrfsScrub(btn) {
+  const targetBtn = btn || document.getElementById('btn-scrub-btrfs');
+  if (targetBtn) {
+    targetBtn.disabled = true;
+    targetBtn.classList.add('is-loading');
+  }
+  try {
+    if (typeof runStorageScrub === 'function') {
+      await runStorageScrub();
+    }
+    await loadApplications();
+  } finally {
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -6831,6 +7010,14 @@ window.triggerSystemUpdate = applySystemUpdate;
 window.openSystemUpdateModal = openSystemUpdateModal;
 window.startSystemUpdate = startSystemUpdate;
 window.loadApplications = loadApplications;
+window.switchApplicationsTab = switchApplicationsTab;
+window.triggerSystemUpdatesCheck = triggerSystemUpdatesCheck;
+window.renderSambaSessionsTable = renderSambaSessionsTable;
+window.openSambaSessionsModal = openSambaSessionsModal;
+window.reloadSambaService = reloadSambaService;
+window.reloadPhpService = reloadPhpService;
+window.restartWsddService = restartWsddService;
+window.triggerBtrfsScrub = triggerBtrfsScrub;
 
 // Auditoría y Registros
 window.loadLogs = loadLogs;
