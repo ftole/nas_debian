@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use nas_core::shell::quote_all;
 use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
 use nas_engine::backup::{evaluate_space, retention_victims, snapshot_dir_name, SpaceDecision};
@@ -66,6 +66,28 @@ enum Command {
         #[command(subcommand)]
         action: DeployAction,
     },
+    /// Inventario de almacenamiento.
+    Storage {
+        #[command(subcommand)]
+        action: StorageAction,
+    },
+    /// Inventario de usuarios y grupos.
+    Users {
+        #[command(subcommand)]
+        action: UsersAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum StorageAction {
+    /// Lista los dispositivos de bloque detectados.
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+enum UsersAction {
+    /// Lista usuarios y grupos locales.
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -80,6 +102,29 @@ enum UpdateAction {
         /// Clave pública Ed25519 en hexadecimal.
         #[arg(long)]
         pubkey: String,
+    },
+    /// Aplica la actualización verificada (requiere --yes).
+    Apply {
+        /// Manifiesto JSON de la release.
+        manifest: PathBuf,
+        /// Artefacto descargado.
+        #[arg(long)]
+        artifact: PathBuf,
+        /// Raíz del despliegue.
+        #[arg(long, default_value = "/opt/nas_debian")]
+        root: String,
+        /// Versión instalada actualmente (para el rollback).
+        #[arg(long)]
+        previous: Option<String>,
+        /// Clave pública Ed25519 en hexadecimal.
+        #[arg(long)]
+        pubkey: String,
+        /// Confirma la ejecución real.
+        #[arg(long)]
+        yes: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
     },
     /// Genera el plan A/B de la actualización.
     Plan {
@@ -101,34 +146,58 @@ enum UpdateAction {
 enum DeployAction {
     /// Muestra el plan de despliegue validado.
     Plan {
-        /// Disco dedicado (`/dev/sdb`) o `LOCAL`.
-        #[arg(long)]
-        disk: String,
-        /// Grupo de trabajo.
-        #[arg(long)]
-        workgroup: String,
-        /// Nombre NetBIOS.
-        #[arg(long)]
-        netbios: String,
-        /// Usuario administrador.
-        #[arg(long)]
-        admin: String,
-        /// Rol del servidor.
-        #[arg(long, default_value = "ARCHIVOS")]
-        role: String,
-        /// Reutiliza datos existentes sin formatear.
-        #[arg(long)]
-        keep_data: bool,
-        /// Fuerza ext4 (por defecto se deriva del rol).
-        #[arg(long)]
-        ext4: bool,
-        /// Fuerza Btrfs (por defecto se deriva del rol).
-        #[arg(long)]
-        btrfs: bool,
-        /// El disco es SSD (afecta a las opciones de montaje).
-        #[arg(long)]
-        ssd: bool,
+        #[command(flatten)]
+        args: DeployArgs,
     },
+    /// Ejecuta el despliegue (requiere --yes; formatear exige --format-token).
+    Apply {
+        #[command(flatten)]
+        args: DeployArgs,
+        /// Confirma la ejecución real.
+        #[arg(long)]
+        yes: bool,
+        /// Permite formatear un disco montado o en uso.
+        #[arg(long)]
+        ignore_in_use: bool,
+        /// Token textual obligatorio para formatear (`SI-FORMATEAR`).
+        #[arg(long)]
+        format_token: Option<String>,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+    },
+}
+
+/// Argumentos comunes de despliegue.
+#[derive(Debug, Args)]
+struct DeployArgs {
+    /// Disco dedicado (`/dev/sdb`) o `LOCAL`.
+    #[arg(long)]
+    disk: String,
+    /// Grupo de trabajo.
+    #[arg(long)]
+    workgroup: String,
+    /// Nombre NetBIOS.
+    #[arg(long)]
+    netbios: String,
+    /// Usuario administrador.
+    #[arg(long)]
+    admin: String,
+    /// Rol del servidor.
+    #[arg(long, default_value = "ARCHIVOS")]
+    role: String,
+    /// Reutiliza datos existentes sin formatear.
+    #[arg(long)]
+    keep_data: bool,
+    /// Fuerza ext4 (por defecto se deriva del rol).
+    #[arg(long)]
+    ext4: bool,
+    /// Fuerza Btrfs (por defecto se deriva del rol).
+    #[arg(long)]
+    btrfs: bool,
+    /// El disco es SSD (afecta a las opciones de montaje).
+    #[arg(long)]
+    ssd: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -245,6 +314,26 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 artifact,
                 pubkey,
             } => update_verify(&manifest, artifact.as_deref(), &pubkey, cli.json),
+            UpdateAction::Apply {
+                manifest,
+                artifact,
+                root,
+                previous,
+                pubkey,
+                yes,
+                sudo,
+            } => update_apply(
+                UpdateApplyOptions {
+                    manifest_path: &manifest,
+                    artifact: &artifact,
+                    root: &root,
+                    previous: previous.as_deref(),
+                    public_key: &pubkey,
+                    confirmed: yes,
+                    sudo,
+                },
+                cli.json,
+            ),
             UpdateAction::Plan {
                 manifest,
                 artifact,
@@ -252,28 +341,27 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 previous,
             } => update_plan(&manifest, &artifact, &root, previous.as_deref(), cli.json),
         },
+        Command::Storage { action } => match action {
+            StorageAction::List => storage_list(cli.json),
+        },
+        Command::Users { action } => match action {
+            UsersAction::List => users_list(cli.json),
+        },
         Command::Deploy { action } => match action {
-            DeployAction::Plan {
-                disk,
-                workgroup,
-                netbios,
-                admin,
-                role,
-                keep_data,
-                ext4,
-                btrfs,
-                ssd,
-            } => deploy_plan(
-                DeployRequest {
-                    disk,
-                    workgroup,
-                    netbios,
-                    admin,
-                    role,
-                    keep_data,
-                    ext4,
-                    btrfs,
-                    ssd,
+            DeployAction::Plan { args } => deploy_plan(&args, cli.json),
+            DeployAction::Apply {
+                args,
+                yes,
+                ignore_in_use,
+                format_token,
+                sudo,
+            } => deploy_apply(
+                &args,
+                DeployRunOptions {
+                    confirmed: yes,
+                    ignore_in_use,
+                    format_token,
+                    sudo,
                 },
                 cli.json,
             ),
@@ -1008,20 +1096,7 @@ fn update_plan(
     Ok(ExitCode::SUCCESS)
 }
 
-#[derive(Debug, Default)]
-struct DeployRequest {
-    disk: String,
-    workgroup: String,
-    netbios: String,
-    admin: String,
-    role: String,
-    keep_data: bool,
-    ext4: bool,
-    btrfs: bool,
-    ssd: bool,
-}
-
-fn deploy_plan(request: DeployRequest, json: bool) -> NasResult<ExitCode> {
+fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     if request.ext4 && request.btrfs {
         return Err(NasError::Invalid(
             "--ext4 y --btrfs son mutuamente excluyentes".into(),
@@ -1032,10 +1107,10 @@ fn deploy_plan(request: DeployRequest, json: bool) -> NasResult<ExitCode> {
         .ok_or_else(|| NasError::Invalid(format!("rol inválido: {}", request.role)))?;
 
     let mut params = DeployParams::new(
-        request.disk,
-        request.workgroup,
-        request.netbios,
-        request.admin,
+        request.disk.clone(),
+        request.workgroup.clone(),
+        request.netbios.clone(),
+        request.admin.clone(),
         role,
     );
     params.keep_data = request.keep_data;
@@ -1051,8 +1126,12 @@ fn deploy_plan(request: DeployRequest, json: bool) -> NasResult<ExitCode> {
         return Err(NasError::Invalid(problems.join("; ")));
     }
 
-    let plan = params.plan();
-    let steps: Vec<String> = plan.iter().map(|step| quote_all(step)).collect();
+    Ok(params)
+}
+
+fn deploy_plan(request: &DeployArgs, json: bool) -> NasResult<ExitCode> {
+    let params = build_deploy_params(request)?;
+    let steps: Vec<String> = params.plan().iter().map(|step| quote_all(step)).collect();
     let invocation = params.deploy_sh_invocation("/opt/nas_debian", "-");
 
     if json {
@@ -1092,6 +1171,316 @@ fn deploy_plan(request: DeployRequest, json: bool) -> NasResult<ExitCode> {
     println!();
     println!("Ejecución transitoria (deploy.sh auditado):");
     println!("  {}", quote_all(&invocation));
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Opciones de ejecución del despliegue.
+#[derive(Debug, Default)]
+struct DeployRunOptions {
+    confirmed: bool,
+    ignore_in_use: bool,
+    format_token: Option<String>,
+    sudo: bool,
+}
+
+fn disk_in_use(runner: &Runner, disk: &str) -> bool {
+    if disk == "LOCAL" {
+        return false;
+    }
+    runner
+        .run(
+            &CommandSpec::new("findmnt")
+                .args(["-R", "-n", "-o", "TARGET", disk])
+                .timeout(Duration::from_secs(15)),
+        )
+        .map(|output| output.is_success() && !output.stdout.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn deploy_apply(
+    request: &DeployArgs,
+    options: DeployRunOptions,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let params = build_deploy_params(request)?;
+    let runner = Runner::new();
+
+    if !params.keep_data {
+        let token = options.format_token.as_deref().unwrap_or_default();
+        if token != "SI-FORMATEAR" {
+            return Err(NasError::Denied(
+                "formatear el disco exige --format-token SI-FORMATEAR".into(),
+            ));
+        }
+        if !options.ignore_in_use && disk_in_use(&runner, &params.disk) {
+            return Err(NasError::Denied(format!(
+                "el disco {} está en uso; use --ignore-in-use tras verificarlo",
+                params.disk
+            )));
+        }
+    }
+
+    if !options.confirmed {
+        return Err(NasError::Denied(
+            "el despliegue modifica el servidor: repita con --yes para confirmar".into(),
+        ));
+    }
+
+    let _lock = nas_engine::TaskLock::acquire("/var/lock/nas-deploy.lock")?;
+    let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "deploy-apply",
+        &params.disk,
+        "START",
+        format!(
+            "rol={} fs={}",
+            params.role.as_str(),
+            params.filesystem.as_str()
+        ),
+    ));
+
+    let plan = params.plan();
+    let mut failure = None;
+    for step in &plan {
+        if let Err(error) = run_step(&runner, step, options.sudo, 900) {
+            failure = Some(error);
+            break;
+        }
+    }
+
+    let (status, detail) = match &failure {
+        None => ("SUCCESS", "despliegue aplicado".to_string()),
+        Some(error) => ("FAILED", error.to_string()),
+    };
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "deploy-apply",
+        &params.disk,
+        status,
+        detail.clone(),
+    ));
+
+    if let Some(error) = failure {
+        return Err(error);
+    }
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "role": params.role.as_str(),
+                "filesystem": params.filesystem.as_str(),
+                "disk": params.disk,
+                "steps": plan.len(),
+            }),
+            "Despliegue completado",
+        ))?;
+    } else {
+        println!("Despliegue completado sobre {}", params.disk);
+        println!(
+            "Rol: {} · FS: {}",
+            params.role.as_str(),
+            params.filesystem.label()
+        );
+        println!("Pasos ejecutados: {}", plan.len());
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+struct UpdateApplyOptions<'a> {
+    manifest_path: &'a Path,
+    artifact: &'a Path,
+    root: &'a str,
+    previous: Option<&'a str>,
+    public_key: &'a str,
+    confirmed: bool,
+    sudo: bool,
+}
+
+fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCode> {
+    let UpdateApplyOptions {
+        manifest_path,
+        artifact,
+        root,
+        previous,
+        public_key,
+        confirmed,
+        sudo,
+    } = options;
+
+    let manifest = ReleaseManifest::load(manifest_path)?;
+    manifest.verify_artifact(artifact)?;
+    manifest.verify_signature(public_key)?;
+
+    if !confirmed {
+        return Err(NasError::Denied(
+            "la actualización modifica el sistema: repita con --yes para confirmar".into(),
+        ));
+    }
+
+    let plan =
+        nas_engine::build_update_plan(&manifest, root, &artifact.to_string_lossy(), previous);
+    let _lock = nas_engine::TaskLock::acquire("/var/lock/nas-update.lock")?;
+
+    let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "update-apply",
+        &manifest.version,
+        "START",
+        format!("artifact={}", artifact.display()),
+    ));
+
+    let runner = Runner::new();
+    let mut failure: Option<NasError> = None;
+
+    for step in &plan.steps {
+        let is_health = step.first().is_some_and(|arg| arg == "curl");
+        match run_step(&runner, step, sudo, 900) {
+            Ok(output) if is_health => {
+                let code = output.stdout.trim();
+                if code != "200" && code != "302" {
+                    failure = Some(NasError::Denied(format!(
+                        "healthcheck devolvió {code}; se revierte la release"
+                    )));
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+
+    if failure.is_some() {
+        for step in &plan.rollback {
+            let _ = run_step(&runner, step, sudo, 300);
+        }
+    }
+
+    let (status, detail) = match &failure {
+        None => ("SUCCESS", format!("release={}", manifest.version)),
+        Some(error) => ("FAILED", error.to_string()),
+    };
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "update-apply",
+        &manifest.version,
+        status,
+        detail,
+    ));
+
+    if let Some(error) = failure {
+        return Err(error);
+    }
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "version": manifest.version,
+                "release_dir": plan.release_dir,
+                "rollback_available": !plan.rollback.is_empty(),
+            }),
+            "Actualización aplicada",
+        ))?;
+    } else {
+        println!("Actualización aplicada: {}", manifest.version);
+        println!("Release: {}", plan.release_dir);
+        println!(
+            "Rollback: {}",
+            if plan.rollback.is_empty() {
+                "no disponible"
+            } else {
+                "disponible"
+            }
+        );
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn storage_list(json: bool) -> NasResult<ExitCode> {
+    let output = Runner::new().run(&CommandSpec::new("lsblk").args([
+        "-J",
+        "-o",
+        "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,ROTA",
+    ]))?;
+    if !output.is_success() {
+        return Err(NasError::Command {
+            command: "lsblk".into(),
+            code: output.code,
+            stderr: output.stderr,
+        });
+    }
+
+    let devices = nas_engine::parsers::lsblk::parse(&output.stdout)
+        .map_err(|error| NasError::Invalid(format!("lsblk inválido: {error}")))?;
+
+    if json {
+        print_json(&ApiResponse::ok(&devices, "Dispositivos de bloque"))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("DISPOSITIVOS DE BLOQUE");
+    for device in &devices {
+        for entry in device.flatten() {
+            let mount = entry.mountpoint.as_deref().unwrap_or("-");
+            let fs = entry.fstype.as_deref().unwrap_or("-");
+            let kind = if entry.rotational == Some(true) {
+                "HDD"
+            } else {
+                "SSD"
+            };
+            println!(
+                "{:<16} {:<8} {:<6} {:<8} {:<18} {}",
+                entry.name, entry.size, entry.kind, fs, mount, kind
+            );
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn users_list(json: bool) -> NasResult<ExitCode> {
+    let (mut users, mut groups) = nas_engine::users::load_local();
+    users.retain(|user| !user.system);
+    groups.retain(|group| group.name.starts_with("grp_"));
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "users": users, "groups": groups }),
+            "Usuarios y grupos",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("USUARIOS DEL PANEL ({})", users.len());
+    for user in &users {
+        println!(
+            "{:<20} uid={:<6} gid={:<6} {:<24} {}",
+            user.name, user.uid, user.gid, user.home, user.shell
+        );
+    }
+    println!();
+    println!("GRUPOS CORPORATIVOS ({})", groups.len());
+    for group in &groups {
+        println!(
+            "{:<20} gid={:<6} {}",
+            group.name,
+            group.gid,
+            group.members.join(", ")
+        );
+    }
 
     Ok(ExitCode::SUCCESS)
 }
