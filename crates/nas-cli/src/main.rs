@@ -3,15 +3,18 @@
 //! Sustituye a `bin/nas-cli` (PHP) manteniendo el contrato `--json` con la
 //! envoltura `{success, message, data}` que consumen el panel y los scripts.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use nas_core::shell::quote_all;
 use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
+use nas_engine::backup::{evaluate_space, retention_victims, snapshot_dir_name, SpaceDecision};
 use nas_engine::tasks::BackupTask;
 use nas_engine::{collect_network, collect_status};
-use nas_exec::{CommandSpec, Runner};
+use nas_exec::{CommandOutput, CommandSpec, Runner, SudoMode};
 use serde::Serialize;
 
 #[derive(Debug, Parser)]
@@ -69,6 +72,26 @@ enum BackupAction {
         #[arg(long, default_value = "/usr/local/bin")]
         dir: PathBuf,
     },
+    /// Ejecuta una tarea de respaldo (requiere --yes).
+    Run {
+        /// Identificador de la tarea.
+        id: String,
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        dir: PathBuf,
+        /// Confirma la ejecución real.
+        #[arg(long)]
+        yes: bool,
+        /// Simula la ejecución mostrando el plan y las guardas.
+        #[arg(long)]
+        dry_run: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+        /// Directorio de bloqueos.
+        #[arg(long, default_value = "/var/lock")]
+        lock_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -122,6 +145,24 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         Command::Backup { action } => match action {
             BackupAction::List { dir } => backup_list(&dir, cli.json),
             BackupAction::Plan { id, dir } => backup_plan(&dir, &id, cli.json),
+            BackupAction::Run {
+                id,
+                dir,
+                yes,
+                dry_run,
+                sudo,
+                lock_dir,
+            } => backup_run(
+                &dir,
+                &id,
+                RunOptions {
+                    dry_run,
+                    confirmed: yes,
+                    sudo,
+                    lock_dir,
+                },
+                cli.json,
+            ),
         },
     }
 }
@@ -190,6 +231,273 @@ fn last_snapshot(task: &BackupTask) -> Option<PathBuf> {
         .collect();
     snapshots.sort();
     snapshots.pop()
+}
+
+/// Opciones de ejecución de una tarea de respaldo.
+#[derive(Debug, Default)]
+struct RunOptions {
+    dry_run: bool,
+    confirmed: bool,
+    sudo: bool,
+    lock_dir: PathBuf,
+}
+
+fn snapshot_names(task: &BackupTask) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(task.task_dir()) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| name.starts_with("snapshot_"))
+        .collect();
+    names.sort();
+    names
+}
+
+fn space_usage(target: &Path) -> Option<nas_engine::DfUsage> {
+    let output = Runner::new()
+        .run(
+            &CommandSpec::new("df").args(["-Pk".to_string(), target.to_string_lossy().to_string()]),
+        )
+        .ok()?;
+    if !output.is_success() {
+        return None;
+    }
+    nas_engine::parse_df(&output.stdout)
+}
+
+fn append_log(path: &Path, level: &str, message: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let line = format!(
+        "[{}] [{}] {}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        level,
+        message
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+fn run_step(
+    runner: &Runner,
+    argv: &[String],
+    sudo: bool,
+    timeout_secs: u64,
+) -> NasResult<CommandOutput> {
+    let program = argv
+        .first()
+        .cloned()
+        .ok_or_else(|| NasError::Invalid("paso del plan vacío".into()))?;
+
+    let mut spec = CommandSpec::new(program)
+        .args(argv[1..].to_vec())
+        .timeout(Duration::from_secs(timeout_secs));
+    if sudo {
+        spec = spec.sudo(SudoMode::Passwordless);
+    }
+
+    runner.run(&spec)?.ensure_success()
+}
+
+fn backup_run(dir: &Path, id: &str, options: RunOptions, json: bool) -> NasResult<ExitCode> {
+    let tasks = discover_tasks(dir)?;
+    let task = tasks.iter().find(|task| task.id == id).ok_or_else(|| {
+        NasError::NotFound(format!("tarea '{id}' no encontrada en {}", dir.display()))
+    })?;
+
+    let problems = task.validate();
+    if !problems.is_empty() {
+        return Err(NasError::Invalid(format!(
+            "tarea '{id}' inválida: {}",
+            problems.join("; ")
+        )));
+    }
+
+    let now = chrono::Local::now();
+    let previous = last_snapshot(task);
+    let plan = task.plan(previous.as_deref(), &now);
+    let snapshot = task.snapshot_path(&now);
+
+    let df_target = if task.task_dir().exists() {
+        task.task_dir()
+    } else {
+        PathBuf::from(&task.destination_root)
+    };
+    let space = space_usage(&df_target).map_or(SpaceDecision::Ok, |usage| {
+        evaluate_space(usage.free_bytes, usage.used_percent)
+    });
+
+    if let SpaceDecision::Abort { reason } = &space {
+        return Err(NasError::Denied(format!(
+            "espacio insuficiente en {}: {reason}",
+            df_target.display()
+        )));
+    }
+
+    let existing = snapshot_names(task);
+    let mut projected = existing.clone();
+    projected.push(snapshot_dir_name(&now));
+    let victims = retention_victims(&projected, task.retention as usize);
+
+    if options.dry_run {
+        if json {
+            print_json(&ApiResponse::ok(
+                serde_json::json!({
+                    "task": task.id,
+                    "snapshot": snapshot,
+                    "space": format!("{space:?}"),
+                    "retention": { "keep": task.retention, "remove": victims },
+                    "steps": plan.iter().map(|step| quote_all(step)).collect::<Vec<_>>(),
+                }),
+                "Simulación de respaldo",
+            ))?;
+        } else {
+            println!("SIMULACIÓN DE RESPALDO: {}", task.id);
+            println!("Snapshot destino : {snapshot}");
+            println!("Espacio          : {space:?}");
+            println!(
+                "Retención        : conservar {}, eliminar {}",
+                task.retention,
+                victims.len()
+            );
+            for (index, step) in plan.iter().enumerate() {
+                println!("{:>2}. {}", index + 1, quote_all(step));
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if !options.confirmed {
+        return Err(NasError::Denied(
+            "la ejecución crea un snapshot real: repita con --yes para confirmar".into(),
+        ));
+    }
+
+    let lock_path = options.lock_dir.join(format!("backup_{id}.lock"));
+    let _lock = nas_engine::TaskLock::acquire(&lock_path)?;
+
+    let log_path = PathBuf::from(&task.log_dir).join(format!("backup_{id}.log"));
+    append_log(
+        &log_path,
+        "INFO",
+        &format!("INICIO ejecución manual de '{id}'"),
+    );
+
+    let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "backup-run",
+        &task.id,
+        "START",
+        format!("snapshot={snapshot}"),
+    ));
+
+    let runner = Runner::new();
+    let mut failure: Option<NasError> = None;
+
+    for step in &plan {
+        let label = step.first().cloned().unwrap_or_default();
+        append_log(
+            &log_path,
+            "INFO",
+            &format!("ejecutando: {}", quote_all(step)),
+        );
+
+        let timeout = match label.as_str() {
+            "mount" | "umount" | "mkdir" | "mv" => 120,
+            _ => 3600,
+        };
+
+        if let Err(error) = run_step(&runner, step, options.sudo, timeout) {
+            failure = Some(error);
+            break;
+        }
+    }
+
+    if let Some(error) = failure {
+        for step in plan
+            .iter()
+            .filter(|step| step.first().is_some_and(|arg| arg == "umount"))
+        {
+            let _ = run_step(&runner, step, options.sudo, 120);
+        }
+        append_log(&log_path, "ERROR", &error.to_string());
+        let _ = audit.append(nas_audit::AuditEntry::new(
+            &actor,
+            "local",
+            "backup-run",
+            &task.id,
+            "FAILED",
+            error.to_string(),
+        ));
+        return Err(error);
+    }
+
+    let mut removed = 0_u32;
+    for victim in &victims {
+        let target = task.task_dir().join(victim);
+        let mut spec = CommandSpec::new("rm")
+            .args(["-rf".to_string(), target.to_string_lossy().to_string()])
+            .timeout(Duration::from_secs(600));
+        if options.sudo {
+            spec = spec.sudo(SudoMode::Passwordless);
+        }
+        match runner.run(&spec) {
+            Ok(output) if output.is_success() => {
+                removed += 1;
+                append_log(&log_path, "INFO", &format!("retención: eliminado {victim}"));
+            }
+            Ok(output) => append_log(
+                &log_path,
+                "WARN",
+                &format!("retención: no se pudo eliminar {victim}: {}", output.stderr),
+            ),
+            Err(error) => append_log(&log_path, "WARN", &error.to_string()),
+        }
+    }
+
+    append_log(
+        &log_path,
+        "INFO",
+        &format!("FIN correcto: {snapshot} (retención aplicada: {removed})"),
+    );
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "backup-run",
+        &task.id,
+        "SUCCESS",
+        format!("snapshot={snapshot} removed={removed}"),
+    ));
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "task": task.id,
+                "snapshot": snapshot,
+                "retention_removed": removed,
+                "log": log_path.display().to_string(),
+            }),
+            "Respaldo completado",
+        ))?;
+    } else {
+        println!("Respaldo completado: {}", task.id);
+        println!("Snapshot : {snapshot}");
+        println!("Retención: {removed} snapshot(s) eliminados");
+        println!("Bitácora : {}", log_path.display());
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn backup_plan(dir: &Path, id: &str, json: bool) -> NasResult<ExitCode> {
