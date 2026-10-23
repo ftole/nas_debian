@@ -20,9 +20,13 @@ const AppState = {
     root: 'nas',
     currentPath: '',
     items: [],
+    displayItems: [],
+    filterQuery: '',
+    sortKey: 'name_asc',
     viewMode: localStorage.getItem('nas_file_view') || 'grid',
     inTrash: false,
     trashItems: [],
+    trashFilterQuery: '',
     selectedItemPath: null,
     currentPreviewFile: null,
     currentPreviewText: '',
@@ -4641,6 +4645,186 @@ function setFileViewMode(mode, triggerRender = true) {
   }
 }
 
+function formatBytesLocal(bytes) {
+  if (bytes === null || bytes === undefined || isNaN(bytes)) return '0 B';
+  const num = Number(bytes);
+  if (num === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const i = Math.floor(Math.log(num) / Math.log(k));
+  const val = parseFloat((num / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2));
+  return `${val} ${sizes[i] || 'B'}`;
+}
+
+function updateFilesStatusBar() {
+  const totalEl = document.getElementById('files-status-total');
+  const sizeEl = document.getElementById('files-status-size');
+  const selectedEl = document.getElementById('files-status-selected');
+  const storageEl = document.getElementById('files-status-storage-info');
+
+  const items = AppState.files.displayItems !== undefined ? AppState.files.displayItems : (AppState.files.items || []);
+  const allItems = AppState.files.items || [];
+  const foldersCount = items.filter(i => i.is_dir).length;
+  const filesCount = items.filter(i => !i.is_dir).length;
+
+  let totalBytes = 0;
+  items.forEach(i => {
+    if (!i.is_dir) {
+      totalBytes += Number(i.size_bytes || i.size || 0);
+    }
+  });
+
+  if (totalEl) {
+    if (AppState.files.filterQuery) {
+      totalEl.textContent = `${items.length} de ${allItems.length} elementos (${foldersCount} carpetas, ${filesCount} archivos)`;
+    } else {
+      totalEl.textContent = `${items.length} elemento(s) (${foldersCount} carpetas, ${filesCount} archivos)`;
+    }
+  }
+
+  if (sizeEl) {
+    sizeEl.textContent = `Tamaño visible: ${formatBytesLocal(totalBytes)}`;
+  }
+
+  if (selectedEl) {
+    if (AppState.files.selectedItemPath) {
+      const selItem = allItems.find(i => (i.relative_path || i.path) === AppState.files.selectedItemPath);
+      if (selItem) {
+        const itemType = selItem.is_dir ? 'Carpeta' : (selItem.size_formatted || '0 B');
+        selectedEl.textContent = `• Seleccionado: ${selItem.name} (${itemType})`;
+      } else {
+        selectedEl.textContent = '';
+      }
+    } else {
+      selectedEl.textContent = '';
+    }
+  }
+
+  if (storageEl) {
+    const rootName = AppState.files.root === 'backups' ? 'Backups (/srv/nas/BACKUPS_HISTORICOS)' : 'Almacenamiento (/srv/nas)';
+    const freeStr = AppState.storage?.overview?.free_formatted ? ` • Libre: ${AppState.storage.overview.free_formatted}` : '';
+    storageEl.textContent = `${rootName}${freeStr}`;
+  }
+}
+
+function filterCurrentFiles(query = null) {
+  if (query === null) {
+    query = document.getElementById('files-filter-input')?.value || '';
+  }
+  AppState.files.filterQuery = String(query).toLowerCase().trim();
+  applyFilesFilterAndSort();
+}
+
+function setFilesSort(sortKey) {
+  AppState.files.sortKey = sortKey || 'name_asc';
+  const sel = document.getElementById('files-sort-select');
+  if (sel && sel.value !== AppState.files.sortKey) {
+    sel.value = AppState.files.sortKey;
+  }
+  updateSortIndicators();
+  applyFilesFilterAndSort();
+}
+
+function toggleTableSort(col) {
+  const currentKey = AppState.files.sortKey || 'name_asc';
+  let newKey = `${col}_asc`;
+  if (currentKey === `${col}_asc`) {
+    newKey = `${col}_desc`;
+  } else if (currentKey === `${col}_desc`) {
+    newKey = `${col}_asc`;
+  } else {
+    if (col === 'size' || col === 'date') {
+      newKey = `${col}_desc`;
+    } else {
+      newKey = `${col}_asc`;
+    }
+  }
+  setFilesSort(newKey);
+}
+
+function updateSortIndicators() {
+  const cols = ['name', 'size', 'permissions', 'date'];
+  const [activeCol, activeDir] = (AppState.files.sortKey || 'name_asc').split('_');
+  cols.forEach(c => {
+    const el = document.getElementById(`sort-indicator-${c}`);
+    if (el) {
+      if (c === activeCol) {
+        el.textContent = activeDir === 'desc' ? ' ▼' : ' ▲';
+        el.style.opacity = '1';
+      } else {
+        el.textContent = '';
+      }
+    }
+  });
+}
+
+function sortFilesItems(items, sortKey = 'name_asc') {
+  const [col, dir] = (sortKey || 'name_asc').split('_');
+  const mult = dir === 'desc' ? -1 : 1;
+
+  return [...items].sort((a, b) => {
+    const aDir = a.is_dir ? 1 : 0;
+    const bDir = b.is_dir ? 1 : 0;
+    if (aDir !== bDir) {
+      return bDir - aDir;
+    }
+
+    if (col === 'size') {
+      const aSize = Number(a.size_bytes ?? a.size ?? 0);
+      const bSize = Number(b.size_bytes ?? b.size ?? 0);
+      return (aSize - bSize) * mult;
+    }
+
+    if (col === 'date') {
+      const aTime = a.mtime_raw ? Number(a.mtime_raw) : new Date(a.modified_at || a.mtime || 0).getTime();
+      const bTime = b.mtime_raw ? Number(b.mtime_raw) : new Date(b.modified_at || b.mtime || 0).getTime();
+      return (aTime - bTime) * mult;
+    }
+
+    if (col === 'permissions') {
+      const aPerm = String(a.permissions || '');
+      const bPerm = String(b.permissions || '');
+      return aPerm.localeCompare(bPerm) * mult;
+    }
+
+    const aName = String(a.name || '');
+    const bName = String(b.name || '');
+    return aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' }) * mult;
+  });
+}
+
+function applyFilesFilterAndSort() {
+  let list = Array.isArray(AppState.files.items) ? [...AppState.files.items] : [];
+  const q = (AppState.files.filterQuery || '').toLowerCase().trim();
+  if (q) {
+    list = list.filter(item => {
+      const name = String(item.name || '').toLowerCase();
+      const owner = String(item.owner || '').toLowerCase();
+      const group = String(item.group || '').toLowerCase();
+      return name.includes(q) || owner.includes(q) || group.includes(q);
+    });
+  }
+  list = sortFilesItems(list, AppState.files.sortKey || 'name_asc');
+  AppState.files.displayItems = list;
+  renderCurrentFiles();
+}
+
+function copyItemUncPath(relPath) {
+  const host = window.location.hostname || window.NAS_HOSTNAME || 'SRV-NAS';
+  let cur = String(relPath || '').replace(/^\/+|\/+$/g, '');
+  if (AppState.files.root === 'backups') {
+    cur = cur ? `BACKUPS_HISTORICOS\\${cur.replace(/\//g, '\\')}` : 'BACKUPS_HISTORICOS';
+  } else {
+    cur = cur ? cur.replace(/\//g, '\\') : '';
+  }
+  const unc = cur ? `\\\\${host}\\${cur}` : `\\\\${host}`;
+  copyUncPath(unc);
+}
+
+function copyCurrentUncPath() {
+  copyItemUncPath(AppState.files.currentPath);
+}
+
 async function loadFiles(subpath = null) {
   if (subpath === null) {
     subpath = AppState.files.currentPath || '';
@@ -4671,8 +4855,9 @@ async function loadFiles(subpath = null) {
     const currentPath = res.data?.current_path ?? res.current_path ?? subpath ?? '';
 
     AppState.files.items = items;
+    AppState.files.selectedItemPath = null;
     renderFileBreadcrumbs(breadcrumbs, currentPath);
-    renderCurrentFiles();
+    applyFilesFilterAndSort();
     updateTrashBadge();
   } catch (e) {
     if (gridContainer) {
@@ -4694,11 +4879,14 @@ function renderCurrentFiles() {
   if (gridContainer) gridContainer.style.display = isGrid ? 'grid' : 'none';
   if (tableContainer) tableContainer.style.display = isGrid ? 'none' : 'block';
 
+  const itemsToRender = AppState.files.displayItems !== undefined ? AppState.files.displayItems : (AppState.files.items || []);
+
   if (isGrid) {
-    renderFileGrid(AppState.files.items);
+    renderFileGrid(itemsToRender);
   } else {
-    renderFileTable(AppState.files.items);
+    renderFileTable(itemsToRender);
   }
+  updateFilesStatusBar();
 }
 
 function renderFileGrid(items) {
@@ -4707,11 +4895,12 @@ function renderFileGrid(items) {
   container.textContent = '';
 
   if (!items || items.length === 0) {
+    const isFiltered = Boolean(AppState.files.filterQuery);
     container.innerHTML = `
       <div style="grid-column:1/-1; text-align:center; padding:45px 20px; color:var(--text-muted);">
-        <svg class="icon" style="width:48px; height:48px; color:var(--text-muted); opacity:0.6; margin-bottom:12px;"><use href="#icon-folder"></use></svg>
-        <div style="font-size:15px; font-weight:600; color:var(--text-main); margin-bottom:4px;">Esta carpeta está vacía</div>
-        <div style="font-size:13px;">Arrastra archivos aquí desde tu equipo o pulsa el botón <strong>Subir archivos</strong>.</div>
+        <svg class="icon" style="width:48px; height:48px; color:var(--text-muted); opacity:0.6; margin-bottom:12px;"><use href="${isFiltered ? '#icon-search' : '#icon-folder'}"></use></svg>
+        <div style="font-size:15px; font-weight:600; color:var(--text-main); margin-bottom:4px;">${isFiltered ? 'No se encontraron archivos' : 'Esta carpeta está vacía'}</div>
+        <div style="font-size:13px;">${isFiltered ? 'Ningún archivo o carpeta coincide con el filtro actual.' : 'Arrastra archivos aquí desde tu equipo o pulsa el botón <strong>Subir archivos</strong>.'}</div>
       </div>
     `;
     return;
@@ -4749,6 +4938,7 @@ function renderFileGrid(items) {
         <div class="file-card-actions">
           ${previewBtn}
           ${downloadBtn}
+          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'copy-unc')" title="Copiar ruta UNC"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-copy"></use></svg></button>
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
           <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
@@ -4803,6 +4993,8 @@ function handleCardAction(e, btn, action) {
   } else if (action === 'download') {
     if (isDir) downloadFolderZip(relPath);
     else downloadFile(relPath);
+  } else if (action === 'copy-unc') {
+    copyItemUncPath(relPath);
   } else if (action === 'rename') {
     openRenameModal(relPath, name);
   } else if (action === 'move') {
@@ -4818,10 +5010,11 @@ function renderFileTable(items) {
   tbody.textContent = '';
 
   if (!items || items.length === 0) {
+    const isFiltered = Boolean(AppState.files.filterQuery);
     tbody.innerHTML = `
       <tr>
         <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
-          Esta carpeta está vacía. Arrastra archivos aquí desde tu equipo o utiliza el botón <strong>Subir archivos</strong>.
+          ${isFiltered ? 'Ningún archivo o carpeta coincide con el filtro actual.' : 'Esta carpeta está vacía. Arrastra archivos aquí desde tu equipo o utiliza el botón <strong>Subir archivos</strong>.'}
         </td>
       </tr>
     `;
@@ -4873,6 +5066,7 @@ function renderFileTable(items) {
           <div style="display:flex; justify-content:flex-end; gap:6px;">
             ${previewAction}
             ${downloadAction}
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'copy-unc')" title="Copiar ruta UNC"><svg class="icon"><use href="#icon-copy"></use></svg></button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
             <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
@@ -4927,6 +5121,7 @@ function selectTableRow(tr, relPath) {
   document.querySelectorAll('#files-table-body tr.selected').forEach(r => r.classList.remove('selected'));
   if (tr) tr.classList.add('selected');
   AppState.files.selectedItemPath = relPath;
+  updateFilesStatusBar();
 }
 
 function handleTableRowAction(btn, action) {
@@ -4941,6 +5136,8 @@ function handleTableRowAction(btn, action) {
   } else if (action === 'download') {
     if (isDir) downloadFolderZip(relPath);
     else downloadFile(relPath);
+  } else if (action === 'copy-unc') {
+    copyItemUncPath(relPath);
   } else if (action === 'rename') {
     openRenameModal(relPath, name);
   } else if (action === 'move') {
@@ -4954,6 +5151,7 @@ function selectFileCard(cardEl, relPath) {
   document.querySelectorAll('.file-card.selected').forEach(c => c.classList.remove('selected'));
   if (cardEl) cardEl.classList.add('selected');
   AppState.files.selectedItemPath = relPath;
+  updateFilesStatusBar();
 }
 
 function handleItemDblClick(relPath, name, isDir) {
@@ -5265,6 +5463,51 @@ function downloadCurrentFolderZip() {
   downloadFolderZip(current);
 }
 
+function openNewFileModal() {
+  const input = document.getElementById('new-file-name');
+  if (input) input.value = '';
+  openModal('modal-new-file');
+  if (input) setTimeout(() => input.focus(), 100);
+}
+
+async function submitNewFile(e) {
+  e.preventDefault();
+  const input = document.getElementById('new-file-name');
+  const name = input ? input.value.trim() : '';
+  if (!name) return;
+
+  const btn = document.getElementById('btn-submit-new-file') || e.target.querySelector('button[type="submit"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
+  try {
+    const res = await apiFetch('/api/files/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: AppState.files.root || 'nas',
+        path: AppState.files.currentPath || '',
+        name: name,
+        content: '',
+      }),
+    });
+
+    closeModal('modal-new-file');
+    showToast(`Archivo "${name}" creado exitosamente.`, 'success');
+    await loadFiles();
+    const createdPath = res.data?.path || (AppState.files.currentPath ? `${AppState.files.currentPath}/${name}` : name);
+    previewFile(createdPath, name);
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
+}
+
 function openNewFolderModal() {
   const input = document.getElementById('new-folder-name');
   if (input) input.value = '';
@@ -5490,57 +5733,128 @@ async function loadTrash() {
     const res = await apiFetch('/api/files/trash');
     const items = res.data?.items ?? res.items ?? [];
     const count = res.data?.count ?? res.count ?? items.length;
+    const totalSizeFormatted = res.data?.total_size_formatted ?? res.total_size_formatted ?? '0 B';
 
+    AppState.files.trashItems = items;
     updateTrashBadgeCount(count);
 
-    if (!tbody) return;
-
-    if (items.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
-            <svg class="icon" style="width:36px; height:36px; color:var(--accent-warning); opacity:0.7; margin-bottom:8px;"><use href="#icon-trash"></use></svg>
-            <div>La papelera de reciclaje está vacía.</div>
-          </td>
-        </tr>
-      `;
-      return;
+    const kpiBadge = document.getElementById('trash-kpi-badge');
+    if (kpiBadge) {
+      kpiBadge.textContent = `${count} elementos (${totalSizeFormatted})`;
     }
 
-    tbody.textContent = '';
-    const range = document.createRange();
-    range.selectNodeContents(tbody);
-    const html = items.map(item => {
-      const isDir = item.is_dir;
-      const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
-
-      return `
-        <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
-          <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
-          <td><strong>${escapeHtml(item.filename)}</strong></td>
-          <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
-          <td>${escapeHtml(item.size_formatted || '0 B')}</td>
-          <td>${escapeHtml(item.deleted_by || 'sistemas')}</td>
-          <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.deleted_at || 'N/A')}</td>
-          <td style="text-align:right;">
-            <div style="display:flex; justify-content:flex-end; gap:6px;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="handleTrashAction(this, 'restore')" title="Restaurar a su carpeta original">
-                <svg class="icon" style="color:var(--accent-success);"><use href="#icon-restore"></use></svg> Restaurar
-              </button>
-              <button type="button" class="btn btn-danger btn-sm" onclick="handleTrashAction(this, 'delete')" title="Eliminar definitivamente">
-                <svg class="icon"><use href="#icon-trash"></use></svg>
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
-
-    const fragment = range.createContextualFragment(html);
-    tbody.appendChild(fragment);
+    renderTrashRows(items);
   } catch (err) {
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:18px;">Error al cargar papelera: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function renderTrashRows(items) {
+  const tbody = document.getElementById('trash-table-body');
+  if (!tbody) return;
+
+  const q = (AppState.files.trashFilterQuery || '').toLowerCase().trim();
+  let filtered = items;
+  if (q) {
+    filtered = items.filter(item => {
+      const name = String(item.filename || item.name || '').toLowerCase();
+      const orig = String(item.original_path || '').toLowerCase();
+      const by = String(item.deleted_by || '').toLowerCase();
+      return name.includes(q) || orig.includes(q) || by.includes(q);
+    });
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
+          <svg class="icon" style="width:36px; height:36px; color:var(--accent-warning); opacity:0.7; margin-bottom:8px;"><use href="#icon-trash"></use></svg>
+          <div>${q ? 'No se encontraron elementos que coincidan con la búsqueda.' : 'La papelera de reciclaje está vacía.'}</div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.textContent = '';
+  const range = document.createRange();
+  range.selectNodeContents(tbody);
+  const html = filtered.map(item => {
+    const isDir = item.is_dir;
+    const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
+
+    return `
+      <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
+        <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
+        <td><strong>${escapeHtml(item.filename)}</strong></td>
+        <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
+        <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+        <td>${escapeHtml(item.deleted_by || 'sistemas')}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.deleted_at || 'N/A')}</td>
+        <td style="text-align:right;">
+          <div style="display:flex; justify-content:flex-end; gap:6px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTrashAction(this, 'restore')" title="Restaurar a su carpeta original">
+              <svg class="icon" style="color:var(--accent-success);"><use href="#icon-restore"></use></svg> Restaurar
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="handleTrashAction(this, 'delete')" title="Eliminar definitivamente">
+              <svg class="icon"><use href="#icon-trash"></use></svg>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  const fragment = range.createContextualFragment(html);
+  tbody.appendChild(fragment);
+}
+
+function filterTrashItems(query = null) {
+  if (query === null) {
+    query = document.getElementById('trash-filter-input')?.value || '';
+  }
+  AppState.files.trashFilterQuery = String(query).toLowerCase().trim();
+  renderTrashRows(AppState.files.trashItems || []);
+}
+
+function openRestoreAllTrashModal() {
+  const count = (AppState.files.trashItems || []).length;
+  if (count === 0) {
+    showToast('La papelera de reciclaje ya se encuentra vacía.', 'info');
+    return;
+  }
+  const countEl = document.getElementById('restore-all-trash-count');
+  if (countEl) {
+    countEl.textContent = `${count} elemento(s)`;
+  }
+  openModal('modal-restore-all-trash');
+}
+
+async function confirmRestoreAllTrash() {
+  const btn = document.getElementById('btn-confirm-restore-all');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
+  try {
+    const res = await apiFetch('/api/files/trash/restore-all', {
+      method: 'POST',
+    });
+
+    closeModal('modal-restore-all-trash');
+    const restored = res.data?.restored ?? res.restored ?? 0;
+    showToast(`Se restauraron ${restored} elemento(s) a sus rutas originales.`, 'success');
+    loadTrash();
+    updateTrashBadge();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
     }
   }
 }
@@ -6511,6 +6825,64 @@ async function loadDiagnostics() {
   }
 }
 
+function initFilesKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const filesView = document.getElementById('view-files');
+    if (!filesView || !filesView.classList.contains('active')) return;
+
+    if (document.querySelector('.modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open')) return;
+
+    const tag = (e.target?.tagName || '').toLowerCase();
+    const isEditing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable;
+
+    if ((e.ctrlKey && (e.key === 'f' || e.key === 'F')) || (!isEditing && e.key === '/')) {
+      const searchInput = AppState.files.inTrash ? document.getElementById('trash-filter-input') : document.getElementById('files-filter-input');
+      if (searchInput) {
+        e.preventDefault();
+        searchInput.focus();
+        if (typeof searchInput.select === 'function') searchInput.select();
+        return;
+      }
+    }
+
+    if (isEditing) return;
+
+    if (AppState.files.inTrash) return;
+
+    if (e.key === 'Backspace') {
+      if (AppState.files.currentPath) {
+        e.preventDefault();
+        const parts = AppState.files.currentPath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+        parts.pop();
+        navigateToSubpath(parts.join('/'));
+      }
+      return;
+    }
+
+    if (e.key === 'F2') {
+      if (AppState.files.selectedItemPath) {
+        const item = (AppState.files.items || []).find(i => (i.relative_path || i.path) === AppState.files.selectedItemPath);
+        if (item) {
+          e.preventDefault();
+          openRenameModal(item.relative_path || item.path, item.name);
+        }
+      }
+      return;
+    }
+
+    if (e.key === 'Delete') {
+      if (AppState.files.selectedItemPath) {
+        const item = (AppState.files.items || []).find(i => (i.relative_path || i.path) === AppState.files.selectedItemPath);
+        if (item) {
+          e.preventDefault();
+          openDeleteModal(item.relative_path || item.path, item.name);
+        }
+      }
+      return;
+    }
+  });
+}
+
 // ==============================================================================
 // 15. Inicialización Robusta al Cargar el DOM
 // ==============================================================================
@@ -6693,6 +7065,7 @@ function initApp() {
   updateTrashBadge();
   loadStorageUnits();
   initSystemNotifications();
+  initFilesKeyboardShortcuts();
 
   // Cerrar drawer de notificaciones al hacer clic fuera
   document.addEventListener('click', (e) => {
@@ -6918,6 +7291,19 @@ window.toggleBackupFields = toggleBackupFields;
 window.toggleEditBackupFields = toggleEditBackupFields;
 
 // Explorador de Archivos y Papelera
+window.filterCurrentFiles = filterCurrentFiles;
+window.setFilesSort = setFilesSort;
+window.toggleTableSort = toggleTableSort;
+window.copyCurrentUncPath = copyCurrentUncPath;
+window.copyItemUncPath = copyItemUncPath;
+window.openNewFileModal = openNewFileModal;
+window.openNewFile = openNewFileModal;
+window.submitNewFile = submitNewFile;
+window.filterTrashItems = filterTrashItems;
+window.openRestoreAllTrashModal = openRestoreAllTrashModal;
+window.confirmRestoreAllTrash = confirmRestoreAllTrash;
+window.loadFiles = loadFiles;
+window.updateFilesStatusBar = updateFilesStatusBar;
 window.triggerFileUpload = triggerFileInput;
 window.triggerFileInput = triggerFileInput;
 window.openNewFolderModal = openNewFolderModal;
