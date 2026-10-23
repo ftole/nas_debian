@@ -10,7 +10,7 @@
 | :--- | :--- | :--- |
 | **F0** | Contratos, workspace, CI de Rust, pruebas de la CLI | ✅ Completado |
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
-| **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `nasctl` | ✅ Completado |
+| **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Motor de respaldos (modelo, plan y ejecución con guardas), deploy/update/storage/usuarios | 🟡 Parcial: `nas backup list`, `plan` y `run` |
 | **F3** | `nas-web` (axum + askama + sqlx) con paridad de rutas y plantillas | ⏳ Pendiente |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
@@ -58,6 +58,8 @@ Binarios de desarrollo:
 cargo run -p nas-cli -- status
 cargo run -p nas-cli -- --json network
 cargo run -p nas-dev -- --source . preflight
+cargo run -p nas-dev -- --inventory inventory.example.yaml doctor --host lab-dev
+cargo run -p nas-dev -- --inventory inventory.example.yaml onboard --host lab-dev
 cargo run -p nas-dev -- --inventory inventory.example.yaml sync --host lab-dev --dry-run
 cargo run -p nasctl -- --inventory inventory.example.yaml check
 cargo run -p nas-cli -- backup list --dir /usr/local/bin
@@ -117,6 +119,21 @@ Confirmaciones y seguridad:
 - `--no-sudo` permite operar sin elevación (cuando el usuario es propietario).
 - Cada ejecución se registra en `~/.local/state/nas-dev/audit.jsonl`
   (`%LOCALAPPDATA%\nas-dev\audit.jsonl` en Windows) con cadena de hashes.
+
+### Alta y diagnóstico del host de desarrollo
+
+- `nas-dev onboard --host <alias>` imprime el procedimiento completo (usuario,
+  `authorized_keys`, `sudoers` acotado con `visudo -c`, docroot y estado
+  aislados). **No ejecuta nada**: el operador revisa y aplica.
+- `nas-dev doctor --host <alias>` comprueba por SSH los requisitos reales:
+  usuario, `sudo -n`, `rsync`, `tar`, `curl`, docroot y su escritura, estado,
+  `nginx -t` y `nginx` activo. Devuelve código 1 si algo falla y muestra la
+  acción correctiva de cada fallo.
+- Ambas órdenes rechazan hosts de producción con código 3.
+
+> Endurecimiento pendiente (F2): sustituir el `sudoers` por un helper
+> `/usr/local/sbin/nas-dev-apply` con acciones fijas, igual que el patrón
+> `nas-terminal`, para no conceder `rm`/`mv` arbitrarios al usuario de desarrollo.
 
 ## 6. Tareas de respaldo (`nas backup`)
 
