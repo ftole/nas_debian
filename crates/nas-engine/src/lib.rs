@@ -29,6 +29,8 @@ pub mod status;
 pub mod storage;
 /// Tareas de respaldo y sus planes de ejecución.
 pub mod tasks;
+/// Terminal web sobre sesiones tmux.
+pub mod terminal;
 /// Verificación y planificación de actualizaciones firmadas.
 pub mod update;
 /// Inventario de usuarios y grupos locales.
@@ -47,5 +49,6 @@ pub use services::ServiceStatus;
 pub use status::{collect as collect_status, SystemMetrics};
 pub use storage::{Disk, StorageOverview};
 pub use tasks::{BackupTask, SourceKind};
+pub use terminal::TerminalSession;
 pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
 pub use users::{GroupEntry, UserEntry};
