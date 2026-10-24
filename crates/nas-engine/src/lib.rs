@@ -21,6 +21,8 @@ pub mod lock;
 pub mod network;
 /// Parsers de salidas del sistema operativo.
 pub mod parsers;
+/// Edición de smb.conf y ACLs de recursos.
+pub mod samba;
 /// Estado y gestión de demonios.
 pub mod services;
 /// Métricas de estado del sistema.
