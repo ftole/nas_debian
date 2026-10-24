@@ -841,3 +841,182 @@ fn last_snapshot_path(task: &nas_engine::tasks::BackupTask) -> Option<std::path:
     snapshots.sort();
     snapshots.pop()
 }
+
+/// Cuerpo para inspeccionar un dispositivo.
+#[derive(Debug, Deserialize)]
+pub struct DeviceBody {
+    device: String,
+}
+
+/// Cuerpo para unirse a un dominio.
+#[derive(Debug, Deserialize)]
+pub struct DomainJoinBody {
+    domain: String,
+    user: String,
+    password: String,
+}
+
+/// Resumen del volumen de datos.
+pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        nas_engine::storage::overview_for(&paths, &Runner::new())
+    })
+    .await
+    {
+        Ok(Ok(overview)) => axum::Json(ApiResponse::ok(overview, "Almacenamiento")).into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("consulta de almacenamiento interrumpida"),
+    }
+}
+
+/// Discos físicos detectados.
+pub async fn storage_disks(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| nas_engine::storage::disks(&Runner::new())).await {
+        Ok(Ok(disks)) => axum::Json(ApiResponse::ok(disks, "Discos detectados")).into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("inventario de discos interrumpido"),
+    }
+}
+
+/// Inspección de un dispositivo concreto.
+pub async fn storage_inspect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<DeviceBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let device = body.device;
+    match tokio::task::spawn_blocking(move || nas_engine::storage::inspect(&Runner::new(), &device))
+        .await
+    {
+        Ok(Ok(payload)) => {
+            axum::Json(ApiResponse::ok(payload, "Inspección de disco")).into_response()
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("inspección interrumpida"),
+    }
+}
+
+/// Estado de la integración con Active Directory.
+pub async fn domain_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
+        Ok(status) => axum::Json(ApiResponse::ok(status, "Estado del dominio")).into_response(),
+        Err(_) => server_error("consulta de dominio interrumpida"),
+    }
+}
+
+/// Une el servidor al dominio (requiere administrador).
+pub async fn domain_join(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<DomainJoinBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !nas_engine::domain::is_valid_domain(&body.domain)
+        || !nas_engine::domain::is_valid_user(&body.user)
+    {
+        let _ = state.auth.db().append_audit(
+            &user,
+            "domain_join",
+            &body.domain,
+            "DENIED",
+            "parámetros inválidos",
+        );
+        return bad_request("dominio o usuario inválidos");
+    }
+
+    let domain = body.domain.clone();
+    let domain_user = body.user.clone();
+    let password = body.password.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::domain::join(&Runner::new(), &domain, &domain_user, &password)
+    })
+    .await
+    .unwrap_or_else(|_| Err("unión interrumpida".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "domain_join", &body.domain, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Equipo unido al dominio",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "domain_join", &body.domain, "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Saca el servidor del dominio (requiere administrador).
+pub async fn domain_leave(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let outcome = tokio::task::spawn_blocking(|| nas_engine::domain::leave(&Runner::new()))
+        .await
+        .unwrap_or_else(|_| Err("salida interrumpida".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "domain_leave", "domain", "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Equipo retirado del dominio",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "domain_leave", "domain", "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+fn forbidden(message: &str) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(ApiResponse::<serde_json::Value>::error(message)),
+    )
+        .into_response()
+}
