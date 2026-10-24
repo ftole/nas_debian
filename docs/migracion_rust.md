@@ -12,7 +12,7 @@
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
-| **F3** | `nas-web` (axum): sesiones, dashboard, archivos, servicios, diagnóstico, respaldos, auditoría, almacenamiento y dominio | 🟡 Rebanada 5 |
+| **F3** | `nas-web` (axum) con todos los módulos operativos y terminal tmux | 🟡 Rebanada 6 |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
@@ -206,8 +206,9 @@ Primera rebanada vertical del sustituto de PHP-FPM:
   `GET /api/metrics`, `/api/network`, `/api/shares`, `/api/users`,
   `/api/services` (+ `manage`), `/api/diagnostics`, `/api/backups` (+ `plan`),
   `/api/audit`, el explorador `/api/files` (`download`, `mkdir`, `rename`,
-  `delete`, `upload`), `/api/storage` (+ `disks`, `inspect`) y `/api/domain`
-  (+ `join`, `leave`).
+  `delete`, `upload`), `/api/storage` (+ `disks`, `inspect`), `/api/domain`
+  (+ `join`, `leave`) y `/api/terminal` (`session`, `send`, `capture`,
+  `resize`, `kill`).
 - **Sesiones persistentes en SQLite** (`web_sessions`): la cookie transporta un
   identificador aleatorio de 256 bits; expiración en base de datos con purga,
   `HttpOnly`, `SameSite=Strict` y `Secure` por defecto.
@@ -261,8 +262,19 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
   `POST /api/domain/join` y `/leave` exigen administrador, validan dominio y
   usuario, envían la contraseña por `stdin` y registran auditoría.
 
-Pendiente de F3: plantillas askama de las 13 vistas, terminal WS
-(`portable-pty`), ejecución de respaldos desde el panel y ZIP de descargas.
+### Terminal web (`nas-web::terminal`)
+
+- Sesiones **tmux** por usuario (`nas-web-<usuario>`, socket `-L nas`) ejecutadas
+  como el usuario autenticado mediante `sudo -n -u`, igual que el panel PHP.
+- Validación estricta: nombre de sesión, geometría (20-500 × 5-300), entrada
+  ≤ 4096 caracteres sin NUL y terminador `--` en `send-keys`.
+- Endpoints `POST /api/terminal/{session,send,resize,kill}` y
+  `GET /api/terminal/capture`, **reservados al superadministrador** y con
+  auditoría de apertura y cierre.
+
+Pendiente de F3: vistas HTML completas, ejecución de respaldos desde el panel
+y ZIP de descargas. El terminal sobre WebSocket con `portable-pty` queda como
+mejora opcional (hoy la paridad con PHP se logra con tmux + polling).
 
 ## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
