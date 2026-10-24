@@ -50,3 +50,6 @@ jobs:
 
       - name: Validar empaquetado (systemd, nginx, instalador)
         run: bash packaging/verify.sh
+
+      - name: Verificar contrato de paridad del panel
+        run: python3 scripts/parity_extract.py --check
