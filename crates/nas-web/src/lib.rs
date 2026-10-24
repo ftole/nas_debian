@@ -12,6 +12,7 @@ pub mod db;
 pub mod files;
 mod routes;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{DefaultBodyLimit, Request};
@@ -34,16 +35,29 @@ pub struct AppState {
     pub paths: Arc<NasPaths>,
     /// Rol del servidor.
     pub role: ServerRole,
+    /// Directorio de runners de respaldo.
+    pub backup_dir: PathBuf,
 }
 
 impl AppState {
     /// Crea el estado del panel.
     pub fn new(auth: Auth, paths: NasPaths, role: ServerRole) -> Self {
+        let backup_dir = std::env::var("NAS_BACKUP_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/usr/local/bin"));
+
         Self {
             auth: Arc::new(auth),
             paths: Arc::new(paths),
             role,
+            backup_dir,
         }
+    }
+
+    /// Fija el directorio donde se descubren las tareas de respaldo.
+    pub fn with_backup_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.backup_dir = dir.into();
+        self
     }
 }
 
@@ -58,6 +72,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/network", get(routes::network))
         .route("/api/shares", get(routes::shares))
         .route("/api/users", get(routes::users))
+        .route("/api/services", get(routes::services))
+        .route("/api/services/manage", post(routes::service_manage))
+        .route("/api/diagnostics", get(routes::diagnostics))
+        .route("/api/backups", get(routes::backups))
+        .route("/api/backups/plan", post(routes::backup_plan))
+        .route("/api/audit", get(routes::audit))
         .route("/api/files", get(routes::files_list))
         .route("/api/files/download", get(routes::files_download))
         .route("/api/files/mkdir", post(routes::files_mkdir))
