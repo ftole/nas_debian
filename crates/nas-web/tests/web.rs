@@ -623,3 +623,58 @@ async fn almacenamiento_responde_en_linux() {
         .expect("discos");
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn terminal_exige_superadministrador_y_valida_geometria() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    // Geometría inválida con superadmin: 400 antes de ejecutar nada.
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/terminal/session",
+            &cookie,
+            r#"{"cols":1,"rows":1}"#,
+        ))
+        .await
+        .expect("sesión");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // Operador sin privilegios: 403.
+    let dir = temp_dir("terminal-op");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("operador", &sha256_hex("Secreta123"), "operator")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.data_root = dir.join("data");
+    let state =
+        AppState::new(auth, paths, ServerRole::Arquivos).with_backup_dir(dir.join("runners"));
+    let app = router(state);
+
+    let response = app
+        .clone()
+        .oneshot(login_request("operador", "Secreta123"))
+        .await
+        .expect("login");
+    let cookie = response
+        .headers()
+        .get(SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("cookie")
+        .split(';')
+        .next()
+        .expect("par cookie")
+        .to_string();
+
+    let response = app
+        .oneshot(post_json(
+            "/api/terminal/session",
+            &cookie,
+            r#"{"cols":200,"rows":50}"#,
+        ))
+        .await
+        .expect("sesión");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
