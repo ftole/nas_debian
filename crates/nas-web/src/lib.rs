@@ -77,6 +77,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/diagnostics", get(routes::diagnostics))
         .route("/api/backups", get(routes::backups))
         .route("/api/backups/plan", post(routes::backup_plan))
+        .route("/api/backups/run", post(routes::backup_run))
         .route("/api/audit", get(routes::audit))
         .route("/api/storage", get(routes::storage))
         .route("/api/storage/disks", get(routes::storage_disks))
