@@ -1,12 +1,14 @@
 //! Panel web del servidor NAS sobre axum.
 //!
-//! Primera rebanada de F3: servidor HTTP, sesión firmada, dashboard mínimo y
-//! endpoints de estado/red con el mismo contrato JSON que el panel PHP.
+//! F3 (rebanada 2): servidor HTTP con sesiones persistentes en SQLite,
+//! dashboard, recursos compartidos y usuarios, con el mismo contrato JSON que
+//! el panel PHP.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 pub mod auth;
+pub mod db;
 mod routes;
 
 use std::sync::Arc;
@@ -17,25 +19,29 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
-use nas_core::NasPaths;
+use nas_core::{NasPaths, ServerRole};
 
 pub use auth::Auth;
+pub use db::Db;
 
 /// Estado compartido por los manejadores.
 #[derive(Clone, Debug)]
 pub struct AppState {
-    /// Configuración de autenticación.
+    /// Autenticación y sesiones.
     pub auth: Arc<Auth>,
     /// Rutas del despliegue.
     pub paths: Arc<NasPaths>,
+    /// Rol del servidor.
+    pub role: ServerRole,
 }
 
 impl AppState {
-    /// Crea el estado a partir de autenticación y rutas.
-    pub fn new(auth: Auth, paths: NasPaths) -> Self {
+    /// Crea el estado del panel.
+    pub fn new(auth: Auth, paths: NasPaths, role: ServerRole) -> Self {
         Self {
             auth: Arc::new(auth),
             paths: Arc::new(paths),
+            role,
         }
     }
 }
@@ -49,6 +55,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(routes::dashboard))
         .route("/api/metrics", get(routes::metrics))
         .route("/api/network", get(routes::network))
+        .route("/api/shares", get(routes::shares))
+        .route("/api/users", get(routes::users))
         .layer(axum::middleware::from_fn(security_headers))
         .with_state(state)
 }
