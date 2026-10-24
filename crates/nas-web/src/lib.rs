@@ -66,6 +66,8 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(routes::healthz))
+        .route("/css/app.css", get(routes::css))
+        .route("/favicon.svg", get(routes::favicon))
         .route("/login", get(routes::login_form).post(routes::login_submit))
         .route("/logout", post(routes::logout))
         .route("/", get(routes::dashboard))
