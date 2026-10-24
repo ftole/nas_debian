@@ -37,8 +37,20 @@ pub struct LoginForm {
 pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
     let now = Utc::now().timestamp();
     let session = match state.auth.login(&form.username, &form.password, now) {
-        Ok(Some(session)) => session,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, Html(LOGIN_ERROR_HTML)).into_response(),
+        Ok(Some(session)) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&form.username, "login", "web", "SUCCESS", "");
+            session
+        }
+        Ok(None) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&form.username, "login", "web", "FAILED", "");
+            return (StatusCode::UNAUTHORIZED, Html(LOGIN_ERROR_HTML)).into_response();
+        }
         Err(error) => return server_error(&error.to_string()),
     };
 
@@ -342,12 +354,26 @@ pub async fn files_delete(
     };
     let path = body.path;
 
+    let user = state
+        .auth
+        .authenticate(cookie_header(&headers), Utc::now().timestamp())
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let audit_path = path.clone();
+
     match tokio::task::spawn_blocking(move || root.trash(&path)).await {
-        Ok(Ok(target)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "trash": target.display().to_string() }),
-            "Elemento movido a la papelera",
-        ))
-        .into_response(),
+        Ok(Ok(target)) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "file_delete", &audit_path, "SUCCESS", "");
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "trash": target.display().to_string() }),
+                "Elemento movido a la papelera",
+            ))
+            .into_response()
+        }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("borrado interrumpido"),
     }
@@ -569,3 +595,249 @@ const LOGIN_ERROR_HTML: &str = concat!(
 <button type="submit">Reintentar</button>
 </form></body></html>"#
 );
+
+/// Cuerpo para gestionar un servicio.
+#[derive(Debug, Deserialize)]
+pub struct ServiceBody {
+    service: String,
+    action: String,
+}
+
+/// Parámetro `?limit=` de la auditoría.
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_audit_limit")]
+    limit: usize,
+}
+
+fn default_audit_limit() -> usize {
+    50
+}
+
+/// Estado de los demonios clave.
+pub async fn services(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| {
+        nas_engine::services::collect(&Runner::new(), nas_engine::services::DEFAULT_SERVICES)
+    })
+    .await
+    {
+        Ok(list) => axum::Json(ApiResponse::ok(list, "Estado de servicios")).into_response(),
+        Err(_) => server_error("consulta de servicios interrumpida"),
+    }
+}
+
+/// Reinicia o recarga un servicio de la lista blanca.
+pub async fn service_manage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ServiceBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "se requieren privilegios de administrador",
+            )),
+        )
+            .into_response();
+    }
+    if !nas_engine::services::is_allowed_service(&body.service)
+        || !nas_engine::services::is_allowed_action(&body.action)
+    {
+        let _ = state.auth.db().append_audit(
+            &user,
+            "service_manage",
+            &body.service,
+            "DENIED",
+            &body.action,
+        );
+        return bad_request("servicio o acción no permitidos");
+    }
+
+    let service = body.service.clone();
+    let action = body.action.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::services::manage(&Runner::new(), &service, &action, true)
+    })
+    .await
+    .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state.auth.db().append_audit(
+                &user,
+                "service_manage",
+                &body.service,
+                "SUCCESS",
+                &body.action,
+            );
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(format!(
+                "{} {} ejecutado",
+                body.action, body.service
+            )))
+            .into_response()
+        }
+        Err(error) => {
+            let _ = state.auth.db().append_audit(
+                &user,
+                "service_manage",
+                &body.service,
+                "FAILED",
+                &error,
+            );
+            server_error(&error)
+        }
+    }
+}
+
+/// Diagnóstico integral del servidor.
+pub async fn diagnostics(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        nas_engine::diagnostics::collect(&paths, &Runner::new())
+    })
+    .await
+    {
+        Ok(checks) => axum::Json(ApiResponse::ok(checks, "Diagnóstico integral")).into_response(),
+        Err(_) => server_error("diagnóstico interrumpido"),
+    }
+}
+
+/// Lista las tareas de respaldo instaladas con su último snapshot.
+pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let dir = state.backup_dir.clone();
+    match tokio::task::spawn_blocking(move || {
+        let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
+        tasks
+            .into_iter()
+            .map(|task| {
+                let last = last_snapshot(&task);
+                serde_json::json!({
+                    "task": task,
+                    "last_snapshot": last,
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    {
+        Ok(list) => axum::Json(ApiResponse::ok(list, "Tareas de respaldo")).into_response(),
+        Err(_) => server_error("consulta de respaldos interrumpida"),
+    }
+}
+
+/// Plan de ejecución de una tarea de respaldo.
+pub async fn backup_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<PathBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let dir = state.backup_dir.clone();
+    let id = body.path;
+    match tokio::task::spawn_blocking(move || {
+        let tasks = nas_engine::tasks::BackupTask::discover(&dir)?;
+        let task = tasks
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| nas_core::NasError::NotFound(format!("tarea '{id}' no encontrada")))?;
+
+        let problems = task.validate();
+        if !problems.is_empty() {
+            return Err(nas_core::NasError::Invalid(problems.join("; ")));
+        }
+
+        let previous = last_snapshot_path(&task);
+        let plan = task.plan(previous.as_deref(), &chrono::Local::now());
+        let steps: Vec<String> = plan
+            .iter()
+            .map(|step| nas_core::shell::quote_all(step))
+            .collect();
+
+        Ok::<_, nas_core::NasError>(serde_json::json!({
+            "task": task,
+            "last_snapshot": previous.map(|path| path.display().to_string()),
+            "steps": steps,
+        }))
+    })
+    .await
+    {
+        Ok(Ok(payload)) => axum::Json(ApiResponse::ok(payload, "Plan de respaldo")).into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("planificación interrumpida"),
+    }
+}
+
+/// Últimas entradas de auditoría del panel.
+pub async fn audit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AuditQuery>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "se requieren privilegios de administrador",
+            )),
+        )
+            .into_response();
+    }
+
+    match state.auth.db().recent_audit(query.limit.clamp(1, 500)) {
+        Ok(rows) => axum::Json(ApiResponse::ok(rows, "Auditoría del panel")).into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
+fn is_admin(state: &AppState, user: &str) -> bool {
+    state
+        .auth
+        .db()
+        .user_role(user)
+        .ok()
+        .flatten()
+        .is_some_and(|role| matches!(role.as_str(), "admin" | "superadmin"))
+}
+
+fn last_snapshot(task: &nas_engine::tasks::BackupTask) -> Option<String> {
+    last_snapshot_path(task).map(|path| path.display().to_string())
+}
+
+fn last_snapshot_path(task: &nas_engine::tasks::BackupTask) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(task.task_dir()).ok()?;
+    let mut snapshots: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("snapshot_"))
+        })
+        .collect();
+    snapshots.sort();
+    snapshots.pop()
+}
