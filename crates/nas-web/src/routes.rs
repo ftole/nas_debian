@@ -1,17 +1,19 @@
 //! Manejadores HTTP del panel.
 
-use axum::extract::State;
+use axum::extract::{Multipart, Query, State};
 use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Form;
 use chrono::Utc;
-use nas_core::ApiResponse;
+use nas_core::{ApiResponse, NasError};
 use nas_engine::parsers::smb::parse_shares;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
 use serde::Deserialize;
+use tokio::io::AsyncWriteExt;
 
+use crate::files::{sanitize_filename, FileRoot};
 use crate::AppState;
 
 /// Sonda de vida usada por systemd/nginx.
@@ -49,8 +51,7 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
 
 /// Cierra la sesión eliminando la cookie y el registro en la base de datos.
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let cookies = cookie_header(&headers);
-    let _ = state.auth.logout(cookies);
+    let _ = state.auth.logout(cookie_header(&headers));
 
     let mut response = Redirect::to("/login").into_response();
     if let Ok(header) = HeaderValue::from_str(&state.auth.clear_cookie_header()) {
@@ -96,6 +97,7 @@ main{{max-width:960px;margin:24px auto;padding:0 22px;display:grid;gap:16px}}
 h1{{font-size:18px;margin:0}} h2{{font-size:13px;color:#94a3b8;margin:0 0 8px}}
 b{{color:#38bdf8;font-size:15px}}
 button{{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer}}
+code{{color:#7dd3fc}}
 </style></head>
 <body>
 <header><h1>NAS · {hostname} · <small>{role}</small></h1>
@@ -104,7 +106,7 @@ button{{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:
   <div class="card"><h2>Hostname</h2><b>{hostname}</b></div>
   <div class="card"><h2>Grupo de trabajo</h2><b>{workgroup}</b></div>
   <div class="card"><h2>IPv4 primaria</h2><b>{ip}</b></div>
-  <div class="card"><h2>API</h2><code>/api/metrics</code> · <code>/api/network</code> · <code>/api/shares</code> · <code>/api/users</code></div>
+  <div class="card"><h2>API</h2><code>/api/metrics</code> · <code>/api/network</code> · <code>/api/shares</code> · <code>/api/users</code> · <code>/api/files</code></div>
 </main>
 </body></html>"#,
         user = html_escape(&user)
@@ -180,6 +182,319 @@ pub async fn users(State(state): State<AppState>, headers: HeaderMap) -> Respons
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Usuarios y grupos")).into_response(),
         Err(_) => server_error("no se pudo leer el inventario de usuarios"),
     }
+}
+
+/// Parámetro `?path=` del explorador.
+#[derive(Debug, Deserialize)]
+pub struct FilesQuery {
+    #[serde(default)]
+    path: String,
+}
+
+/// Cuerpo con una única ruta.
+#[derive(Debug, Deserialize)]
+pub struct PathBody {
+    path: String,
+}
+
+/// Cuerpo para renombrar o mover.
+#[derive(Debug, Deserialize)]
+pub struct RenameBody {
+    from: String,
+    to: String,
+}
+
+fn file_root(state: &AppState) -> Result<FileRoot, Box<Response>> {
+    FileRoot::new(state.paths.data_root.clone())
+        .map_err(|error| Box::new(server_error(&error.to_string())))
+}
+
+/// Lista el contenido de un directorio.
+pub async fn files_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = query.path;
+
+    match tokio::task::spawn_blocking(move || root.list(&path)).await {
+        Ok(Ok(entries)) => {
+            axum::Json(ApiResponse::ok(entries, "Contenido del directorio")).into_response()
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("listado interrumpido"),
+    }
+}
+
+/// Descarga un archivo con cabeceras seguras.
+pub async fn files_download(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = query.path;
+    let name = path
+        .rsplit('/')
+        .next()
+        .map(str::to_string)
+        .unwrap_or_else(|| "descarga.bin".to_string());
+
+    match tokio::task::spawn_blocking(move || root.read(&path, 64 * 1024 * 1024)).await {
+        Ok(Ok(bytes)) => {
+            let mut response = Response::new(axum::body::Body::from(bytes));
+            let response_headers = response.headers_mut();
+            response_headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            if let Ok(value) = HeaderValue::from_str(&format!(
+                "attachment; filename=\"{}\"",
+                name.replace('"', "")
+            )) {
+                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
+            }
+            response_headers.insert(
+                "content-security-policy",
+                HeaderValue::from_static("default-src 'none'; sandbox"),
+            );
+            response
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("descarga interrumpida"),
+    }
+}
+
+/// Crea un directorio.
+pub async fn files_mkdir(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<PathBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = body.path;
+
+    match tokio::task::spawn_blocking(move || root.mkdir(&path)).await {
+        Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Directorio creado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("creación interrumpida"),
+    }
+}
+
+/// Renombra o mueve un elemento.
+pub async fn files_rename(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<RenameBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    match tokio::task::spawn_blocking(move || root.rename(&body.from, &body.to)).await {
+        Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Elemento renombrado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("renombrado interrumpido"),
+    }
+}
+
+/// Envía un elemento a la papelera interna.
+pub async fn files_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<PathBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = body.path;
+
+    match tokio::task::spawn_blocking(move || root.trash(&path)).await {
+        Ok(Ok(target)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "trash": target.display().to_string() }),
+            "Elemento movido a la papelera",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("borrado interrumpido"),
+    }
+}
+
+/// Sube uno o varios archivos a un directorio, escribiendo por streaming.
+pub async fn files_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    let mut directory = String::new();
+    let mut saved: Vec<String> = Vec::new();
+
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(error) => return bad_request(&format!("multipart inválido: {error}")),
+        };
+
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "path" {
+            match field.text().await {
+                Ok(text) => directory = text,
+                Err(error) => return bad_request(&format!("campo path inválido: {error}")),
+            }
+            continue;
+        }
+        if name != "file" {
+            continue;
+        }
+
+        let filename = match sanitize_filename(field.file_name().unwrap_or_default()) {
+            Ok(name) => name,
+            Err(error) => return error_response(error),
+        };
+        let target_dir = match root.resolve_dir(&directory) {
+            Ok(dir) => dir,
+            Err(error) => return error_response(error),
+        };
+        let destination = target_dir.join(&filename);
+        if destination.exists() {
+            return (
+                StatusCode::CONFLICT,
+                axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "el archivo '{filename}' ya existe"
+                ))),
+            )
+                .into_response();
+        }
+
+        let temporary = target_dir.join(format!(".upload-{}", random_hex()));
+        let mut file = match tokio::fs::File::create(&temporary).await {
+            Ok(file) => file,
+            Err(error) => return server_error(&format!("no se pudo crear el temporal: {error}")),
+        };
+
+        let mut field = field;
+        let mut total: u64 = 0;
+        loop {
+            match field.chunk().await {
+                Ok(Some(chunk)) => {
+                    total += chunk.len() as u64;
+                    if total > 512 * 1024 * 1024 {
+                        let _ = tokio::fs::remove_file(&temporary).await;
+                        return (
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            axum::Json(ApiResponse::<serde_json::Value>::error(
+                                "el archivo supera el límite de 512 MB",
+                            )),
+                        )
+                            .into_response();
+                    }
+                    if let Err(error) = file.write_all(&chunk).await {
+                        let _ = tokio::fs::remove_file(&temporary).await;
+                        return server_error(&format!("fallo al escribir: {error}"));
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = tokio::fs::remove_file(&temporary).await;
+                    return bad_request(&format!("carga interrumpida: {error}"));
+                }
+            }
+        }
+
+        if let Err(error) = file.flush().await {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return server_error(&format!("fallo al sincronizar: {error}"));
+        }
+        drop(file);
+
+        if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return server_error(&format!("no se pudo promover la carga: {error}"));
+        }
+
+        saved.push(if directory.is_empty() {
+            filename
+        } else {
+            format!("{directory}/{filename}")
+        });
+    }
+
+    axum::Json(ApiResponse::ok(
+        serde_json::json!({ "uploaded": saved }),
+        "Carga completada",
+    ))
+    .into_response()
+}
+
+fn random_hex() -> String {
+    let mut buffer = [0u8; 8];
+    let _ = getrandom::getrandom(&mut buffer);
+    hex::encode(buffer)
+}
+
+fn bad_request(message: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        axum::Json(ApiResponse::<serde_json::Value>::error(message)),
+    )
+        .into_response()
+}
+
+fn error_response(error: NasError) -> Response {
+    let status = match error {
+        NasError::Denied(_) => StatusCode::FORBIDDEN,
+        NasError::NotFound(_) => StatusCode::NOT_FOUND,
+        NasError::Invalid(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (
+        status,
+        axum::Json(ApiResponse::<serde_json::Value>::error(error.to_string())),
+    )
+        .into_response()
 }
 
 fn cookie_header(headers: &HeaderMap) -> &str {
