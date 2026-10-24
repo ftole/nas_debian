@@ -862,3 +862,30 @@ async fn shares_valida_nombres_y_sesion() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn usuarios_valida_nombres_y_privilegios() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/users",
+            &cookie,
+            r#"{"username":"Usuario Malo","password":"123456","groups":[]}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/groups",
+            &cookie,
+            r#"{"name":"no-prefijo"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
