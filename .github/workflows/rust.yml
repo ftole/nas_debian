@@ -47,3 +47,6 @@ jobs:
 
       - name: Compilar en modo release
         run: cargo build --workspace --release --locked
+
+      - name: Validar empaquetado (systemd, nginx, instalador)
+        run: bash packaging/verify.sh
