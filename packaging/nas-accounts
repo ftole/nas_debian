@@ -51,24 +51,24 @@ samba_set() {
 
 case "$ACTION" in
     create-user)
-        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; GROUPS="${7:-}"
+        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; USER_GROUPS="${7:-}"
         valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
         id -u "$USER_NAME" >/dev/null 2>&1 && { echo "el usuario ya existe" >&2; exit 5; }
         read_password "$PASS_ARG"
         useradd -m -s /bin/bash -c "$FULL" "$USER_NAME"
         printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
-        apply_groups "$USER_NAME" "$GROUPS"
+        apply_groups "$USER_NAME" "$USER_GROUPS"
         samba_set "$USER_NAME" "$SAMBA"
         echo "usuario $USER_NAME creado"
         ;;
     update-user)
-        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; GROUPS="${7:-}"
+        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; USER_GROUPS="${7:-}"
         valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
         id -u "$USER_NAME" >/dev/null 2>&1 || { echo "el usuario no existe" >&2; exit 6; }
         read_password "$PASS_ARG"
         usermod -c "$FULL" "$USER_NAME"
         printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
-        apply_groups "$USER_NAME" "$GROUPS"
+        apply_groups "$USER_NAME" "$USER_GROUPS"
         samba_set "$USER_NAME" "$SAMBA"
         echo "usuario $USER_NAME actualizado"
         ;;
