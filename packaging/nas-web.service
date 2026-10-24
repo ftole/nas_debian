@@ -1,0 +1,39 @@
+[Unit]
+Description=Panel web NAS (Rust/axum)
+Documentation=https://github.com/ftole/nas_debian
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nas-web
+Group=nas-web
+EnvironmentFile=/etc/nas-web.env
+ExecStart=/usr/local/bin/nas-web
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+
+# Endurecimiento (se permite setuid para `sudo -n` acotado por sudoers)
+NoNewPrivileges=no
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/nas /srv/nas
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
