@@ -1,65 +1,89 @@
-//! Autenticación por cookie firmada (HMAC-SHA256).
+//! Autenticación con sesiones persistentes en SQLite.
 //!
-//! Sesión sin estado en servidor: la cookie contiene `usuario|expiración|firma`.
-//! La contraseña se valida contra su SHA-256 y todas las comparaciones son de
-//! tiempo constante.
+//! La cookie transporta un identificador aleatorio de 256 bits; la sesión vive
+//! en la base de datos con expiración. Las comparaciones de hash son de tiempo
+//! constante y la cookie es `HttpOnly`, `SameSite=Strict` y `Secure` por defecto.
 
-use hmac::{Hmac, Mac};
+use nas_core::NasResult;
 use sha2::{Digest, Sha256};
 
-type HmacSha256 = Hmac<Sha256>;
+use crate::db::Db;
 
 /// Configuración de autenticación del panel.
 #[derive(Clone)]
 pub struct Auth {
-    user: String,
-    password_sha256: String,
-    secret: Vec<u8>,
+    db: Db,
     ttl_secs: i64,
     secure_cookie: bool,
 }
 
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Auth")
+            .field("db", &self.db.path())
+            .field("ttl_secs", &self.ttl_secs)
+            .field("secure_cookie", &self.secure_cookie)
+            .finish()
+    }
+}
+
 impl Auth {
-    /// Crea la configuración a partir de usuario, hash SHA-256 de la contraseña y secreto HMAC.
-    pub fn new(
-        user: impl Into<String>,
-        password_sha256: impl Into<String>,
-        secret: impl AsRef<[u8]>,
-        ttl_secs: i64,
-        secure_cookie: bool,
-    ) -> Self {
+    /// Nombre de la cookie de sesión.
+    pub const COOKIE: &'static str = "nas_session";
+
+    /// Crea la configuración sobre una base de datos ya abierta.
+    pub fn new(db: Db, ttl_secs: i64, secure_cookie: bool) -> Self {
         Self {
-            user: user.into(),
-            password_sha256: password_sha256.into().to_lowercase(),
-            secret: secret.as_ref().to_vec(),
+            db,
             ttl_secs,
             secure_cookie,
         }
     }
 
-    /// Nombre de la cookie de sesión.
-    pub const COOKIE: &'static str = "nas_session";
+    /// Acceso a la base de datos subyacente.
+    pub fn db(&self) -> &Db {
+        &self.db
+    }
 
-    /// Verifica usuario y contraseña.
-    pub fn verify_credentials(&self, user: &str, password: &str) -> bool {
+    /// Valida credenciales y crea una sesión; devuelve el identificador.
+    pub fn login(&self, username: &str, password: &str, now: i64) -> NasResult<Option<String>> {
+        let Some(stored) = self.db.user_hash(username)? else {
+            return Ok(None);
+        };
+
         let mut hasher = Sha256::new();
         hasher.update(password.as_bytes());
         let provided = hex::encode(hasher.finalize());
 
-        ct_eq(user, &self.user) & ct_eq(&provided, &self.password_sha256)
+        if !ct_eq(&provided, &stored) {
+            return Ok(None);
+        }
+
+        let id = random_id()?;
+        self.db.create_session(&id, username, now + self.ttl_secs)?;
+        Ok(Some(id))
     }
 
-    /// Emite el valor de cookie para el usuario, con expiración y firma.
-    pub fn issue_cookie(&self, now: i64) -> String {
-        let exp = now + self.ttl_secs;
-        let payload = format!("{}|{}", self.user, exp);
-        format!("{payload}|{}", self.sign(&payload))
+    /// Resuelve el usuario autenticado a partir de las cookies.
+    pub fn authenticate(&self, cookies: &str, now: i64) -> NasResult<Option<String>> {
+        let Some(id) = cookie_value(cookies) else {
+            return Ok(None);
+        };
+        self.db.session_user(id, now)
     }
 
-    /// Construye la cabecera `Set-Cookie` correspondiente.
-    pub fn set_cookie_header(&self, value: &str) -> String {
+    /// Invalida la sesión asociada a las cookies.
+    pub fn logout(&self, cookies: &str) -> NasResult<()> {
+        if let Some(id) = cookie_value(cookies) {
+            self.db.delete_session(id)?;
+        }
+        Ok(())
+    }
+
+    /// Cabecera `Set-Cookie` para una sesión nueva.
+    pub fn set_cookie_header(&self, session_id: &str) -> String {
         let mut header = format!(
-            "{}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+            "{}={session_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
             Self::COOKIE,
             self.ttl_secs
         );
@@ -69,57 +93,33 @@ impl Auth {
         header
     }
 
-    /// Cabecera para eliminar la cookie.
+    /// Cabecera `Set-Cookie` para eliminar la sesión.
     pub fn clear_cookie_header(&self) -> String {
-        format!(
+        let mut header = format!(
             "{}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
             Self::COOKIE
-        )
-    }
-
-    /// Comprueba la cookie de una petición y devuelve el usuario autenticado.
-    pub fn authenticate(&self, cookies: &str, now: i64) -> Option<String> {
-        let raw = cookies
-            .split(';')
-            .filter_map(|part| part.trim().split_once('='))
-            .find(|(name, _)| *name == Self::COOKIE)
-            .map(|(_, value)| value)?;
-
-        let mut parts = raw.split('|');
-        let user = parts.next()?;
-        let exp: i64 = parts.next()?.parse().ok()?;
-        let signature = parts.next()?;
-        if parts.next().is_some() {
-            return None;
+        );
+        if self.secure_cookie {
+            header.push_str("; Secure");
         }
-
-        if exp <= now {
-            return None;
-        }
-
-        let expected = self.sign(&format!("{user}|{exp}"));
-        if ct_eq(signature, &expected) {
-            Some(user.to_string())
-        } else {
-            None
-        }
-    }
-
-    fn sign(&self, payload: &str) -> String {
-        let mut mac = HmacSha256::new_from_slice(&self.secret).expect("clave HMAC válida");
-        mac.update(payload.as_bytes());
-        hex::encode(mac.finalize().into_bytes())
+        header
     }
 }
 
-impl std::fmt::Debug for Auth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Auth")
-            .field("user", &self.user)
-            .field("ttl_secs", &self.ttl_secs)
-            .field("secure_cookie", &self.secure_cookie)
-            .finish_non_exhaustive()
-    }
+fn cookie_value(cookies: &str) -> Option<&str> {
+    cookies
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .find(|(name, _)| *name == Auth::COOKIE)
+        .map(|(_, value)| value)
+        .filter(|value| !value.is_empty())
+}
+
+fn random_id() -> NasResult<String> {
+    let mut buffer = [0u8; 32];
+    getrandom::getrandom(&mut buffer)
+        .map_err(|error| nas_core::NasError::Invalid(format!("generador aleatorio: {error}")))?;
+    Ok(hex::encode(buffer))
 }
 
 fn ct_eq(a: &str, b: &str) -> bool {
@@ -135,48 +135,73 @@ fn ct_eq(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::Auth;
-
-    fn auth() -> Auth {
-        Auth::new("admin", sha256_hex("Secreta123"), b"clave-hmac", 3600, true)
-    }
+    use crate::db::Db;
+    use sha2::{Digest, Sha256};
 
     fn sha256_hex(value: &str) -> String {
-        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(value.as_bytes());
         hex::encode(hasher.finalize())
     }
 
-    #[test]
-    fn valida_credenciales_correctas() {
-        assert!(auth().verify_credentials("admin", "Secreta123"));
-        assert!(!auth().verify_credentials("admin", "otra"));
-        assert!(!auth().verify_credentials("root", "Secreta123"));
+    fn auth() -> Auth {
+        let db = Db::in_memory().expect("db");
+        db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+            .expect("usuario");
+        Auth::new(db, 3600, true)
     }
 
     #[test]
-    fn emite_y_valida_cookie() {
+    fn inicia_sesion_con_credenciales_correctas() {
         let auth = auth();
-        let cookie = auth.issue_cookie(1_000);
+        let id = auth
+            .login("admin", "Secreta123", 1_000)
+            .expect("login")
+            .expect("sesión");
+        assert_eq!(
+            auth.authenticate(&format!("{}= {id}", Auth::COOKIE).replace(' ', ""), 1_000)
+                .expect("auth"),
+            Some("admin".to_string())
+        );
+    }
+
+    #[test]
+    fn rechaza_credenciales_incorrectas() {
+        let auth = auth();
+        assert!(auth.login("admin", "otra", 1_000).expect("login").is_none());
         assert!(auth
-            .authenticate(&format!("otra=1; nas_session={cookie}"), 1_000)
-            .is_some());
+            .login("root", "Secreta123", 1_000)
+            .expect("login")
+            .is_none());
     }
 
     #[test]
-    fn rechaza_cookie_expirada_o_manipulada() {
+    fn rechaza_sesion_expirada_y_cerrada() {
         let auth = auth();
-        let cookie = auth.issue_cookie(1_000);
-        assert!(auth.authenticate(&cookie, 9_999).is_none());
+        let id = auth
+            .login("admin", "Secreta123", 1_000)
+            .expect("login")
+            .expect("id");
+        let cookie = format!("{}={id}", Auth::COOKIE);
 
-        let tampered = cookie.replace("admin", "root");
-        assert!(auth.authenticate(&tampered, 1_000).is_none());
+        assert!(auth.authenticate(&cookie, 9_999).expect("auth").is_none());
+
+        let id = auth
+            .login("admin", "Secreta123", 1_000)
+            .expect("login")
+            .expect("id");
+        auth.logout(&format!("{}={id}", Auth::COOKIE))
+            .expect("logout");
+        assert!(auth
+            .authenticate(&format!("{}={id}", Auth::COOKIE), 1_000)
+            .expect("auth")
+            .is_none());
     }
 
     #[test]
-    fn cabeceras_de_cookie_incluyen_atributos_de_seguridad() {
+    fn cabeceras_incluyen_atributos_de_seguridad() {
         let auth = auth();
-        let header = auth.set_cookie_header("valor");
+        let header = auth.set_cookie_header("abc");
         assert!(header.contains("HttpOnly"));
         assert!(header.contains("SameSite=Strict"));
         assert!(header.contains("Secure"));
