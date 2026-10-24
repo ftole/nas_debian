@@ -110,6 +110,7 @@ echo "[4/7] Instalando helpers privilegiados de Samba"
 install -m 0755 "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
 install -m 0755 "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
 install -m 0755 "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
+install -m 0755 "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-accounts
 install -d -m 2770 -o root -g www-data /var/lib/nas/staging 2>/dev/null || true
 
 echo "[5/7] Instalando unidad systemd"
@@ -135,6 +136,11 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/rm -rf /var/lib/nas/dev-sync/*, /usr/bin/rm -rf /srv/nas/.trash/*, \
     /usr/bin/mkdir -p /var/lib/nas/dev-sync/*, /usr/bin/mkdir -p /srv/nas/*, \
     /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
+    /usr/bin/tmux, /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
+    /usr/bin/fstrim -v /srv/nas, \
+    /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
+    /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
+    /usr/local/sbin/nas-accounts *, \
     /usr/bin/true
 SUDO
 chmod 0440 "$SUDOERS_FILE"
