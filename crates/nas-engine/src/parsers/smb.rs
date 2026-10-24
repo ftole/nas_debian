@@ -150,6 +150,95 @@ pub fn parse_testparm(text: &str) -> SambaConfig {
     config
 }
 
+/// Recurso compartido declarado en `smb.conf`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Share {
+    /// Nombre de la sección.
+    pub name: String,
+    /// Ruta en disco.
+    pub path: Option<String>,
+    /// Solo lectura.
+    pub read_only: bool,
+    /// Acceso de invitados.
+    pub guest_ok: bool,
+    /// Visible en el explorador de red.
+    pub browseable: bool,
+    /// Usuarios autorizados.
+    pub valid_users: Vec<String>,
+    /// Comentario descriptivo.
+    pub comment: Option<String>,
+}
+
+/// Extrae los recursos compartidos (todas las secciones salvo `[global]`).
+pub fn parse_shares(text: &str) -> Vec<Share> {
+    let mut shares: Vec<Share> = Vec::new();
+    let mut current: Option<Share> = None;
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            if let Some(share) = current.take() {
+                shares.push(share);
+            }
+            let name = line[1..line.len() - 1].trim().to_string();
+            if name.eq_ignore_ascii_case("global") || name.is_empty() {
+                continue;
+            }
+            current = Some(Share {
+                name,
+                path: None,
+                read_only: true,
+                guest_ok: false,
+                browseable: true,
+                valid_users: Vec::new(),
+                comment: None,
+            });
+            continue;
+        }
+
+        let Some(share) = current.as_mut() else {
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_lowercase();
+        let value = value.trim();
+
+        match key.as_str() {
+            "path" => share.path = Some(value.to_string()),
+            "read only" => {
+                share.read_only = !matches!(value.to_lowercase().as_str(), "no" | "false" | "0")
+            }
+            "guest ok" | "public" => {
+                share.guest_ok = matches!(value.to_lowercase().as_str(), "yes" | "true" | "1")
+            }
+            "browseable" | "browsable" => {
+                share.browseable = !matches!(value.to_lowercase().as_str(), "no" | "false" | "0")
+            }
+            "valid users" => {
+                share.valid_users = value
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .filter(|user| !user.is_empty())
+                    .map(str::to_string)
+                    .collect();
+            }
+            "comment" => share.comment = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    if let Some(share) = current {
+        shares.push(share);
+    }
+
+    shares
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_smb_conf, parse_testparm};
@@ -192,6 +281,47 @@ mod tests {
     fn default_es_netbios_habilitado() {
         assert!(super::SambaConfig::default().netbios_enabled);
         assert!(parse_smb_conf("").netbios_enabled);
+    }
+
+    #[test]
+    fn extrae_recursos_compartidos_completos() {
+        let text = "[global]
+   workgroup = TEAM-JOFRATO
+
+[SISTEMAS]
+   path = /srv/nas/SISTEMAS
+   read only = no
+   valid users = @grp_samba
+   comment = Sistemas
+
+[CONTABILIDAD$]
+   path = /srv/nas/CONTABILIDAD
+   read only = yes
+   guest ok = no
+   browseable = no
+";
+
+        let shares = super::parse_shares(text);
+        assert_eq!(shares.len(), 2);
+        assert_eq!(shares[0].name, "SISTEMAS");
+        assert_eq!(shares[0].path.as_deref(), Some("/srv/nas/SISTEMAS"));
+        assert!(!shares[0].read_only);
+        assert_eq!(shares[0].valid_users, vec!["@grp_samba"]);
+        assert_eq!(shares[0].comment.as_deref(), Some("Sistemas"));
+
+        assert_eq!(shares[1].name, "CONTABILIDAD$");
+        assert!(shares[1].read_only);
+        assert!(!shares[1].browseable);
+    }
+
+    #[test]
+    fn sin_recursos_devuelve_lista_vacia() {
+        assert!(super::parse_shares(
+            "[global]
+ workgroup = WG
+"
+        )
+        .is_empty());
     }
 
     #[test]
