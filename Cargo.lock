@@ -1100,9 +1100,12 @@ dependencies = [
 name = "nasctl"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
+ "nas-audit",
  "nas-core",
  "nas-inventory",
+ "nas-ssh",
  "serde",
  "serde_json",
 ]
