@@ -17,10 +17,11 @@ TimeoutStopSec=10
 # Endurecimiento. `sudo -n` requiere CAP_SETUID/SETGID y las acciones
 # privilegiadas acotadas (btrfs/fstrim) necesitan CAP_SYS_ADMIN.
 NoNewPrivileges=no
+# ProtectHome=no porque useradd -m crea /home/<usuario>.
 # ProtectSystem=yes (no strict) porque el helper validado escribe /etc/samba/smb.conf
 # en el mismo namespace; /usr y /boot siguen protegidos y /etc es root-only.
 ProtectSystem=yes
-ProtectHome=yes
+ProtectHome=no
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
