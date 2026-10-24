@@ -76,8 +76,8 @@ case "$ACTION" in
         USER_NAME="${1:-}"; ENABLE="${2:-1}"
         valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
         if [ "$ENABLE" = "1" ]; then
+            usermod -e "" "$USER_NAME" 2>/dev/null || true
             usermod -U "$USER_NAME" 2>/dev/null || true
-            usermod -e "" "$USER_NAME"
             smbpasswd -e "$USER_NAME" >/dev/null 2>&1 || true
         else
             usermod -L "$USER_NAME"
@@ -101,7 +101,7 @@ case "$ACTION" in
         if [ "$ACTION" = "add-member" ]; then
             gpasswd -a "$USER_NAME" "$GROUP" >/dev/null
         else
-            gpasswd -d "$USER_NAME" "$GROUP" >/dev/null
+            gpasswd -d "$USER_NAME" "$GROUP" >/dev/null 2>&1 || true
         fi
         echo "$USER_NAME $ACTION $GROUP"
         ;;
