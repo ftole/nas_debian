@@ -479,10 +479,13 @@ fn bad_request(message: &str) -> Response {
 }
 
 fn error_response(error: NasError) -> Response {
-    let status = match error {
+    let status = match &error {
         NasError::Denied(_) => StatusCode::FORBIDDEN,
         NasError::NotFound(_) => StatusCode::NOT_FOUND,
         NasError::Invalid(_) => StatusCode::BAD_REQUEST,
+        NasError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            StatusCode::NOT_FOUND
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
