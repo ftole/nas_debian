@@ -35,18 +35,6 @@ pub async fn login_form() -> Html<String> {
     Html(views::login(&hostname(), None))
 }
 
-/// Hoja de estilos de la pantalla de acceso.
-pub async fn login_css() -> Response {
-    (
-        [
-            (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
-            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
-        ],
-        views::LOGIN_CSS,
-    )
-        .into_response()
-}
-
 /// Credenciales enviadas por el formulario.
 #[derive(Debug, Deserialize)]
 pub struct LoginForm {
@@ -1264,35 +1252,66 @@ pub async fn backup_run(
     }
 }
 
-fn page_context<'a>(
-    state: &AppState,
-    user: &'a str,
-    section: &'a str,
-    hostname: &'a str,
-    workgroup: &'a str,
-) -> views::PageCtx<'a> {
-    views::PageCtx {
-        active: section,
-        user,
-        role: state.role.label(),
-        hostname,
-        workgroup,
-    }
-}
-
-fn render(state: &AppState, user: &str, section: &str, title: &str, body: String) -> Response {
-    let hostname = std::fs::read_to_string("/etc/hostname")
+fn hostname_value() -> String {
+    std::fs::read_to_string("/etc/hostname")
         .map(|value| value.trim().to_string())
         .ok()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "SRV-NAS".to_string());
-    let workgroup = std::fs::read_to_string(&state.paths.samba_conf)
+        .unwrap_or_else(|| "SRV-NAS".to_string())
+}
+
+fn workgroup_value(state: &AppState) -> String {
+    std::fs::read_to_string(&state.paths.samba_conf)
         .ok()
         .and_then(|text| nas_core::config::parse_workgroup(&text))
-        .unwrap_or_else(|| "N/D".to_string());
+        .unwrap_or_else(|| "N/D".to_string())
+}
 
-    let ctx = page_context(state, user, section, &hostname, &workgroup);
-    Html(views::layout(&ctx, title, &body)).into_response()
+fn server_ip() -> String {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("1.1.1.1:53")?;
+            socket.local_addr()
+        })
+        .map(|addr| addr.ip().to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
+fn render_shell(state: &AppState, user: &str, active: &str) -> Response {
+    let role = state
+        .auth
+        .db()
+        .user_role(user)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let is_admin = matches!(role.as_str(), "admin" | "superadmin");
+    let is_super = role == "superadmin";
+    let csrf = views::csrf_token();
+
+    let shell = views::Shell {
+        active,
+        user,
+        hostname: &hostname_value(),
+        workgroup: &workgroup_value(state),
+        role_label: if is_super {
+            "Superadministrador"
+        } else if is_admin {
+            "Administrador"
+        } else {
+            "Operador Web"
+        },
+        server_role: state.role.as_str(),
+        is_admin,
+        is_super,
+        ip: &server_ip(),
+    };
+
+    Html(views::shell(&shell, &csrf)).into_response()
+}
+
+fn login_redirect() -> Response {
+    Redirect::to("/login").into_response()
 }
 
 /// Hoja de estilos del panel.
@@ -1307,7 +1326,19 @@ pub async fn css() -> Response {
         .into_response()
 }
 
-/// Favicon del panel.
+/// Hoja de estilos de la pantalla de acceso.
+pub async fn login_css() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        views::LOGIN_CSS,
+    )
+        .into_response()
+}
+
+/// Favicon.
 pub async fn favicon() -> Response {
     (
         [
@@ -1319,233 +1350,81 @@ pub async fn favicon() -> Response {
         .into_response()
 }
 
-fn login_redirect() -> Response {
-    Redirect::to("/login").into_response()
+/// Comportamiento original del panel.
+pub async fn app_js() -> Response {
+    js_response(crate::assets::APP_JS)
 }
 
-fn load_error(message: &str) -> String {
-    format!(
-        "<div class=\"panel\"><div class=\"card\"><span class=\"badge err\">error</span> {}</div></div>",
-        views::esc(message)
+/// Visor de hojas de cálculo.
+pub async fn vendor_xlsx() -> Response {
+    js_response(crate::assets::XLSX_JS)
+}
+
+/// Compresión ZIP en el navegador.
+pub async fn vendor_jszip() -> Response {
+    js_response(crate::assets::JSZIP_JS)
+}
+
+/// Vista previa de documentos Word.
+pub async fn vendor_docx() -> Response {
+    js_response(crate::assets::DOCX_JS)
+}
+
+fn js_response(bytes: &'static [u8]) -> Response {
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        bytes,
     )
+        .into_response()
 }
 
-/// Vista del dashboard.
-pub async fn page_dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let metrics = match tokio::task::spawn_blocking(|| collect_status(&Runner::new())).await {
-        Ok(metrics) => metrics,
-        Err(_) => {
-            return render(
-                &state,
-                &user,
-                "dashboard",
-                "Dashboard",
-                load_error("métricas no disponibles"),
-            )
+macro_rules! page_handler {
+    ($name:ident, $active:literal) => {
+        pub async fn $name(State(state): State<AppState>, headers: HeaderMap) -> Response {
+            match require_auth(&state, &headers) {
+                Ok(user) => render_shell(&state, &user, $active),
+                Err(_) => login_redirect(),
+            }
         }
     };
-
-    let body = views::dashboard(&metrics, state.role.label());
-    render(&state, &user, "dashboard", "Dashboard", body)
 }
 
-/// Vista de recursos compartidos.
-pub async fn page_shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
+page_handler!(page_dashboard, "dashboard");
+page_handler!(page_shares, "shares");
+page_handler!(page_users, "users");
+page_handler!(page_backups, "backups");
+page_handler!(page_services, "services");
+page_handler!(page_diagnostics, "diagnostics");
+page_handler!(page_storage, "storage");
+page_handler!(page_files, "files");
+page_handler!(page_domain, "domain");
 
-    if !state.role.has_shares() {
-        return render(
-            &state,
-            &user,
-            "shares",
-            "Recursos",
-            load_error("el rol BACKUP no expone recursos compartidos"),
-        );
+/// Vista del terminal (solo superadministrador).
+pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match require_auth(&state, &headers) {
+        Ok(user) if is_superadmin(&state, &user) => render_shell(&state, &user, "terminal"),
+        Ok(user) => (
+            StatusCode::FORBIDDEN,
+            render_shell(&state, &user, "terminal"),
+        )
+            .into_response(),
+        Err(_) => login_redirect(),
     }
-
-    let path = state.paths.samba_conf.clone();
-    let body = match tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await {
-        Ok(Ok(text)) => views::shares(&parse_shares(&text)),
-        Ok(Err(error)) => load_error(&format!("no se pudo leer smb.conf: {error}")),
-        Err(_) => load_error("lectura interrumpida"),
-    };
-
-    render(&state, &user, "shares", "Recursos compartidos", body)
 }
 
-/// Vista de usuarios y grupos.
-pub async fn page_users(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let body = match tokio::task::spawn_blocking(|| {
-        let (mut users, mut groups) = nas_engine::users::load_local();
-        users.retain(|user| !user.system);
-        groups.retain(|group| group.name.starts_with("grp_"));
-        (users, groups)
-    })
-    .await
-    {
-        Ok((users, groups)) => views::users(&users, &groups),
-        Err(_) => load_error("inventario de usuarios no disponible"),
-    };
-
-    render(&state, &user, "users", "Usuarios y grupos", body)
-}
-
-/// Vista de tareas de respaldo.
-pub async fn page_backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let dir = state.backup_dir.clone();
-    let body = match tokio::task::spawn_blocking(move || {
-        let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
-        tasks
-            .into_iter()
-            .map(|task| {
-                let last = nas_engine::last_snapshot(&task).map(|path| {
-                    path.file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                        .unwrap_or_default()
-                });
-                (task, last)
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    {
-        Ok(tasks) => views::backups(&tasks),
-        Err(_) => load_error("tareas de respaldo no disponibles"),
-    };
-
-    render(&state, &user, "backups", "Respaldos", body)
-}
-
-/// Vista de servicios.
-pub async fn page_services(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let body = match tokio::task::spawn_blocking(|| {
-        nas_engine::services::collect(&Runner::new(), nas_engine::services::DEFAULT_SERVICES)
-    })
-    .await
-    {
-        Ok(list) => views::services(&list),
-        Err(_) => load_error("estado de servicios no disponible"),
-    };
-
-    render(&state, &user, "services", "Servicios", body)
-}
-
-/// Vista de diagnóstico.
-pub async fn page_diagnostics(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let paths = state.paths.clone();
-    let body = match tokio::task::spawn_blocking(move || {
-        nas_engine::diagnostics::collect(&paths, &Runner::new())
-    })
-    .await
-    {
-        Ok(checks) => views::diagnostics(&checks),
-        Err(_) => load_error("diagnóstico no disponible"),
-    };
-
-    render(&state, &user, "diagnostics", "Diagnóstico", body)
-}
-
-/// Vista de almacenamiento.
-pub async fn page_storage(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let paths = state.paths.clone();
-    let body = match tokio::task::spawn_blocking(move || {
-        let runner = Runner::new();
-        let overview = nas_engine::storage::overview_for(&paths, &runner);
-        let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
-        (overview, disks)
-    })
-    .await
-    {
-        Ok((Ok(overview), disks)) => views::storage(&overview, &disks),
-        Ok((Err(error), _)) => load_error(&error.to_string()),
-        Err(_) => load_error("almacenamiento no disponible"),
-    };
-
-    render(&state, &user, "storage", "Almacenamiento", body)
-}
-
-/// Vista del explorador de archivos.
-pub async fn page_files(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<FilesQuery>,
-) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let root = match FileRoot::new(state.paths.data_root.clone()) {
-        Ok(root) => root,
-        Err(error) => {
-            return render(
-                &state,
-                &user,
-                "files",
-                "Archivos",
-                load_error(&error.to_string()),
-            )
-        }
-    };
-
-    let current = query.path.clone();
-    let list_path = current.clone();
-    let body = match tokio::task::spawn_blocking(move || root.list(&list_path)).await {
-        Ok(Ok(entries)) => views::files(&current, &entries),
-        Ok(Err(error)) => load_error(&error.to_string()),
-        Err(_) => load_error("listado interrumpido"),
-    };
-
-    render(&state, &user, "files", "Archivos", body)
-}
-
-/// Vista de dominio.
-pub async fn page_domain(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-
-    let body =
-        match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
-            Ok(status) => views::domain(&status),
-            Err(_) => load_error("estado del dominio no disponible"),
-        };
-
-    render(&state, &user, "domain", "Dominio", body)
+/// Vista de auditoría (solo administradores).
+pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match require_auth(&state, &headers) {
+        Ok(user) if is_admin(&state, &user) => render_shell(&state, &user, "logs"),
+        Ok(user) => (StatusCode::FORBIDDEN, render_shell(&state, &user, "logs")).into_response(),
+        Err(_) => login_redirect(),
+    }
 }
 
 /// Descarga una carpeta (o archivo) como ZIP.
@@ -1594,55 +1473,4 @@ pub async fn files_zip(
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("compresión interrumpida"),
     }
-}
-
-/// Vista del terminal web (solo superadministrador).
-pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-    if !is_superadmin(&state, &user) {
-        return (
-            StatusCode::FORBIDDEN,
-            render(
-                &state,
-                &user,
-                "terminal",
-                "Terminal",
-                load_error("el terminal está reservado al superadministrador"),
-            ),
-        )
-            .into_response();
-    }
-
-    render(&state, &user, "terminal", "Terminal", views::terminal())
-}
-
-/// Vista de auditoría del panel (solo administradores).
-pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(_) => return login_redirect(),
-    };
-    if !is_admin(&state, &user) {
-        return (
-            StatusCode::FORBIDDEN,
-            render(
-                &state,
-                &user,
-                "audit",
-                "Auditoría",
-                load_error("se requieren privilegios de administrador"),
-            ),
-        )
-            .into_response();
-    }
-
-    let body = match state.auth.db().recent_audit(100) {
-        Ok(rows) => views::audit(&rows),
-        Err(error) => load_error(&error.to_string()),
-    };
-
-    render(&state, &user, "audit", "Auditoría", body)
 }
