@@ -14,7 +14,8 @@ Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10
 
-# Endurecimiento (se permite setuid para `sudo -n` acotado por sudoers)
+# Endurecimiento. `sudo -n` requiere CAP_SETUID/SETGID y las acciones
+# privilegiadas acotadas (btrfs/fstrim) necesitan CAP_SYS_ADMIN.
 NoNewPrivileges=no
 ProtectSystem=strict
 ProtectHome=yes
@@ -32,7 +33,7 @@ SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 ReadWritePaths=/var/lib/nas /srv/nas
 UMask=0077
-CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_MKNOD
 AmbientCapabilities=
 
 [Install]
