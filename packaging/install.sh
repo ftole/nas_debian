@@ -48,15 +48,43 @@ echo "[2/7] Creando usuario de servicio y directorios de estado"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
-install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR" "$STATE_DIR/audit"
-install -d -m 0775 -o root -g grp_samba "$DATA_ROOT" 2>/dev/null || install -d -m 0775 "$DATA_ROOT"
+
+# Grupos necesarios: www-data para compartir la base SQLite del panel PHP y
+# grp_samba para operar sobre /srv/nas. En instalaciones nuevas pueden no existir.
+usermod -aG www-data "$SERVICE_USER" 2>/dev/null || true
+usermod -aG grp_samba "$SERVICE_USER" 2>/dev/null || true
+
+if [ -d "$STATE_DIR" ]; then
+    # Migración en sitio: se conserva el propietario (www-data) para no romper
+    # el panel PHP y permitir el rollback; el grupo conserva acceso de escritura.
+    echo "    $STATE_DIR ya existe: se conserva su propietario (migración en sitio)"
+    chmod 2770 "$STATE_DIR" 2>/dev/null || true
+    chgrp www-data "$STATE_DIR" 2>/dev/null || true
+else
+    install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
+fi
+install -d -m 2770 "$STATE_DIR/audit" 2>/dev/null || true
+chgrp www-data "$STATE_DIR/audit" 2>/dev/null || true
+
+# Base de datos compartida: lectura/escritura para www-data y nas-web.
+if [ -f "$STATE_DIR/nas.sqlite" ]; then
+    chgrp www-data "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
+    chmod 0660 "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
+fi
+
+install -d -m 0775 "$DATA_ROOT" 2>/dev/null || true
 install -d -m 0750 /etc/nas
 
 echo "[3/7] Configurando variables de entorno"
 if [ ! -f "$ENV_FILE" ]; then
     secret="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    echo "    Defina la contraseña del panel (se guardará como SHA-256):"
-    read -r -s -p "    Contraseña: " password; echo
+    if [ -n "${NAS_WEB_PASSWORD:-}" ]; then
+        password="$NAS_WEB_PASSWORD"
+        echo "    Contraseña tomada de NAS_WEB_PASSWORD"
+    else
+        echo "    Defina la contraseña del panel (se guardará como SHA-256):"
+        read -r -s -p "    Contraseña: " password; echo
+    fi
     hash="$(printf '%s' "$password" | sha256sum | cut -d' ' -f1)"
     install -m 0600 -o root -g root /dev/null "$ENV_FILE"
     {
