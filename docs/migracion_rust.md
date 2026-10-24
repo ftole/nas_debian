@@ -12,7 +12,7 @@
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
-| **F3** | `nas-web` (axum) con todos los módulos operativos, terminal tmux y ejecución de respaldos | 🟡 Rebanada 7 |
+| **F3** | `nas-web` (axum) con API completa y **vistas HTML** del panel | 🟡 Rebanada 8 |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
@@ -275,9 +275,18 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
   `GET /api/terminal/capture`, **reservados al superadministrador** y con
   auditoría de apertura y cierre.
 
-Pendiente de F3: vistas HTML completas y ZIP de descargas. El terminal sobre
-WebSocket con `portable-pty` queda como mejora opcional (la paridad con PHP se
-logra con tmux + polling).
+### Vistas HTML (`nas-web::views`)
+
+- Layout Slate UI propio (CSS embebido, cero dependencias) con barra lateral de
+  8 secciones, cabecera con rol y cierre de sesión.
+- Páginas: `/dashboard`, `/shares`, `/users`, `/backups`, `/services`,
+  `/diagnostics`, `/storage`, `/files` y `/domain`, renderizadas en servidor con
+  datos reales y acciones vía `fetch` (plan/ejecutar respaldo, reiniciar
+  servicio, crear carpeta, subir y borrar archivos, unir al dominio).
+- `/` redirige a `/dashboard`; sin sesión todo redirige a `/login`.
+
+Pendiente de F3: vista de terminal (hoy sólo API), vista de auditoría y ZIP de
+descargas.
 
 ## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
