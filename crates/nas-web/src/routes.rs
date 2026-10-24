@@ -1249,3 +1249,72 @@ pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) ->
         Err(error) => server_error(&error),
     }
 }
+
+/// Cuerpo para ejecutar una tarea de respaldo.
+#[derive(Debug, Deserialize)]
+pub struct BackupRunBody {
+    path: String,
+    #[serde(default)]
+    confirm: bool,
+}
+
+/// Ejecuta una tarea de respaldo con las guardas del motor.
+pub async fn backup_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<BackupRunBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let dir = state.backup_dir.clone();
+    let id = body.path.clone();
+    let confirm = body.confirm;
+
+    let outcome = tokio::task::spawn_blocking(move || {
+        let tasks = nas_engine::tasks::BackupTask::discover(&dir)?;
+        let task = tasks
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| nas_core::NasError::NotFound(format!("tarea '{id}' no encontrada")))?;
+
+        let options = nas_engine::RunOptions {
+            dry_run: false,
+            confirmed: confirm,
+            sudo: true,
+            lock_dir: std::path::PathBuf::from("/var/lock"),
+        };
+
+        nas_engine::run_backup(&Runner::new(), &task, &options, &chrono::Local::now())
+    })
+    .await
+    .unwrap_or_else(|_| Err(nas_core::NasError::Invalid("ejecución interrumpida".into())));
+
+    match outcome {
+        Ok(report) => {
+            let _ = state.auth.db().append_audit(
+                &user,
+                "backup_run",
+                &report.task,
+                "SUCCESS",
+                &report.snapshot,
+            );
+            axum::Json(ApiResponse::ok(report, "Respaldo completado")).into_response()
+        }
+        Err(error) => {
+            let _ = state.auth.db().append_audit(
+                &user,
+                "backup_run",
+                &body.path,
+                "FAILED",
+                &error.to_string(),
+            );
+            error_response(error)
+        }
+    }
+}
