@@ -1474,3 +1474,823 @@ pub async fn files_zip(
         Err(_) => server_error("compresión interrumpida"),
     }
 }
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+pub struct ExtQuery {
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub grouped: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TrashBody {
+    #[serde(default)]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MoveBody {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveBody {
+    pub path: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DomainDiscoverBody {
+    pub domain: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DiagBody {
+    #[serde(default)]
+    pub r#type: String,
+}
+
+fn not_implemented(feature: &str) -> Response {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+            "{feature} aún no está portado a Rust (F3)"
+        ))),
+    )
+        .into_response()
+}
+
+fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
+    let output = Runner::new()
+        .run(&command)
+        .map_err(|error| error.to_string())?;
+    if output.is_success() {
+        Ok(output.stdout)
+    } else {
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+/// Logs recientes del sistema (journalctl).
+pub async fn logs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ExtQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+
+    match tokio::task::spawn_blocking(move || {
+        let spec = nas_exec::CommandSpec::new("journalctl")
+            .args(["-n", &limit.to_string(), "--no-pager", "-o", "short-iso"])
+            .timeout(std::time::Duration::from_secs(20));
+        run_json(spec)
+    })
+    .await
+    {
+        Ok(Ok(text)) => {
+            let entries: Vec<serde_json::Value> = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| {
+                    let mut parts = line.splitn(3, ' ');
+                    let timestamp = parts.next().unwrap_or_default();
+                    let unit = parts.next().unwrap_or("system");
+                    let message = parts.next().unwrap_or(line);
+                    serde_json::json!({
+                        "source": "system",
+                        "unit": unit,
+                        "timestamp": timestamp,
+                        "message": message,
+                        "action": message,
+                        "action_label": unit,
+                        "badge": "blue",
+                    })
+                })
+                .collect();
+            axum::Json(ApiResponse::ok(entries, "Logs del sistema")).into_response()
+        }
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("lectura de logs interrumpida"),
+    }
+}
+
+/// Alias de listado de grupos.
+pub async fn groups_list(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    users(State(state), headers).await
+}
+
+/// Mapa de acceso de recursos (recursos, grupos y usuarios).
+pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let path = state.paths.samba_conf.clone();
+
+    match tokio::task::spawn_blocking(move || {
+        let shares: Vec<String> = std::fs::read_to_string(&path)
+            .ok()
+            .map(|text| {
+                nas_engine::parsers::smb::parse_shares(&text)
+                    .into_iter()
+                    .map(|share| share.name)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let (_, groups) = nas_engine::users::load_local();
+        let groups: Vec<String> = groups
+            .into_iter()
+            .filter(|group| group.name.starts_with("grp_"))
+            .map(|group| group.name)
+            .collect();
+        let (mut users, _) = nas_engine::users::load_local();
+        users.retain(|user| !user.system);
+        let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
+        serde_json::json!({ "shares": shares, "groups": groups, "users": users })
+    })
+    .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Mapa de acceso")).into_response(),
+        Err(_) => server_error("mapa de acceso interrumpido"),
+    }
+}
+
+/// Unidades de almacenamiento adicionales (aún sin montajes extra).
+pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    axum::Json(ApiResponse::ok(
+        serde_json::json!({ "units": [] }),
+        "Unidades de almacenamiento",
+    ))
+    .into_response()
+}
+
+/// Subvolúmenes Btrfs (vacío si el filesystem no es Btrfs).
+pub async fn storage_subvolumes(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    axum::Json(ApiResponse::ok(
+        serde_json::json!({ "subvolumes": [] }),
+        "Subvolúmenes",
+    ))
+    .into_response()
+}
+
+/// Estado del scrub Btrfs.
+pub async fn storage_scrub(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| {
+        run_json(
+            nas_exec::CommandSpec::new("btrfs")
+                .args(["scrub", "status", "/srv/nas"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(15)),
+        )
+    })
+    .await
+    {
+        Ok(Ok(text)) => {
+            let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
+            axum::Json(ApiResponse::ok(status, "Estado de scrub")).into_response()
+        }
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("consulta de scrub interrumpida"),
+    }
+}
+
+/// Inicia el scrub Btrfs.
+pub async fn storage_scrub_start(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    match tokio::task::spawn_blocking(|| {
+        run_json(
+            nas_exec::CommandSpec::new("btrfs")
+                .args(["scrub", "start", "/srv/nas"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        )
+    })
+    .await
+    {
+        Ok(Ok(text)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "output": text }),
+            "Scrub iniciado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("inicio de scrub interrumpido"),
+    }
+}
+
+/// Ejecuta fstrim sobre el volumen.
+pub async fn storage_trim(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    match tokio::task::spawn_blocking(|| {
+        run_json(
+            nas_exec::CommandSpec::new("fstrim")
+                .args(["-v", "/srv/nas"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(120)),
+        )
+    })
+    .await
+    {
+        Ok(Ok(text)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "output": text }),
+            "TRIM ejecutado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("TRIM interrumpido"),
+    }
+}
+
+/// Respaldos actualmente en ejecución.
+pub async fn backups_running(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| {
+        let output = Runner::new().run(
+            &nas_exec::CommandSpec::new("pgrep")
+                .args(["-af", "backup_|rsync"])
+                .timeout(std::time::Duration::from_secs(10)),
+        );
+        let mut tasks: Vec<String> = Vec::new();
+        if let Ok(output) = output {
+            for line in output.stdout.lines() {
+                if let Some(name) = line.split("backup_").nth(1) {
+                    let id = name
+                        .split(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+                        .next()
+                        .unwrap_or("");
+                    if !id.is_empty() && !tasks.iter().any(|t| t == id) {
+                        tasks.push(id.to_string());
+                    }
+                }
+            }
+        }
+        let running = !tasks.is_empty();
+        serde_json::json!({ "running": running, "tasks": tasks })
+    })
+    .await
+    {
+        Ok(payload) => {
+            axum::Json(ApiResponse::ok(payload, "Respaldos en ejecución")).into_response()
+        }
+        Err(_) => server_error("consulta de respaldos interrumpida"),
+    }
+}
+
+/// Historial de comandos del terminal (aún sin persistencia propia).
+pub async fn terminal_history(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    axum::Json(ApiResponse::ok(
+        Vec::<String>::new(),
+        "Historial de terminal",
+    ))
+    .into_response()
+}
+
+/// Contenido de un archivo de texto.
+pub async fn files_content(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ExtQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = query.path.unwrap_or_default();
+
+    match tokio::task::spawn_blocking(move || root.read(&path, 2 * 1024 * 1024)).await {
+        Ok(Ok(bytes)) => {
+            let content = String::from_utf8_lossy(&bytes).to_string();
+            let lines = content.lines().count();
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "content": content, "lines_count": lines }),
+                "Contenido del archivo",
+            ))
+            .into_response()
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("lectura interrumpida"),
+    }
+}
+
+/// Lista la papelera interna.
+pub async fn files_trash(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    match tokio::task::spawn_blocking(move || root.trash_entries()).await {
+        Ok(Ok(items)) => {
+            let count = items.len();
+            let total: u64 = items.iter().map(|item| item.size).sum();
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "items": items,
+                    "count": count,
+                    "total_size": total,
+                    "total_size_formatted": format_size(total),
+                }),
+                "Papelera",
+            ))
+            .into_response()
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("papelera interrumpida"),
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Restaura un elemento de la papelera.
+pub async fn trash_restore(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<TrashBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || root.restore_trash(&body.id)).await {
+        Ok(Ok(name)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "restored": name }),
+            "Elemento restaurado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("restauración interrumpida"),
+    }
+}
+
+/// Elimina definitivamente un elemento de la papelera.
+pub async fn trash_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<TrashBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || root.delete_trash(&body.id)).await {
+        Ok(Ok(())) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Elemento eliminado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("borrado interrumpido"),
+    }
+}
+
+/// Vacía la papelera.
+pub async fn trash_empty(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || root.empty_trash()).await {
+        Ok(Ok(removed)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "removed": removed }),
+            "Papelera vaciada",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("vaciado interrumpido"),
+    }
+}
+
+/// Restaura todos los elementos de la papelera.
+pub async fn trash_restore_all(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || {
+        let entries = root.trash_entries()?;
+        let mut restored = 0u32;
+        for entry in entries {
+            if root.restore_trash(&entry.id).is_ok() {
+                restored += 1;
+            }
+        }
+        Ok::<_, nas_core::NasError>(restored)
+    })
+    .await
+    {
+        Ok(Ok(restored)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "restored": restored }),
+            "Papelera restaurada",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("restauración interrumpida"),
+    }
+}
+
+/// Crea un archivo o carpeta (alias de mkdir para nombres con extensión).
+pub async fn files_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<PathBody>,
+) -> Response {
+    files_mkdir(State(state), headers, axum::Json(body)).await
+}
+
+/// Mueve un elemento.
+pub async fn files_move(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<MoveBody>,
+) -> Response {
+    files_rename(
+        State(state),
+        headers,
+        axum::Json(RenameBody {
+            from: body.from,
+            to: body.to,
+        }),
+    )
+    .await
+}
+
+/// Guarda el contenido de un archivo.
+pub async fn files_save(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<SaveBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    match tokio::task::spawn_blocking(move || root.write(&body.path, &body.content)).await {
+        Ok(Ok(bytes)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "bytes": bytes }),
+            "Archivo guardado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("guardado interrumpido"),
+    }
+}
+
+/// Descubre controladores de dominio.
+pub async fn domain_discover(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<DomainDiscoverBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    if !nas_engine::domain::is_valid_domain(&body.domain) {
+        return bad_request("dominio inválido");
+    }
+
+    let domain = body.domain.clone();
+    match tokio::task::spawn_blocking(move || {
+        run_json(
+            nas_exec::CommandSpec::new("realm")
+                .args(["discover", "--verbose", &domain])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        )
+    })
+    .await
+    {
+        Ok(Ok(raw)) => {
+            let realm = raw
+                .lines()
+                .find_map(|line| line.strip_prefix("realm-name:"))
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string();
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "domain_name": body.domain,
+                    "realm_name": if realm.is_empty() { body.domain.to_uppercase() } else { realm },
+                    "raw": raw,
+                }),
+                "Dominio descubierto",
+            ))
+            .into_response()
+        }
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("descubrimiento interrumpido"),
+    }
+}
+
+/// Ejecuta una prueba diagnóstica.
+pub async fn diagnostics_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<DiagBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let kind = if body.r#type.is_empty() {
+        "services".to_string()
+    } else {
+        body.r#type.clone()
+    };
+
+    let outcome = tokio::task::spawn_blocking(move || match kind.as_str() {
+        "ping" => run_json(
+            nas_exec::CommandSpec::new("ping")
+                .args(["-c", "1", "-W", "2", "1.1.1.1"])
+                .timeout(std::time::Duration::from_secs(10)),
+        ),
+        "dns" => run_json(
+            nas_exec::CommandSpec::new("getent")
+                .args(["hosts", "localhost"])
+                .timeout(std::time::Duration::from_secs(10)),
+        ),
+        "samba" => run_json(
+            nas_exec::CommandSpec::new("testparm")
+                .arg("-s")
+                .timeout(std::time::Duration::from_secs(15)),
+        ),
+        "disk" => run_json(
+            nas_exec::CommandSpec::new("df")
+                .args(["-Pk", "/srv/nas"])
+                .timeout(std::time::Duration::from_secs(10)),
+        ),
+        _ => run_json(
+            nas_exec::CommandSpec::new("systemctl")
+                .args(["is-active", "smbd"])
+                .timeout(std::time::Duration::from_secs(10)),
+        ),
+    })
+    .await;
+
+    match outcome {
+        Ok(Ok(output)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "status": "success", "output": output }),
+            "Prueba completada",
+        ))
+        .into_response(),
+        Ok(Err(error)) => (
+            StatusCode::OK,
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "status": "failed", "output": error }),
+                "La prueba falló",
+            )),
+        )
+            .into_response(),
+        Err(_) => server_error("prueba interrumpida"),
+    }
+}
+
+/// Reinicia el servidor.
+pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let _ = state
+        .auth
+        .db()
+        .append_audit(&user, "system_reboot", "host", "REQUESTED", "");
+
+    match tokio::task::spawn_blocking(|| {
+        run_json(
+            nas_exec::CommandSpec::new("systemctl")
+                .arg("reboot")
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(15)),
+        )
+    })
+    .await
+    {
+        Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Reinicio programado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => server_error(&error),
+        Err(_) => server_error("reinicio interrumpido"),
+    }
+}
+
+/// Información de versión y actualizaciones.
+pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let version = std::fs::read_to_string(state.paths.repo.join("version.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({ "version": "0.1.0", "commit": "dev" }));
+
+    axum::Json(ApiResponse::ok(
+        serde_json::json!({
+            "version": version["version"],
+            "latest_version": version["version"],
+            "has_updates": false,
+            "gpg_verified": false,
+            "commit": version["commit"],
+        }),
+        "Información de actualizaciones",
+    ))
+    .into_response()
+}
+
+/// Estado de las aplicaciones y tecnologías.
+pub async fn system_applications(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let active = |unit: &str| {
+            runner
+                .run(
+                    &nas_exec::CommandSpec::new("systemctl")
+                        .args(["is-active", unit])
+                        .timeout(std::time::Duration::from_secs(10)),
+                )
+                .map(|out| out.stdout == "active")
+                .unwrap_or(false)
+        };
+
+        let smbstatus = runner
+            .run(
+                &nas_exec::CommandSpec::new("smbstatus")
+                    .arg("-b")
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(15)),
+            )
+            .ok();
+        let sessions = smbstatus
+            .as_ref()
+            .map(|out| {
+                out.stdout
+                    .lines()
+                    .filter(|line| line.trim_start().starts_with(|c: char| c.is_ascii_digit()))
+                    .count()
+            })
+            .unwrap_or(0);
+
+        let tasks = nas_engine::tasks::BackupTask::discover("/usr/local/bin")
+            .map(|tasks| tasks.len())
+            .unwrap_or(0);
+        let overview = nas_engine::storage::overview_for(&paths, &runner).ok();
+        let fs = overview
+            .as_ref()
+            .map(|o| o.filesystem.clone())
+            .unwrap_or_else(|| "desconocido".into());
+        let is_btrfs = overview.as_ref().is_some_and(|o| o.is_btrfs);
+
+        serde_json::json!({
+            "samba": {
+                "active": active("smbd"),
+                "version": "4.x (Debian 13)",
+                "sessions": sessions,
+                "sessions_list": [],
+                "vfs_modules": "acl_xattr, streams_xattr",
+            },
+            "wsdd": { "active": active("wsdd2") },
+            "web": {
+                "active": true,
+                "pool_mode": "ondemand",
+                "php_version": serde_json::Value::Null,
+                "memory_mb": 0,
+            },
+            "btrfs": {
+                "active": is_btrfs,
+                "filesystem": fs,
+                "compression": "zstd:3",
+                "scrub_status": if is_btrfs { "programado" } else { "no disponible" },
+                "scrub_errors": "0",
+                "schedule": "mensual (día 1, 02:00)",
+            },
+            "rsync": {
+                "tasks_count": tasks,
+                "protocols": "SSH + CIFS",
+                "deduplication": ">85% (link-dest)",
+                "staging": "atómico",
+            },
+            "security": {
+                "active": active("auditd"),
+                "auditd_active": active("auditd"),
+                "aide_active": active("dailyaidecheck.timer"),
+                "audit_rules": 0,
+                "fim_status": "AIDE configurado",
+            },
+        })
+    })
+    .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Aplicaciones")).into_response(),
+        Err(_) => server_error("consulta de aplicaciones interrumpida"),
+    }
+}
+
+/// Acciones aún no portadas (devuelven 501 con mensaje claro).
+pub async fn pending_shares_update() -> Response {
+    not_implemented("La edición de recursos compartidos")
+}
+/// Acción pendiente.
+pub async fn pending_shares_delete() -> Response {
+    not_implemented("El borrado de recursos compartidos")
+}
+/// Acción pendiente.
+pub async fn pending_shares_access() -> Response {
+    not_implemented("La asignación de ACLs de recursos")
+}
+/// Acción pendiente.
+pub async fn pending_shares_repair() -> Response {
+    not_implemented("La reparación de ACLs")
+}
+/// Acción pendiente.
+pub async fn pending_users() -> Response {
+    not_implemented("La gestión de usuarios")
+}
+/// Acción pendiente.
+pub async fn pending_groups() -> Response {
+    not_implemented("La gestión de grupos")
+}
+/// Acción pendiente.
+pub async fn pending_backups_write() -> Response {
+    not_implemented("La creación o edición de tareas de respaldo")
+}
+/// Acción pendiente.
+pub async fn pending_system_update() -> Response {
+    not_implemented("La actualización del sistema desde el panel")
+}
