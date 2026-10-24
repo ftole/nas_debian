@@ -158,6 +158,25 @@ def write_outputs(outputs: dict[str, str]) -> None:
         print(f"[parity] escrito tests/parity/{name}")
 
 
+def check_routes() -> list[str]:
+    """Devuelve los endpoints de app.js sin ruta equivalente en lib.rs."""
+    lib = (ROOT / "crates" / "nas-web" / "src" / "lib.rs").read_text(encoding="utf-8")
+    registered = {
+        re.sub(r"\{[^}]+\}", "{x}", route)
+        for route in re.findall(r'\.route\(\s*"([^"]+)"', lib)
+    }
+    endpoints = [
+        line.strip()
+        for line in (PARITY / "endpoints.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return [
+        endpoint
+        for endpoint in endpoints
+        if re.sub(r"\{[^}]+\}", "{x}", endpoint) not in registered
+    ]
+
+
 def check_outputs(outputs: dict[str, str]) -> int:
     failures = 0
     for name, content in outputs.items():
@@ -170,10 +189,15 @@ def check_outputs(outputs: dict[str, str]) -> int:
         if current != content:
             print(f"[parity] DERIVA en tests/parity/{name} (regenera el contrato)")
             failures += 1
+    missing_routes = check_routes()
+    for route in missing_routes:
+        print(f"[parity] SIN RUTA en nas-web: {route}")
+    failures += len(missing_routes)
+
     if failures:
-        print(f"[parity] {failures} artefacto(s) desactualizado(s)")
+        print(f"[parity] {failures} problema(s) de paridad")
         return 1
-    print("[parity] contrato de paridad actualizado")
+    print("[parity] contrato de paridad y rutas verificadas")
     return 0
 
 
