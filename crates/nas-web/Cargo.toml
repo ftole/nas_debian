@@ -29,6 +29,8 @@ chrono = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+getrandom = "0.2"
 
 [dev-dependencies]
 http-body-util = { workspace = true }
