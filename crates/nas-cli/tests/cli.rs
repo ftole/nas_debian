@@ -180,3 +180,22 @@ fn update_apply_rechaza_manifiesto_sin_firma() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn migrate_status_lista_componentes_legacy() {
+    let output = nas()
+        .args(["--json", "migrate", "status"])
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+
+    assert_eq!(payload["success"], true);
+    let items = payload["data"]["items"].as_array().expect("items");
+    assert_eq!(items.len(), 10);
+    assert!(items
+        .iter()
+        .any(|item| item["path"] == "web" && item["wave"] == "A"));
+    assert!(items
+        .iter()
+        .any(|item| item["path"] == "src/core/deploy.sh" && item["wave"] == "B"));
+}
