@@ -173,22 +173,101 @@ pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Respon
     }
 }
 
-/// Usuarios administrables y grupos corporativos.
+/// Usuarios administrables (formato que consume `app.js`).
 pub async fn users(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
 
-    match tokio::task::spawn_blocking(|| {
-        let (mut users, mut groups) = nas_engine::users::load_local();
+    let db = state.auth.db().clone();
+    match tokio::task::spawn_blocking(move || {
+        let (mut users, groups) = nas_engine::users::load_local();
         users.retain(|user| !user.system);
-        groups.retain(|group| group.name.starts_with("grp_"));
-        serde_json::json!({ "users": users, "groups": groups })
+
+        let samba_users = Runner::new()
+            .run(
+                &nas_exec::CommandSpec::new("pdbedit")
+                    .args(["-L", "-s"])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(15)),
+            )
+            .ok()
+            .map(|output| {
+                output
+                    .stdout
+                    .lines()
+                    .filter_map(|line| line.split(':').next().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let list: Vec<serde_json::Value> = users
+            .into_iter()
+            .map(|user| {
+                let member_of: Vec<String> = groups
+                    .iter()
+                    .filter(|group| group.members.iter().any(|member| member == &user.name))
+                    .map(|group| group.name.clone())
+                    .collect();
+                let role = db.user_role(&user.name).ok().flatten();
+                let is_superadmin = role.as_deref() == Some("superadmin");
+                let is_admin = matches!(role.as_deref(), Some("admin") | Some("superadmin"));
+                let can_web = role.is_some();
+                let is_samba = samba_users.iter().any(|name| name == &user.name);
+                serde_json::json!({
+                    "username": user.name,
+                    "full_name": user.full_name,
+                    "uid": user.uid,
+                    "shell": user.shell,
+                    "groups": member_of,
+                    "is_admin": is_admin,
+                    "is_superadmin": is_superadmin,
+                    "can_web": can_web,
+                    "samba_enabled": is_samba,
+                    "is_samba": is_samba,
+                    "enabled": true,
+                })
+            })
+            .collect();
+        list
     })
     .await
     {
-        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Usuarios y grupos")).into_response(),
-        Err(_) => server_error("no se pudo leer el inventario de usuarios"),
+        Ok(list) => axum::Json(ApiResponse::ok(list, "Usuarios")).into_response(),
+        Err(_) => server_error("inventario de usuarios interrumpido"),
+    }
+}
+
+/// Grupos corporativos (formato que consume `app.js`).
+pub async fn groups(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| {
+        let (_, groups) = nas_engine::users::load_local();
+        let list: Vec<serde_json::Value> = groups
+            .into_iter()
+            .filter(|group| group.name.starts_with("grp_"))
+            .map(|group| {
+                let is_special = matches!(
+                    group.name.as_str(),
+                    "grp_samba" | "grp_web" | "grp_superadmin" | "grp_backups"
+                );
+                serde_json::json!({
+                    "name": group.name,
+                    "gid": group.gid,
+                    "members": group.members,
+                    "is_special": is_special,
+                })
+            })
+            .collect();
+        list
+    })
+    .await
+    {
+        Ok(list) => axum::Json(ApiResponse::ok(list, "Grupos")).into_response(),
+        Err(_) => server_error("inventario de grupos interrumpido"),
     }
 }
 
@@ -1620,11 +1699,6 @@ pub async fn logs(
         Ok(Err(error)) => server_error(&error),
         Err(_) => server_error("lectura de logs interrumpida"),
     }
-}
-
-/// Alias de listado de grupos.
-pub async fn groups_list(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    users(State(state), headers).await
 }
 
 /// Mapa de acceso de recursos (recursos, grupos y usuarios).
