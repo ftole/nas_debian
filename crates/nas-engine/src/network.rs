@@ -158,11 +158,13 @@ fn collect_linux(runner: &Runner, paths: &NasPaths) -> NetworkOverview {
 }
 
 fn collect_samba(runner: &Runner, paths: &NasPaths) -> smb::SambaConfig {
+    // `testparm -s` puede devolver código distinto de cero por avisos (p. ej.
+    // al ejecutarse sin privilegios) pero su salida sigue siendo válida.
     let effective = runner
         .run(&CommandSpec::new("testparm").arg("-s"))
         .ok()
-        .filter(|out| out.is_success())
-        .map(|out| smb::parse_testparm(&out.stdout));
+        .map(|out| smb::parse_testparm(&out.stdout))
+        .filter(|config| config.min_protocol.is_some() || config.max_protocol.is_some());
 
     let mut config = std::fs::read_to_string(&paths.samba_conf)
         .ok()
