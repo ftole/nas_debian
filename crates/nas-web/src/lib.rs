@@ -7,10 +7,12 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod assets;
 pub mod auth;
 pub mod db;
 pub mod files;
 mod routes;
+pub mod template;
 pub mod views;
 
 use std::path::PathBuf;
@@ -68,6 +70,10 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(routes::healthz))
         .route("/css/app.css", get(routes::css))
         .route("/css/login.css", get(routes::login_css))
+        .route("/js/app.js", get(routes::app_js))
+        .route("/js/vendor/xlsx.full.min.js", get(routes::vendor_xlsx))
+        .route("/js/vendor/jszip.min.js", get(routes::vendor_jszip))
+        .route("/js/vendor/docx-preview.min.js", get(routes::vendor_docx))
         .route("/favicon.svg", get(routes::favicon))
         .route("/login", get(routes::login_form).post(routes::login_submit))
         .route("/logout", post(routes::logout))
