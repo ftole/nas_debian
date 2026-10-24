@@ -51,6 +51,7 @@ fn paths_for(dir: &Path) -> NasPaths {
     paths.state_dir = dir.to_path_buf();
     paths.samba_conf = dir.join("smb.conf");
     paths.role_file = dir.join("role");
+    paths.data_root = dir.join("data");
     std::fs::write(&paths.samba_conf, SMB_CONF).expect("smb.conf");
     std::fs::write(&paths.role_file, "ARCHIVOS\n").expect("role");
     paths
@@ -279,4 +280,177 @@ async fn cabeceras_de_seguridad_presentes() {
     assert!(headers.contains_key("content-security-policy"));
     assert!(headers.contains_key("x-frame-options"));
     assert!(headers.contains_key("x-content-type-options"));
+}
+
+fn post_json(uri: &str, cookie: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("cookie", cookie)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("petición")
+}
+
+fn upload_body(boundary: &str, dir: &str, filename: &str, content: &str) -> Body {
+    let crlf = "\r\n";
+    let mut body = String::new();
+    body.push_str(&format!("--{boundary}{crlf}"));
+    body.push_str(&format!(
+        "Content-Disposition: form-data; name=\"path\"{crlf}{crlf}"
+    ));
+    body.push_str(dir);
+    body.push_str(&format!("{crlf}--{boundary}{crlf}"));
+    body.push_str(&format!(
+        "Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"{crlf}"
+    ));
+    body.push_str(&format!("Content-Type: text/plain{crlf}{crlf}"));
+    body.push_str(content);
+    body.push_str(&format!("{crlf}--{boundary}--{crlf}"));
+    Body::from(body)
+}
+
+#[tokio::test]
+async fn files_crea_lista_renombra_y_borra() {
+    let app = app(ServerRole::Arquivos);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/mkdir",
+            &cookie,
+            r#"{"path":"SISTEMAS"}"#,
+        ))
+        .await
+        .expect("mkdir");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/files?path=", &cookie))
+        .await
+        .expect("list");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    let entries = payload["data"].as_array().expect("arreglo");
+    assert!(entries.iter().any(|entry| entry["name"] == "SISTEMAS"));
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/rename",
+            &cookie,
+            r#"{"from":"SISTEMAS","to":"SISTEMAS_2026"}"#,
+        ))
+        .await
+        .expect("rename");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/delete",
+            &cookie,
+            r#"{"path":"SISTEMAS_2026"}"#,
+        ))
+        .await
+        .expect("delete");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(payload["data"]["trash"]
+        .as_str()
+        .unwrap_or_default()
+        .contains(".trash"));
+}
+
+#[tokio::test]
+async fn files_rechaza_escape_de_la_raiz() {
+    let app = app(ServerRole::Arquivos);
+    let cookie = cookie_for(&app).await;
+
+    for uri in [
+        "/api/files?path=../etc",
+        "/api/files?path=/etc/passwd",
+        "/api/files?path=docs/../../etc",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(get(uri, &cookie))
+            .await
+            .expect("respuesta");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "fallo en {uri}");
+    }
+}
+
+#[tokio::test]
+async fn files_sube_descarga_y_detecta_duplicados() {
+    let app = app(ServerRole::Arquivos);
+    let cookie = cookie_for(&app).await;
+    let boundary = "XBOUNDARYX";
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(upload_body(
+            boundary,
+            "",
+            "informe.txt",
+            "contenido de prueba",
+        ))
+        .expect("petición");
+
+    let response = app.clone().oneshot(request).await.expect("upload");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["data"]["uploaded"][0], "informe.txt");
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/files/download?path=informe.txt", &cookie))
+        .await
+        .expect("download");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .headers()
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .contains("informe.txt"));
+    assert_eq!(body_text(response).await, "contenido de prueba");
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(upload_body(boundary, "", "informe.txt", "otra vez"))
+        .expect("petición");
+    let response = app.oneshot(request).await.expect("upload duplicado");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn files_requiere_sesion() {
+    let response = app(ServerRole::Arquivos)
+        .oneshot(
+            Request::builder()
+                .uri("/api/files")
+                .body(Body::empty())
+                .expect("petición"),
+        )
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
