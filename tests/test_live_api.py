@@ -27,6 +27,11 @@ def test_live_api_endpoints():
     if not os.path.isfile(env_path):
         pytest.skip("Archivo .env no encontrado; omitiendo prueba en vivo.")
 
+    panel_user = os.environ.get("NAS_WEB_PANEL_USER", "admin")
+    panel_password = os.environ.get("NAS_WEB_PANEL_PASSWORD", "")
+    if not panel_password:
+        pytest.skip("NAS_WEB_PANEL_PASSWORD no definido; omitiendo prueba en vivo del panel Rust.")
+
     raw_cfg = test_remote.load_env_file(env_path)
     cfg = test_remote.normalize_env_config(raw_cfg)
     ip = cfg.get("NAS_TEST_IP", "")
@@ -49,28 +54,30 @@ def test_live_api_endpoints():
     conn.request("GET", "/login")
     res = conn.getresponse()
     html = res.read().decode("utf-8")
-    cookie = res.getheader("Set-Cookie").split(";")[0]
+    cookie = (res.getheader("Set-Cookie") or "nas_session=pending").split(";")[0]
     m = re.search(r'name=["\']csrf_token["\'][^>]*?value=["\']([a-f0-9]{64})["\']', html, re.IGNORECASE)
     if not m:
         m = re.search(r'value=["\']([a-f0-9]{64})["\'][^>]*?name=["\']csrf_token["\']', html, re.IGNORECASE)
-    assert m, f"No se encontró token CSRF en login:\n{html[:500]}"
+    assert m, f"No se encontró token CSRF en login: {html[:500]}"
     csrf = m.group(1)
 
-    # Iniciar sesión
-    login_body = json.dumps({
-        "username": cfg["NAS_TEST_USER"],
-        "password": cfg["NAS_TEST_PASSWORD"],
+    # Iniciar sesión (contrato Rust: formulario y cookie posterior)
+    from urllib.parse import urlencode
+
+    login_body = urlencode({
+        "username": panel_user,
+        "password": panel_password,
         "csrf_token": csrf,
     })
     headers = {
-        "Content-Type": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
         "Cookie": cookie,
         "X-CSRF-Token": csrf,
     }
-    conn.request("POST", "/api/auth/login", body=login_body, headers=headers)
+    conn.request("POST", "/login", body=login_body, headers=headers)
     lres = conn.getresponse()
-    assert lres.status == 200, f"Login falló con status {lres.status}"
-    lcookie = lres.getheader("Set-Cookie", cookie).split(";")[0]
+    assert lres.status in (303, 200), f"Login falló con status {lres.status}"
+    lcookie = (lres.getheader("Set-Cookie") or cookie).split(";")[0]
     lres.read()
     headers["Cookie"] = lcookie
 
@@ -102,11 +109,12 @@ def test_live_api_endpoints():
     data = json.loads(r.read().decode("utf-8"))
     assert "data" in data
 
-    # 5. Detener respaldo inexistente
-    conn.request("POST", "/api/backups/tarea_test_inexistente/stop", body="{}", headers=headers)
+    # 5. Respaldos en ejecución
+    conn.request("GET", "/api/backups/running", headers=headers)
     r = conn.getresponse()
-    assert r.status == 200, f"Stop backup falló con status {r.status}"
-    r.read()
+    assert r.status == 200, f"Backups running falló con status {r.status}"
+    running = json.loads(r.read().decode("utf-8")).get("data", {})
+    assert "running" in running
 
     # 6. Consultar actualizaciones en caliente
     conn.request("GET", "/api/system/updates", headers=headers)
@@ -132,7 +140,7 @@ def test_live_api_endpoints():
     r = conn.getresponse()
     assert r.status == 200, f"Terminal capture falló con status {r.status}"
     cap = json.loads(r.read().decode("utf-8")).get("data", {})
-    assert "output" in cap and "cwd" in cap and "user" in cap
+    assert "output" in cap and "session" in cap
 
     conn.request("POST", "/api/terminal/send", body=json.dumps({"data": "echo LIVE_TERMINAL_OK"}), headers=headers)
     r = conn.getresponse()
