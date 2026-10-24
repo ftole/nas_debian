@@ -1265,15 +1265,59 @@ pub async fn backup_run(
     }
 }
 
-fn render(state: &AppState, user: &str, section: &str, title: &str, body: String) -> Response {
-    Html(views::layout(
-        section,
+fn page_context<'a>(
+    state: &AppState,
+    user: &'a str,
+    section: &'a str,
+    hostname: &'a str,
+    workgroup: &'a str,
+) -> views::PageCtx<'a> {
+    views::PageCtx {
+        active: section,
         user,
-        state.role.label(),
-        title,
-        &body,
-    ))
-    .into_response()
+        role: state.role.label(),
+        hostname,
+        workgroup,
+    }
+}
+
+fn render(state: &AppState, user: &str, section: &str, title: &str, body: String) -> Response {
+    let hostname = std::fs::read_to_string("/etc/hostname")
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "SRV-NAS".to_string());
+    let workgroup = std::fs::read_to_string(&state.paths.samba_conf)
+        .ok()
+        .and_then(|text| nas_core::config::parse_workgroup(&text))
+        .unwrap_or_else(|| "N/D".to_string());
+
+    let ctx = page_context(state, user, section, &hostname, &workgroup);
+    Html(views::layout(&ctx, title, &body)).into_response()
+}
+
+/// Hoja de estilos del panel.
+pub async fn css() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        views::APP_CSS,
+    )
+        .into_response()
+}
+
+/// Favicon del panel.
+pub async fn favicon() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/svg+xml"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        views::FAVICON,
+    )
+        .into_response()
 }
 
 fn login_redirect() -> Response {
@@ -1562,13 +1606,13 @@ pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) ->
     if !is_superadmin(&state, &user) {
         return (
             StatusCode::FORBIDDEN,
-            Html(views::layout(
-                "terminal",
+            render(
+                &state,
                 &user,
-                state.role.label(),
+                "terminal",
                 "Terminal",
-                &load_error("el terminal está reservado al superadministrador"),
-            )),
+                load_error("el terminal está reservado al superadministrador"),
+            ),
         )
             .into_response();
     }
@@ -1585,13 +1629,13 @@ pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Re
     if !is_admin(&state, &user) {
         return (
             StatusCode::FORBIDDEN,
-            Html(views::layout(
-                "audit",
+            render(
+                &state,
                 &user,
-                state.role.label(),
+                "audit",
                 "Auditoría",
-                &load_error("se requieren privilegios de administrador"),
-            )),
+                load_error("se requieren privilegios de administrador"),
+            ),
         )
             .into_response();
     }
