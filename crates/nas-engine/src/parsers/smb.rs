@@ -165,6 +165,8 @@ pub struct Share {
     pub browseable: bool,
     /// Usuarios autorizados.
     pub valid_users: Vec<String>,
+    /// Principales con permiso de escritura.
+    pub write_list: Vec<String>,
     /// Comentario descriptivo.
     pub comment: Option<String>,
 }
@@ -195,6 +197,7 @@ pub fn parse_shares(text: &str) -> Vec<Share> {
                 guest_ok: false,
                 browseable: true,
                 valid_users: Vec::new(),
+                write_list: Vec::new(),
                 comment: None,
             });
             continue;
@@ -222,6 +225,13 @@ pub fn parse_shares(text: &str) -> Vec<Share> {
             }
             "valid users" => {
                 share.valid_users = value
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .filter(|user| !user.is_empty())
+                    .map(str::to_string)
+                    .collect();
+            }
+            "write list" => {
+                share.write_list = value
                     .split(|c: char| c == ',' || c.is_whitespace())
                     .filter(|user| !user.is_empty())
                     .map(str::to_string)
