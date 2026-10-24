@@ -8,6 +8,26 @@ use std::sync::{Arc, Mutex};
 
 use nas_core::{NasError, NasResult};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
+
+/// Entrada de auditoría del panel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuditRow {
+    /// Identificador incremental.
+    pub id: i64,
+    /// Marca de tiempo UNIX.
+    pub ts: i64,
+    /// Usuario que ejecutó la acción.
+    pub username: String,
+    /// Acción lógica.
+    pub action: String,
+    /// Objeto afectado.
+    pub target: String,
+    /// Resultado (`SUCCESS`, `FAILED`, `DENIED`).
+    pub result: String,
+    /// Detalle libre.
+    pub detail: String,
+}
 
 /// Acceso compartido a la base de datos.
 #[derive(Clone)]
@@ -71,7 +91,17 @@ impl Db {
                  created_at INTEGER NOT NULL,
                  expires_at INTEGER NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);",
+             CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at);
+             CREATE TABLE IF NOT EXISTS web_audit (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ts INTEGER NOT NULL,
+                 username TEXT NOT NULL,
+                 action TEXT NOT NULL,
+                 target TEXT NOT NULL,
+                 result TEXT NOT NULL,
+                 detail TEXT NOT NULL DEFAULT ''
+             );
+             CREATE INDEX IF NOT EXISTS idx_web_audit_ts ON web_audit(ts DESC);",
         )
         .map_err(db_error)
     }
@@ -162,6 +192,56 @@ impl Db {
         conn.execute("DELETE FROM web_sessions WHERE id = ?1", params![id])
             .map_err(db_error)?;
         Ok(())
+    }
+
+    /// Registra una acción en la auditoría web.
+    pub fn append_audit(
+        &self,
+        username: &str,
+        action: &str,
+        target: &str,
+        result: &str,
+        detail: &str,
+    ) -> NasResult<()> {
+        let conn = self.conn.lock().expect("mutex de base de datos");
+        conn.execute(
+            "INSERT INTO web_audit (ts, username, action, target, result, detail)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![now_ts(), username, action, target, result, detail],
+        )
+        .map_err(db_error)?;
+        Ok(())
+    }
+
+    /// Últimas entradas de auditoría (más recientes primero).
+    pub fn recent_audit(&self, limit: usize) -> NasResult<Vec<AuditRow>> {
+        let conn = self.conn.lock().expect("mutex de base de datos");
+        let mut statement = conn
+            .prepare(
+                "SELECT id, ts, username, action, target, result, detail
+                 FROM web_audit ORDER BY id DESC LIMIT ?1",
+            )
+            .map_err(db_error)?;
+
+        let rows = statement
+            .query_map(params![limit as i64], |row| {
+                Ok(AuditRow {
+                    id: row.get(0)?,
+                    ts: row.get(1)?,
+                    username: row.get(2)?,
+                    action: row.get(3)?,
+                    target: row.get(4)?,
+                    result: row.get(5)?,
+                    detail: row.get(6)?,
+                })
+            })
+            .map_err(db_error)?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row.map_err(db_error)?);
+        }
+        Ok(entries)
     }
 
     /// Purga sesiones expiradas y devuelve cuántas eliminó.
