@@ -340,3 +340,157 @@ mod tests {
         assert!(sanitize_filename("").is_err());
     }
 }
+
+/// Tamaño máximo agregado al comprimir una carpeta en ZIP (256 MiB).
+pub const ZIP_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+impl FileRoot {
+    /// Comprime una carpeta (o archivo) en un ZIP en memoria, con límite de tamaño.
+    pub fn zip(&self, relative: &str) -> NasResult<Vec<u8>> {
+        use std::io::Cursor;
+        use zip::write::SimpleFileOptions;
+
+        let source = self.resolve(relative)?;
+        if !source.exists() {
+            return Err(NasError::NotFound(format!("no existe: {relative}")));
+        }
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let mut total: u64 = 0;
+
+        if source.is_file() {
+            let name = source
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "archivo".to_string());
+            add_to_zip(&mut writer, &options, &source, &name, &mut total)?;
+        } else {
+            let entries = collect_files(&source, &mut total)?;
+            for (absolute, relative_name) in entries {
+                add_to_zip(&mut writer, &options, &absolute, &relative_name, &mut total)?;
+            }
+        }
+
+        writer
+            .finish()
+            .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String)>> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).map_err(|e| NasError::io(&dir, e))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            *total = total.saturating_add(metadata.len());
+            if *total > ZIP_MAX_BYTES {
+                return Err(NasError::Denied(
+                    "la carpeta supera el límite de 256 MiB para descarga ZIP".into(),
+                ));
+            }
+            let name = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push((path, name));
+        }
+    }
+
+    Ok(files)
+}
+
+fn add_to_zip<W: std::io::Write + std::io::Seek>(
+    writer: &mut zip::ZipWriter<W>,
+    options: &zip::write::SimpleFileOptions,
+    path: &Path,
+    name: &str,
+    total: &mut u64,
+) -> NasResult<()> {
+    use std::io::Write;
+
+    let metadata = std::fs::metadata(path).map_err(|e| NasError::io(path, e))?;
+    *total = total.saturating_add(metadata.len());
+    if *total > ZIP_MAX_BYTES {
+        return Err(NasError::Denied(
+            "el contenido supera el límite de 256 MiB para descarga ZIP".into(),
+        ));
+    }
+
+    writer
+        .start_file(name.to_string(), *options)
+        .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
+
+    let data = std::fs::read(path).map_err(|e| NasError::io(path, e))?;
+    writer
+        .write_all(&data)
+        .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod ziptests {
+    use super::FileRoot;
+
+    fn root(tag: &str) -> FileRoot {
+        let dir = std::env::temp_dir().join(format!(
+            "nas-zip-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        FileRoot::new(dir).expect("root")
+    }
+
+    #[test]
+    fn comprime_carpeta_completa() {
+        let root = root("dir");
+        root.mkdir("SISTEMAS/2026").expect("mkdir");
+        std::fs::write(root.root().join("SISTEMAS/2026/a.txt"), b"hola").expect("a");
+        std::fs::write(root.root().join("SISTEMAS/b.txt"), b"mundo").expect("b");
+
+        let bytes = root.zip("SISTEMAS").expect("zip");
+        assert!(bytes.starts_with(b"PK"));
+
+        let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip válido");
+        assert_eq!(archive.len(), 2);
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn comprime_un_archivo() {
+        let root = root("file");
+        std::fs::write(root.root().join("informe.txt"), b"x").expect("write");
+        assert!(root.zip("informe.txt").expect("zip").starts_with(b"PK"));
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn rechaza_escapes() {
+        let root = root("escape");
+        assert!(root.zip("../etc").is_err());
+        assert!(root.zip("/etc").is_err());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+}
