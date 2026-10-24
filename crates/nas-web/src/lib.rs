@@ -9,11 +9,12 @@
 
 pub mod auth;
 pub mod db;
+pub mod files;
 mod routes;
 
 use std::sync::Arc;
 
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header::HeaderName, HeaderValue};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -57,6 +58,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/network", get(routes::network))
         .route("/api/shares", get(routes::shares))
         .route("/api/users", get(routes::users))
+        .route("/api/files", get(routes::files_list))
+        .route("/api/files/download", get(routes::files_download))
+        .route("/api/files/mkdir", post(routes::files_mkdir))
+        .route("/api/files/rename", post(routes::files_rename))
+        .route("/api/files/delete", post(routes::files_delete))
+        .route(
+            "/api/files/upload",
+            post(routes::files_upload).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
         .layer(axum::middleware::from_fn(security_headers))
         .with_state(state)
 }
