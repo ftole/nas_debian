@@ -14,6 +14,7 @@ use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 
 use crate::files::{sanitize_filename, FileRoot};
+use crate::views;
 use crate::AppState;
 
 /// Sonda de vida usada por systemd/nginx.
@@ -72,58 +73,12 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     response
 }
 
-/// Dashboard mínimo con datos de red en vivo.
+/// Raíz: redirige al dashboard autenticado.
 pub async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) if response.status() == StatusCode::UNAUTHORIZED => {
-            return Redirect::to("/login").into_response()
-        }
-        Err(response) => return *response,
-    };
-
-    let paths = state.paths.clone();
-    let metrics = tokio::task::spawn_blocking(move || {
-        let runner = Runner::new();
-        let overview = collect_network(&runner, &paths);
-        (overview.hostname, overview.workgroup, overview.primary_ip)
-    })
-    .await
-    .unwrap_or_else(|_| ("desconocido".to_string(), None, None));
-
-    let hostname = html_escape(&metrics.0);
-    let workgroup = html_escape(metrics.1.as_deref().unwrap_or("N/D"));
-    let ip = html_escape(metrics.2.as_deref().unwrap_or("N/D"));
-    let role = state.role.label();
-
-    Html(format!(
-        r#"<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panel NAS · {hostname}</title>
-<style>
-body{{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0}}
-header{{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;background:#1e293b;border-bottom:1px solid #334155}}
-main{{max-width:960px;margin:24px auto;padding:0 22px;display:grid;gap:16px}}
-.card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px}}
-h1{{font-size:18px;margin:0}} h2{{font-size:13px;color:#94a3b8;margin:0 0 8px}}
-b{{color:#38bdf8;font-size:15px}}
-button{{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer}}
-code{{color:#7dd3fc}}
-</style></head>
-<body>
-<header><h1>NAS · {hostname} · <small>{role}</small></h1>
-<form method="post" action="/logout"><button type="submit">Salir ({user})</button></form></header>
-<main>
-  <div class="card"><h2>Hostname</h2><b>{hostname}</b></div>
-  <div class="card"><h2>Grupo de trabajo</h2><b>{workgroup}</b></div>
-  <div class="card"><h2>IPv4 primaria</h2><b>{ip}</b></div>
-  <div class="card"><h2>API</h2><code>/api/metrics</code> · <code>/api/network</code> · <code>/api/shares</code> · <code>/api/users</code> · <code>/api/files</code></div>
-</main>
-</body></html>"#,
-        user = html_escape(&user)
-    ))
-    .into_response()
+    match require_auth(&state, &headers) {
+        Ok(_) => Redirect::to("/dashboard").into_response(),
+        Err(_) => Redirect::to("/login").into_response(),
+    }
 }
 
 /// Métricas del sistema en JSON (contrato compartido).
@@ -557,15 +512,6 @@ fn server_error(message: &str) -> Response {
         axum::Json(ApiResponse::<serde_json::Value>::error(message)),
     )
         .into_response()
-}
-
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 const LOGIN_HTML: &str = concat!(
@@ -1317,4 +1263,244 @@ pub async fn backup_run(
             error_response(error)
         }
     }
+}
+
+fn render(state: &AppState, user: &str, section: &str, title: &str, body: String) -> Response {
+    Html(views::layout(
+        section,
+        user,
+        state.role.label(),
+        title,
+        &body,
+    ))
+    .into_response()
+}
+
+fn login_redirect() -> Response {
+    Redirect::to("/login").into_response()
+}
+
+fn load_error(message: &str) -> String {
+    format!(
+        "<div class=\"panel\"><div class=\"card\"><span class=\"badge err\">error</span> {}</div></div>",
+        views::esc(message)
+    )
+}
+
+/// Vista del dashboard.
+pub async fn page_dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let metrics = match tokio::task::spawn_blocking(|| collect_status(&Runner::new())).await {
+        Ok(metrics) => metrics,
+        Err(_) => {
+            return render(
+                &state,
+                &user,
+                "dashboard",
+                "Dashboard",
+                load_error("métricas no disponibles"),
+            )
+        }
+    };
+
+    let body = views::dashboard(&metrics, state.role.label());
+    render(&state, &user, "dashboard", "Dashboard", body)
+}
+
+/// Vista de recursos compartidos.
+pub async fn page_shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    if !state.role.has_shares() {
+        return render(
+            &state,
+            &user,
+            "shares",
+            "Recursos",
+            load_error("el rol BACKUP no expone recursos compartidos"),
+        );
+    }
+
+    let path = state.paths.samba_conf.clone();
+    let body = match tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await {
+        Ok(Ok(text)) => views::shares(&parse_shares(&text)),
+        Ok(Err(error)) => load_error(&format!("no se pudo leer smb.conf: {error}")),
+        Err(_) => load_error("lectura interrumpida"),
+    };
+
+    render(&state, &user, "shares", "Recursos compartidos", body)
+}
+
+/// Vista de usuarios y grupos.
+pub async fn page_users(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let body = match tokio::task::spawn_blocking(|| {
+        let (mut users, mut groups) = nas_engine::users::load_local();
+        users.retain(|user| !user.system);
+        groups.retain(|group| group.name.starts_with("grp_"));
+        (users, groups)
+    })
+    .await
+    {
+        Ok((users, groups)) => views::users(&users, &groups),
+        Err(_) => load_error("inventario de usuarios no disponible"),
+    };
+
+    render(&state, &user, "users", "Usuarios y grupos", body)
+}
+
+/// Vista de tareas de respaldo.
+pub async fn page_backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let dir = state.backup_dir.clone();
+    let body = match tokio::task::spawn_blocking(move || {
+        let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
+        tasks
+            .into_iter()
+            .map(|task| {
+                let last = nas_engine::last_snapshot(&task).map(|path| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+                (task, last)
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    {
+        Ok(tasks) => views::backups(&tasks),
+        Err(_) => load_error("tareas de respaldo no disponibles"),
+    };
+
+    render(&state, &user, "backups", "Respaldos", body)
+}
+
+/// Vista de servicios.
+pub async fn page_services(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let body = match tokio::task::spawn_blocking(|| {
+        nas_engine::services::collect(&Runner::new(), nas_engine::services::DEFAULT_SERVICES)
+    })
+    .await
+    {
+        Ok(list) => views::services(&list),
+        Err(_) => load_error("estado de servicios no disponible"),
+    };
+
+    render(&state, &user, "services", "Servicios", body)
+}
+
+/// Vista de diagnóstico.
+pub async fn page_diagnostics(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let paths = state.paths.clone();
+    let body = match tokio::task::spawn_blocking(move || {
+        nas_engine::diagnostics::collect(&paths, &Runner::new())
+    })
+    .await
+    {
+        Ok(checks) => views::diagnostics(&checks),
+        Err(_) => load_error("diagnóstico no disponible"),
+    };
+
+    render(&state, &user, "diagnostics", "Diagnóstico", body)
+}
+
+/// Vista de almacenamiento.
+pub async fn page_storage(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let paths = state.paths.clone();
+    let body = match tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let overview = nas_engine::storage::overview_for(&paths, &runner);
+        let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
+        (overview, disks)
+    })
+    .await
+    {
+        Ok((Ok(overview), disks)) => views::storage(&overview, &disks),
+        Ok((Err(error), _)) => load_error(&error.to_string()),
+        Err(_) => load_error("almacenamiento no disponible"),
+    };
+
+    render(&state, &user, "storage", "Almacenamiento", body)
+}
+
+/// Vista del explorador de archivos.
+pub async fn page_files(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let root = match FileRoot::new(state.paths.data_root.clone()) {
+        Ok(root) => root,
+        Err(error) => {
+            return render(
+                &state,
+                &user,
+                "files",
+                "Archivos",
+                load_error(&error.to_string()),
+            )
+        }
+    };
+
+    let current = query.path.clone();
+    let list_path = current.clone();
+    let body = match tokio::task::spawn_blocking(move || root.list(&list_path)).await {
+        Ok(Ok(entries)) => views::files(&current, &entries),
+        Ok(Err(error)) => load_error(&error.to_string()),
+        Err(_) => load_error("listado interrumpido"),
+    };
+
+    render(&state, &user, "files", "Archivos", body)
+}
+
+/// Vista de dominio.
+pub async fn page_domain(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+
+    let body =
+        match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
+            Ok(status) => views::domain(&status),
+            Err(_) => load_error("estado del dominio no disponible"),
+        };
+
+    render(&state, &user, "domain", "Dominio", body)
 }
