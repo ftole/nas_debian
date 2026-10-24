@@ -95,7 +95,7 @@ pub fn router(state: AppState) -> Router {
             "/api/shares",
             get(routes::shares).post(routes::share_create),
         )
-        .route("/api/users", get(routes::users))
+        .route("/api/users", get(routes::users).post(routes::user_create))
         .route("/api/services", get(routes::services))
         .route("/api/services/manage", post(routes::service_manage))
         .route("/api/diagnostics", get(routes::diagnostics))
@@ -120,10 +120,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/logs", get(routes::logs))
         .route(
             "/api/groups",
-            get(routes::groups_list).post(routes::pending_groups),
+            get(routes::groups_list).post(routes::group_create),
         )
-        .route("/api/groups/rename", post(routes::pending_groups))
-        .route("/api/groups/delete", post(routes::pending_groups))
+        .route("/api/groups/rename", post(routes::group_rename))
+        .route("/api/groups/delete", post(routes::group_delete))
         .route("/api/shares/update", post(routes::share_update))
         .route("/api/shares/delete", post(routes::share_delete))
         .route(
@@ -134,10 +134,10 @@ pub fn router(state: AppState) -> Router {
             "/api/shares/access/repair",
             post(routes::share_access_repair),
         )
-        .route("/api/users/update", post(routes::pending_users))
-        .route("/api/users/toggle", post(routes::pending_users))
-        .route("/api/users/groups", post(routes::pending_users))
-        .route("/api/users/delete", post(routes::pending_users))
+        .route("/api/users/update", post(routes::user_update))
+        .route("/api/users/toggle", post(routes::user_toggle))
+        .route("/api/users/groups", post(routes::user_groups))
+        .route("/api/users/delete", post(routes::user_delete))
         .route("/api/backups/running", get(routes::backups_running))
         .route("/api/backups/test", post(routes::pending_backups_write))
         .route("/api/backups/update", post(routes::pending_backups_write))
