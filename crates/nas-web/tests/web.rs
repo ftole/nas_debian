@@ -832,3 +832,33 @@ async fn contrato_de_paridad_completo() {
         &missing[..missing.len().min(15)]
     );
 }
+
+#[tokio::test]
+async fn shares_valida_nombres_y_sesion() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/shares")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"name":"mal nombre"}"#))
+                .expect("petición"),
+        )
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = cookie_for(&app).await;
+    let response = app
+        .oneshot(post_json(
+            "/api/shares",
+            &cookie,
+            r#"{"name":"mal nombre","scheme":1}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
