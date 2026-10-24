@@ -739,3 +739,61 @@ async fn vistas_renderizan_datos_reales() {
         assert!(body.contains("sidebar"), "{uri} sin layout");
     }
 }
+
+#[tokio::test]
+async fn zip_descarga_una_carpeta() {
+    let (app, dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let root = dir.join("data");
+    std::fs::create_dir_all(root.join("SISTEMAS/2026")).expect("dirs");
+    std::fs::write(root.join("SISTEMAS/2026/a.txt"), b"hola").expect("a");
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/files/zip?path=SISTEMAS", &cookie))
+        .await
+        .expect("zip");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .headers()
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .contains(".zip"));
+
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("cuerpo")
+        .to_bytes();
+    assert!(bytes.starts_with(b"PK"));
+
+    let response = app
+        .oneshot(get("/api/files/zip?path=../etc", &cookie))
+        .await
+        .expect("escape");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn vistas_terminal_y_auditoria() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/terminal", &cookie))
+        .await
+        .expect("terminal");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(body_text(response).await.contains("Terminal"));
+
+    let response = app
+        .oneshot(get("/audit", &cookie))
+        .await
+        .expect("auditoría");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(body_text(response).await.contains("login"));
+}
