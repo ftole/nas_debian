@@ -1,0 +1,134 @@
+#!/bin/bash
+# ==============================================================================
+# Gestión validada de cuentas del sistema y de Samba para el panel.
+# Uso: nas-accounts <accion> [args...]
+#   create-user  <usuario> <nombre> <password|-> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
+#   update-user  <usuario> <nombre> <password|-> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
+#   toggle-user  <usuario> <enable:0|1>
+#   delete-user  <usuario>
+#   add-member   <usuario> <grupo>
+#   remove-member <usuario> <grupo>
+#   create-group <grupo>
+#   rename-group <viejo> <nuevo>
+#   delete-group <grupo>
+# La contraseña se lee por stdin cuando el argumento es "-".
+# ==============================================================================
+set -euo pipefail
+
+ACTION="${1:-}"; shift || true
+
+valid_user() { [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
+valid_group() { [[ "$1" =~ ^grp_[a-z0-9_-]{1,28}$ ]]; }
+
+read_password() {
+    if [ "${1:-}" = "-" ]; then
+        IFS= read -r PASSWORD
+    else
+        PASSWORD="$1"
+    fi
+    [ "${#PASSWORD}" -ge 6 ] || { echo "contraseña demasiado corta" >&2; exit 3; }
+}
+
+apply_groups() {
+    local user="$1" groups="$2"
+    [ -n "$groups" ] || return 0
+    local IFS=','
+    for g in $groups; do
+        valid_group "$g" || { echo "grupo inválido: $g" >&2; exit 4; }
+    done
+    usermod -G "$groups" "$user"
+}
+
+samba_set() {
+    local user="$1" enable="$2"
+    if [ "$enable" = "1" ]; then
+        printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | smbpasswd -a -s "$user" >/dev/null
+        smbpasswd -e "$user" >/dev/null 2>&1 || true
+    else
+        smbpasswd -x "$user" >/dev/null 2>&1 || true
+    fi
+}
+
+case "$ACTION" in
+    create-user)
+        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; GROUPS="${7:-}"
+        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        id -u "$USER_NAME" >/dev/null 2>&1 && { echo "el usuario ya existe" >&2; exit 5; }
+        read_password "$PASS_ARG"
+        useradd -m -s /bin/bash -c "$FULL" "$USER_NAME"
+        printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
+        apply_groups "$USER_NAME" "$GROUPS"
+        samba_set "$USER_NAME" "$SAMBA"
+        echo "usuario $USER_NAME creado"
+        ;;
+    update-user)
+        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; GROUPS="${7:-}"
+        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        id -u "$USER_NAME" >/dev/null 2>&1 || { echo "el usuario no existe" >&2; exit 6; }
+        read_password "$PASS_ARG"
+        usermod -c "$FULL" "$USER_NAME"
+        printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
+        apply_groups "$USER_NAME" "$GROUPS"
+        samba_set "$USER_NAME" "$SAMBA"
+        echo "usuario $USER_NAME actualizado"
+        ;;
+    toggle-user)
+        USER_NAME="${1:-}"; ENABLE="${2:-1}"
+        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        if [ "$ENABLE" = "1" ]; then
+            usermod -U "$USER_NAME" 2>/dev/null || true
+            usermod -e "" "$USER_NAME"
+            smbpasswd -e "$USER_NAME" >/dev/null 2>&1 || true
+        else
+            usermod -L "$USER_NAME"
+            usermod -e 1 "$USER_NAME"
+            smbpasswd -d "$USER_NAME" >/dev/null 2>&1 || true
+        fi
+        echo "usuario $USER_NAME $([ "$ENABLE" = "1" ] && echo reactivado || echo suspendido)"
+        ;;
+    delete-user)
+        USER_NAME="${1:-}"
+        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        [ "$USER_NAME" = "www-data" ] && { echo "cuenta protegida" >&2; exit 7; }
+        smbpasswd -x "$USER_NAME" >/dev/null 2>&1 || true
+        userdel "$USER_NAME"
+        echo "usuario $USER_NAME eliminado"
+        ;;
+    add-member|remove-member)
+        USER_NAME="${1:-}"; GROUP="${2:-}"
+        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        valid_group "$GROUP" || { echo "grupo inválido" >&2; exit 4; }
+        if [ "$ACTION" = "add-member" ]; then
+            gpasswd -a "$USER_NAME" "$GROUP" >/dev/null
+        else
+            gpasswd -d "$USER_NAME" "$GROUP" >/dev/null
+        fi
+        echo "$USER_NAME $ACTION $GROUP"
+        ;;
+    create-group)
+        GROUP="${1:-}"
+        valid_group "$GROUP" || { echo "grupo inválido" >&2; exit 4; }
+        groupadd "$GROUP"
+        echo "grupo $GROUP creado"
+        ;;
+    rename-group)
+        OLD="${1:-}"; NEW="${2:-}"
+        valid_group "$OLD" || { echo "grupo inválido" >&2; exit 4; }
+        valid_group "$NEW" || { echo "grupo inválido" >&2; exit 4; }
+        groupmod -n "$NEW" "$OLD"
+        echo "grupo $OLD renombrado a $NEW"
+        ;;
+    delete-group)
+        GROUP="${1:-}"
+        valid_group "$GROUP" || { echo "grupo inválido" >&2; exit 4; }
+        case "$GROUP" in grp_samba|grp_web|grp_superadmin|grp_backups)
+            echo "grupo protegido" >&2; exit 8 ;;
+        esac
+        groupdel "$GROUP"
+        echo "grupo $GROUP eliminado"
+        ;;
+    *)
+        echo "acción desconocida: $ACTION" >&2
+        exit 1
+        ;;
+esac
