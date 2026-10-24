@@ -14,6 +14,9 @@ path = "src/main.rs"
 [dependencies]
 nas-core = { workspace = true }
 nas-inventory = { workspace = true }
+nas-ssh = { workspace = true }
+nas-audit = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
