@@ -18,6 +18,8 @@ use crate::files::Entry;
 pub const APP_CSS: &str = include_str!("../assets/app.css");
 /// Sprite de iconos SVG.
 pub const ICONS_SVG: &str = include_str!("../assets/icons.svg");
+/// Hoja de estilos de la pantalla de acceso.
+pub const LOGIN_CSS: &str = include_str!("../assets/login.css");
 /// Favicon del panel.
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.svg");
 
@@ -178,6 +180,83 @@ fn panel(title: &str, icon_name: &str, content: &str) -> String {
         icon(icon_name, "icon-sm"),
         esc(title),
         content
+    )
+}
+
+/// Pantalla de acceso con la identidad visual original.
+pub fn login(hostname: &str, error: Option<&str>) -> String {
+    let alert_class = if error.is_some() {
+        "login-alert visible"
+    } else {
+        "login-alert"
+    };
+    let alert_text = esc(error.unwrap_or(""));
+
+    format!(
+        r##"<!DOCTYPE html>
+<html lang="es" data-theme="dark"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>Iniciar Sesión • {hostname} (Debian 13)</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/login.css">
+</head>
+<body class="login-page">
+{ICONS_SVG}
+<div class="login-container">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-brand">
+        {server_icon}
+        <div class="login-title-group">
+          <h1><span>NAS</span> <span style="opacity:0.4; font-weight:300;">|</span> <span style="color:var(--accent-primary);">{hostname}</span></h1>
+          <p class="login-subtitle">Servidor NAS Departamental &amp; Central de Respaldos</p>
+        </div>
+      </div>
+    </div>
+    <div class="login-body">
+      <div id="login-alert" class="{alert_class}">
+        {alert_icon}
+        <span id="login-alert-text">{alert_text}</span>
+      </div>
+      <form id="login-form" method="POST" action="/login">
+        <div class="form-group" style="margin-bottom:16px;">
+          <label for="username">Usuario:</label>
+          <div class="input-with-icon">
+            <input type="text" id="username" name="username" required autofocus placeholder="usuario del panel" autocomplete="username">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:20px;">
+          <label for="password">Contraseña:</label>
+          <div class="input-with-icon">
+            <input type="password" id="password" name="password" required placeholder="Contraseña de acceso" autocomplete="current-password">
+            <button type="button" class="input-addon-btn" id="btn-toggle-pass" title="Mostrar/ocultar contraseña" onclick="togglePassVisibility()">
+              <svg class="icon icon-sm" id="icon-pass-toggle"><use href="#icon-eye"></use></svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" id="btn-submit" style="width:100%; justify-content:center; padding:10px;">
+          {lock_icon}<span>Iniciar sesión</span>
+        </button>
+      </form>
+    </div>
+    <div class="login-footer"><span>Debian 13 (Trixie)</span><span>Acceso seguro</span></div>
+  </div>
+</div>
+<script>
+function togglePassVisibility(){{
+  const input=document.getElementById('password');
+  const icon=document.getElementById('icon-pass-toggle');
+  const hidden=input.type==='password';
+  input.type=hidden?'text':'password';
+  if(icon) icon.innerHTML='<use href="#'+(hidden?'icon-eye-off':'icon-eye')+'"></use>';
+}}
+</script>
+</body></html>"##,
+        hostname = esc(hostname),
+        server_icon = icon("icon-server", "login-brand-icon"),
+        alert_icon = icon("icon-alert-triangle", "icon-sm"),
+        lock_icon = icon("icon-lock", ""),
     )
 }
 
