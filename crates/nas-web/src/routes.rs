@@ -1504,3 +1504,102 @@ pub async fn page_domain(State(state): State<AppState>, headers: HeaderMap) -> R
 
     render(&state, &user, "domain", "Dominio", body)
 }
+
+/// Descarga una carpeta (o archivo) como ZIP.
+pub async fn files_zip(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root(&state) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    let path = query.path;
+    let name = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "nas".to_string());
+
+    match tokio::task::spawn_blocking(move || root.zip(&path)).await {
+        Ok(Ok(bytes)) => {
+            let mut response = Response::new(axum::body::Body::from(bytes));
+            let response_headers = response.headers_mut();
+            response_headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/zip"),
+            );
+            if let Ok(value) = HeaderValue::from_str(&format!(
+                "attachment; filename=\"{}.zip\"",
+                name.replace('"', "")
+            )) {
+                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
+            }
+            response_headers.insert(
+                "content-security-policy",
+                HeaderValue::from_static("default-src 'none'; sandbox"),
+            );
+            response
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("compresión interrumpida"),
+    }
+}
+
+/// Vista del terminal web (solo superadministrador).
+pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+    if !is_superadmin(&state, &user) {
+        return (
+            StatusCode::FORBIDDEN,
+            Html(views::layout(
+                "terminal",
+                &user,
+                state.role.label(),
+                "Terminal",
+                &load_error("el terminal está reservado al superadministrador"),
+            )),
+        )
+            .into_response();
+    }
+
+    render(&state, &user, "terminal", "Terminal", views::terminal())
+}
+
+/// Vista de auditoría del panel (solo administradores).
+pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(_) => return login_redirect(),
+    };
+    if !is_admin(&state, &user) {
+        return (
+            StatusCode::FORBIDDEN,
+            Html(views::layout(
+                "audit",
+                &user,
+                state.role.label(),
+                "Auditoría",
+                &load_error("se requieren privilegios de administrador"),
+            )),
+        )
+            .into_response();
+    }
+
+    let body = match state.auth.db().recent_audit(100) {
+        Ok(rows) => views::audit(&rows),
+        Err(error) => load_error(&error.to_string()),
+    };
+
+    render(&state, &user, "audit", "Auditoría", body)
+}
