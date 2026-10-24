@@ -13,7 +13,7 @@
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
 | **F3** | `nas-web` (axum): API completa, vistas HTML, terminal, auditoría y ZIP | ✅ **Completado** |
-| **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
+| **F4** | TUI (`ratatui`) con navegación, acciones y explorador | ✅ **Completado** |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
 | **F7** | Retirada de PHP/Bash/Python y limpieza del árbol | ⏳ Pendiente |
@@ -198,7 +198,19 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 9. Panel web (`nas-web`)
+## 9. Asistente TUI (`nas-tui`)
+
+- Binario `nas-tui` con `ratatui` + `crossterm`: menú lateral de 12 secciones,
+  panel de detalle, barra de estado y overlay para planes.
+- Secciones: Dashboard, Red, Recursos, Usuarios, Respaldos, Servicios,
+  Diagnóstico, Almacenamiento, Archivos, Dominio, Terminal (indica el panel web)
+  y Salir.
+- Teclas: `↑/↓` o `j/k` navegar, `Tab/←/→` cambiar sección, `Enter` abrir
+  (entrar en carpeta, ver plan de respaldo, reiniciar servicio), `Retroceso`
+  subir de directorio, `F5`/`r` refrescar, `q`/`Esc` salir.
+- El explorador confina rutas a `/srv/nas` (rechaza `..` y rutas absolutas).
+
+## 10. Panel web (`nas-web`)
 
 Primera rebanada vertical del sustituto de PHP-FPM:
 
@@ -298,14 +310,14 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
 (auth, dashboard, recursos, usuarios, respaldos, servicios, diagnóstico,
 almacenamiento, archivos, dominio, terminal, auditoría).
 
-## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
+## 11. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
 - `nas storage list` usa `lsblk -J` y el parser tipado (tipo, tamaño, fstype,
   montaje, HDD/SSD).
 - `nas users list` lee `/etc/passwd` y `/etc/group` y separa cuentas de sistema
   de las administrables, listando además los grupos `grp_*`.
 
-## 11. Mapa de migración
+## 12. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -322,7 +334,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 12. Seguridad implementada
+## 13. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -340,7 +352,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 13. Siguientes pasos
+## 14. Siguientes pasos
 
 F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
 
