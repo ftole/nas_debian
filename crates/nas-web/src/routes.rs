@@ -140,7 +140,33 @@ pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Respon
     let path = state.paths.samba_conf.clone();
     match tokio::task::spawn_blocking(move || std::fs::read_to_string(&path)).await {
         Ok(Ok(text)) => {
-            axum::Json(ApiResponse::ok(parse_shares(&text), "Recursos compartidos")).into_response()
+            let shares: Vec<serde_json::Value> = parse_shares(&text)
+                .into_iter()
+                .map(|share| {
+                    let scheme_name = if share.guest_ok {
+                        "Acceso público / Invitados"
+                    } else if share.read_only {
+                        "Solo lectura estricta"
+                    } else if !share.write_list.is_empty() {
+                        "Lectura general + escritura exclusiva"
+                    } else {
+                        "Lectura y escritura por grupo"
+                    };
+                    serde_json::json!({
+                        "name": share.name,
+                        "path": share.path,
+                        "read_only": share.read_only,
+                        "browseable": share.browseable,
+                        "hidden": !share.browseable,
+                        "guest_ok": share.guest_ok,
+                        "valid_users": share.valid_users,
+                        "write_list": share.write_list,
+                        "comment": share.comment,
+                        "scheme_name": scheme_name,
+                    })
+                })
+                .collect();
+            axum::Json(ApiResponse::ok(shares, "Recursos compartidos")).into_response()
         }
         Ok(Err(error)) => server_error(&format!("no se pudo leer smb.conf: {error}")),
         Err(_) => server_error("lectura de smb.conf interrumpida"),
@@ -1609,24 +1635,67 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
     let path = state.paths.samba_conf.clone();
 
     match tokio::task::spawn_blocking(move || {
-        let shares: Vec<String> = std::fs::read_to_string(&path)
-            .ok()
-            .map(|text| {
-                nas_engine::parsers::smb::parse_shares(&text)
-                    .into_iter()
-                    .map(|share| share.name)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let (_, groups) = nas_engine::users::load_local();
-        let groups: Vec<String> = groups
+        let conf = std::fs::read_to_string(&path).unwrap_or_default();
+        let parsed = nas_engine::parsers::smb::parse_shares(&conf);
+        let shares: Vec<String> = parsed.iter().map(|share| share.name.clone()).collect();
+
+        let level_for =
+            |share: &nas_engine::parsers::smb::Share, principal: &str| -> &'static str {
+                let entry = if principal.starts_with('@') {
+                    principal.to_string()
+                } else {
+                    format!("@{principal}")
+                };
+                if share.guest_ok {
+                    "read"
+                } else if share
+                    .write_list
+                    .iter()
+                    .any(|item| item == &entry || item == principal)
+                {
+                    "write"
+                } else if share
+                    .valid_users
+                    .iter()
+                    .any(|item| item == &entry || item == principal)
+                {
+                    "read"
+                } else {
+                    "none"
+                }
+            };
+
+        let (mut users, groups) = nas_engine::users::load_local();
+        users.retain(|user| !user.system);
+        let groups: Vec<serde_json::Value> = groups
             .into_iter()
             .filter(|group| group.name.starts_with("grp_"))
-            .map(|group| group.name)
+            .map(|group| {
+                let mut row = serde_json::Map::new();
+                row.insert("name".into(), serde_json::json!(group.name));
+                for share in &parsed {
+                    row.insert(
+                        share.name.clone(),
+                        serde_json::json!(level_for(share, &format!("@{}", group.name))),
+                    );
+                }
+                serde_json::Value::Object(row)
+            })
             .collect();
-        let (mut users, _) = nas_engine::users::load_local();
-        users.retain(|user| !user.system);
-        let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
+        let users: Vec<serde_json::Value> = users
+            .into_iter()
+            .map(|user| {
+                let mut row = serde_json::Map::new();
+                row.insert("name".into(), serde_json::json!(user.name));
+                for share in &parsed {
+                    row.insert(
+                        share.name.clone(),
+                        serde_json::json!(level_for(share, &user.name)),
+                    );
+                }
+                serde_json::Value::Object(row)
+            })
+            .collect();
         serde_json::json!({ "shares": shares, "groups": groups, "users": users })
     })
     .await
@@ -2266,21 +2335,6 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
 }
 
 /// Acciones aún no portadas (devuelven 501 con mensaje claro).
-pub async fn pending_shares_update() -> Response {
-    not_implemented("La edición de recursos compartidos")
-}
-/// Acción pendiente.
-pub async fn pending_shares_delete() -> Response {
-    not_implemented("El borrado de recursos compartidos")
-}
-/// Acción pendiente.
-pub async fn pending_shares_access() -> Response {
-    not_implemented("La asignación de ACLs de recursos")
-}
-/// Acción pendiente.
-pub async fn pending_shares_repair() -> Response {
-    not_implemented("La reparación de ACLs")
-}
 /// Acción pendiente.
 pub async fn pending_users() -> Response {
     not_implemented("La gestión de usuarios")
@@ -2296,4 +2350,508 @@ pub async fn pending_backups_write() -> Response {
 /// Acción pendiente.
 pub async fn pending_system_update() -> Response {
     not_implemented("La actualización del sistema desde el panel")
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShareBody {
+    pub name: String,
+    #[serde(default)]
+    pub comment: String,
+    #[serde(default)]
+    pub scheme: u8,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub unit: String,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    #[serde(default)]
+    pub write_group: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShareNameBody {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShareAccessBody {
+    pub share: String,
+    #[serde(default)]
+    pub kind: String,
+    pub name: String,
+    pub level: String,
+}
+
+fn share_path(name: &str, unit: &str) -> String {
+    if unit.is_empty() || unit == "principal" {
+        format!("/srv/nas/{name}")
+    } else {
+        format!("/srv/nas/unidades/{unit}/{name}")
+    }
+}
+
+fn normalize_group(group: &str) -> String {
+    if group.starts_with('@') {
+        group.to_string()
+    } else {
+        format!("@{group}")
+    }
+}
+
+fn share_spec(body: &ShareBody, path: &str) -> nas_engine::samba::ShareSpec {
+    let groups: Vec<String> = body.groups.iter().map(|g| normalize_group(g)).collect();
+    let write = if body.write_group.is_empty() {
+        None
+    } else {
+        Some(normalize_group(&body.write_group))
+    };
+
+    let read_only = body.scheme == 3;
+    let guest_ok = body.scheme == 4;
+    let write_list = if body.scheme == 2 {
+        write.into_iter().collect()
+    } else if body.scheme == 1 {
+        groups.clone()
+    } else {
+        Vec::new()
+    };
+
+    nas_engine::samba::ShareSpec {
+        name: body.name.trim().to_string(),
+        path: path.to_string(),
+        read_only,
+        browseable: !body.hidden,
+        guest_ok,
+        valid_users: if guest_ok { Vec::new() } else { groups },
+        write_list: if read_only || guest_ok {
+            Vec::new()
+        } else {
+            write_list
+        },
+        comment: body.comment.clone(),
+    }
+}
+
+fn stage_and_apply(conf: &str) -> Result<(), String> {
+    let stamp = chrono::Local::now().format("%Y%m%d%H%M%S%3f");
+    let dir = std::path::Path::new("/var/lib/nas/staging");
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let staged = dir.join(format!("smbconf_{stamp}"));
+    std::fs::write(&staged, conf).map_err(|error| error.to_string())?;
+
+    let output = Runner::new()
+        .run(
+            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-samba-apply")
+                .arg(staged.to_string_lossy().to_string())
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(60)),
+        )
+        .map_err(|error| error.to_string())?;
+
+    if output.is_success() {
+        Ok(())
+    } else {
+        let _ = std::fs::remove_file(&staged);
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+fn apply_acl(path: &str, principal: &str, level: &str) -> Result<(), String> {
+    let output = Runner::new()
+        .run(
+            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-share-acl")
+                .args([path, principal.trim_start_matches('@'), level])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(120)),
+        )
+        .map_err(|error| error.to_string())?;
+
+    if output.is_success() {
+        Ok(())
+    } else {
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+fn create_share_dir(name: &str, unit: &str) -> Result<(), String> {
+    let output = Runner::new()
+        .run(
+            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-share-dir")
+                .args([name, if unit.is_empty() { "principal" } else { unit }])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        )
+        .map_err(|error| error.to_string())?;
+
+    if output.is_success() {
+        Ok(())
+    } else {
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+fn apply_spec_acls(spec: &nas_engine::samba::ShareSpec) {
+    for group in &spec.valid_users {
+        let level = if spec.write_list.contains(group) {
+            "write"
+        } else {
+            "read"
+        };
+        let _ = apply_acl(&spec.path, group, level);
+    }
+    for group in &spec.write_list {
+        if !spec.valid_users.contains(group) {
+            let _ = apply_acl(&spec.path, group, "write");
+        }
+    }
+}
+
+/// Crea un recurso compartido.
+pub async fn share_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ShareBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if nas_engine::samba::validate_name(&body.name).is_err() {
+        return bad_request("nombre de recurso inválido");
+    }
+
+    let path = share_path(body.name.trim(), body.unit.trim());
+    if let Err(error) = nas_engine::samba::validate_path(&path) {
+        return error_response(error);
+    }
+    let spec = share_spec(&body, &path);
+    let share_name = body.name.clone();
+
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let updated =
+            nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
+        create_share_dir(&spec.name, "principal")?;
+        stage_and_apply(&updated)?;
+        apply_spec_acls(&spec);
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "share_create", &share_name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Recurso creado")).into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_create", &share_name, "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Actualiza un recurso compartido existente.
+pub async fn share_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ShareBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let share_name = body.name.clone();
+
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let existing = nas_engine::parsers::smb::parse_shares(&conf)
+            .into_iter()
+            .find(|share| share.name.eq_ignore_ascii_case(body.name.trim()))
+            .ok_or_else(|| format!("no existe el recurso '{}'", body.name))?;
+        let path = existing
+            .path
+            .unwrap_or_else(|| share_path(body.name.trim(), "principal"));
+        let spec = share_spec(&body, &path);
+        let updated =
+            nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
+        stage_and_apply(&updated)?;
+        apply_spec_acls(&spec);
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "share_update", &share_name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Recurso actualizado",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_update", &share_name, "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Elimina un recurso compartido (conserva los archivos).
+pub async fn share_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ShareNameBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let name = body.name.clone();
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let updated =
+            nas_engine::samba::remove_share(&conf, &name).map_err(|error| error.to_string())?;
+        stage_and_apply(&updated)
+    })
+    .await
+    .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "share_delete", &body.name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Recurso eliminado",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_delete", &body.name, "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Ajusta el nivel de acceso de un grupo o usuario sobre un recurso.
+pub async fn share_access_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ShareAccessBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !matches!(body.level.as_str(), "none" | "read" | "write") {
+        return bad_request("nivel de acceso inválido");
+    }
+
+    let share_name = body.share.clone();
+    let level_name = body.level.clone();
+    let principal = if body.kind == "users" {
+        body.name.clone()
+    } else {
+        normalize_group(&body.name)
+    };
+
+    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let mut shares = nas_engine::parsers::smb::parse_shares(&conf);
+        let share = shares
+            .iter_mut()
+            .find(|share| share.name.eq_ignore_ascii_case(body.share.trim()))
+            .ok_or_else(|| format!("no existe el recurso '{}'", body.share))?;
+
+        let path = share
+            .path
+            .clone()
+            .unwrap_or_else(|| share_path(&share.name, "principal"));
+        let entry = principal.clone();
+
+        match body.level.as_str() {
+            "none" => {
+                share.valid_users.retain(|item| item != &entry);
+                share.write_list.retain(|item| item != &entry);
+            }
+            "read" => {
+                if !share.valid_users.contains(&entry) {
+                    share.valid_users.push(entry.clone());
+                }
+                share.write_list.retain(|item| item != &entry);
+            }
+            _ => {
+                if !share.valid_users.contains(&entry) {
+                    share.valid_users.push(entry.clone());
+                }
+                if !share.write_list.contains(&entry) {
+                    share.write_list.push(entry.clone());
+                }
+            }
+        }
+
+        let spec = nas_engine::samba::ShareSpec {
+            name: share.name.clone(),
+            path,
+            read_only: share.read_only,
+            browseable: share.browseable,
+            guest_ok: share.guest_ok,
+            valid_users: share.valid_users.clone(),
+            write_list: share.write_list.clone(),
+            comment: share.comment.clone().unwrap_or_default(),
+        };
+        let updated =
+            nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
+        stage_and_apply(&updated)?;
+        let acl_level = if body.level == "none" {
+            "none"
+        } else {
+            body.level.as_str()
+        };
+        apply_acl(&spec.path, &principal, acl_level)?;
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|_| Err("cambio de acceso interrumpido".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state.auth.db().append_audit(
+                &user,
+                "share_access",
+                &share_name,
+                "SUCCESS",
+                &level_name,
+            );
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Permiso actualizado",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_access", &share_name, "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Reaplica las ACLs de todos los recursos según `smb.conf`.
+pub async fn share_access_repair(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ShareNameBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let outcome = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let shares = nas_engine::parsers::smb::parse_shares(&conf);
+        let mut applied = 0;
+        for share in shares {
+            if !body.name.is_empty() && !share.name.eq_ignore_ascii_case(body.name.trim()) {
+                continue;
+            }
+            let Some(path) = share.path.clone() else {
+                continue;
+            };
+            for group in &share.valid_users {
+                let level = if share.write_list.contains(group) {
+                    "write"
+                } else {
+                    "read"
+                };
+                if apply_acl(&path, group, level).is_ok() {
+                    applied += 1;
+                }
+            }
+            for group in &share.write_list {
+                if !share.valid_users.contains(group) && apply_acl(&path, group, "write").is_ok() {
+                    applied += 1;
+                }
+            }
+        }
+        Ok(applied)
+    })
+    .await
+    .unwrap_or_else(|_| Err("reparación interrumpida".to_string()));
+
+    match outcome {
+        Ok(applied) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_acl_repair", "shares", "SUCCESS", "");
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "applied": applied }),
+                "ACLs reaplicadas",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "share_acl_repair", "shares", "FAILED", &error);
+            server_error(&error)
+        }
+    }
 }
