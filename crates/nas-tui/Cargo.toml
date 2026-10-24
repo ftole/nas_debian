@@ -1,0 +1,27 @@
+[package]
+name = "nas-tui"
+description = "Asistente TUI del servidor NAS (ratatui) para consola local o SSH"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "nas_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nas-tui"
+path = "src/main.rs"
+
+[dependencies]
+nas-core = { workspace = true }
+nas-exec = { workspace = true }
+nas-engine = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+chrono = { workspace = true }
+
+[lints]
+workspace = true
