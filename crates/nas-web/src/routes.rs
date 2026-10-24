@@ -2336,14 +2336,6 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
 
 /// Acciones aún no portadas (devuelven 501 con mensaje claro).
 /// Acción pendiente.
-pub async fn pending_users() -> Response {
-    not_implemented("La gestión de usuarios")
-}
-/// Acción pendiente.
-pub async fn pending_groups() -> Response {
-    not_implemented("La gestión de grupos")
-}
-/// Acción pendiente.
 pub async fn pending_backups_write() -> Response {
     not_implemented("La creación o edición de tareas de respaldo")
 }
@@ -2853,5 +2845,468 @@ pub async fn share_access_repair(
                     .append_audit(&user, "share_acl_repair", "shares", "FAILED", &error);
             server_error(&error)
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserBody {
+    pub username: String,
+    #[serde(default)]
+    pub full_name: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    #[serde(default)]
+    pub is_admin: bool,
+    #[serde(default)]
+    pub can_web: bool,
+    #[serde(default)]
+    pub samba_enabled: bool,
+    #[serde(default)]
+    pub is_superadmin: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ToggleUserBody {
+    pub username: String,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MemberBody {
+    pub username: String,
+    pub group: String,
+    #[serde(default)]
+    pub action: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupBody {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameGroupBody {
+    pub old: String,
+    #[serde(default)]
+    pub new: String,
+    #[serde(default)]
+    pub new_name: String,
+}
+
+fn valid_username(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && name.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+fn valid_grp(name: &str) -> bool {
+    name.starts_with("grp_")
+        && name.len() <= 32
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String> {
+    let mut spec = nas_exec::CommandSpec::new("/usr/local/sbin/nas-accounts")
+        .args(args.iter().map(|arg| (*arg).to_string()))
+        .sudo(nas_exec::SudoMode::Passwordless)
+        .timeout(std::time::Duration::from_secs(60));
+    if let Some(password) = password {
+        spec = spec.stdin_secret(nas_exec::SecretInput::new(password));
+    }
+    let output = Runner::new()
+        .run(&spec)
+        .map_err(|error| error.to_string())?;
+    if output.is_success() {
+        Ok(output.stdout)
+    } else {
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+/// Crea un usuario del sistema.
+pub async fn user_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<UserBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !valid_username(&body.username) || !body.groups.iter().all(|group| valid_grp(group)) {
+        return bad_request("usuario o grupo inválido");
+    }
+    if body.password.len() < 6 {
+        return bad_request("la contraseña debe tener al menos 6 caracteres");
+    }
+
+    let username = body.username.clone();
+    let groups = body.groups.join(",");
+    let samba = if body.samba_enabled { "1" } else { "0" };
+    let full_name = body.full_name.clone();
+    let can_web = body.can_web;
+    let password = body.password.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        run_accounts(
+            &[
+                "create-user",
+                &username,
+                &full_name,
+                "-",
+                "0",
+                if can_web { "1" } else { "0" },
+                samba,
+                &groups,
+            ],
+            Some(&password),
+        )
+    })
+    .await
+    .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+
+    match result {
+        Ok(_) => {
+            if can_web {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(body.password.as_bytes());
+                let hash = hex::encode(hasher.finalize());
+                let role = if body.is_superadmin {
+                    "superadmin"
+                } else if body.is_admin {
+                    "admin"
+                } else {
+                    "operator"
+                };
+                let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+            }
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&actor, "user_create", &body.username, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Usuario creado")).into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Actualiza un usuario existente.
+pub async fn user_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<UserBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !valid_username(&body.username) {
+        return bad_request("usuario inválido");
+    }
+
+    let username = body.username.clone();
+    let groups = body.groups.join(",");
+    let samba = if body.samba_enabled { "1" } else { "0" };
+    let full_name = body.full_name.clone();
+    let password = body.password.clone();
+    let can_web = body.can_web;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let password = if password.is_empty() {
+            "cambiar123".to_string()
+        } else {
+            password
+        };
+        run_accounts(
+            &[
+                "update-user",
+                &username,
+                &full_name,
+                "-",
+                "0",
+                "1",
+                samba,
+                &groups,
+            ],
+            Some(&password),
+        )
+    })
+    .await
+    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+
+    match result {
+        Ok(_) => {
+            if can_web && !body.password.is_empty() {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(body.password.as_bytes());
+                let hash = hex::encode(hasher.finalize());
+                let _ = state
+                    .auth
+                    .db()
+                    .upsert_user(&body.username, &hash, "operator");
+            }
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&actor, "user_update", &body.username, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Usuario actualizado",
+            ))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Activa o suspende una cuenta.
+pub async fn user_toggle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ToggleUserBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !valid_username(&body.username) {
+        return bad_request("usuario inválido");
+    }
+
+    let username = body.username.clone();
+    let enabled = if body.enabled { "1" } else { "0" };
+    let result = tokio::task::spawn_blocking(move || {
+        run_accounts(&["toggle-user", &username, enabled], None)
+    })
+    .await
+    .unwrap_or_else(|_| Err("cambio de estado interrumpido".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&actor, "user_toggle", &body.username, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Estado actualizado",
+            ))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Elimina una cuenta del sistema.
+pub async fn user_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<ToggleUserBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !valid_username(&body.username) || body.username == "www-data" {
+        return bad_request("usuario inválido o protegido");
+    }
+
+    let username = body.username.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_accounts(&["delete-user", &username], None))
+            .await
+            .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&actor, "user_delete", &body.username, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Usuario eliminado",
+            ))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Añade o quita un miembro de un grupo.
+pub async fn user_groups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<MemberBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !valid_username(&body.username) || !valid_grp(&body.group) {
+        return bad_request("usuario o grupo inválido");
+    }
+
+    let action = if body.action == "add" {
+        "add-member"
+    } else {
+        "remove-member"
+    };
+    let username = body.username.clone();
+    let group = body.group.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_accounts(&[action, &username, &group], None))
+            .await
+            .unwrap_or_else(|_| Err("membresía interrumpida".to_string()));
+
+    match result {
+        Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Membresía actualizada",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Crea un grupo corporativo.
+pub async fn group_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<GroupBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let name = body.name.trim().to_string();
+    if !valid_grp(&name) {
+        return bad_request("el grupo debe llamarse grp_<nombre>");
+    }
+
+    let created = name.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_accounts(&["create-group", &created], None))
+            .await
+            .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "group_create", &name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Grupo creado")).into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Renombra un grupo.
+pub async fn group_rename(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<RenameGroupBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let new_name = if body.new.is_empty() {
+        body.new_name.clone()
+    } else {
+        body.new.clone()
+    };
+    if !valid_grp(&body.old) || !valid_grp(&new_name) {
+        return bad_request("nombre de grupo inválido");
+    }
+
+    let old = body.old.clone();
+    let target = new_name.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_accounts(&["rename-group", &old, &target], None))
+            .await
+            .unwrap_or_else(|_| Err("renombrado interrumpido".to_string()));
+
+    match result {
+        Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Grupo renombrado",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Elimina un grupo corporativo.
+pub async fn group_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<GroupBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let name = body.name.trim().to_string();
+    if !valid_grp(&name) {
+        return bad_request("grupo inválido");
+    }
+
+    let target = name.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_accounts(&["delete-group", &target], None))
+            .await
+            .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "group_delete", &name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Grupo eliminado",
+            ))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
     }
 }
