@@ -53,6 +53,7 @@ fi
 # grp_samba para operar sobre /srv/nas. En instalaciones nuevas pueden no existir.
 usermod -aG www-data "$SERVICE_USER" 2>/dev/null || true
 usermod -aG grp_samba "$SERVICE_USER" 2>/dev/null || true
+usermod -aG systemd-journal "$SERVICE_USER" 2>/dev/null || true
 
 if [ -d "$STATE_DIR" ]; then
     # Migración en sitio: se conserva el propietario (www-data) para no romper
