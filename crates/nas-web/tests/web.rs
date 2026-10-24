@@ -229,9 +229,9 @@ async fn dashboard_redirige_sin_sesion_y_carga_con_sesion() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(body.contains("Dashboard"));
-    assert!(body.contains("Hostname"));
-    assert!(body.contains("Cerrar sesión"));
+    assert!(body.contains("id=\"view-dashboard\""));
+    assert!(body.contains("masthead"));
+    assert!(body.contains("sidebar-nav"));
 }
 
 #[tokio::test]
@@ -712,22 +712,22 @@ async fn backup_run_exige_confirmacion_y_tarea_valida() {
 
 #[tokio::test]
 async fn vistas_renderizan_datos_reales() {
-    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, Some(("demo", LOCAL_RUNNER)));
     let cookie = cookie_for(&app).await;
 
     let cases = [
-        ("/dashboard", "Hostname"),
-        ("/shares", "SISTEMAS"),
-        ("/users", "Usuarios"),
-        ("/backups", "demo"),
-        ("/services", "smbd"),
-        ("/diagnostics", "rol"),
-        ("/storage", "Almacenamiento"),
-        ("/files", "Archivos"),
-        ("/domain", "Active Directory"),
+        ("/dashboard", "view-dashboard"),
+        ("/shares", "view-shares"),
+        ("/users", "view-users"),
+        ("/backups", "view-backups"),
+        ("/services", "view-services"),
+        ("/diagnostics", "view-services"),
+        ("/storage", "view-storage"),
+        ("/files", "view-files"),
+        ("/domain", "view-domain"),
     ];
 
-    for (uri, needle) in cases {
+    for (uri, view_id) in cases {
         let response = app
             .clone()
             .oneshot(get(uri, &cookie))
@@ -735,7 +735,10 @@ async fn vistas_renderizan_datos_reales() {
             .expect("respuesta");
         assert_eq!(response.status(), StatusCode::OK, "fallo en {uri}");
         let body = body_text(response).await;
-        assert!(body.contains(needle), "{uri} no contiene '{needle}'");
+        assert!(
+            body.contains(&format!("id=\"{view_id}\"")),
+            "{uri} no contiene la vista '{view_id}'"
+        );
         assert!(body.contains("sidebar"), "{uri} sin layout");
     }
 }
@@ -788,12 +791,44 @@ async fn vistas_terminal_y_auditoria() {
         .await
         .expect("terminal");
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(body_text(response).await.contains("Terminal"));
+    assert!(body_text(response).await.contains("id=\"view-terminal\""));
 
     let response = app
         .oneshot(get("/audit", &cookie))
         .await
         .expect("auditoría");
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(body_text(response).await.contains("login"));
+    assert!(body_text(response).await.contains("id=\"view-logs\""));
+}
+
+#[tokio::test]
+async fn contrato_de_paridad_completo() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(get("/dashboard", &cookie))
+        .await
+        .expect("panel");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/parity/contract.json"))
+            .expect("contrato");
+    let ids = contract["layout"]["ids"].as_array().expect("ids");
+    assert!(ids.len() > 500, "contrato incompleto");
+
+    let missing: Vec<&str> = ids
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|id| !body.contains(&format!("id=\"{id}\"")))
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "faltan {} IDs del contrato: {:?}",
+        missing.len(),
+        &missing[..missing.len().min(15)]
+    );
 }
