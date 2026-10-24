@@ -214,7 +214,7 @@ async fn dashboard_redirige_sin_sesion_y_carga_con_sesion() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/")
+                .uri("/dashboard")
                 .body(Body::empty())
                 .expect("petición"),
         )
@@ -223,10 +223,14 @@ async fn dashboard_redirige_sin_sesion_y_carga_con_sesion() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
     let cookie = cookie_for(&app).await;
-    let response = app.oneshot(get("/", &cookie)).await.expect("respuesta");
+    let response = app
+        .oneshot(get("/dashboard", &cookie))
+        .await
+        .expect("respuesta");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    assert!(body.contains("Panel NAS"));
+    assert!(body.contains("Dashboard"));
+    assert!(body.contains("Hostname"));
     assert!(body.contains("Salir"));
 }
 
@@ -704,4 +708,34 @@ async fn backup_run_exige_confirmacion_y_tarea_valida() {
         .await
         .expect("sin confirmar");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn vistas_renderizan_datos_reales() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let cookie = cookie_for(&app).await;
+
+    let cases = [
+        ("/dashboard", "Hostname"),
+        ("/shares", "SISTEMAS"),
+        ("/users", "Usuarios"),
+        ("/backups", "demo"),
+        ("/services", "smbd"),
+        ("/diagnostics", "rol"),
+        ("/storage", "Almacenamiento"),
+        ("/files", "Archivos"),
+        ("/domain", "Active Directory"),
+    ];
+
+    for (uri, needle) in cases {
+        let response = app
+            .clone()
+            .oneshot(get(uri, &cookie))
+            .await
+            .expect("respuesta");
+        assert_eq!(response.status(), StatusCode::OK, "fallo en {uri}");
+        let body = body_text(response).await;
+        assert!(body.contains(needle), "{uri} no contiene '{needle}'");
+        assert!(body.contains("sidebar"), "{uri} sin layout");
+    }
 }
