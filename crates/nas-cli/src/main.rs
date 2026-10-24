@@ -49,6 +49,11 @@ enum Command {
         #[command(subcommand)]
         action: AuditAction,
     },
+    /// Estado del retiro del stack anterior.
+    Migrate {
+        #[command(subcommand)]
+        action: MigrateAction,
+    },
     /// Tareas de respaldo instaladas en el servidor.
     Backup {
         #[command(subcommand)]
@@ -199,6 +204,12 @@ struct DeployArgs {
 }
 
 #[derive(Debug, Subcommand)]
+enum MigrateAction {
+    /// Muestra qué componentes legacy siguen presentes y su sustituto.
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
 enum BackupAction {
     /// Lista las tareas de respaldo instaladas (`backup_*.sh`).
     List {
@@ -339,6 +350,9 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 previous,
             } => update_plan(&manifest, &artifact, &root, previous.as_deref(), cli.json),
         },
+        Command::Migrate { action } => match action {
+            MigrateAction::Status => migrate_status(cli.json),
+        },
         Command::Storage { action } => match action {
             StorageAction::List => storage_list(cli.json),
         },
@@ -365,6 +379,78 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             ),
         },
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct LegacyItem {
+    path: String,
+    replacement: &'static str,
+    wave: &'static str,
+    present: bool,
+}
+
+fn legacy_inventory(root: &Path) -> Vec<LegacyItem> {
+    let items: [(&str, &str, &str); 10] = [
+        ("web", "nas-web", "A"),
+        ("bin/nas-cli", "nas (CLI Rust)", "A"),
+        ("src/asistente.sh", "nas-tui", "A"),
+        ("src/modules", "nas-tui", "A"),
+        ("nas_admin.py", "nasctl", "A"),
+        ("test_remote.py", "nas-ssh + nas-dev", "A"),
+        ("src/core/deploy.sh", "nas deploy", "B"),
+        ("src/core/updater.sh", "nas update", "B"),
+        ("src/core/uninstall.sh", "nas uninstall", "B"),
+        ("install.sh", "packaging/install.sh", "B"),
+    ];
+
+    items
+        .iter()
+        .map(|(path, replacement, wave)| LegacyItem {
+            path: (*path).to_string(),
+            replacement,
+            wave,
+            present: root.join(path).exists(),
+        })
+        .collect()
+}
+
+fn migrate_status(json: bool) -> NasResult<ExitCode> {
+    let root = std::env::var("NAS_REPO_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let items = legacy_inventory(&root);
+    let pending = items.iter().filter(|item| item.present).count();
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "root": root.display().to_string(),
+                "pending": pending,
+                "items": items,
+            }),
+            "Estado del retiro del stack anterior",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("RETIRO DEL STACK ANTERIOR (raíz: {})", root.display());
+    println!(
+        "{:<26} {:<22} {:<5} ESTADO",
+        "COMPONENTE", "SUSTITUTO", "OLA"
+    );
+    for item in &items {
+        println!(
+            "{:<26} {:<22} {:<5} {}",
+            item.path,
+            item.replacement,
+            item.wave,
+            if item.present { "presente" } else { "retirado" }
+        );
+    }
+    println!();
+    println!("Pendientes de retiro: {pending}");
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn discover_tasks(dir: &Path) -> NasResult<Vec<BackupTask>> {
