@@ -7,6 +7,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Form;
 use chrono::Utc;
 use nas_core::ApiResponse;
+use nas_engine::parsers::smb::parse_shares;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -32,26 +33,25 @@ pub struct LoginForm {
 
 /// Procesa el acceso y emite la cookie de sesión.
 pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
-    if !state
-        .auth
-        .verify_credentials(&form.username, &form.password)
-    {
-        return (StatusCode::UNAUTHORIZED, Html(LOGIN_ERROR_HTML)).into_response();
-    }
-
     let now = Utc::now().timestamp();
-    let value = state.auth.issue_cookie(now);
-    let mut response = Redirect::to("/").into_response();
+    let session = match state.auth.login(&form.username, &form.password, now) {
+        Ok(Some(session)) => session,
+        Ok(None) => return (StatusCode::UNAUTHORIZED, Html(LOGIN_ERROR_HTML)).into_response(),
+        Err(error) => return server_error(&error.to_string()),
+    };
 
-    if let Ok(header) = HeaderValue::from_str(&state.auth.set_cookie_header(&value)) {
+    let mut response = Redirect::to("/").into_response();
+    if let Ok(header) = HeaderValue::from_str(&state.auth.set_cookie_header(&session)) {
         response.headers_mut().insert(SET_COOKIE, header);
     }
-
     response
 }
 
-/// Cierra la sesión eliminando la cookie.
-pub async fn logout(State(state): State<AppState>) -> Response {
+/// Cierra la sesión eliminando la cookie y el registro en la base de datos.
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let cookies = cookie_header(&headers);
+    let _ = state.auth.logout(cookies);
+
     let mut response = Redirect::to("/login").into_response();
     if let Ok(header) = HeaderValue::from_str(&state.auth.clear_cookie_header()) {
         response.headers_mut().insert(SET_COOKIE, header);
@@ -59,10 +59,14 @@ pub async fn logout(State(state): State<AppState>) -> Response {
     response
 }
 
-/// Dashboard mínimo con métricas en vivo.
+/// Dashboard mínimo con datos de red en vivo.
 pub async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(user) = authenticated_user(&state, &headers) else {
-        return Redirect::to("/login").into_response();
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) if response.status() == StatusCode::UNAUTHORIZED => {
+            return Redirect::to("/login").into_response()
+        }
+        Err(response) => return *response,
     };
 
     let paths = state.paths.clone();
@@ -77,6 +81,7 @@ pub async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Res
     let hostname = html_escape(&metrics.0);
     let workgroup = html_escape(metrics.1.as_deref().unwrap_or("N/D"));
     let ip = html_escape(metrics.2.as_deref().unwrap_or("N/D"));
+    let role = state.role.label();
 
     Html(format!(
         r#"<!DOCTYPE html>
@@ -93,13 +98,13 @@ b{{color:#38bdf8;font-size:15px}}
 button{{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer}}
 </style></head>
 <body>
-<header><h1>NAS · {hostname}</h1>
+<header><h1>NAS · {hostname} · <small>{role}</small></h1>
 <form method="post" action="/logout"><button type="submit">Salir ({user})</button></form></header>
 <main>
   <div class="card"><h2>Hostname</h2><b>{hostname}</b></div>
   <div class="card"><h2>Grupo de trabajo</h2><b>{workgroup}</b></div>
   <div class="card"><h2>IPv4 primaria</h2><b>{ip}</b></div>
-  <div class="card"><h2>API</h2><code>/api/metrics</code> · <code>/api/network</code></div>
+  <div class="card"><h2>API</h2><code>/api/metrics</code> · <code>/api/network</code> · <code>/api/shares</code> · <code>/api/users</code></div>
 </main>
 </body></html>"#,
         user = html_escape(&user)
@@ -109,40 +114,89 @@ button{{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:
 
 /// Métricas del sistema en JSON (contrato compartido).
 pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if authenticated_user(&state, &headers).is_none() {
-        return unauthorized();
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
     }
 
-    let result = tokio::task::spawn_blocking(|| collect_status(&Runner::new())).await;
-    match result {
+    match tokio::task::spawn_blocking(|| collect_status(&Runner::new())).await {
         Ok(metrics) => axum::Json(ApiResponse::ok(metrics, "Métricas del sistema")).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(ApiResponse::<serde_json::Value>::error(
-                "no se pudieron recolectar las métricas",
-            )),
-        )
-            .into_response(),
+        Err(_) => server_error("no se pudieron recolectar las métricas"),
     }
 }
 
-/// Inventario de red en JSON (contrato compartido).
+/// Inventario de red en JSON.
 pub async fn network(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if authenticated_user(&state, &headers).is_none() {
-        return unauthorized();
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
     }
 
     let paths = state.paths.clone();
-    let result = tokio::task::spawn_blocking(move || collect_network(&Runner::new(), &paths)).await;
-    match result {
+    match tokio::task::spawn_blocking(move || collect_network(&Runner::new(), &paths)).await {
         Ok(overview) => axum::Json(ApiResponse::ok(overview, "Inventario de red")).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(_) => server_error("no se pudo recolectar el inventario de red"),
+    }
+}
+
+/// Recursos compartidos declarados en `smb.conf`.
+pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    if !state.role.has_shares() {
+        return (
+            StatusCode::FORBIDDEN,
             axum::Json(ApiResponse::<serde_json::Value>::error(
-                "no se pudo recolectar el inventario de red",
+                "el rol BACKUP no expone recursos compartidos",
             )),
         )
-            .into_response(),
+            .into_response();
+    }
+
+    let path = state.paths.samba_conf.clone();
+    match tokio::task::spawn_blocking(move || std::fs::read_to_string(&path)).await {
+        Ok(Ok(text)) => {
+            axum::Json(ApiResponse::ok(parse_shares(&text), "Recursos compartidos")).into_response()
+        }
+        Ok(Err(error)) => server_error(&format!("no se pudo leer smb.conf: {error}")),
+        Err(_) => server_error("lectura de smb.conf interrumpida"),
+    }
+}
+
+/// Usuarios administrables y grupos corporativos.
+pub async fn users(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    match tokio::task::spawn_blocking(|| {
+        let (mut users, mut groups) = nas_engine::users::load_local();
+        users.retain(|user| !user.system);
+        groups.retain(|group| group.name.starts_with("grp_"));
+        serde_json::json!({ "users": users, "groups": groups })
+    })
+    .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Usuarios y grupos")).into_response(),
+        Err(_) => server_error("no se pudo leer el inventario de usuarios"),
+    }
+}
+
+fn cookie_header(headers: &HeaderMap) -> &str {
+    headers
+        .get(COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+}
+
+fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<String, Box<Response>> {
+    match state
+        .auth
+        .authenticate(cookie_header(headers), Utc::now().timestamp())
+    {
+        Ok(Some(user)) => Ok(user),
+        Ok(None) => Err(Box::new(unauthorized())),
+        Err(error) => Err(Box::new(server_error(&error.to_string()))),
     }
 }
 
@@ -156,12 +210,12 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
-fn authenticated_user(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let cookies = headers
-        .get(COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    state.auth.authenticate(cookies, Utc::now().timestamp())
+fn server_error(message: &str) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        axum::Json(ApiResponse::<serde_json::Value>::error(message)),
+    )
+        .into_response()
 }
 
 fn html_escape(value: &str) -> String {
