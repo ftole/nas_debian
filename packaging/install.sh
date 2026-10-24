@@ -1,0 +1,135 @@
+#!/bin/bash
+# ==============================================================================
+# Instalador del panel NAS en Rust (nas-web + CLI).
+# Idempotente: puede ejecutarse varias veces sin duplicar configuración.
+# Uso: sudo bash packaging/install.sh [--prefix DIR] [--no-nginx]
+# ==============================================================================
+set -euo pipefail
+
+PREFIX="${PREFIX:-/usr/local/bin}"
+ENV_FILE="/etc/nas-web.env"
+UNIT_FILE="/etc/systemd/system/nas-web.service"
+NGINX_SITE="/etc/nginx/sites-available/nas-web"
+SUDOERS_FILE="/etc/sudoers.d/nas-web"
+STATE_DIR="/var/lib/nas"
+DATA_ROOT="/srv/nas"
+SERVICE_USER="nas-web"
+CONFIGURE_NGINX=1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --prefix) PREFIX="${2:?falta directorio}"; shift 2 ;;
+        --no-nginx) CONFIGURE_NGINX=0; shift ;;
+        -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+        *) echo "opción desconocida: $1" >&2; exit 2 ;;
+    esac
+done
+
+[ "$(id -u)" -eq 0 ] || { echo "[-] ejecute como root" >&2; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-$REPO_DIR/target/release}"
+
+for bin in nas nas-web nas-tui nasctl nas-dev; do
+    if [ ! -x "$BUILD_DIR/$bin" ]; then
+        echo "[-] falta el binario $BUILD_DIR/$bin (ejecute: cargo build --release --workspace)" >&2
+        exit 1
+    fi
+done
+
+echo "[1/7] Instalando binarios en $PREFIX"
+install -d -m 0755 "$PREFIX"
+for bin in nas nas-web nas-tui nasctl nas-dev; do
+    install -m 0755 "$BUILD_DIR/$bin" "$PREFIX/$bin"
+done
+
+echo "[2/7] Creando usuario de servicio y directorios de estado"
+if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+fi
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR" "$STATE_DIR/audit"
+install -d -m 0775 -o root -g grp_samba "$DATA_ROOT" 2>/dev/null || install -d -m 0775 "$DATA_ROOT"
+install -d -m 0750 /etc/nas
+
+echo "[3/7] Configurando variables de entorno"
+if [ ! -f "$ENV_FILE" ]; then
+    secret="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    echo "    Defina la contraseña del panel (se guardará como SHA-256):"
+    read -r -s -p "    Contraseña: " password; echo
+    hash="$(printf '%s' "$password" | sha256sum | cut -d' ' -f1)"
+    install -m 0600 -o root -g root /dev/null "$ENV_FILE"
+    {
+        echo "NAS_WEB_BIND=127.0.0.1:8080"
+        echo "NAS_WEB_USER=admin"
+        echo "NAS_WEB_SECRET=$secret"
+        echo "NAS_WEB_PASSWORD_SHA256=$hash"
+        echo "NAS_WEB_TTL_SECS=28800"
+        echo "NAS_REPO_DIR=/opt/nas_debian"
+        echo "NAS_STATE_DIR=$STATE_DIR"
+        echo "NAS_DATA_ROOT=$DATA_ROOT"
+        echo "NAS_SAMBA_CONF=/etc/samba/smb.conf"
+        echo "NAS_ROLE_FILE=/etc/nas/role"
+        echo "NAS_BACKUP_DIR=/usr/local/bin"
+        echo "NAS_INVENTORY=/etc/nas/inventory.yaml"
+    } > "$ENV_FILE"
+else
+    echo "    $ENV_FILE ya existe: se conserva"
+fi
+
+echo "[4/7] Instalando unidad systemd"
+install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
+systemctl daemon-reload
+systemctl enable --now nas-web.service
+systemctl --no-pager --lines=0 status nas-web.service || true
+
+echo "[5/7] Instalando reglas sudo acotadas para el panel"
+cat > "$SUDOERS_FILE" <<'SUDO'
+nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, \
+    /usr/bin/systemctl restart smbd, /usr/bin/systemctl reload smbd, \
+    /usr/bin/systemctl start nmbd, /usr/bin/systemctl stop nmbd, \
+    /usr/bin/systemctl restart nmbd, /usr/bin/systemctl reload nmbd, \
+    /usr/bin/systemctl start wsdd2, /usr/bin/systemctl stop wsdd2, \
+    /usr/bin/systemctl restart wsdd2, /usr/bin/systemctl reload wsdd2, \
+    /usr/bin/systemctl start nginx, /usr/bin/systemctl stop nginx, \
+    /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx, \
+    /usr/bin/systemctl restart php8.4-fpm, /usr/bin/systemctl reload php8.4-fpm, \
+    /usr/bin/systemctl restart sssd, \
+    /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
+    /usr/sbin/realm list, /usr/sbin/realm join *, /usr/sbin/realm leave, \
+    /usr/bin/rm -rf /var/lib/nas/dev-sync/*, /usr/bin/rm -rf /srv/nas/.trash/*, \
+    /usr/bin/mkdir -p /var/lib/nas/dev-sync/*, /usr/bin/mkdir -p /srv/nas/*, \
+    /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
+    /usr/bin/true
+SUDO
+chmod 0440 "$SUDOERS_FILE"
+if command -v visudo >/dev/null 2>&1; then
+    visudo -cf "$SUDOERS_FILE" >/dev/null || { echo "[-] sudoers inválido" >&2; rm -f "$SUDOERS_FILE"; exit 1; }
+fi
+
+if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
+    echo "[6/7] Configurando Nginx"
+    install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled
+    if [ -f "$NGINX_SITE" ]; then
+        cp -a "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
+    fi
+    install -m 0644 "$SCRIPT_DIR/nginx-nas-web.conf" "$NGINX_SITE"
+    ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/nas-web
+    if nginx -t; then
+        systemctl reload nginx
+    else
+        echo "[-] Nginx rechazó la configuración; se conserva el respaldo" >&2
+        exit 1
+    fi
+else
+    echo "[6/7] Nginx omitido (--no-nginx o no instalado)"
+fi
+
+echo "[7/7] Verificación"
+curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo "    healthz OK" || echo "    [!] healthz no responde aún"
+echo
+echo "Instalación completada."
+echo "  Panel:      https://<servidor>/  (usuario admin)"
+echo "  Variables:  $ENV_FILE"
+echo "  Servicio:   systemctl status nas-web"
+echo "  Reinicio:   systemctl restart nas-web"
