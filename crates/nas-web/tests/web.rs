@@ -231,7 +231,7 @@ async fn dashboard_redirige_sin_sesion_y_carga_con_sesion() {
     let body = body_text(response).await;
     assert!(body.contains("Dashboard"));
     assert!(body.contains("Hostname"));
-    assert!(body.contains("Salir"));
+    assert!(body.contains("Cerrar sesión"));
 }
 
 #[tokio::test]
