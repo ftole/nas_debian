@@ -22,9 +22,29 @@ pub async fn healthz() -> &'static str {
     "ok"
 }
 
+fn hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "SRV-NAS".to_string())
+}
+
 /// Formulario de acceso.
-pub async fn login_form() -> Html<&'static str> {
-    Html(LOGIN_HTML)
+pub async fn login_form() -> Html<String> {
+    Html(views::login(&hostname(), None))
+}
+
+/// Hoja de estilos de la pantalla de acceso.
+pub async fn login_css() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        views::LOGIN_CSS,
+    )
+        .into_response()
 }
 
 /// Credenciales enviadas por el formulario.
@@ -50,7 +70,14 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "web", "FAILED", "");
-            return (StatusCode::UNAUTHORIZED, Html(LOGIN_ERROR_HTML)).into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                Html(views::login(
+                    &hostname(),
+                    Some("Usuario o contraseña incorrectos."),
+                )),
+            )
+                .into_response();
         }
         Err(error) => return server_error(&error.to_string()),
     };
@@ -513,34 +540,6 @@ fn server_error(message: &str) -> Response {
     )
         .into_response()
 }
-
-const LOGIN_HTML: &str = concat!(
-    r#"<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Acceso · Panel NAS</title><style>"#,
-    "body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}form{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:26px;width:320px;display:grid;gap:12px}h1{font-size:18px;margin:0 0 6px}label{font-size:12px;color:#94a3b8}input{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px;color:#e2e8f0}button{background:#38bdf8;color:#0f172a;font-weight:600;border:0;border-radius:8px;padding:10px;cursor:pointer}",
-    r#"</style></head>
-<body><form method="post" action="/login">
-<h1>Panel NAS</h1>
-<div><label for="username">Usuario</label><input id="username" name="username" autocomplete="username" required autofocus></div>
-<div><label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
-<button type="submit">Entrar</button>
-</form></body></html>"#
-);
-
-const LOGIN_ERROR_HTML: &str = concat!(
-    r#"<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8"><title>Acceso denegado</title><style>"#,
-    "body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}form{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:26px;width:320px;display:grid;gap:12px}h1{font-size:18px;margin:0}label{font-size:12px;color:#94a3b8}input{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px;color:#e2e8f0}button{background:#38bdf8;color:#0f172a;font-weight:600;border:0;border-radius:8px;padding:10px;cursor:pointer}.err{background:#7f1d1d;border:1px solid #b91c1c;padding:8px;border-radius:8px;font-size:13px}",
-    r#"</style></head>
-<body><form method="post" action="/login">
-<h1>Acceso denegado</h1><div class="err">Usuario o contraseña incorrectos.</div>
-<div><label for="username">Usuario</label><input id="username" name="username" autocomplete="username" required autofocus></div>
-<div><label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
-<button type="submit">Reintentar</button>
-</form></body></html>"#
-);
 
 /// Cuerpo para gestionar un servicio.
 #[derive(Debug, Deserialize)]
