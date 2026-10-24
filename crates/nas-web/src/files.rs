@@ -494,3 +494,187 @@ mod ziptests {
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
+
+/// Entrada de la papelera interna.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TrashEntry {
+    /// Identificador (nombre del archivo en `.trash`).
+    pub id: String,
+    /// Nombre original del elemento.
+    pub name: String,
+    /// Tamaño en bytes.
+    pub size: u64,
+    /// Tamaño legible.
+    pub size_formatted: String,
+    /// Marca de borrado (`YYYY-MM-DD HH:MM:SS`).
+    pub deleted_at: String,
+}
+
+impl FileRoot {
+    /// Escribe un archivo de texto dentro de la raíz.
+    pub fn write(&self, relative: &str, contents: &str) -> NasResult<u64> {
+        let path = self.resolve(relative)?;
+        if path == self.root {
+            return Err(NasError::Denied("no se puede sobrescribir la raíz".into()));
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| NasError::Invalid("ruta sin padre".into()))?;
+        std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
+        std::fs::write(&path, contents).map_err(|e| NasError::io(&path, e))?;
+        Ok(contents.len() as u64)
+    }
+
+    /// Lista la papelera interna con metadatos.
+    pub fn trash_entries(&self) -> NasResult<Vec<TrashEntry>> {
+        let trash = self.root.join(".trash");
+        if !trash.is_dir() {
+            return Ok(Vec::new());
+        }
+
+        let mut entries = Vec::new();
+        for item in std::fs::read_dir(&trash).map_err(|e| NasError::io(&trash, e))? {
+            let item = item.map_err(|e| NasError::io(&trash, e))?;
+            let id = item.file_name().to_string_lossy().to_string();
+            let metadata = item.metadata().ok();
+            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+
+            let (stamp, name) = split_trash_name(&id);
+            let name = name.to_string();
+            let deleted_at = chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M%S")
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|_| stamp.to_string());
+
+            entries.push(TrashEntry {
+                id,
+                name,
+                size,
+                size_formatted: human_size(size),
+                deleted_at,
+            });
+        }
+        entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        Ok(entries)
+    }
+
+    /// Restaura un elemento de la papelera a la raíz.
+    pub fn restore_trash(&self, id: &str) -> NasResult<String> {
+        let source = self.trash_path(id)?;
+        let (_, name) = split_trash_name(id);
+        let mut target = self.root.join(name);
+        let mut counter = 1;
+        while target.exists() {
+            target = self.root.join(format!("{name}.{counter}"));
+            counter += 1;
+        }
+        std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        Ok(target
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default())
+    }
+
+    /// Elimina definitivamente un elemento de la papelera.
+    pub fn delete_trash(&self, id: &str) -> NasResult<()> {
+        let path = self.trash_path(id)?;
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(|e| NasError::io(&path, e))
+        } else {
+            std::fs::remove_file(&path).map_err(|e| NasError::io(&path, e))
+        }
+    }
+
+    /// Vacía la papelera completa.
+    pub fn empty_trash(&self) -> NasResult<u32> {
+        let entries = self.trash_entries()?;
+        let mut removed = 0;
+        for entry in entries {
+            if self.delete_trash(&entry.id).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    fn trash_path(&self, id: &str) -> NasResult<PathBuf> {
+        if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
+            return Err(NasError::Denied(
+                "identificador de papelera inválido".into(),
+            ));
+        }
+        let path = self.root.join(".trash").join(id);
+        if !path.exists() {
+            return Err(NasError::NotFound(format!("no existe en papelera: {id}")));
+        }
+        Ok(path)
+    }
+}
+
+fn split_trash_name(id: &str) -> (&str, &str) {
+    // Formato: YYYYMMDD_HHMMSS_nombre
+    if id.len() > 16 && id.as_bytes().get(15) == Some(&b'_') {
+        (&id[..15], &id[16..])
+    } else {
+        ("", id)
+    }
+}
+
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::FileRoot;
+
+    fn root(tag: &str) -> FileRoot {
+        let dir = std::env::temp_dir().join(format!(
+            "nas-trash-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        FileRoot::new(dir).expect("root")
+    }
+
+    #[test]
+    fn escribe_lista_restaura_y_vacia() {
+        let root = root("flujo");
+        root.write("SISTEMAS/nota.txt", "hola").expect("write");
+        assert_eq!(root.read("SISTEMAS/nota.txt", 1024).expect("read"), b"hola");
+
+        root.trash("SISTEMAS/nota.txt").expect("trash");
+        let entries = root.trash_entries().expect("lista");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "nota.txt");
+
+        let restored = root.restore_trash(&entries[0].id).expect("restore");
+        assert_eq!(restored, "nota.txt");
+
+        root.trash("nota.txt").expect("trash 2");
+        assert_eq!(root.empty_trash().expect("vaciar"), 1);
+        assert!(root.trash_entries().expect("lista").is_empty());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn rechaza_ids_peligrosos() {
+        let root = root("seguridad");
+        assert!(root.restore_trash("../etc/passwd").is_err());
+        assert!(root.delete_trash("a/b").is_err());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+}
