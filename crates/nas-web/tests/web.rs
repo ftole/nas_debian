@@ -574,3 +574,52 @@ async fn gestion_de_servicio_rechaza_fuera_de_lista_blanca() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn dominio_expone_estado_y_valida_parametros() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/domain", &cookie))
+        .await
+        .expect("estado");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(payload["data"]["joined"].is_boolean());
+
+    let response = app
+        .oneshot(post_json(
+            "/api/domain/join",
+            &cookie,
+            r#"{"domain":"team..local","user":"admin","password":"x"}"#,
+        ))
+        .await
+        .expect("join inválido");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn almacenamiento_responde_en_linux() {
+    if cfg!(windows) {
+        return;
+    }
+
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/storage", &cookie))
+        .await
+        .expect("storage");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(get("/api/storage/disks", &cookie))
+        .await
+        .expect("discos");
+    assert_eq!(response.status(), StatusCode::OK);
+}
