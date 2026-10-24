@@ -198,7 +198,20 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 9. Asistente TUI (`nas-tui`)
+## 9. Ejecución remota (`nasctl exec`)
+
+- `nasctl --inventory inventory.yaml exec --host <alias> status` ejecuta la CLI
+  `nas` del servidor remoto por SSH (`nas --json <acción>`) y valida el contrato
+  JSON antes de mostrar el resultado.
+- Selectores mutuamente excluyentes: `--host`, `--group` o `--all`.
+- Acciones permitidas (lista blanca): `status`, `network`, `services`, `diag`,
+  `backup-list`, `backup-plan <id>`.
+- Opciones de transporte: `--identity`, `--known_hosts`, `--remote-bin`
+  (por defecto `nas`), con timeout del inventario.
+- Cada ejecución se registra en la auditoría local encadenada con host, acción,
+  resultado y error.
+
+## 10. Asistente TUI (`nas-tui`)
 
 - Binario `nas-tui` con `ratatui` + `crossterm`: menú lateral de 12 secciones,
   panel de detalle, barra de estado y overlay para planes.
@@ -210,7 +223,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
   subir de directorio, `F5`/`r` refrescar, `q`/`Esc` salir.
 - El explorador confina rutas a `/srv/nas` (rechaza `..` y rutas absolutas).
 
-## 10. Panel web (`nas-web`)
+## 11. Panel web (`nas-web`)
 
 Primera rebanada vertical del sustituto de PHP-FPM:
 
@@ -310,14 +323,14 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
 (auth, dashboard, recursos, usuarios, respaldos, servicios, diagnóstico,
 almacenamiento, archivos, dominio, terminal, auditoría).
 
-## 11. Almacenamiento y usuarios (`nas storage` / `nas users`)
+## 12. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
 - `nas storage list` usa `lsblk -J` y el parser tipado (tipo, tamaño, fstype,
   montaje, HDD/SSD).
 - `nas users list` lee `/etc/passwd` y `/etc/group` y separa cuentas de sistema
   de las administrables, listando además los grupos `grp_*`.
 
-## 12. Mapa de migración
+## 13. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -334,7 +347,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 13. Seguridad implementada
+## 14. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -352,7 +365,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 14. Siguientes pasos
+## 15. Siguientes pasos
 
 F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
 
