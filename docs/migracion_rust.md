@@ -12,7 +12,7 @@
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
-| **F3** | `nas-web` (axum) con API completa y **vistas HTML** del panel | 🟡 Rebanada 8 |
+| **F3** | `nas-web` (axum): API completa, vistas HTML, terminal, auditoría y ZIP | ✅ **Completado** |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
@@ -285,8 +285,18 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
   servicio, crear carpeta, subir y borrar archivos, unir al dominio).
 - `/` redirige a `/dashboard`; sin sesión todo redirige a `/login`.
 
-Pendiente de F3: vista de terminal (hoy sólo API), vista de auditoría y ZIP de
-descargas.
+### Cierre de F3
+
+- **Terminal web** (`/terminal`): inicio/reanudación de sesión, captura con
+  polling cada 1.2 s, envío de comandos y cierre; reservado al superadministrador.
+- **Auditoría** (`/audit`): últimas 100 entradas con fecha, usuario, acción,
+  objetivo, resultado y detalle; sólo administradores.
+- **ZIP** (`GET /api/files/zip`): comprime carpetas recursivamente con límite de
+  256 MiB, omite symlinks y sirve `application/zip` con `Content-Disposition`.
+
+**F3 cerrada:** el panel Rust ofrece paridad funcional con el panel PHP
+(auth, dashboard, recursos, usuarios, respaldos, servicios, diagnóstico,
+almacenamiento, archivos, dominio, terminal, auditoría).
 
 ## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
@@ -334,8 +344,7 @@ descargas.
 
 F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
 
-1. **F3 — `nas-web` (resto)**: plantillas askama de las 14 vistas, SQLite de
-   sesiones/auditoría, uploads, explorador, terminal WS y las rutas restantes.
+1. **F4 — `nas-tui`**: asistente `ratatui` con los 13 módulos.
 2. **F4 — `nas-tui`**: ratatui con los 13 módulos del asistente.
 3. **F5 — `nasctl` remoto**: ejecución sobre releases firmados por SSH.
 4. **F6 — empaquetado**: `.deb`, unidades systemd endurecidas y cutover.
