@@ -20,6 +20,8 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("diagnostics", "Diagnóstico"),
     ("storage", "Almacenamiento"),
     ("files", "Archivos"),
+    ("terminal", "Terminal"),
+    ("audit", "Auditoría"),
 ];
 
 /// Escapa texto para HTML.
@@ -441,6 +443,92 @@ pub fn domain(status: &nas_engine::domain::DomainStatus) -> String {
          <input id=\"dompass\" type=\"password\" placeholder=\"contraseña\">\
          <button class=\"btn primary\" onclick=\"joinDomain()\">Unir al dominio</button></div></div>\
          <div class=\"card\">{details}</div></div>"
+    )
+}
+
+/// Auditoría del panel.
+pub fn audit(rows: &[crate::db::AuditRow]) -> String {
+    let body: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let when = chrono::DateTime::from_timestamp(row.ts, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_else(|| row.ts.to_string());
+            let result = match row.result.as_str() {
+                "SUCCESS" => "<span class=\"badge ok\">SUCCESS</span>".to_string(),
+                "FAILED" => "<span class=\"badge err\">FAILED</span>".to_string(),
+                other => format!("<span class=\"badge\">{}</span>", esc(other)),
+            };
+            format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td><td class=\"muted\">{}</td></tr>",
+                esc(&when),
+                esc(&row.username),
+                esc(&row.action),
+                esc(&row.target),
+                result,
+                esc(&row.detail)
+            )
+        })
+        .collect();
+
+    format!(
+        "<div class=\"panel\"><div class=\"panel-head\"><h2>Últimas {} entradas</h2></div>{}</div>",
+        rows.len(),
+        table(
+            &[
+                "Fecha",
+                "Usuario",
+                "Acción",
+                "Objetivo",
+                "Resultado",
+                "Detalle"
+            ],
+            &body
+        )
+    )
+}
+
+/// Terminal web con captura periódica.
+pub fn terminal() -> String {
+    let script = r#"
+let nasTimer=null;
+function startTerminal(){
+  fetch('/api/terminal/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cols:200,rows:50})})
+    .then(r=>r.json()).then(j=>{ if(!j.success) alert(j.error||j.message); pollTerminal(); });
+}
+function pollTerminal(){
+  if(nasTimer) clearInterval(nasTimer);
+  const refresh=()=>fetch('/api/terminal/capture').then(r=>r.json()).then(j=>{
+    const pre=document.getElementById('term');
+    if(pre && j.success && j.data) pre.textContent=j.data.output;
+  }).catch(()=>{});
+  refresh();
+  nasTimer=setInterval(refresh,1200);
+}
+function sendTerminal(){
+  const input=document.getElementById('cmd');
+  const data=input.value;
+  fetch('/api/terminal/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:data,enter:true})})
+    .then(()=>{input.value='';});
+}
+function killTerminal(){
+  if(confirm('¿Cerrar la sesión de terminal?')) fetch('/api/terminal/kill',{method:'POST'}).then(()=>{ if(nasTimer) clearInterval(nasTimer); document.getElementById('term').textContent=''; });
+}
+window.addEventListener('DOMContentLoaded',pollTerminal);
+"#;
+
+    format!(
+        "<div class=\"panel\"><div class=\"panel-head\"><h2>Terminal (tmux)</h2>\
+         <div class=\"row\"><button class=\"btn primary\" onclick=\"startTerminal()\">Iniciar / Reanudar</button>\
+         <button class=\"btn danger\" onclick=\"killTerminal()\">Cerrar sesión</button></div></div>\
+         <div class=\"card\"><pre id=\"term\" style=\"min-height:280px;\">(sin sesión activa)</pre>\
+         <div class=\"row\"><input id=\"cmd\" placeholder=\"comando y Enter\" style=\"flex:1;\" onkeydown=\"if(event.key==='Enter'){{sendTerminal();}}\">\
+         <button class=\"btn\" onclick=\"sendTerminal()\">Enviar</button></div></div></div>\
+         <script>{script}</script>"
     )
 }
 
