@@ -16,7 +16,7 @@
 | **F4** | TUI (`ratatui`) con navegación, acciones y explorador | ✅ **Completado** |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado, systemd endurecido, Nginx `proxy_pass`, cutover y rollback | ✅ **Completado** |
-| **F7** | Retirada de PHP/Bash/Python y limpieza del árbol | ⏳ Pendiente |
+| **F7** | Retirada escalonada del stack anterior | 🟡 Herramientas y plan listos (`nas migrate status`, `scripts/retire-legacy.sh`); ejecución **bloqueada hasta validar el cutover** |
 
 Mientras no se complete F7, **el sistema en producción sigue siendo el actual**
 (PHP + Bash + Python). El workspace Rust convive en `crates/` sin interferir.
