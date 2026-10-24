@@ -54,6 +54,10 @@ pub enum NasError {
     /// Dependencia externa ausente en el sistema.
     #[error("dependencia ausente: {0}")]
     MissingDependency(String),
+
+    /// Fallo de la base de datos local.
+    #[error("error de base de datos: {0}")]
+    Database(String),
 }
 
 impl NasError {
@@ -79,7 +83,7 @@ impl NasError {
                     *code
                 }
             }
-            Self::Io { .. } | Self::Json(_) => 1,
+            Self::Io { .. } | Self::Json(_) | Self::Database(_) => 1,
         }
     }
 }
