@@ -15,7 +15,7 @@
 | **F3** | `nas-web` (axum): API completa, vistas HTML, terminal, auditoría y ZIP | ✅ **Completado** |
 | **F4** | TUI (`ratatui`) con navegación, acciones y explorador | ✅ **Completado** |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
-| **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
+| **F6** | Empaquetado, systemd endurecido, Nginx `proxy_pass`, cutover y rollback | ✅ **Completado** |
 | **F7** | Retirada de PHP/Bash/Python y limpieza del árbol | ⏳ Pendiente |
 
 Mientras no se complete F7, **el sistema en producción sigue siendo el actual**
@@ -198,7 +198,21 @@ desde un binario tipado:
 `--dry-run` muestra plan, decisión de espacio y retención sin tocar el sistema;
 la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 
-## 9. Ejecución remota (`nasctl exec`)
+## 9. Despliegue y empaquetado
+
+Ver **[despliegue_rust.md](despliegue_rust.md)** para la guía completa.
+
+- `packaging/install.sh`: instalación idempotente (binarios, usuario de
+  servicio, `/etc/nas-web.env` 0600, unidad systemd, sudoers acotado,
+  host virtual de Nginx con `proxy_pass`).
+- `packaging/nas-web.service`: unidad endurecida (`ProtectSystem=strict`,
+  `PrivateTmp`, `RestrictAddressFamilies`, `SystemCallFilter`, `ReadWritePaths`).
+- `packaging/nginx-nas-web.conf`: TLS, CSP, gzip y límite de subida 512 MB.
+- `packaging/verify.sh`: validaciones estáticas ejecutadas en CI.
+- Cutover A/B con `releases/<versión>` + `current` y rollback documentado al
+  panel PHP.
+
+## 10. Ejecución remota (`nasctl exec`)
 
 - `nasctl --inventory inventory.yaml exec --host <alias> status` ejecuta la CLI
   `nas` del servidor remoto por SSH (`nas --json <acción>`) y valida el contrato
@@ -211,7 +225,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 - Cada ejecución se registra en la auditoría local encadenada con host, acción,
   resultado y error.
 
-## 10. Asistente TUI (`nas-tui`)
+## 11. Asistente TUI (`nas-tui`)
 
 - Binario `nas-tui` con `ratatui` + `crossterm`: menú lateral de 12 secciones,
   panel de detalle, barra de estado y overlay para planes.
@@ -223,7 +237,7 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
   subir de directorio, `F5`/`r` refrescar, `q`/`Esc` salir.
 - El explorador confina rutas a `/srv/nas` (rechaza `..` y rutas absolutas).
 
-## 11. Panel web (`nas-web`)
+## 12. Panel web (`nas-web`)
 
 Primera rebanada vertical del sustituto de PHP-FPM:
 
@@ -323,14 +337,14 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
 (auth, dashboard, recursos, usuarios, respaldos, servicios, diagnóstico,
 almacenamiento, archivos, dominio, terminal, auditoría).
 
-## 12. Almacenamiento y usuarios (`nas storage` / `nas users`)
+## 13. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
 - `nas storage list` usa `lsblk -J` y el parser tipado (tipo, tamaño, fstype,
   montaje, HDD/SSD).
 - `nas users list` lee `/etc/passwd` y `/etc/group` y separa cuentas de sistema
   de las administrables, listando además los grupos `grp_*`.
 
-## 13. Mapa de migración
+## 14. Mapa de migración
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
@@ -347,7 +361,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
 
-## 14. Seguridad implementada
+## 15. Seguridad implementada
 
 - **Ejecución sin shell:** `nas-exec` construye `Command` con vectores de
   argumentos; nunca interpola cadenas.
@@ -365,7 +379,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
   impiden que una herramienta de desarrollo toque producción.
 - **Lints:** `#![forbid(unsafe_code)]`, `clippy -D warnings` en CI.
 
-## 15. Siguientes pasos
+## 16. Siguientes pasos
 
 F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
 
