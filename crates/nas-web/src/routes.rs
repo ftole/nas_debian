@@ -1020,3 +1020,232 @@ fn forbidden(message: &str) -> Response {
     )
         .into_response()
 }
+
+/// Cuerpo para iniciar la sesión de terminal.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TerminalSessionBody {
+    cols: u16,
+    rows: u16,
+}
+
+impl Default for TerminalSessionBody {
+    fn default() -> Self {
+        Self {
+            cols: 200,
+            rows: 50,
+        }
+    }
+}
+
+/// Cuerpo para enviar texto al terminal.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TerminalSendBody {
+    data: String,
+    enter: bool,
+}
+
+impl Default for TerminalSendBody {
+    fn default() -> Self {
+        Self {
+            data: String::new(),
+            enter: true,
+        }
+    }
+}
+
+/// Cuerpo para redimensionar el terminal.
+#[derive(Debug, Deserialize)]
+pub struct TerminalResizeBody {
+    cols: u16,
+    rows: u16,
+}
+
+fn is_superadmin(state: &AppState, user: &str) -> bool {
+    state
+        .auth
+        .db()
+        .user_role(user)
+        .ok()
+        .flatten()
+        .is_some_and(|role| role == "superadmin")
+}
+
+/// Inicia (o reutiliza) la sesión de terminal del usuario.
+pub async fn terminal_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<TerminalSessionBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_superadmin(&state, &user) {
+        return forbidden("el terminal está reservado al superadministrador");
+    }
+    if !nas_engine::terminal::is_valid_geometry(body.cols, body.rows) {
+        return bad_request("geometría del terminal fuera de rango");
+    }
+
+    let session_user = user.clone();
+    let cols = body.cols;
+    let rows = body.rows;
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::terminal::start(&Runner::new(), &session_user, cols, rows)
+    })
+    .await
+    .unwrap_or_else(|_| Err("apertura de terminal interrumpida".to_string()));
+
+    match outcome {
+        Ok(session) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "terminal_start", &session.name, "SUCCESS", "");
+            axum::Json(ApiResponse::ok(session, "Sesión de terminal lista")).into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "terminal_start", "terminal", "FAILED", &error);
+            server_error(&error)
+        }
+    }
+}
+
+/// Envía texto a la sesión del usuario.
+pub async fn terminal_send(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<TerminalSendBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_superadmin(&state, &user) {
+        return forbidden("el terminal está reservado al superadministrador");
+    }
+    if !nas_engine::terminal::is_valid_input(&body.data) {
+        return bad_request("entrada inválida para el terminal");
+    }
+
+    let session_user = user.clone();
+    let name = nas_engine::terminal::session_name(&user);
+    let data = body.data;
+    let enter = body.enter;
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::terminal::send(&Runner::new(), &session_user, &name, &data, enter)
+    })
+    .await
+    .unwrap_or_else(|_| Err("envío interrumpido".to_string()));
+
+    match outcome {
+        Ok(()) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Entrada enviada",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Captura el panel visible del terminal.
+pub async fn terminal_capture(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_superadmin(&state, &user) {
+        return forbidden("el terminal está reservado al superadministrador");
+    }
+
+    let session_user = user.clone();
+    let name = nas_engine::terminal::session_name(&user);
+    let captured_name = name.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::terminal::capture(&Runner::new(), &session_user, &captured_name)
+    })
+    .await
+    .unwrap_or_else(|_| Err("captura interrumpida".to_string()));
+
+    match outcome {
+        Ok(output) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "output": output, "session": name }),
+            "Captura del terminal",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Redimensiona el terminal.
+pub async fn terminal_resize(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<TerminalResizeBody>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_superadmin(&state, &user) {
+        return forbidden("el terminal está reservado al superadministrador");
+    }
+    if !nas_engine::terminal::is_valid_geometry(body.cols, body.rows) {
+        return bad_request("geometría del terminal fuera de rango");
+    }
+
+    let session_user = user.clone();
+    let name = nas_engine::terminal::session_name(&user);
+    let cols = body.cols;
+    let rows = body.rows;
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::terminal::resize(&Runner::new(), &session_user, &name, cols, rows)
+    })
+    .await
+    .unwrap_or_else(|_| Err("redimensionado interrumpido".to_string()));
+
+    match outcome {
+        Ok(()) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Terminal redimensionado",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Termina la sesión de terminal del usuario.
+pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_superadmin(&state, &user) {
+        return forbidden("el terminal está reservado al superadministrador");
+    }
+
+    let session_user = user.clone();
+    let name = nas_engine::terminal::session_name(&user);
+    let killed_name = name.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::terminal::kill(&Runner::new(), &session_user, &killed_name)
+    })
+    .await
+    .unwrap_or_else(|_| Err("cierre interrumpido".to_string()));
+
+    match outcome {
+        Ok(()) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "terminal_kill", &name, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Sesión cerrada")).into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
