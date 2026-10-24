@@ -11,12 +11,16 @@
 pub mod backup;
 /// Planificación del despliegue del servidor.
 pub mod deploy;
+/// Diagnóstico integral del servidor.
+pub mod diagnostics;
 /// Bloqueo exclusivo por tarea.
 pub mod lock;
 /// Inventario agregado de red.
 pub mod network;
 /// Parsers de salidas del sistema operativo.
 pub mod parsers;
+/// Estado y gestión de demonios.
+pub mod services;
 /// Métricas de estado del sistema.
 pub mod status;
 /// Tareas de respaldo y sus planes de ejecución.
@@ -31,8 +35,10 @@ pub use backup::{
     SpaceDecision,
 };
 pub use deploy::{DeployParams, FileSystem};
+pub use diagnostics::Check;
 pub use lock::TaskLock;
 pub use network::{collect as collect_network, NetworkOverview};
+pub use services::ServiceStatus;
 pub use status::{collect as collect_status, SystemMetrics};
 pub use tasks::{BackupTask, SourceKind};
 pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
