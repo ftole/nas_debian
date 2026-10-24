@@ -129,8 +129,9 @@ RETENTION=2
 
     let payload = json_of(&output);
     assert_eq!(payload["success"], true);
+    assert_eq!(payload["data"]["dry_run"], true);
     assert!(payload["data"]["steps"].is_array());
-    assert_eq!(payload["data"]["retention"]["keep"], 2);
+    assert_eq!(payload["data"]["removed"], 0);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
