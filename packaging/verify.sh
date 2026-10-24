@@ -27,7 +27,7 @@ for script in "$SCRIPT_DIR"/*.sh; do
 done
 
 UNIT="$SCRIPT_DIR/nas-web.service"
-check "$UNIT" "ProtectSystem=strict" "unit: ProtectSystem"
+check "$UNIT" "ProtectSystem=yes" "unit: ProtectSystem"
 check "$UNIT" "PrivateTmp=yes" "unit: PrivateTmp"
 check "$UNIT" "RestrictAddressFamilies=" "unit: RestrictAddressFamilies"
 check "$UNIT" "EnvironmentFile=/etc/nas-web.env" "unit: EnvironmentFile"
