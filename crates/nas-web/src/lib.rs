@@ -120,7 +120,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/logs", get(routes::logs))
         .route(
             "/api/groups",
-            get(routes::groups_list).post(routes::group_create),
+            get(routes::groups).post(routes::group_create),
         )
         .route("/api/groups/rename", post(routes::group_rename))
         .route("/api/groups/delete", post(routes::group_delete))
