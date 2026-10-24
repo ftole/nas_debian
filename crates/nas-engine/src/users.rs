@@ -14,6 +14,8 @@ pub struct UserEntry {
     pub uid: u32,
     /// GID principal.
     pub gid: u32,
+    /// Nombre completo (GECOS).
+    pub full_name: String,
     /// Directorio home.
     pub home: String,
     /// Shell de inicio.
@@ -53,6 +55,7 @@ pub fn parse_passwd(text: &str) -> Vec<UserEntry> {
                 name: fields[0].to_string(),
                 uid,
                 gid,
+                full_name: fields[4].to_string(),
                 home: fields[5].to_string(),
                 system: is_system_user(uid, &shell),
                 shell,
@@ -132,6 +135,7 @@ users:x:100:empleado1
         assert!(users[1].system);
         assert!(!users[2].system);
         assert_eq!(users[2].home, "/home/sistemas");
+        assert_eq!(users[2].full_name, "Sistemas");
         assert_eq!(managed_users(&users).len(), 2);
     }
 
