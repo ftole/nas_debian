@@ -678,3 +678,30 @@ async fn terminal_exige_superadministrador_y_valida_geometria() {
         .expect("sesión");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn backup_run_exige_confirmacion_y_tarea_valida() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/backups/run",
+            &cookie,
+            r#"{"path":"fantasma","confirm":true}"#,
+        ))
+        .await
+        .expect("tarea inexistente");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/backups/run",
+            &cookie,
+            r#"{"path":"demo","confirm":false}"#,
+        ))
+        .await
+        .expect("sin confirmar");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
