@@ -12,7 +12,7 @@
 | **F1** | `nas-core`, `nas-exec`, `nas-engine` (parsers, estado, red, respaldos), `nas-audit` | ✅ Completado |
 | **F1b** | `nas-inventory` (multi-servidor), `nas-ssh` (OpenSSH), `nas-dev sync` real, `doctor`, `onboard`, `nasctl` | ✅ Completado |
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
-| **F3** | `nas-web` (axum) con sesiones SQLite, dashboard y API | 🟡 Rebanada 2: `+ /api/shares`, `/api/users`, sesiones persistentes |
+| **F3** | `nas-web` (axum) con sesiones SQLite, dashboard, API y explorador de archivos | 🟡 Rebanada 3: `+ /api/files` (list, upload, download, mkdir, rename, delete) |
 | **F4** | TUI (`ratatui`) y paridad total de la CLI PHP | ⏳ Pendiente |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
 | **F6** | Empaquetado `.deb`, unidades systemd, cutover y rollback | ⏳ Pendiente |
@@ -203,7 +203,9 @@ la ejecución real exige `--yes` y devuelve código 3 si falta la confirmación.
 Primera rebanada vertical del sustituto de PHP-FPM:
 
 - **Rutas**: `GET /healthz`, `GET/POST /login`, `POST /logout`, `GET /`,
-  `GET /api/metrics`, `GET /api/network`, `/api/shares`, `/api/users`.
+  `GET /api/metrics`, `GET /api/network`, `/api/shares`, `/api/users` y el
+  explorador `/api/files` (`files`, `download`, `mkdir`, `rename`, `delete`,
+  `upload`).
 - **Sesiones persistentes en SQLite** (`web_sessions`): la cookie transporta un
   identificador aleatorio de 256 bits; expiración en base de datos con purga,
   `HttpOnly`, `SameSite=Strict` y `Secure` por defecto.
@@ -225,8 +227,18 @@ cargo run -p nas-web --bin nas-web
 NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE_COOKIE=1 NAS_WEB_BIND=127.0.0.1:8080 cargo run -p nas-web
 ```
 
-Pendiente de F3: plantillas askama de las 13 vistas restantes, auditoría en
-SQLite, uploads, explorador de archivos, terminal WS y las ~60 rutas restantes.
+### Explorador de archivos (`nas-web::files`)
+
+- Confinamiento estricto a `NasPaths::data_root`: se rechazan rutas absolutas,
+  `..` y cualquier resolución que escape de la raíz (incluidos symlinks).
+- `list` ordena carpetas primero; `mkdir`, `rename` y `delete` (papelera
+  interna `.trash/<fecha>_<nombre>`).
+- `upload` por **streaming** con límite de 512 MB, nombre saneado, escritura en
+  temporal y promoción atómica; 409 si el archivo ya existe.
+- `download` con `Content-Disposition: attachment` y CSP `default-src 'none'; sandbox`.
+
+Pendiente de F3: plantillas askama de las 13 vistas, auditoría en SQLite,
+terminal WS y las ~55 rutas restantes (backups, storage, servicios, dominio).
 
 ## 10. Almacenamiento y usuarios (`nas storage` / `nas users`)
 
