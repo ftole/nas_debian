@@ -454,3 +454,123 @@ async fn files_requiere_sesion() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+fn app_with_fixtures(role: ServerRole, backup: Option<(&str, &str)>) -> (Router, PathBuf) {
+    let dir = temp_dir("f3d");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let paths = paths_for(&dir);
+
+    let backup_dir = dir.join("runners");
+    std::fs::create_dir_all(&backup_dir).expect("runners");
+    if let Some((id, content)) = backup {
+        std::fs::write(backup_dir.join(format!("backup_{id}.sh")), content).expect("runner");
+    }
+
+    let state = AppState::new(auth, paths, role).with_backup_dir(backup_dir);
+    (router(state), dir)
+}
+
+const LOCAL_RUNNER: &str = "SOURCE_TYPE=\"local\"
+SRC_PATH=\"/datos\"
+RETENTION=3
+";
+
+#[tokio::test]
+async fn services_y_diagnostics_responden() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/services", &cookie))
+        .await
+        .expect("servicios");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    let services = payload["data"].as_array().expect("arreglo");
+    assert_eq!(services.len(), 4);
+    assert!(services.iter().any(|item| item["service"] == "smbd"));
+
+    let response = app
+        .oneshot(get("/api/diagnostics", &cookie))
+        .await
+        .expect("diagnóstico");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    let checks = payload["data"].as_array().expect("arreglo");
+    assert!(checks.iter().any(|check| check["name"] == "rol"));
+}
+
+#[tokio::test]
+async fn backups_lista_y_planifica() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/backups", &cookie))
+        .await
+        .expect("lista");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    let tasks = payload["data"].as_array().expect("arreglo");
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0]["task"]["id"], "demo");
+
+    let response = app
+        .oneshot(post_json(
+            "/api/backups/plan",
+            &cookie,
+            r#"{"path":"demo"}"#,
+        ))
+        .await
+        .expect("plan");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(!payload["data"]["steps"]
+        .as_array()
+        .expect("pasos")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn auditoria_registra_el_login() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(get("/api/audit?limit=10", &cookie))
+        .await
+        .expect("auditoría");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    let rows = payload["data"].as_array().expect("arreglo");
+    assert!(rows
+        .iter()
+        .any(|row| row["action"] == "login" && row["result"] == "SUCCESS"));
+}
+
+#[tokio::test]
+async fn gestion_de_servicio_rechaza_fuera_de_lista_blanca() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(post_json(
+            "/api/services/manage",
+            &cookie,
+            r#"{"service":"sshd","action":"restart"}"#,
+        ))
+        .await
+        .expect("gestión");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
