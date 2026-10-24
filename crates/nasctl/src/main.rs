@@ -4,6 +4,8 @@
 //! está pensada para acompañar releases firmados. Nunca lee el árbol de
 //! desarrollo ni ejecuta código local sin validar.
 
+mod remote;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -45,6 +47,13 @@ enum Command {
         /// Alias del host.
         #[arg(long)]
         host: String,
+    },
+    /// Ejecuta una acción permitida en uno o varios hosts.
+    Exec {
+        #[command(flatten)]
+        options: remote::ExecOptions,
+        #[command(subcommand)]
+        action: remote::RemoteAction,
     },
 }
 
@@ -89,6 +98,7 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> NasResult<ExitCode> {
+    let inventory_arg = cli.inventory.clone();
     let path = inventory_path(cli.inventory);
     let inventory = Inventory::load(&path)?;
 
@@ -96,6 +106,9 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         Command::Hosts => hosts(&inventory, &path, cli.json),
         Command::Check => check(&inventory, &path, cli.json),
         Command::Status { host } => status(&inventory, &host, cli.json),
+        Command::Exec { options, action } => {
+            remote::exec(inventory_arg, &action, &options, cli.json)
+        }
     }
 }
 
