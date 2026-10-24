@@ -13,6 +13,8 @@ pub mod backup;
 pub mod deploy;
 /// Diagnóstico integral del servidor.
 pub mod diagnostics;
+/// Integración con Active Directory.
+pub mod domain;
 /// Bloqueo exclusivo por tarea.
 pub mod lock;
 /// Inventario agregado de red.
@@ -23,6 +25,8 @@ pub mod parsers;
 pub mod services;
 /// Métricas de estado del sistema.
 pub mod status;
+/// Inventario de almacenamiento.
+pub mod storage;
 /// Tareas de respaldo y sus planes de ejecución.
 pub mod tasks;
 /// Verificación y planificación de actualizaciones firmadas.
@@ -36,10 +40,12 @@ pub use backup::{
 };
 pub use deploy::{DeployParams, FileSystem};
 pub use diagnostics::Check;
+pub use domain::DomainStatus;
 pub use lock::TaskLock;
 pub use network::{collect as collect_network, NetworkOverview};
 pub use services::ServiceStatus;
 pub use status::{collect as collect_status, SystemMetrics};
+pub use storage::{Disk, StorageOverview};
 pub use tasks::{BackupTask, SourceKind};
 pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
 pub use users::{GroupEntry, UserEntry};
