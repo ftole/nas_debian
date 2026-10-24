@@ -91,7 +91,10 @@ pub fn router(state: AppState) -> Router {
         .route("/audit", get(routes::page_audit))
         .route("/api/metrics", get(routes::metrics))
         .route("/api/network", get(routes::network))
-        .route("/api/shares", get(routes::shares))
+        .route(
+            "/api/shares",
+            get(routes::shares).post(routes::share_create),
+        )
         .route("/api/users", get(routes::users))
         .route("/api/services", get(routes::services))
         .route("/api/services/manage", post(routes::service_manage))
@@ -121,15 +124,15 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/groups/rename", post(routes::pending_groups))
         .route("/api/groups/delete", post(routes::pending_groups))
-        .route("/api/shares/update", post(routes::pending_shares_update))
-        .route("/api/shares/delete", post(routes::pending_shares_delete))
+        .route("/api/shares/update", post(routes::share_update))
+        .route("/api/shares/delete", post(routes::share_delete))
         .route(
             "/api/shares/access",
-            get(routes::shares_access).post(routes::pending_shares_access),
+            get(routes::shares_access).post(routes::share_access_update),
         )
         .route(
             "/api/shares/access/repair",
-            post(routes::pending_shares_repair),
+            post(routes::share_access_repair),
         )
         .route("/api/users/update", post(routes::pending_users))
         .route("/api/users/toggle", post(routes::pending_users))
