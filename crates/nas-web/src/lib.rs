@@ -11,6 +11,7 @@ pub mod auth;
 pub mod db;
 pub mod files;
 mod routes;
+pub mod views;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +69,15 @@ pub fn router(state: AppState) -> Router {
         .route("/login", get(routes::login_form).post(routes::login_submit))
         .route("/logout", post(routes::logout))
         .route("/", get(routes::dashboard))
+        .route("/dashboard", get(routes::page_dashboard))
+        .route("/shares", get(routes::page_shares))
+        .route("/users", get(routes::page_users))
+        .route("/backups", get(routes::page_backups))
+        .route("/services", get(routes::page_services))
+        .route("/diagnostics", get(routes::page_diagnostics))
+        .route("/storage", get(routes::page_storage))
+        .route("/files", get(routes::page_files))
+        .route("/domain", get(routes::page_domain))
         .route("/api/metrics", get(routes::metrics))
         .route("/api/network", get(routes::network))
         .route("/api/shares", get(routes::shares))
