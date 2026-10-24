@@ -106,13 +106,19 @@ else
     echo "    $ENV_FILE ya existe: se conserva"
 fi
 
-echo "[4/7] Instalando unidad systemd"
+echo "[4/7] Instalando helpers privilegiados de Samba"
+install -m 0755 "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
+install -m 0755 "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
+install -m 0755 "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
+install -d -m 2770 -o root -g www-data /var/lib/nas/staging 2>/dev/null || true
+
+echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
 systemctl daemon-reload
 systemctl enable --now nas-web.service
 systemctl --no-pager --lines=0 status nas-web.service || true
 
-echo "[5/7] Instalando reglas sudo acotadas para el panel"
+echo "[6/7] Instalando reglas sudo acotadas para el panel"
 cat > "$SUDOERS_FILE" <<'SUDO'
 nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, \
     /usr/bin/systemctl restart smbd, /usr/bin/systemctl reload smbd, \
@@ -137,7 +143,7 @@ if command -v visudo >/dev/null 2>&1; then
 fi
 
 if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
-    echo "[6/7] Configurando Nginx"
+    echo "[7/7] Configurando Nginx"
     install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled
     if [ -f "$NGINX_SITE" ]; then
         cp -a "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
@@ -154,7 +160,7 @@ else
     echo "[6/7] Nginx omitido (--no-nginx o no instalado)"
 fi
 
-echo "[7/7] Verificación"
+echo "[verificación]"
 curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo "    healthz OK" || echo "    [!] healthz no responde aún"
 echo
 echo "Instalación completada."
