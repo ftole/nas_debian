@@ -114,6 +114,62 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files", get(routes::files_list))
         .route("/api/files/download", get(routes::files_download))
         .route("/api/files/zip", get(routes::files_zip))
+        .route("/api/logs", get(routes::logs))
+        .route(
+            "/api/groups",
+            get(routes::groups_list).post(routes::pending_groups),
+        )
+        .route("/api/groups/rename", post(routes::pending_groups))
+        .route("/api/groups/delete", post(routes::pending_groups))
+        .route("/api/shares/update", post(routes::pending_shares_update))
+        .route("/api/shares/delete", post(routes::pending_shares_delete))
+        .route(
+            "/api/shares/access",
+            get(routes::shares_access).post(routes::pending_shares_access),
+        )
+        .route(
+            "/api/shares/access/repair",
+            post(routes::pending_shares_repair),
+        )
+        .route("/api/users/update", post(routes::pending_users))
+        .route("/api/users/toggle", post(routes::pending_users))
+        .route("/api/users/groups", post(routes::pending_users))
+        .route("/api/users/delete", post(routes::pending_users))
+        .route("/api/backups/running", get(routes::backups_running))
+        .route("/api/backups/test", post(routes::pending_backups_write))
+        .route("/api/backups/update", post(routes::pending_backups_write))
+        .route("/api/backups/delete", post(routes::pending_backups_write))
+        .route("/api/backups/", post(routes::pending_backups_write))
+        .route("/api/storage/units", get(routes::storage_units))
+        .route("/api/storage/subvolumes", get(routes::storage_subvolumes))
+        .route(
+            "/api/storage/scrub",
+            get(routes::storage_scrub).post(routes::storage_scrub_start),
+        )
+        .route("/api/storage/trim", post(routes::storage_trim))
+        .route("/api/system/updates", get(routes::system_updates))
+        .route("/api/system/applications", get(routes::system_applications))
+        .route("/api/system/reboot", post(routes::system_reboot))
+        .route(
+            "/api/system/update/run",
+            post(routes::pending_system_update),
+        )
+        .route("/api/domain/status", get(routes::domain_status))
+        .route("/api/domain/discover", post(routes::domain_discover))
+        .route("/api/diagnostics/run", post(routes::diagnostics_run))
+        .route("/api/terminal/history", get(routes::terminal_history))
+        .route("/api/files/content", get(routes::files_content))
+        .route("/api/files/create", post(routes::files_create))
+        .route("/api/files/move", post(routes::files_move))
+        .route("/api/files/save", post(routes::files_save))
+        .route("/api/files/trash", get(routes::files_trash))
+        .route("/api/files/trash/restore", post(routes::trash_restore))
+        .route(
+            "/api/files/trash/restore-all",
+            post(routes::trash_restore_all),
+        )
+        .route("/api/files/trash/delete", post(routes::trash_delete))
+        .route("/api/files/trash/empty", post(routes::trash_empty))
         .route("/api/files/mkdir", post(routes::files_mkdir))
         .route("/api/files/rename", post(routes::files_rename))
         .route("/api/files/delete", post(routes::files_delete))
