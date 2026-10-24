@@ -140,7 +140,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/fstrim -v /srv/nas, \
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
     /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
-    /usr/local/sbin/nas-accounts *, \
+    /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \
     /usr/bin/true
 SUDO
 chmod 0440 "$SUDOERS_FILE"
