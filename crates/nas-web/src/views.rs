@@ -93,16 +93,20 @@ pub fn layout(ctx: &PageCtx<'_>, title: &str, body: &str) -> String {
     }
 
     format!(
-        r#"<!DOCTYPE html>
+        r##"<!DOCTYPE html>
 <html lang="es" data-theme="dark"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} • Panel NAS {hostname}</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>try{{var t=localStorage.getItem('nas_theme');if(t){{document.documentElement.setAttribute('data-theme',t);}}}}catch(e){{}}</script>
 <link rel="stylesheet" href="/css/app.css">
 </head><body>
 {ICONS_SVG}
 <header class="masthead">
   <div class="masthead-main">
+    <button class="mobile-toggle" onclick="toggleSidebar()" title="Alternar menú de navegación">
+      <svg class="icon"><use href="#icon-menu"></use></svg>
+    </button>
     <div class="masthead-brand">
       {server_icon}
       <span class="brand-logo-text"><span>NAS</span><span class="brand-divider">|</span><span class="brand-hostname">{hostname}</span></span>
@@ -112,6 +116,9 @@ pub fn layout(ctx: &PageCtx<'_>, title: &str, body: &str) -> String {
   <div class="masthead-tools">
     <div class="header-meta-pill"><span>Rol:</span> <strong>{role}</strong></div>
     <div class="header-meta-pill"><span>Workgroup:</span> <strong>{workgroup}</strong></div>
+    <button class="btn btn-secondary btn-sm" id="btn-theme-toggle" onclick="toggleTheme()" title="Alternar tema claro/oscuro">
+      <svg class="icon icon-sm" id="theme-toggle-icon"><use href="#icon-sun"></use></svg>
+    </button>
     <div class="user-pill"><span class="status-dot status-ok"></span><span class="user-name">{user}</span></div>
     <form method="post" action="/logout" style="display:inline">
       <button type="submit" class="btn btn-secondary btn-sm" title="Cerrar sesión">{power_icon}<span class="btn-text-responsive">Cerrar sesión</span></button>
@@ -120,11 +127,36 @@ pub fn layout(ctx: &PageCtx<'_>, title: &str, body: &str) -> String {
 </header>
 <div class="app-layout">
   <aside class="sidebar"><nav class="sidebar-nav">{nav}</nav></aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
   <main class="main-content">
     <section class="view-section active">{body}</section>
   </main>
 </div>
-</body></html>"#,
+<script>
+function toggleSidebar(){{
+  var sidebar=document.querySelector('.sidebar');
+  var backdrop=document.getElementById('sidebar-backdrop');
+  if(!sidebar) return;
+  sidebar.classList.toggle('open');
+  if(backdrop) backdrop.classList.toggle('active');
+}}
+function toggleTheme(){{
+  var root=document.documentElement;
+  var next=root.getAttribute('data-theme')==='light'?'dark':'light';
+  root.setAttribute('data-theme',next);
+  try{{localStorage.setItem('nas_theme',next);}}catch(e){{}}
+  swapThemeIcon(next);
+}}
+function swapThemeIcon(theme){{
+  var icon=document.getElementById('theme-toggle-icon');
+  if(!icon) return;
+  icon.innerHTML='<use href="#'+(theme==='light'?'icon-sun':'icon-moon')+'"></use>';
+}}
+document.addEventListener('DOMContentLoaded',function(){{
+  swapThemeIcon(document.documentElement.getAttribute('data-theme')||'dark');
+}});
+</script>
+</body></html>"##,
         title = esc(title),
         hostname = esc(ctx.hostname),
         role = esc(ctx.role),
