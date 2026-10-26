@@ -145,7 +145,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/backups/test", post(routes::backup_test))
         .route("/api/backups/update", post(routes::backup_update))
         .route("/api/backups/delete", post(routes::backup_delete))
-        .route("/api/backups/", post(routes::pending_backups_write))
+        .route("/api/backups/", post(routes::backup_create))
         .route("/api/storage/units", get(routes::storage_units))
         .route("/api/storage/subvolumes", get(routes::storage_subvolumes))
         .route(
@@ -156,10 +156,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/system/updates", get(routes::system_updates))
         .route("/api/system/applications", get(routes::system_applications))
         .route("/api/system/reboot", post(routes::system_reboot))
-        .route(
-            "/api/system/update/run",
-            post(routes::pending_system_update),
-        )
+        .route("/api/system/update/run", post(routes::system_update_run))
         .route("/api/domain/status", get(routes::domain_status))
         .route("/api/domain/discover", post(routes::domain_discover))
         .route("/api/diagnostics/run", post(routes::diagnostics_run))
