@@ -49,8 +49,6 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `crates/nas-tui` | Rust (ratatui) | **Asistente visual de terminal** con dashboard, servicios, respaldos y diagnóstico. |
 | `crates/nas-engine` | Rust Lib | Lógica de sistema: almacenamiento, Samba, usuarios, respaldos, dominio, actualizaciones firmadas y diagnósticos. |
 | `crates/nas-exec` | Rust Lib | Ejecutor de comandos con allowlist, timeouts, redacción de secretos y modo sudo sin contraseña. |
-| `.env.example` | Plantilla Config | **Plantilla documentada de credenciales locales** para pruebas remotas en Debian 13. |
-| `requirements-assistant.txt` | Dependencias Python | Dependencias requeridas por el asistente de administración remota (`paramiko`, `keyring`, `colorama`). |
 | `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** (ola B pendiente de portar): detección de entorno, protección de partición raíz, roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), formateo, Samba, Nginx y parches de Debian 13. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
