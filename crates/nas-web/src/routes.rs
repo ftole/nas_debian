@@ -311,6 +311,8 @@ pub async fn groups(State(state): State<AppState>, headers: HeaderMap) -> Respon
 pub struct FilesQuery {
     #[serde(default)]
     path: String,
+    #[serde(default)]
+    root: Option<String>,
 }
 
 /// Cuerpo con una única ruta.
@@ -1311,14 +1313,14 @@ pub async fn terminal_capture(State(state): State<AppState>, headers: HeaderMap)
     let name = nas_engine::terminal::session_name(&user);
     let captured_name = name.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::capture(&Runner::new(), &session_user, &captured_name)
+        nas_engine::terminal::capture_details(&Runner::new(), &session_user, &captured_name)
     })
     .await
     .unwrap_or_else(|_| Err("captura interrumpida".to_string()));
 
     match outcome {
-        Ok(output) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "output": output, "session": name }),
+        Ok((output, cwd)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "output": output, "cwd": cwd, "user": user, "session": name }),
             "Captura del terminal",
         ))
         .into_response(),
@@ -3796,5 +3798,537 @@ pub async fn backup_test(
         ))
         .into_response(),
         Err(error) => server_error(&error),
+    }
+}
+
+/// Cuerpo de una acción de almacenamiento.
+#[derive(Debug, Deserialize)]
+pub struct StorageActionBody {
+    #[serde(default)]
+    pub device: String,
+    #[serde(default)]
+    pub disk: String,
+    #[serde(default)]
+    pub fstype: String,
+    #[serde(default)]
+    pub confirm: String,
+    #[serde(default)]
+    pub unmount: bool,
+    #[serde(default)]
+    pub unit_id: String,
+    #[serde(default)]
+    pub subvolume: String,
+    #[serde(default)]
+    pub vg: String,
+    #[serde(default)]
+    pub lv: String,
+    #[serde(default)]
+    pub size: String,
+}
+
+fn audit_storage(
+    state: &AppState,
+    actor: &str,
+    action: &str,
+    target: &str,
+    status: &str,
+    detail: &str,
+) {
+    let _ = state
+        .auth
+        .db()
+        .append_audit(actor, action, target, status, detail);
+}
+
+async fn storage_operation<F>(
+    state: AppState,
+    headers: HeaderMap,
+    action: &'static str,
+    target: String,
+    operation: F,
+) -> Response
+where
+    F: FnOnce() -> Result<String, String> + Send + 'static,
+{
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let audited_target = target.clone();
+    let outcome = tokio::task::spawn_blocking(operation)
+        .await
+        .unwrap_or_else(|_| Err("operación interrumpida".to_string()));
+
+    match outcome {
+        Ok(message) => {
+            audit_storage(&state, &actor, action, &audited_target, "SUCCESS", &message);
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "message": message }),
+                message,
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            audit_storage(&state, &actor, action, &audited_target, "FAILED", &error);
+            error_response(NasError::Invalid(error))
+        }
+    }
+}
+
+/// Formatea y monta un dispositivo en `/srv/nas`.
+pub async fn storage_format(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageActionBody>,
+) -> Response {
+    let target = body.device.clone();
+    let device = body.device;
+    let fstype = if body.fstype.is_empty() {
+        "ext4".to_string()
+    } else {
+        body.fstype
+    };
+    let confirm = body.confirm;
+    let unmount = body.unmount;
+    storage_operation(state, headers, "storage_format", target, move || {
+        nas_engine::storage_ops::format_device(&Runner::new(), &device, &fstype, &confirm, unmount)
+    })
+    .await
+}
+
+/// Crea un volumen LVM y lo monta en `/srv/nas`.
+pub async fn storage_lvm(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageActionBody>,
+) -> Response {
+    let target = body.disk.clone();
+    storage_operation(state, headers, "storage_lvm", target, move || {
+        nas_engine::storage_ops::lvm_create(
+            &Runner::new(),
+            &body.disk,
+            &body.vg,
+            &body.lv,
+            &body.size,
+            &body.fstype,
+            &body.confirm,
+            body.unmount,
+        )
+    })
+    .await
+}
+
+/// Crea un subvolumen Btrfs.
+pub async fn storage_subvolume(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageActionBody>,
+) -> Response {
+    let target = body.subvolume.clone();
+    storage_operation(state, headers, "storage_subvolume", target, move || {
+        nas_engine::storage_ops::create_subvolume(
+            &Runner::new(),
+            &body.device,
+            &body.subvolume,
+            &body.confirm,
+        )
+    })
+    .await
+}
+
+/// Añade una unidad adicional montada en `/srv/nas/unidades/<id>`.
+pub async fn storage_add_unit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageActionBody>,
+) -> Response {
+    let target = body.unit_id.clone();
+    let fstype = if body.fstype.is_empty() {
+        "ext4".to_string()
+    } else {
+        body.fstype
+    };
+    storage_operation(state, headers, "storage_add_unit", target, move || {
+        nas_engine::storage_ops::add_unit(
+            &Runner::new(),
+            &body.device,
+            &body.unit_id,
+            &fstype,
+            &body.confirm,
+        )
+    })
+    .await
+}
+
+/// Extiende el pool LVM que contiene `/srv/nas`.
+pub async fn storage_extend_pool(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageActionBody>,
+) -> Response {
+    let target = body.device.clone();
+    storage_operation(state, headers, "storage_extend_pool", target, move || {
+        nas_engine::storage_ops::extend_pool(&Runner::new(), &body.device, &body.confirm)
+    })
+    .await
+}
+
+fn backup_action_id(id: &str) -> Option<String> {
+    nas_engine::backup_control::valid_id(id).then(|| id.trim().to_string())
+}
+
+/// Ejecuta una tarea de respaldo en segundo plano.
+pub async fn backup_run_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let Some(id) = backup_action_id(&id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let task = id.clone();
+    let outcome =
+        tokio::task::spawn_blocking(move || nas_engine::backup_control::run(&Runner::new(), &task))
+            .await
+            .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
+
+    match outcome {
+        Ok(message) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_run", &id, "SUCCESS", &message);
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "message": message }),
+                message,
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_run", &id, "FAILED", &error);
+            error_response(NasError::Invalid(error))
+        }
+    }
+}
+
+/// Detiene la ejecución de una tarea de respaldo.
+pub async fn backup_stop_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let Some(id) = backup_action_id(&id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::backup_control::stop(&Runner::new(), &task)
+    })
+    .await
+    .unwrap_or_else(|_| Err("detención interrumpida".to_string()));
+
+    match outcome {
+        Ok(message) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_stop", &id, "SUCCESS", &message);
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "message": message }),
+                message,
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_stop", &id, "FAILED", &error);
+            error_response(NasError::Invalid(error))
+        }
+    }
+}
+
+/// Devuelve las últimas líneas de la bitácora de una tarea.
+pub async fn backup_logs_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Query(query): Query<ExtQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let Some(id) = backup_action_id(&id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let lines = query.limit.unwrap_or(200);
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::backup_control::logs(&Runner::new(), &task, lines)
+    })
+    .await
+    .unwrap_or_else(|_| Err("lectura de bitácora interrumpida".to_string()));
+
+    match outcome {
+        Ok(output) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "id": id, "output": output }),
+            "Bitácora de la tarea",
+        ))
+        .into_response(),
+        Err(error) => error_response(NasError::Invalid(error)),
+    }
+}
+
+/// Raíz confinada según el parámetro `root` del explorador.
+fn file_root_for(state: &AppState, root: Option<&str>) -> Result<FileRoot, Box<Response>> {
+    let requested = root.unwrap_or("").trim();
+    let base = if requested.is_empty() || requested == "nas" || requested == "principal" {
+        state.paths.data_root.clone()
+    } else {
+        if !nas_engine::storage_ops::valid_name(requested) {
+            return Err(Box::new(bad_request("unidad de almacenamiento inválida")));
+        }
+        let unit = state.paths.data_root.join("unidades").join(requested);
+        if !unit.is_dir() {
+            return Err(Box::new(not_found_response(
+                "la unidad solicitada no existe",
+            )));
+        }
+        unit
+    };
+    FileRoot::new(base).map_err(|error| Box::new(server_error(&error.to_string())))
+}
+
+fn not_found_response(message: &str) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        axum::Json(ApiResponse::<serde_json::Value>::error(message)),
+    )
+        .into_response()
+}
+
+/// Listado del explorador con selección de unidad (`/api/files/list`).
+pub async fn files_list_rooted(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root_for(&state, query.root.as_deref()) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = query.path;
+
+    match tokio::task::spawn_blocking(move || {
+        let entries = root.list(&path)?;
+        Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
+    })
+    .await
+    {
+        Ok(Ok(payload)) => {
+            axum::Json(ApiResponse::ok(payload, "Contenido del directorio")).into_response()
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("listado interrumpido"),
+    }
+}
+
+fn inline_content_type(name: &str) -> &'static str {
+    let extension = name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Sirve un archivo para previsualización en línea (`/api/files/raw`).
+pub async fn files_raw(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<FilesQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root_for(&state, query.root.as_deref()) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+    let path = query.path;
+    let name = path
+        .rsplit('/')
+        .next()
+        .map(str::to_string)
+        .unwrap_or_default();
+
+    match tokio::task::spawn_blocking(move || root.read(&path, 64 * 1024 * 1024)).await {
+        Ok(Ok(bytes)) => {
+            let mut response = Response::new(axum::body::Body::from(bytes));
+            let content_type = HeaderValue::from_static(inline_content_type(&name));
+            let response_headers = response.headers_mut();
+            response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
+            if let Ok(value) =
+                HeaderValue::from_str(&format!("inline; filename=\"{}\"", name.replace('"', "")))
+            {
+                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
+            }
+            response_headers.insert(
+                "x-content-type-options",
+                HeaderValue::from_static("nosniff"),
+            );
+            response
+        }
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("lectura interrumpida"),
+    }
+}
+
+fn acl_entries(runner: &Runner, path: &str) -> Option<String> {
+    runner
+        .run(
+            &nas_exec::CommandSpec::new("getfacl")
+                .args(["-p", path])
+                .timeout(std::time::Duration::from_secs(15)),
+        )
+        .ok()
+        .filter(|output| output.is_success())
+        .map(|output| output.stdout)
+}
+
+fn acl_has(text: &str, entry: &str, perms: &str, default: bool) -> bool {
+    let prefix = if default { "default:group:" } else { "group:" };
+    text.lines().any(|line| {
+        let line = line.trim();
+        line.strip_prefix(prefix)
+            .and_then(|rest| rest.split_once(':'))
+            .is_some_and(|(name, value)| name == entry && value.trim().starts_with(perms))
+    })
+}
+
+/// Audita las ACL reales de cada recurso contra `smb.conf`.
+pub async fn shares_access_audit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ExtQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let path = state.paths.samba_conf.clone();
+    let only = query.path.clone().filter(|value| !value.is_empty());
+
+    match tokio::task::spawn_blocking(move || {
+        let conf = std::fs::read_to_string(&path).unwrap_or_default();
+        let runner = Runner::new();
+        let mut shares = serde_json::Map::new();
+        let mut out_of_sync = 0;
+
+        for share in parse_shares(&conf) {
+            if let Some(only) = &only {
+                if !share.name.eq_ignore_ascii_case(only) {
+                    continue;
+                }
+            }
+            let path = share.path.clone().unwrap_or_default();
+            let mut discrepancies = Vec::new();
+            let acl = acl_entries(&runner, &path);
+
+            let mut expected: Vec<(String, &'static str)> = Vec::new();
+            for entry in &share.valid_users {
+                let name = entry.trim_start_matches('@').to_string();
+                expected.push((name, "r-x"));
+            }
+            for entry in &share.write_list {
+                let name = entry.trim_start_matches('@').to_string();
+                if let Some(item) = expected.iter_mut().find(|(n, _)| *n == name) {
+                    item.1 = "rwx";
+                } else {
+                    expected.push((name, "rwx"));
+                }
+            }
+            if !expected.iter().any(|(name, _)| name == "grp_samba") {
+                expected.push(("grp_samba".to_string(), "rwx"));
+            }
+
+            match &acl {
+                None => discrepancies.push(format!("no se pudo leer la ACL de {path}")),
+                Some(text) => {
+                    for (name, perms) in &expected {
+                        if !acl_has(text, name, perms, false) {
+                            discrepancies.push(format!("falta group:{name}:{perms}"));
+                        }
+                        if !acl_has(text, name, perms, true) {
+                            discrepancies.push(format!("falta default:group:{name}:{perms}"));
+                        }
+                    }
+                }
+            }
+
+            if !discrepancies.is_empty() {
+                out_of_sync += 1;
+            }
+            shares.insert(
+                share.name.clone(),
+                serde_json::json!({
+                    "path": path,
+                    "in_sync": discrepancies.is_empty(),
+                    "discrepancies": discrepancies,
+                }),
+            );
+        }
+
+        let total = shares.len();
+        serde_json::json!({
+            "total": total,
+            "out_of_sync_count": out_of_sync,
+            "shares": shares,
+        })
+    })
+    .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Auditoría de ACL")).into_response(),
+        Err(_) => server_error("auditoría de ACL interrumpida"),
     }
 }
