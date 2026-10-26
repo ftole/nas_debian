@@ -147,7 +147,7 @@ pub fn build_plan(
         vec![
             "test".to_string(),
             "-f".to_string(),
-            format!("{release_dir}/web/public/index.php"),
+            format!("{release_dir}/Cargo.toml"),
         ],
         vec![
             "ln".to_string(),
