@@ -1,0 +1,86 @@
+#!/bin/bash
+# ==============================================================================
+# Instala, elimina y prueba tareas de respaldo validadas por el panel.
+# Uso: nas-backup-manage <install|delete|test> [args...]
+#   install <id>   usa /var/lib/nas/staging/nas_backup_<id>.{sh,cron,cred}
+#   delete  <id>
+#   test    <proto> <ip> <share|path> <port> <user>   (contraseña por stdin)
+# ==============================================================================
+set -euo pipefail
+
+ACTION="${1:-}"; shift || true
+STAGING="/var/lib/nas/staging"
+
+valid_id() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; }
+valid_host() { [[ "$1" =~ ^[A-Za-z0-9._:-]{1,253}$ ]]; }
+
+case "$ACTION" in
+    install)
+        ID="${1:-}"
+        valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
+        RUNNER="$STAGING/nas_backup_${ID}.sh"
+        CRON="$STAGING/nas_backup_${ID}.cron"
+        CRED="$STAGING/nas_backup_${ID}.cred"
+
+        [ -f "$RUNNER" ] || { echo "falta runner preparado" >&2; exit 3; }
+        [ -f "$CRON" ] || { echo "falta cron preparado" >&2; exit 3; }
+        bash -n "$RUNNER" || { echo "runner con sintaxis inválida" >&2; exit 4; }
+
+        install -d -m 0755 /usr/local/bin /etc/cron.d /etc/backup-credentials
+        install -d -m 2770 /srv/nas/BACKUPS_HISTORICOS
+        install -d -m 2770 "/srv/nas/BACKUPS_HISTORICOS/$ID" 2>/dev/null || true
+        chown root:grp_samba "/srv/nas/BACKUPS_HISTORICOS/$ID" 2>/dev/null || true
+
+        install -m 0755 -o root -g root "$RUNNER" "/usr/local/bin/backup_${ID}.sh"
+        install -m 0644 -o root -g root "$CRON" "/etc/cron.d/backup_${ID}"
+        if [ -f "$CRED" ] && [ -s "$CRED" ]; then
+            install -m 0600 -o root -g root "$CRED" "/etc/backup-credentials/${ID}.cred"
+            rm -f "$CRED"
+        fi
+        rm -f "$RUNNER" "$CRON"
+        echo "tarea $ID instalada"
+        ;;
+    delete)
+        ID="${1:-}"
+        valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
+        rm -f "/etc/cron.d/backup_${ID}" "/usr/local/bin/backup_${ID}.sh" "/etc/backup-credentials/${ID}.cred"
+        rm -f "/var/lock/backup_${ID}.lock"
+        echo "tarea $ID eliminada (snapshots conservados)"
+        ;;
+    test)
+        PROTO="${1:-}"; HOST="${2:-}"; TARGET="${3:-}"; PORT="${4:-22}"; USER_NAME="${5:-}"
+        IFS= read -r PASSWORD || true
+        case "$PROTO" in
+            cifs)
+                valid_host "$HOST" || { echo "host inválido" >&2; exit 2; }
+                [ -n "$TARGET" ] && [ -n "$USER_NAME" ] || { echo "recurso o usuario vacío" >&2; exit 2; }
+                TMPCRED="$(mktemp)"; TMPMOUNT="$(mktemp -d)"
+                printf 'username=%s\npassword=%s\n' "$USER_NAME" "$PASSWORD" > "$TMPCRED"
+                chmod 0600 "$TMPCRED"
+                trap 'umount "$TMPMOUNT" 2>/dev/null || true; rmdir "$TMPMOUNT" 2>/dev/null || true; rm -f "$TMPCRED"' EXIT
+                mount -t cifs "//$HOST/$TARGET" "$TMPMOUNT" -o "credentials=$TMPCRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl"
+                echo "conexión CIFS verificada: //$HOST/$TARGET"
+                ;;
+            ssh)
+                valid_host "$HOST" || { echo "host inválido" >&2; exit 2; }
+                [ -n "$USER_NAME" ] || { echo "usuario vacío" >&2; exit 2; }
+                SSHPASS="$PASSWORD" sshpass -e ssh -p "$PORT" \
+                    -o StrictHostKeyChecking=accept-new \
+                    -o UserKnownHostsFile=/root/.ssh/known_hosts_backup \
+                    -o ConnectTimeout=10 "$USER_NAME@$HOST" true
+                echo "conexión SSH verificada: $USER_NAME@$HOST:$PORT"
+                ;;
+            local)
+                [ -d "$TARGET" ] || { echo "ruta local inexistente: $TARGET" >&2; exit 3; }
+                echo "ruta local verificada: $TARGET"
+                ;;
+            *)
+                echo "protocolo no soportado: $PROTO" >&2; exit 2
+                ;;
+        esac
+        ;;
+    *)
+        echo "acción desconocida: $ACTION" >&2
+        exit 1
+        ;;
+esac
