@@ -10,9 +10,9 @@ from __future__ import annotations
 import pathlib
 import re
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-WEB = ROOT / "legacy" / "web" if (ROOT / "legacy" / "web").exists() else ROOT / "web"
-WEB = WEB / "templates"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+# Archivado en F7.2: las plantillas PHP originales viven ahora como fixtures.
+WEB = ROOT / "tests" / "parity" / "fixtures"
 OUT = ROOT / "crates" / "nas-web" / "templates"
 
 ACTIVE = re.compile(r"\$activeView\s*===\s*'([a-z]+)'\s*\?\s*'active'\s*:\s*''")
