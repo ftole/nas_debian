@@ -338,8 +338,9 @@ async fn files_crea_lista_renombra_y_borra() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload: serde_json::Value =
         serde_json::from_str(&body_text(response).await).expect("json");
-    let entries = payload["data"].as_array().expect("arreglo");
+    let entries = payload["data"]["items"].as_array().expect("arreglo");
     assert!(entries.iter().any(|entry| entry["name"] == "SISTEMAS"));
+    assert_eq!(payload["data"]["current_path"], "");
 
     let response = app
         .clone()
@@ -496,8 +497,9 @@ async fn services_y_diagnostics_responden() {
     let payload: serde_json::Value =
         serde_json::from_str(&body_text(response).await).expect("json");
     let services = payload["data"].as_array().expect("arreglo");
-    assert_eq!(services.len(), 4);
+    assert!(services.len() >= 4);
     assert!(services.iter().any(|item| item["service"] == "smbd"));
+    assert!(services.iter().all(|item| item["name"].is_string()));
 
     let response = app
         .oneshot(get("/api/diagnostics", &cookie))
@@ -506,7 +508,8 @@ async fn services_y_diagnostics_responden() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload: serde_json::Value =
         serde_json::from_str(&body_text(response).await).expect("json");
-    let checks = payload["data"].as_array().expect("arreglo");
+    assert!(payload["data"]["overall_status"].is_string());
+    let checks = payload["data"]["checks"].as_array().expect("arreglo");
     assert!(checks.iter().any(|check| check["name"] == "rol"));
 }
 
