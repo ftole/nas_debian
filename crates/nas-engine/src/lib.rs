@@ -9,6 +9,8 @@
 
 /// Políticas de respaldo: snapshots, retención y espacio.
 pub mod backup;
+/// Especificación y generación de tareas de respaldo.
+pub mod backup_spec;
 /// Planificación del despliegue del servidor.
 pub mod deploy;
 /// Diagnóstico integral del servidor.
