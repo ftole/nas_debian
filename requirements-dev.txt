@@ -1,6 +1,0 @@
-# [LEGACY] Dependencias de desarrollo del stack Python retirado en F7.
-# La validacion vigente usa cargo, shellcheck y scripts/parity_extract.py.
-flake8==7.1.2
-pytest==8.3.4
-paramiko>=3.4.0
-
