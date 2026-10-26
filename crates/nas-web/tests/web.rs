@@ -889,3 +889,30 @@ async fn usuarios_valida_nombres_y_privilegios() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn backups_valida_tareas() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/backups",
+            &cookie,
+            r#"{"id":"a b","proto":"local","path":"/srv/nas","cron":"0 2 * * *","retention":3}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/backups",
+            &cookie,
+            r#"{"id":"ok","proto":"ftp","path":"/srv/nas","cron":"0 2 * * *","retention":3}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
