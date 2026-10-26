@@ -30,7 +30,7 @@ La interfaz web fue construida siguiendo una premisa fundamental: **un servidor 
    - 36 iconos SVG vectoriales empaquetados localmente en un bloque `<svg><defs>` inline en el layout.
 
 4. **Desacoplamiento Absoluto de Cockpit:**  
-   - Interfaz propietaria construida sobre PHP 8 MVC, eliminando cualquier residuo o conflicto con Cockpit (`.cockpit-*`, `cockpit.css`), garantizando una experiencia coherente y personalizada.
+   - Interfaz propietaria servida por `nas-web` (Rust), sin residuos de Cockpit (`.cockpit-*`, `cockpit.css`) ni dependencias externas, garantizando una experiencia coherente y personalizada.
 
 ---
 
@@ -85,13 +85,14 @@ La interfaz cuenta con soporte nativo para **Tema Oscuro** (predeterminado) y **
 
 ### 3.3 Dashboard y Monitoreo en Tiempo Real
 - **Tarjetas de estado comprensibles:** Métricas clave (Uso de Procesador, Memoria RAM libre, Ocupación de Discos y Tráfico de Red) acompañadas de colores contextuales (Verde para estado óptimo, Ámbar para precaución, Rojo para saturación).
-- **Control de servicios:** Indicadores visuales en vivo del estado de los demonios (`smbd`, `wsdd2`, `nginx`, `php-fpm`, `sssd`), permitiendo reiniciar o detener servicios con un solo clic.
+- **Control de servicios:** Indicadores visuales en vivo del estado de los demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`, `cron`, `php8.4-fpm`, `sssd`), permitiendo reiniciar o detener servicios con un solo clic.
 
 ---
 
-## 4. Asistente Visual de Consola (Whiptail TUI)
+## 4. Asistente Visual de Consola (`nas-tui`)
 
-Para la administración directa desde la terminal o por SSH, el asistente `whiptail` implementa una experiencia cuidada:
+Para la administración directa desde la terminal o por SSH, el asistente `nas-tui`
+(ratatui) implementa una experiencia cuidada:
 
 - **Paleta ANSI nativa coherente:** Uso de colores que respetan el estándar del terminal de Debian, sin caracteres extraños ni dependencias de entornos gráficos.
 - **Ciclo de validación y edición sin pérdida de datos:** Si una prueba de conexión remota (CIFS o SSH) falla por una contraseña incorrecta o un nombre de recurso erróneo, el asistente **no descarta el formulario**. Muestra el error exacto y reabre el cuadro de diálogo manteniendo intactos los datos introducidos para que el administrador solo corrija el campo necesario.
