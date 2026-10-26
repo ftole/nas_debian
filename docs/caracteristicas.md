@@ -64,12 +64,14 @@ El motor de respaldos trabaja de forma autónoma con una arquitectura pensada pa
 
 ## 4. Panel Web de Administración (Slate UI 100% Offline)
 
-El servidor incluye una interfaz web nativa basada en PHP 8 MVC y el sistema de diseño Slate UI:
+El servidor incluye el panel web portado a Rust (`nas-web`, axum) conservando las vistas y el sistema de diseño Slate UI originales:
 
 - **100% Offline (Cero dependencias remotas):**  
   No hace peticiones a Google Fonts, ni descarga librerías desde CDNs como Bootstrap o Tailwind CDN. Cuenta con 36 iconos vectoriales SVG incrustados localmente, garantizando que el panel abra al instante incluso en redes totalmente aisladas de Internet.
 - **Consumo casi nulo en reposo (~0 MB):**  
-  Funciona mediante Nginx-light y un pool PHP-FPM configurado en modo `pm = ondemand`. Cuando nadie navega en el panel, los procesos de PHP se suspenden por completo.
+  Un binario único servido por `nas-web.service` detrás de Nginx (`proxy_pass`); no hay intérprete ni procesos ociosos que mantener calientes.
+- **Assets intocables:**  
+  `app.js`, CSS, favicon y las librerías de ofimática viajan dentro del binario y se sirven byte a byte, con hashes verificados en CI.
 - **Explorador de Archivos Drag-and-Drop:**
   - Navega con seguridad por las carpetas de `/srv/nas`.
   - Permite arrastrar y soltar archivos desde Windows con barra de progreso interactiva (hasta 512 MB por archivo).
@@ -77,7 +79,7 @@ El servidor incluye una interfaz web nativa basada en PHP 8 MVC y el sistema de 
   - **Papelera de Reciclaje Integrada (`.trash/`):** Al eliminar un archivo, se mueve a la papelera con su ruta original registrada. El panel muestra un contador flotante (badge) con los elementos en papelera, permitiendo restaurarlos a su ubicación exacta o vaciarla definitivamente.
   - **Visor Universal de Archivos y Ofimática 100% Offline (Excel, Word, PowerPoint, Texto, PDFs y Multimedia):** Permite previsualizar hojas de cálculo (`.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`) con navegación por pestañas y tablas estilizadas (SheetJS local), documentos Word (`.docx`) renderizados fielmente en formato página (docx-preview y JSZip locales), presentaciones PowerPoint (`.pptx`) con navegación interactiva por diapositivas y extracción de contenidos, además de visor y editor de texto en caliente con numeración de líneas, reproductor multimedia HTML5 y visor PDF nativo con cero dependencias en la nube.
 - **Terminal PTY Real (tmux) con `sudo`:**  
-  Ejecuta una sesión `tmux` auténtica *como el usuario de la sesión* (no como `www-data`), habilitando programas interactivos de pantalla completa (`top`, `htop`, `nano`, `vi`) y `Ctrl+C`. Soporta `sudo` solicitando la contraseña igual que en SSH, arranca en el directorio de inicio del usuario, persiste en el servidor y conserva historial con flechas ↑ y ↓ más botones de acceso rápido (`df -h`, `free -m`, `uptime`, `smbstatus`, `realm list`).
+  Ejecuta una sesión `tmux` auténtica *como el usuario de la sesión* (no como la cuenta del servicio), habilitando programas interactivos de pantalla completa (`top`, `htop`, `nano`, `vi`) y `Ctrl+C`. Soporta `sudo` solicitando la contraseña igual que en SSH, arranca en el directorio de inicio del usuario, persiste en el servidor y conserva historial con flechas ↑ y ↓ más botones de acceso rápido (`df -h`, `free -m`, `uptime`, `smbstatus`, `realm list`).
 - **Integración con Active Directory (AD):**  
   Permite descubrir controladores de dominio en la red corporativa y unir el servidor NAS al dominio Windows mediante `realmd`, `sssd` y `adcli` con un solo formulario.
 - **Auditoría y Registros del Sistema:**  
