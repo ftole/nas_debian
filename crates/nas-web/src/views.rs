@@ -62,6 +62,17 @@ pub fn csrf_token() -> String {
     hex::encode(buffer)
 }
 
+/// Indica si el volumen de datos está en Btrfs (controla los botones de scrub).
+fn data_root_is_btrfs() -> bool {
+    std::fs::read_to_string("/proc/mounts")
+        .map(|text| {
+            text.lines()
+                .filter(|line| line.split_whitespace().nth(1) == Some("/srv/nas"))
+                .any(|line| line.split_whitespace().nth(2) == Some("btrfs"))
+        })
+        .unwrap_or(false)
+}
+
 /// Renderiza el panel completo con la vista activa.
 pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     let mut flags: HashMap<&str, bool> = HashMap::new();
@@ -91,7 +102,7 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     flags.insert("role_has_backups", context.server_role != "ARCHIVOS");
     flags.insert("is_admin", context.is_admin);
     flags.insert("is_super", context.is_super);
-    flags.insert("btrfs_controls", false);
+    flags.insert("btrfs_controls", data_root_is_btrfs());
     flags.insert("net_health_ok", true);
     flags.insert("net_no_interfaces", false);
     flags.insert("net_dhcp_known", true);
@@ -108,6 +119,24 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     token(&mut tokens, "workgroup", escape(context.workgroup));
     token(&mut tokens, "server_ip", escape(context.ip));
     token(&mut tokens, "csrf_token", csrf.to_string());
+    token(
+        &mut tokens,
+        "active_group_services_diagnostics",
+        if matches!(context.active, "services" | "diagnostics") {
+            "active".to_string()
+        } else {
+            String::new()
+        },
+    );
+    token(
+        &mut tokens,
+        "active_group_applications_updates",
+        if matches!(context.active, "applications" | "updates") {
+            "active".to_string()
+        } else {
+            String::new()
+        },
+    );
     token(&mut tokens, "asset_version", "1");
     token(&mut tokens, "now_ts", now.timestamp().to_string());
     token(
