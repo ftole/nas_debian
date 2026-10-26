@@ -17,7 +17,7 @@ La plataforma no confía en un único perímetro defensivo. Implementa un modelo
 | **Nivel 1** | **Núcleo y Kernel** | `sysctl`, udev, ext4 `commit=2`, Btrfs `scrub`, LVM/RAID lock | Endurecimiento del stack de red IP, aislamiento de memoria/punteros, protección física de disco y mitigación de DoS. |
 | **Nivel 2** | **Integridad y Auditoría** | `auditd`, AIDE (FIM), Samba `full_audit`, rsyslog, logrotate | Registro de eventos del kernel en tiempo real, verificación criptográfica offline de archivos y trazabilidad de operaciones SMB. |
 | **Nivel 3** | **Perímetro y Red** | UFW Firewall, OpenSSH TOFU (`accept-new`), fail2ban, WSDD2 | Denegación por defecto de puertos, autenticación SSH sin root, bloqueo de fuerza bruta y descubrimiento seguro sin NetBIOS broadcast. |
-| **Nivel 4** | **Aplicación y Datos** | PHP-FPM ondemand, `proc_open`, CSRF tokens, Rate Limiting, RBAC tripartito, Staging Atómico, Hardlinks | Privilegios mínimos en entorno web, prevención total de inyección de comandos, control de acceso granular y respaldos inmunes a apagones. |
+| **Nivel 4** | **Aplicación y Datos** | `nas-web` (Rust/axum), `nas-exec`, CSRF, Rate Limiting, RBAC tripartito, Staging Atómico, Hardlinks | Privilegios mínimos en entorno web, prevención total de inyección de comandos, control de acceso granular y respaldos inmunes a apagones. |
 
 ---
 
@@ -87,7 +87,7 @@ El nivel más bajo de la arquitectura blinda los parámetros del kernel Linux me
 
 ### 2.4 Protección del Almacenamiento Físico y Prevención de Corrupción
 - **Aislamiento de la Unidad del SO:** Regla udev `/etc/udev/rules.d/80-udisks2-hide-os.rules` asigna `UDISKS_IGNORE="1"` al disco donde reside la raíz `/`, ocultándolo en UDisks2 e interfaces gráficas.
-- **Bloqueo Incondicional de Volúmenes en Uso:** El motor de despliegue (`deploy.sh`) y la API web (`StorageService.php`) verifican firmas LVM (`PV/VG`) y arreglos RAID (`mdadm`). Si un disco contiene metadatos de volumen activo, **el sistema prohíbe formatearlo categóricamente**.
+- **Bloqueo Incondicional de Volúmenes en Uso:** El motor de despliegue (`deploy.sh`) y la API web (`nas-engine::storage`) verifican firmas LVM (`PV/VG`) y arreglos RAID (`mdadm`). Si un disco contiene metadatos de volumen activo, **el sistema prohíbe formatearlo categóricamente**.
 - **Confirmación Textual Estricta:** Cualquier formateo manual exige el paso interactivo de escribir exactamente `SI-FORMATEAR`. Las banderas `--force` nunca sobrepasan discos en uso.
 - **Reutilización Segura de Datos (`--keep-data`):** Reconoce particiones preexistentes (`NAS_DATA`) y las monta en `/srv/nas` sin formateo, permitiendo migraciones sin riesgo de pérdida.
 - **Sincronización contra Apagones y Bit Rot:**
@@ -184,25 +184,34 @@ Todos los demás puertos (incluyendo bases de datos o servicios auxiliares) qued
 El nivel superior protege la interfaz de administración web, el motor de ejecución de comandos, el almacenamiento estructurado y el ciclo de vida de los respaldos.
 
 ### 5.1 Aislamiento del Servidor Web y Mínimos Privilegios
-- **Usuario no Privilegiado:** Nginx y PHP-FPM operan bajo la cuenta de sistema `www-data`, sin permisos de escritura fuera de su directorio de trabajo.
-- **Pool Ondemand Ultraligero:** La directiva `pm = ondemand` detiene los procesos de PHP-FPM cuando no hay peticiones activas. El consumo de memoria en reposo es nulo (~0 MB) y la ventana de exposición de código PHP en RAM se minimiza.
+- **Usuario de Servicio sin Login:** `nas-web.service` corre como la cuenta de sistema `nas-web` (shell `nologin`), sin escritura fuera de `/var/lib/nas` y `/srv/nas`.
+- **Endurecimiento systemd:** `ProtectSystem=yes`, `PrivateTmp=yes`, `NoNewPrivileges`, `RestrictAddressFamilies` y `CapabilityBoundingSet` acotado; `ReadWritePaths` limita la escritura a `/var/lib/nas`, `/srv/nas`, `/usr/local/bin`, `/etc/cron.d`, `/etc/backup-credentials` y `/etc/samba`.
+- **Escucha local:** El binario atiende en `127.0.0.1:8080`; solo Nginx publica el puerto 80/443.
+- **Consumo en reposo:** Al ser un binario compilado sin intérprete, no hay procesos ociosos que calentar ni memoria de runtime que liberar.
 - **Cifrado TLS y Cabeceras HTTP:** Certificado autofirmado con longitud de clave segura (o certificado corporativo) en `/etc/ssl/certs/nas-web.crt`, forzando cabeceras:
   - `X-Content-Type-Options: nosniff`
   - `X-Frame-Options: SAMEORIGIN`
   - `X-XSS-Protection: 1; mode=block`
 
-### 5.2 Prevención Absoluta de Inyección de Comandos (`proc_open`)
-Las clases controladoras y de servicio PHP (`SystemService`, `BackupService`, `UserService`, `StorageService`) interactúan con el sistema exclusivamente mediante `proc_open` pasando arreglos de cadenas individuales:
-```php
-// Ejecución segura: NO se invoca /bin/sh -c y los argumentos no se concatenan como texto plano
-$process = proc_open(['systemctl', 'restart', 'smbd'], $descriptors, $pipes);
-```
-Esto erradica de raíz cualquier vector de **Command Injection** por caracteres especiales (`;`, `&&`, `|`, `` ` ``, `$()`).
+### 5.2 Prevención Absoluta de Inyección de Comandos (`nas-exec`)
+Toda invocación al sistema pasa por `nas-exec`, que recibe el programa y un arreglo de argumentos, aplica allowlist, timeout y redacción de secretos:
 
-### 5.3 Escalada Acotada con Sudoers (`nas-web`)
-El archivo `/etc/sudoers.d/nas-web` contiene una lista blanca cerrada con los comandos y rutas absolutas que `www-data` puede invocar con `sudo`:
-- Los alias `NAS_SERVICES`, `NAS_SAMBA`, `NAS_USERS`, `NAS_STORAGE`, `NAS_TERMINAL` y `NAS_BACKUP_EXEC` especifican argumentos y rutas canónicas.
-- Cada modificación se valida antes con `visudo -c -f` para evitar corrupciones en el parser de sudo.
+```rust
+Runner::new().run(
+    &CommandSpec::new("systemctl")
+        .args(["restart", "smbd"])
+        .sudo(SudoMode::Passwordless),
+)?;
+```
+
+No existe ninguna ruta de código que construya una línea de shell con datos del usuario. Esto erradica **Command Injection** por `;`, `&&`, `|`, backticks o `$()`.
+
+### 5.3 Escalada Acotada con Sudoers (`nas-web-rust`)
+`/etc/sudoers.d/nas-web-rust` autoriza únicamente binarios y argumentos canónicos:
+- `systemctl` para `smbd`, `nmbd`, `wsdd2`, `nginx`, `php8.4-fpm` y `sssd` (start/stop/restart/reload).
+- Helpers validados: `nas-samba-apply` (valida con `testparm`, respalda e instala `smb.conf` de forma atómica), `nas-share-dir`, `nas-share-acl`, `nas-accounts` y `nas-backup-manage`.
+- `pdbedit -L -s`, `passwd -S *`, `testparm -s`, `realm list|join|leave`, `btrfs scrub`, `fstrim` y `/bin/bash /opt/nas_debian/src/core/updater.sh --yes`.
+- El archivo se valida con `visudo -cf` en cada instalación y actualización.
 
 ### 5.4 Confinamiento contra *Path Traversal* en el Explorador de Archivos
 En el gestor de archivos web, cada ruta solicitada es normalizada mediante `realpath()` y validada contra `/srv/nas`:
@@ -210,12 +219,13 @@ En el gestor de archivos web, cada ruta solicitada es normalizada mediante `real
 - La papelera oculta `.trash` queda estrictamente confinada y protegida contra navegación directa.
 
 ### 5.5 Seguridad Web: Tokens Anti-CSRF y Rate Limiting
-- **Protección contra Falsificación de Peticiones en Sitios Cruzados (CSRF):** Cada sesión genera un token criptográfico de 64 caracteres hexadecimales (`hash_hmac`). Todas las peticiones mutantes (POST, PUT, DELETE) deben incluir el token coincidente en el cuerpo o en la cabecera `X-CSRF-Token`, bloqueando peticiones no autorizadas desde navegadores externos.
-- **Rate Limiting contra Fuerza Bruta Web:** El middleware de autenticación (`AuthService`) rastrea intentos fallidos por IP. Al acumular 5 fallos, bloquea la dirección respondiendo de inmediato con código HTTP 429 (*Too Many Requests*).
+- **Protección CSRF:** Cada sesión genera un token de 256 bits (`getrandom`) y las peticiones mutantes deben presentarlo en el formulario o en la cabecera `X-CSRF-Token`; la comparación es en tiempo constante.
+- **Sesiones:** Cookie `HttpOnly`, `SameSite=Strict` y `Secure` (configurable con `NAS_WEB_INSECURE_COOKIE=1` solo en desarrollo), con identificador aleatorio de 256 bits y TTL configurable.
+- **Rate Limiting contra Fuerza Bruta:** La tabla `api_rate_limits` en SQLite cuenta intentos por clave/IP en ventanas deslizantes y responde HTTP 429, sin demonios en memoria (Redis/Memcached).
 - **100% Offline (Inmunidad a la Cadena de Suministro):** No se realizan llamadas a CDNs, Google Fonts ni scripts externos. La interfaz Slate UI incluye sus 36 iconos SVG y estilos de forma local.
 
 ### 5.6 Terminal Administrativa Segura (PTY Real)
-- La terminal web opera mediante un helper root (`/usr/local/sbin/nas-terminal`) que gestiona sesiones PTY bajo `tmux` ejecutadas en el contexto del usuario autenticado.
+- La terminal web opera mediante un helper root (`/usr/local/sbin/nas-terminal`) que gestiona sesiones PTY bajo `tmux` ejecutadas en el contexto del usuario autenticado, invocado por `nas-web` con `nas-exec`.
 - Cuenta con lista blanca estricta de acciones (`start`, `keys`, `capture`, `resize`, `kill`), directorio confinado y compatibilidad transparente con `sudo` interactivo.
 
 ### 5.7 Control de Acceso Basado en Roles (RBAC) Tripartito
