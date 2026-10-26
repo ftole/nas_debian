@@ -123,17 +123,20 @@ El primer release marca el hito donde la arquitectura, seguridad, servicios y pa
 ### Paso 1: Checklist Pre-vuelo de Calidad
 Antes de congelar la versión, verifica que todas las suites de validación pasen al 100%:
 
-```powershell
-# 1. Pruebas unitarias backend web y controladores
-php tests/test_web.php
+```bash
+# 1. Formato, lints y pruebas del workspace Rust
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 
-# 2. Pruebas de integración remota (pytest)
-pytest tests/ -q
+# 2. Contrato de paridad y auditoría de interfaz
+python3 scripts/parity_extract.py --check
+python3 scripts/qa_ui_audit.py --static
 
-# 3. Pruebas de estilo y buenas prácticas Python
-flake8 tests/
+# 3. Validación del empaquetado
+bash packaging/verify.sh
 
-# 4. Asegurar árbol de trabajo limpio y sincronizado con main
+# 4. Árbol de trabajo limpio y sincronizado
 git checkout main
 git pull origin main
 git status
@@ -145,23 +148,24 @@ git status
 ---
 
 ### Paso 2: Actualizar Metadatos de Versión en el Repositorio
-Actualiza el archivo de versión que lee el panel web ([`web/version.json`](../web/version.json)):
 
-```json
-{
-  "version": "1.0.0-beta.1",
-  "build": 1,
-  "release_date": "2026-10-19",
-  "channel": "beta",
-  "notes": "Primer Release Beta: Servidor NAS Departamental, Central de Respaldos Btrfs/CIFS/SSH y Panel Web MVC"
-}
+La fuente de verdad es `Cargo.toml` del workspace (versión de los binarios) y el
+manifiesto de release que consume `nas update`. Actualiza la versión en
+`Cargo.toml` y en el `version.json` de la release (no en `legacy/`):
+
+```bash
+# versión de todos los crates del workspace
+sed -i 's/^version = ".*"/version = "1.0.0-beta.1"/' Cargo.toml
+
+git add Cargo.toml Cargo.lock
+git commit -m "chore: actualizar la version del workspace a 1.0.0-beta.1"
 ```
 
-Confirma el cambio de forma atómica:
-```powershell
-git add web/version.json
-git commit -m "chore: actualizar metadatos para release v1.0.0-beta.1"
-git push origin main
+El manifiesto firmado (`nas-1.0.0-beta.1.json`) declara versión, commit,
+artefacto, SHA-256, fecha y firma Ed25519; se verifica con:
+
+```bash
+nas update verify --manifest nas-1.0.0-beta.1.json --artifact target/release/nas   --pubkey packaging/release.pub
 ```
 
 ---
@@ -279,24 +283,14 @@ Clasifica los cambios en:
 
 ---
 
-### Paso 3: Actualizar `web/version.json`
-Actualiza el número de versión y fecha:
+### Paso 3: Publicar el manifiesto firmado
 
-```json
-{
-  "version": "1.0.0-beta.2",
-  "build": 2,
-  "release_date": "2026-10-25",
-  "channel": "beta",
-  "notes": "Optimizaciones de compresión ZIP, cálculo reactivo de tamaños y mejoras de UX en respaldos"
-}
-```
-
-Confirma y envía a `main`:
-```powershell
-git add web/version.json
-git commit -m "chore: actualizar metadatos para release v1.0.0-beta.2"
-git push origin main
+```bash
+sha256sum target/release/nas > nas.sha256
+# firmar la carga canonica: version|commit|artifact|sha256|published_at
+nas update sign --manifest nas-1.0.0-beta.2.json --key release.key
+git add nas-1.0.0-beta.2.json
+git commit -m "chore: publicar el manifiesto firmado de la version 1.0.0-beta.2"
 ```
 
 ---
@@ -347,7 +341,7 @@ Los administradores pueden actualizar sus servidores de dos formas equivalentes:
 | `error: gpg failed to sign the data` | La sesión de terminal no puede abrir la ventana para pedir la contraseña (*pinentry*). | En Git Bash/PowerShell define: `export GPG_TTY=$(tty)` o reinicia el agente GPG con `gpgconf --kill gpg-agent`. |
 | `[!] No se encontró una versión firmada válida` al ejecutar `nas update` | El tag fue creado sin la bandera `-s` (no está firmado) o la clave pública del autor no ha sido importada en root en Debian. | 1. Importa la clave en Debian con `sudo gpg --import clave_autor.asc`.<br>2. Para entornos de desarrollo o pruebas sin clave GPG, autoriza la actualización temporal con: `sudo NAS_ALLOW_UNSIGNED_UPDATES=true nas update`. |
 | El release no muestra la insignia verde **Verified** en GitHub | El correo configurado en la clave GPG no coincide con ningún correo verificado en tu cuenta de GitHub. | Agrega el correo de la clave en **GitHub Settings → Emails** o genera una clave que use tu correo verificado. |
-| El servidor actualizó pero el navegador sigue viendo la versión anterior | La caché del navegador o el caché de código de operación (OPcache) de PHP-FPM conserva archivos antiguos. | En Debian recarga PHP-FPM con `sudo systemctl reload php*-fpm` y realiza una recarga forzada en el navegador (`Ctrl + F5`). |
+| El navegador sigue viendo la versión anterior | La caché del navegador conserva `app.js`/CSS antiguos (los assets van embebidos en el binario, no en disco). | Fuerza recarga (`Ctrl + F5`) y verifica que `nas-web.service` se reinició tras la actualización. |
 
 ---
 
