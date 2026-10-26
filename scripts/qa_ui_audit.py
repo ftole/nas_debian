@@ -27,7 +27,11 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_JS = ROOT / "web" / "public" / "js" / "app.js"
+APP_JS = (
+    ROOT / "legacy" / "web" / "public" / "js" / "app.js"
+    if (ROOT / "legacy" / "web").exists()
+    else ROOT / "web" / "public" / "js" / "app.js"
+)
 TEMPLATE = ROOT / "crates" / "nas-web" / "templates" / "layout.html"
 
 CTX = ssl._create_unverified_context()
