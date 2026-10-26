@@ -2,18 +2,24 @@
 # ==============================================================================
 # INSTALADOR OFICIAL: Servidor NAS & Central de Respaldos EAD-COL (Debian 13)
 # ==============================================================================
+# Instala la plataforma Rust (nas, nas-web, nas-tui, nasctl) y el panel web.
+#
 # Uso remoto con One-Liner:
 #   curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
+#
+# Desinstalación:
+#   sudo bash install.sh --uninstall
 # ==============================================================================
 
 set -e
 
-# Evitar que git pida contraseñas interactivamente y congele el script
 export GIT_TERMINAL_PROMPT=0
+export PATH="/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/nas_debian"
-BIN_PATH="/usr/local/bin/nas"
+BIN_DIR="/usr/local/bin"
+CARGO_HOME="${CARGO_HOME:-/root/.cargo}"
 
 SSH_CHECK=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 || true)
 if echo "$SSH_CHECK" | grep -qi "successfully authenticated"; then
@@ -31,16 +37,14 @@ C_YELLOW="\033[1;33m"
 C_RED="\033[1;31m"
 C_WHITE="\033[1;37m"
 
-# Verifica la firma GPG de un tag contra la huella esperada (misma lógica que updater.sh).
+# Verifica la firma GPG de un tag contra la huella esperada.
 verificar_firma_tag() {
     local tag="$1" esperado="$2" salida fp
     if ! salida=$(git verify-tag --raw "$tag" 2>&1); then
         return 1
     fi
     fp=$(echo "$salida" | awk '/^\[GNUPG:\] VALIDSIG /{print $3; exit}')
-    if [ -z "$fp" ]; then
-        return 1
-    fi
+    [ -n "$fp" ] || return 1
     if [ -n "$esperado" ]; then
         local esperado_norm fp_norm
         esperado_norm=$(printf '%s' "$esperado" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
@@ -52,8 +56,7 @@ verificar_firma_tag() {
     return 0
 }
 
-# Devuelve la tag firmada mas reciente (esquema vMAJOR.MINOR.PATCH) alcanzable
-# desde la referencia dada. Imprime la tag o devuelve 1 si no hay ninguna valida.
+# Devuelve la tag firmada más reciente alcanzable desde la referencia dada.
 seleccionar_tag_firmada() {
     local esperado="$1" ref="$2" tag
     while IFS= read -r tag; do
@@ -68,8 +71,7 @@ seleccionar_tag_firmada() {
     return 1
 }
 
-# Aplica la politica de tags firmadas tras clonar. Devuelve 1 si se exige firma
-# y no existe una tag valida (la instalacion debe abortarse).
+# Aplica la política de tags firmadas tras clonar.
 aplicar_politica_tags() {
     local esperado="${NAS_UPDATE_SIGNER:-}"
     local obligatorio="${NAS_REQUIRE_SIGNED_TAGS:-false}"
@@ -90,24 +92,21 @@ aplicar_politica_tags() {
     return 1
 }
 
-# 1. Comprobación de permisos de superusuario
 if [ "$EUID" -ne 0 ]; then
     echo -e "${C_RED}[-] Este instalador requiere privilegios de administrador.${C_RESET}"
-    echo -e "    Por favor ejecuta: ${C_BOLD}sudo bash $0${C_RESET} o utiliza ${C_BOLD}sudo${C_RESET} en el comando curl."
+    echo -e "    Por favor ejecuta: ${C_BOLD}sudo bash $0${C_RESET}"
     exit 1
 fi
 
-# Desinstalación si se especifica el flag --uninstall
 if [ "$1" == "--uninstall" ] || [ "$1" == "uninstall" ]; then
-    echo -e "${C_YELLOW}[!] Desinstalando CLI 'nas' del sistema...${C_RESET}"
-    rm -f "$BIN_PATH" /usr/local/bin/asistente_nas /usr/local/bin/asistente-nas
-    if [ -d "$INSTALL_DIR" ]; then
-        if [ -f "$INSTALL_DIR/src/core/uninstall.sh" ]; then
-            bash "$INSTALL_DIR/src/core/uninstall.sh" --yes
-        fi
-        rm -rf "$INSTALL_DIR"
+    echo -e "${C_YELLOW}[!] Desinstalando la plataforma NAS...${C_RESET}"
+    systemctl disable --now nas-web.service 2>/dev/null || true
+    rm -f "$BIN_DIR/nas" "$BIN_DIR/nas-web" "$BIN_DIR/nas-tui" "$BIN_DIR/nasctl" "$BIN_DIR/nas-dev"
+    if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/src/core/uninstall.sh" ]; then
+        bash "$INSTALL_DIR/src/core/uninstall.sh" --yes || true
     fi
-    echo -e "${C_GREEN}✔ El comando 'nas' y sus archivos han sido desinstalados completamente.${C_RESET}"
+    rm -rf "$INSTALL_DIR"
+    echo -e "${C_GREEN}✔ Plataforma desinstalada.${C_RESET}"
     exit 0
 fi
 
@@ -115,13 +114,23 @@ clear 2>/dev/null || true
 echo -e "${C_CYAN}"
 echo "  ╭──────────────────────────────────────────────────────────────────────────╮"
 echo "  │        INSTALADOR OFICIAL • SERVIDOR NAS & BACKUP EAD-COL (DEBIAN 13)    │"
+echo "  │                    Plataforma Rust (axum + ratatui)                      │"
 echo -e "  ╰──────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 
-echo -e " ${C_BOLD}[1/4]${C_RESET} Verificando e instalando herramientas base (git, curl, whiptail, php)..."
+echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando herramientas base..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl wget whiptail ca-certificates btrfs-progs samba-vfs-modules php-cli php-sqlite3 >/dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl ca-certificates \
+    build-essential pkg-config btrfs-progs samba-vfs-modules cifs-utils rsync >/dev/null 2>&1
 
-echo -e " ${C_BOLD}[2/4]${C_RESET} Descargando y sincronizando componentes en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
+if ! command -v cargo >/dev/null 2>&1; then
+    echo -e "  Instalando toolchain de Rust..."
+    curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+    sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable >/dev/null 2>&1
+    export PATH="$CARGO_HOME/bin:$PATH"
+fi
+cargo --version
+
+echo -e " ${C_BOLD}[2/5]${C_RESET} Sincronizando el repositorio en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
 if [ -d "$INSTALL_DIR/.git" ]; then
     cd "$INSTALL_DIR"
     git remote set-url origin "$REPO_URL" 2>/dev/null || true
@@ -139,152 +148,41 @@ if [ -d "$INSTALL_DIR/.git" ]; then
             REMOTE_REV=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "$REMOTE_REV")
         fi
         if [ -n "$CURRENT_REV" ] && [ -n "$REMOTE_REV" ] && [ "$CURRENT_REV" != "$REMOTE_REV" ]; then
-            BACKUP_DIR=$(mktemp -d "${INSTALL_DIR}.install_backup_XXXXXX")
-            if ! cp -a "$INSTALL_DIR/." "$BACKUP_DIR/" 2>/dev/null; then
-                echo -e "${C_RED}[-] No se pudo crear el backup de la instalación.${C_RESET}"
-                exit 1
-            fi
-            TARGET_REF="origin/main"
-            if [ -n "$LATEST_TAG" ]; then
-                if [ -n "${NAS_UPDATE_SIGNER:-}" ] || [ "${NAS_REQUIRE_SIGNED_TAGS:-false}" == "true" ]; then
-                    TARGET_REF="$LATEST_TAG"
-                fi
-            fi
-            if ! git merge --ff-only "$TARGET_REF"; then
-                echo -e "${C_RED}[-] La actualización no es fast-forward. Backup disponible en: $BACKUP_DIR${C_RESET}"
-                exit 1
-            fi
-            if ! find "$INSTALL_DIR" -type f -name "*.sh" -exec bash -n {} \;; then
-                echo -e "${C_RED}[-] La nueva versión no superó la validación; restaurando la anterior.${C_RESET}"
-                git reset --hard "$CURRENT_REV"
+            if ! git merge --ff-only "${LATEST_TAG:-origin/main}"; then
+                echo -e "${C_RED}[-] La actualización no es fast-forward.${C_RESET}"
                 exit 1
             fi
         fi
     fi
-elif [ -f "$SCRIPT_DIR/src/asistente.sh" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
+elif [ -d "$SCRIPT_DIR/.git" ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR" ]; then
     rm -rf "$INSTALL_DIR"
-    if [ -d "$SCRIPT_DIR/.git" ] && git clone -q "$SCRIPT_DIR" "$INSTALL_DIR" 2>/dev/null; then
-        :
-    else
-        cp -a "$SCRIPT_DIR" "$INSTALL_DIR"
-        find "$INSTALL_DIR" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.bats" \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
-    fi
-    if [ -d "$INSTALL_DIR/.git" ] && cd "$INSTALL_DIR"; then
-        git remote set-url origin "$REPO_URL" 2>/dev/null || true
-        aplicar_politica_tags || exit 1
-    fi
+    git clone -q "$SCRIPT_DIR" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    aplicar_politica_tags || exit 1
 else
     rm -rf "$INSTALL_DIR"
     git clone -q "$REPO_URL" "$INSTALL_DIR"
-    if cd "$INSTALL_DIR"; then
-        aplicar_politica_tags || exit 1
+    cd "$INSTALL_DIR"
+    aplicar_politica_tags || exit 1
+fi
+cd "$INSTALL_DIR"
+git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+
+echo -e " ${C_BOLD}[3/5]${C_RESET} Compilando la plataforma Rust (puede tardar varios minutos)..."
+cargo build --release --locked --workspace
+
+echo -e " ${C_BOLD}[4/5]${C_RESET} Instalando binarios y el servicio del panel..."
+for bin in nas nas-web nas-tui nasctl nas-dev; do
+    if [ -f "target/release/$bin" ]; then
+        install -m 0755 "target/release/$bin" "$BIN_DIR/$bin"
     fi
-fi
+done
+bash packaging/install.sh
 
-find "$INSTALL_DIR" -type f \( -name "*.sh" -o -path "*/bin/*" \) -exec chmod +x {} + 2>/dev/null || true
-chmod -R go-w "$INSTALL_DIR" 2>/dev/null || true
-git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
-
-echo -e " ${C_BOLD}[3/4]${C_RESET} Creando comando global del sistema ${C_GREEN}nas${C_RESET} en ${C_WHITE}$BIN_PATH${C_RESET}..."
-rm -f "$BIN_PATH"
-cat << 'EOF' > "$BIN_PATH"
-#!/bin/bash
-# Wrapper CLI Global: nas
-INSTALL_DIR="/opt/nas_debian"
-REPO_URL="https://github.com/ftole/nas_debian.git"
-
-if [ "$EUID" -ne 0 ]; then
-    echo "[-] El comando 'nas' requiere privilegios de administrador. Ejecuta: sudo nas $@"
-    exit 1
-fi
-
-export GIT_TERMINAL_PROMPT=0
-
-git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
-
-case "$1" in
-    update|--update|-u)
-        if [ -f "$INSTALL_DIR/src/core/updater.sh" ]; then
-            bash "$INSTALL_DIR/src/core/updater.sh" "${@:2}"
-            exit $?
-        else
-            echo "[-] Error: no se encontró el actualizador en $INSTALL_DIR. Reinstala con install.sh."
-            exit 1
-        fi
-        ;;
-
-    version|--version|-v)
-        if [ -d "$INSTALL_DIR/.git" ]; then
-            cd "$INSTALL_DIR"
-            echo "Servidor NAS EAD-COL (Debian 13)"
-            echo "Versión: $(git log -1 --format='%h (%cd)' --date=short)"
-            echo "Commit:  $(git log -1 --format='%s')"
-        else
-            echo "Servidor NAS EAD-COL (Debian 13) - Versión 1.0"
-        fi
-        exit 0
-        ;;
-
-    uninstall|--uninstall)
-        if [ -f "$INSTALL_DIR/install.sh" ]; then
-            bash "$INSTALL_DIR/install.sh" --uninstall
-        else
-            rm -f /usr/local/bin/nas
-            rm -rf "$INSTALL_DIR"
-            echo "✔ CLI desinstalado."
-        fi
-        exit 0
-        ;;
-
-    "")
-        if [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
-            export TERM="${TERM:-xterm-256color}"
-            if [ ! -t 0 ]; then
-                exec < /dev/tty 2>/dev/null || true
-            fi
-            exec bash "$INSTALL_DIR/src/asistente.sh"
-        else
-            echo "[-] Error: No se encontró $INSTALL_DIR/src/asistente.sh"
-            exit 1
-        fi
-        ;;
-
-    *)
-        if [ -f "$INSTALL_DIR/bin/nas-cli" ]; then
-            exec php "$INSTALL_DIR/bin/nas-cli" "$@"
-        elif [ -f "$INSTALL_DIR/src/asistente.sh" ]; then
-            export TERM="${TERM:-xterm-256color}"
-            if [ ! -t 0 ]; then
-                exec < /dev/tty 2>/dev/null || true
-            fi
-            exec bash "$INSTALL_DIR/src/asistente.sh" "$@"
-        else
-            echo "[-] Error: No se encontraron los componentes de ejecución en $INSTALL_DIR"
-            exit 1
-        fi
-        ;;
-esac
-EOF
-
-chmod 755 "$BIN_PATH"
-ln -sf "$BIN_PATH" /usr/local/bin/asistente_nas 2>/dev/null || true
-ln -sf "$BIN_PATH" /usr/local/bin/asistente-nas 2>/dev/null || true
-
-echo -e " ${C_BOLD}[4/4]${C_RESET} ¡Instalación y configuración completadas con éxito!"
-echo ""
-echo -e "${C_GREEN}==============================================================================${C_RESET}"
-echo -e "${C_BOLD}${C_WHITE} ✔ ¡EL CLI 'nas' ESTÁ LISTO PARA USAR EN TU SERVIDOR!${C_RESET}"
-echo -e "${C_GREEN}==============================================================================${C_RESET}"
-echo -e " • Para abrir el asistente en cualquier momento:  ${C_CYAN}sudo nas${C_RESET}"
-echo -e " • Para actualizar a la última versión:          ${C_CYAN}sudo nas update${C_RESET}"
-echo -e " • Para desinstalar por completo:                ${C_CYAN}sudo nas uninstall${C_RESET}"
-echo -e "${C_GREEN}==============================================================================${C_RESET}\n"
-
-# Si se ejecuta interactivamente, preguntar si desea iniciar de inmediato
-if [ -t 0 ]; then
-    read -r -p "¿Deseas abrir el Asistente Visual ahora mismo? [S/n]: " RESP
-    RESP=${RESP:-S}
-    if [[ "$RESP" =~ ^[sSyY]$ ]]; then
-        exec "$BIN_PATH"
-    fi
-fi
+echo -e " ${C_BOLD}[5/5]${C_RESET} Estado final..."
+systemctl --no-pager --lines=0 status nas-web.service || true
+printf '  %s\n' "Panel:  https://$(hostname -I 2>/dev/null | awk '{print $1}')/"
+printf '  %s\n' "CLI:    sudo nas --help"
+printf '  %s\n' "TUI:    sudo nas-tui"
+echo
+echo -e "${C_GREEN}✔ Instalación completada.${C_RESET}"
