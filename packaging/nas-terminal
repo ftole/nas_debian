@@ -1,0 +1,73 @@
+#!/bin/bash
+# ==============================================================================
+# Sesiones PTY del panel sobre tmux, aisladas por usuario.
+# Uso: nas-terminal -u <usuario> <start|capture|raw|raw_enter|resize|kill|exists> [args]
+# ==============================================================================
+set -euo pipefail
+
+TARGET_USER=""
+if [ "${1:-}" = "-u" ]; then
+    TARGET_USER="${2:-}"
+    shift 2 || true
+fi
+
+ACTION="${1:-}"; shift || true
+
+TARGET_USER="$(printf '%s' "$TARGET_USER" | tr -cd 'a-zA-Z0-9_.-' | cut -c1-32)"
+if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
+    TARGET_USER="$(id -un)"
+fi
+
+SESSION="nas-web-${TARGET_USER}"
+HOME_DIR="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+[ -d "$HOME_DIR" ] || HOME_DIR=/srv/nas
+[ -d "$HOME_DIR" ] || HOME_DIR=/tmp
+
+run_as() {
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$TARGET_USER" -- "$@"
+    else
+        "$@"
+    fi
+}
+
+case "$ACTION" in
+    start)
+        COLS="${1:-200}"; ROWS="${2:-50}"
+        case "$COLS" in (*[!0-9]*|'') COLS=200 ;; esac
+        case "$ROWS" in (*[!0-9]*|'') ROWS=50 ;; esac
+        if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
+            run_as env PAGER=cat SYSTEMD_PAGER=cat TERM=xterm-256color \
+                tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$HOME_DIR" /bin/bash
+        fi
+        echo "session=$SESSION"
+        ;;
+    exists)
+        run_as tmux has-session -t "$SESSION" 2>/dev/null
+        ;;
+    raw)
+        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
+        ;;
+    raw_enter)
+        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
+        run_as tmux send-keys -t "$SESSION" Enter
+        ;;
+    capture)
+        run_as tmux capture-pane -e -t "$SESSION" -p
+        CWD="$(run_as tmux display-message -p -F '#{pane_current_path}' -t "$SESSION" 2>/dev/null || echo "$HOME_DIR")"
+        printf '___NAS_CWD___%s\n' "$CWD"
+        ;;
+    resize)
+        COLS="${1:-200}"; ROWS="${2:-50}"
+        case "$COLS" in (*[!0-9]*|'') COLS=200 ;; esac
+        case "$ROWS" in (*[!0-9]*|'') ROWS=50 ;; esac
+        run_as tmux resize-window -t "$SESSION" -x "$COLS" -y "$ROWS" 2>/dev/null || true
+        ;;
+    kill)
+        run_as tmux kill-session -t "$SESSION" 2>/dev/null || true
+        ;;
+    *)
+        echo "accion desconocida: $ACTION" >&2
+        exit 2
+        ;;
+esac
