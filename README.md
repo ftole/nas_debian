@@ -1,10 +1,12 @@
 # Servidor NAS y Central de Respaldos Multiplataforma (Debian 13)
 
-[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Bash Shell](https://img.shields.io/badge/Scripting-Bash-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Web UI](https://img.shields.io/badge/Web%20UI-Nginx%20%2B%20PHP--FPM-009688?style=for-the-badge)](https://github.com/ftole/nas_debian)
+[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Rust](https://img.shields.io/badge/Platform-Rust-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Web UI](https://img.shields.io/badge/Web%20UI-Rust%20(axum)%20%2B%20Nginx-009688?style=for-the-badge)](https://github.com/ftole/nas_debian)
 
 Este repositorio contiene las herramientas para desplegar y administrar sobre **Debian 13 (Trixie)** un servidor de almacenamiento en red (NAS departamental) y una central de copias de seguridad resistente a ransomware. 
 
-Todo el sistema corre de forma **nativa** sobre Linux, sin capas de virtualización pesadas ni dependencias externas. Puedes controlarlo completamente desde la terminal (con el comando `nas` o el asistente visual en consola) o a través de su panel web administrativo MVC (PHP 8 + Nginx-light), diseñado para consumir prácticamente cero recursos en reposo.
+Todo el sistema corre de forma **nativa** sobre Linux, sin capas de virtualización pesadas ni dependencias externas. Toda la plataforma está implementada en **Rust**: el CLI `nas`, el asistente de terminal `nas-tui` y el panel web `nas-web` (axum + Nginx) comparten el mismo motor (`nas-engine`), con los assets del panel embebidos en el binario y cero llamadas a CDNs.
+
+El panel web portado conserva **las vistas y el JavaScript originales** (`app.js`, CSS y librerías de ofimática offline servidos byte a byte), verificado en CI mediante el contrato de paridad `tests/parity/` y comparado en vivo contra el panel PHP antes de retirarlo (fase F6/F7).
 
 ---
 
@@ -15,6 +17,20 @@ El servidor combina el rendimiento del kernel de Debian 13 con interfaces ágile
 ![Arquitectura General del Sistema](docs/assets/arquitectura_general.svg)
 
 ---
+
+## 🧱 Estructura del Repositorio
+
+| Ruta | Contenido |
+| :--- | :--- |
+| `crates/nas-core` | Configuración, rutas, errores y contrato de respuesta |
+| `crates/nas-exec` | Ejecución de comandos con allowlist, timeouts y redacción |
+| `crates/nas-engine` | Almacenamiento, Samba, usuarios, respaldos, dominio, diagnósticos |
+| `crates/nas-cli` | Comando `nas` (ANSI y `--json`) |
+| `crates/nas-web` | Panel web axum + assets embebidos + plantillas portadas |
+| `crates/nas-tui` | Asistente de terminal (ratatui) |
+| `crates/nasctl`, `crates/nas-dev` | Multi-host e inspección de entorno de desarrollo |
+| `src/core`, `src/lib` | Motor Bash de despliegue/desinstalación (aún vigente) |
+| `legacy/` | Panel PHP, asistente `whiptail`, CLI PHP y utilidades Python retiradas |
 
 ## 📚 Documentación Técnica Detallada
 
