@@ -114,6 +114,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/storage", get(routes::storage))
         .route("/api/storage/disks", get(routes::storage_disks))
         .route("/api/storage/inspect", post(routes::storage_inspect))
+        .route("/api/storage/format", post(routes::storage_format))
+        .route("/api/storage/lvm", post(routes::storage_lvm))
+        .route("/api/storage/subvolume", post(routes::storage_subvolume))
+        .route("/api/storage/add-unit", post(routes::storage_add_unit))
+        .route(
+            "/api/storage/extend-pool",
+            post(routes::storage_extend_pool),
+        )
         .route("/api/domain", get(routes::domain_status))
         .route("/api/domain/join", post(routes::domain_join))
         .route("/api/domain/leave", post(routes::domain_leave))
@@ -125,6 +133,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files", get(routes::files_list))
         .route("/api/files/download", get(routes::files_download))
         .route("/api/files/zip", get(routes::files_zip))
+        .route("/api/files/list", get(routes::files_list_rooted))
+        .route("/api/files/raw", get(routes::files_raw))
         .route("/api/logs", get(routes::logs))
         .route(
             "/api/groups",
@@ -142,11 +152,15 @@ pub fn router(state: AppState) -> Router {
             "/api/shares/access/repair",
             post(routes::share_access_repair),
         )
+        .route("/api/shares/access/audit", get(routes::shares_access_audit))
         .route("/api/users/update", post(routes::user_update))
         .route("/api/users/toggle", post(routes::user_toggle))
         .route("/api/users/groups", post(routes::user_groups))
         .route("/api/users/delete", post(routes::user_delete))
         .route("/api/backups/running", get(routes::backups_running))
+        .route("/api/backups/{id}/run", post(routes::backup_run_id))
+        .route("/api/backups/{id}/stop", post(routes::backup_stop_id))
+        .route("/api/backups/{id}/logs", get(routes::backup_logs_id))
         .route("/api/backups/test", post(routes::backup_test))
         .route("/api/backups/update", post(routes::backup_update))
         .route("/api/backups/delete", post(routes::backup_delete))
