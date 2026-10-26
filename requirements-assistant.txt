@@ -1,3 +1,5 @@
+# [LEGACY] Dependencias del asistente Python retirado en F7.
+# Se conserva solo como referencia historica; la plataforma activa es Rust.
 # Dependencias para el Asistente de Administración Remota NAS (Windows)
 # Se empaqueta con PyInstaller; PyInstaller se instala en el job de build.
 paramiko>=3.4.0
