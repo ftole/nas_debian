@@ -11,6 +11,7 @@ pub mod assets;
 pub mod auth;
 pub mod db;
 pub mod files;
+pub mod legacy;
 mod routes;
 pub mod template;
 pub mod views;
