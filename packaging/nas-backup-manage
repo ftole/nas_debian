@@ -40,6 +40,47 @@ case "$ACTION" in
         rm -f "$RUNNER" "$CRON"
         echo "tarea $ID instalada"
         ;;
+    run)
+        ID="${1:-}"
+        valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
+        RUNNER="/usr/local/bin/backup_${ID}.sh"
+        [ -x "$RUNNER" ] || { echo "no existe el runner $RUNNER" >&2; exit 3; }
+        if pgrep -f "backup_${ID}.sh" >/dev/null 2>&1; then
+            echo "la tarea $ID ya está en ejecución"
+            exit 0
+        fi
+        setsid nohup "$RUNNER" >/dev/null 2>&1 < /dev/null &
+        echo "tarea $ID iniciada"
+        ;;
+    stop)
+        ID="${1:-}"
+        valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
+        mapfile -t PIDS < <(pgrep -f "backup_${ID}.sh" 2>/dev/null || true)
+        if [ "${#PIDS[@]}" -eq 0 ]; then
+            echo "la tarea $ID no está en ejecución"
+            exit 0
+        fi
+        kill -TERM "${PIDS[@]}" 2>/dev/null || true
+        sleep 1
+        mapfile -t PIDS < <(pgrep -f "backup_${ID}.sh" 2>/dev/null || true)
+        if [ "${#PIDS[@]}" -gt 0 ]; then
+            kill -KILL "${PIDS[@]}" 2>/dev/null || true
+        fi
+        echo "tarea $ID detenida"
+        ;;
+    logs)
+        ID="${1:-}"
+        LINES="${2:-200}"
+        valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
+        case "$LINES" in (*[!0-9]*|'') LINES=200 ;; esac
+        [ "$LINES" -ge 1 ] && [ "$LINES" -le 500 ] || LINES=200
+        LOG="/srv/nas/LOGS_BACKUP/backup_${ID}.log"
+        if [ ! -f "$LOG" ]; then
+            echo "(sin bitácora todavía para $ID)"
+            exit 0
+        fi
+        tail -n "$LINES" "$LOG"
+        ;;
     delete)
         ID="${1:-}"
         valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
