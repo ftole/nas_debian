@@ -269,14 +269,20 @@ _hook_post_actualizacion() {
         rm -f "$tmp_sudoers" 2>/dev/null || true
     fi
 
-    # 4. Sincronizar aplicación web MVC en /var/www/nas-web si existe
-    local web_src="$PROJECT_ROOT/web"
-    [ -d "$web_src" ] || web_src="$PROJECT_ROOT/legacy/web"
-    if [ -d "/var/www/nas-web" ] && [ -d "$web_src" ]; then
-        if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/www/nas-web" ]; then
-            cp -rf "$web_src/"* /var/www/nas-web/ 2>/dev/null || true
-            chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
-            chmod -R 755 /var/www/nas-web 2>/dev/null || true
+    # 4. Recompilar e instalar la plataforma Rust
+    if [ -f "$PROJECT_ROOT/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+        if ( cd "$PROJECT_ROOT" && cargo build --release --locked --workspace >/dev/null 2>&1 ); then
+            for bin in nas nas-web nas-tui nasctl nas-dev; do
+                if [ -f "$PROJECT_ROOT/target/release/$bin" ] && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+                    install -m 0755 "$PROJECT_ROOT/target/release/$bin" "/usr/local/bin/$bin" 2>/dev/null || true
+                fi
+            done
+            if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+                systemctl restart nas-web 2>/dev/null || true
+            fi
+            echo "[updater] plataforma Rust recompilada e instalada"
+        else
+            echo "[updater] aviso: la compilación Rust falló; se conserva la versión anterior" >&2
         fi
     fi
 
