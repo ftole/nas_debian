@@ -74,6 +74,21 @@ enum Command {
         #[command(subcommand)]
         action: StorageAction,
     },
+    /// Desinstala la plataforma Rust (no elimina /srv/nas).
+    Uninstall {
+        /// Confirma la desinstalación.
+        #[arg(long)]
+        yes: bool,
+        /// Elimina también el estado del panel (`/var/lib/nas` y `/etc/nas`).
+        #[arg(long)]
+        purge: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+        /// Solo muestra el plan.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Inventario de usuarios y grupos.
     Users {
         #[command(subcommand)]
@@ -128,6 +143,23 @@ enum UpdateAction {
         /// Elevar privilegios con `sudo -n`.
         #[arg(long)]
         sudo: bool,
+    },
+    /// Firma un manifiesto con una clave privada Ed25519 (hex de 32 bytes).
+    Sign {
+        /// Manifiesto JSON de la release.
+        manifest: PathBuf,
+        /// Archivo con la clave privada Ed25519 en hexadecimal.
+        #[arg(long)]
+        key: PathBuf,
+        /// Archivo de salida (por defecto, sobrescribe el manifiesto).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Deriva la clave pública (hex) de una clave privada Ed25519.
+    Pubkey {
+        /// Archivo con la clave privada Ed25519 en hexadecimal.
+        #[arg(long)]
+        key: PathBuf,
     },
     /// Genera el plan A/B de la actualización.
     Plan {
@@ -343,6 +375,10 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 },
                 cli.json,
             ),
+            UpdateAction::Sign { manifest, key, out } => {
+                update_sign(&manifest, &key, out.as_deref(), cli.json)
+            }
+            UpdateAction::Pubkey { key } => update_pubkey(&key, cli.json),
             UpdateAction::Plan {
                 manifest,
                 artifact,
@@ -353,6 +389,12 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         Command::Migrate { action } => match action {
             MigrateAction::Status => migrate_status(cli.json),
         },
+        Command::Uninstall {
+            yes,
+            purge,
+            sudo,
+            dry_run,
+        } => uninstall_command(yes, purge, sudo, dry_run, cli.json),
         Command::Storage { action } => match action {
             StorageAction::List => storage_list(cli.json),
         },
@@ -878,6 +920,58 @@ fn audit_verify(json: bool) -> NasResult<ExitCode> {
     result.map(|_| ExitCode::SUCCESS)
 }
 
+fn update_sign(
+    manifest_path: &Path,
+    key_path: &Path,
+    out: Option<&Path>,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let secret = std::fs::read_to_string(key_path)
+        .map_err(|error| nas_core::NasError::io(key_path, error))?;
+    let mut manifest = ReleaseManifest::load(manifest_path)?;
+    nas_engine::update::sign_manifest(&mut manifest, secret.trim())?;
+    let target = out.unwrap_or(manifest_path);
+    let text = serde_json::to_string_pretty(&manifest)
+        .map_err(|error| nas_core::NasError::Invalid(error.to_string()))?;
+    std::fs::write(
+        target,
+        format!(
+            "{text}
+"
+        ),
+    )
+    .map_err(|error| nas_core::NasError::io(target, error))?;
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "manifest": target, "version": manifest.version }),
+            "Manifiesto firmado",
+        ))?;
+    } else {
+        println!(
+            "Manifiesto firmado: {} (v{})",
+            target.display(),
+            manifest.version
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn update_pubkey(key_path: &Path, json: bool) -> NasResult<ExitCode> {
+    let secret = std::fs::read_to_string(key_path)
+        .map_err(|error| nas_core::NasError::io(key_path, error))?;
+    let public = nas_engine::update::public_key_from_secret(secret.trim())?;
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "pubkey": public }),
+            "Clave pública",
+        ))?;
+    } else {
+        println!("{public}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn update_verify(
     manifest_path: &Path,
     artifact: Option<&Path>,
@@ -1023,6 +1117,108 @@ fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     }
 
     Ok(params)
+}
+
+fn uninstall_command(
+    confirmed: bool,
+    purge: bool,
+    sudo: bool,
+    dry_run: bool,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let plan = nas_engine::uninstall::plan(purge);
+    if dry_run || !confirmed {
+        if json {
+            print_json(&ApiResponse::ok(
+                serde_json::json!({
+                    "steps": plan.steps,
+                    "purge_state": plan.purge_state,
+                    "executed": false,
+                }),
+                "Plan de desinstalación",
+            ))?;
+        } else {
+            println!("PLAN DE DESINSTALACIÓN");
+            for step in &plan.steps {
+                println!("  - {}", step.description);
+            }
+            println!("  (no se elimina /srv/nas)");
+            if !confirmed {
+                println!(
+                    "
+Repita con --yes para ejecutar."
+                );
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let _lock = nas_engine::TaskLock::acquire("/var/lock/nas-uninstall.lock")?;
+    let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "uninstall",
+        "plataforma",
+        "START",
+        format!("purge={purge}"),
+    ));
+
+    let runner = Runner::new();
+    for step in &plan.steps {
+        let mut spec = nas_exec::CommandSpec::new(&step.argv[0]).args(step.argv[1..].to_vec());
+        if sudo {
+            spec = spec.sudo(nas_exec::SudoMode::Passwordless);
+        }
+        spec = spec.timeout(std::time::Duration::from_secs(120));
+        match runner.run(&spec) {
+            Ok(output) if output.is_success() => {}
+            Ok(_) if step.optional => {}
+            Ok(output) => {
+                let detail = if output.stderr.is_empty() {
+                    output.stdout
+                } else {
+                    output.stderr
+                };
+                let _ = audit.append(nas_audit::AuditEntry::new(
+                    &actor,
+                    "local",
+                    "uninstall",
+                    &step.description,
+                    "FAILED",
+                    detail.clone(),
+                ));
+                return Err(NasError::Denied(format!(
+                    "falló el paso '{}': {}",
+                    step.description, detail
+                )));
+            }
+            Err(error) if step.optional => {
+                let _ = error;
+            }
+            Err(error) => return Err(NasError::Denied(error.to_string())),
+        }
+    }
+
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "uninstall",
+        "plataforma",
+        "SUCCESS",
+        "desinstalación completada",
+    ));
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "steps": plan.steps.len(), "purge_state": plan.purge_state }),
+            "Plataforma desinstalada",
+        ))?;
+    } else {
+        println!("Plataforma desinstalada. /srv/nas se conserva intacto.");
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn deploy_plan(request: &DeployArgs, json: bool) -> NasResult<ExitCode> {
