@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > Este documento contiene la **propuesta técnica y conceptual de rediseño de Experiencia de Usuario (UX)** para el módulo de Usuarios, Grupos y Permisos del panel web administrativo de **NAS Debian 13**.
-> **Nota de Gobernanza de Código:** Esta especificación es estrictamente documental y no altera el código operativo existente de `UserController.php`, `UserService.php` ni los controladores de usuarios actuales.
+> **Nota de gobernanza (F7):** esta especificación es documental. El panel PHP al que se refiere ya fue retirado a `legacy/web/`; las mismas vistas y `app.js` siguen activos desde `crates/nas-web` (plantillas portadas y assets embebidos).
 
 ---
 
@@ -145,7 +145,7 @@ La matriz de permisos actual se enriquece con:
 
 ## 4. Guía de Tokens y Clases CSS para Slate UI
 
-Para asegurar compatibilidad plena con el diseño visual existente en `web/public/css/app.css` y `web/templates/layout.php`, los estilos de esta propuesta respetan la paleta de tokens oficial:
+Para asegurar compatibilidad plena con el diseño visual existente (`crates/nas-web/assets/app.css` y `crates/nas-web/templates/layout.html`), los estilos de esta propuesta respetan la paleta de tokens oficial:
 
 ```css
 /* Tokens sugeridos para el rediseño de usuarios */
@@ -203,10 +203,10 @@ Cuando este desarrollo sea programado para codificación en una versión posteri
 
 | Fase | Alcance | Archivos a Modificar | Impacto |
 | :--- | :--- | :--- | :--- |
-| **Fase 1** | Segmentación por Pestañas (Admin vs NAS) | `web/templates/layout.php`, `web/public/js/app.js` | Mejora puramente visual en la presentación de tablas sin alterar la API. |
-| **Fase 2** | Previsualizador de Accesos Samba | `web/src/Services/SambaService.php`, `web/public/js/app.js` | Endpoint de cálculo de permisos simulados por usuario y modal informativo. |
-| **Fase 3** | Tags Chips y Drag-and-Drop | `web/public/js/app.js`, `web/public/css/app.css` | Reemplazo del selector de grupos en los modales de creación y edición. |
-| **Fase 4** | Iluminación Cruzada y Guardado en Lote en Matriz | `web/public/js/app.js` | Interactividad avanzada de tabla matricial y consolidación de peticiones. |
+| **Fase 1** | Segmentación por pestañas (Admin vs NAS) | `crates/nas-web/templates/layout.html`, `crates/nas-web/assets/js/app.js` | Mejora visual en la presentación de tablas sin alterar la API. |
+| **Fase 2** | Previsualizador de accesos Samba | API `/api/shares/access` + `crates/nas-web/assets/js/app.js` | Cálculo de permisos por usuario y modal informativo. |
+| **Fase 3** | Tags/Chips y drag-and-drop | `crates/nas-web/assets/js/app.js`, `crates/nas-web/assets/app.css` | Reemplazo del selector de grupos en los modales de creación y edición. |
+| **Fase 4** | Iluminación cruzada y guardado en lote en la matriz | `crates/nas-web/assets/js/app.js` | Interactividad avanzada de la tabla matricial y consolidación de peticiones. |
 
 ---
 
