@@ -151,6 +151,24 @@ ejecuta.
 - El contrato de paridad se desacopló del árbol PHP: las plantillas originales
   viven en `tests/parity/fixtures/` y los hashes se calculan sobre
   `crates/nas-web/assets/`.
-- `legacy/web/` eliminado; se conserva `legacy/asistente.sh` y `legacy/modules/`
-  como referencia de comportamiento para la ola B.
+- `legacy/web/` y el resto de `legacy/` eliminados del árbol (recuperables desde
+  la etiqueta `legacy-php-final`).
 - `scratch/`, `target/`, `.venv/`, `dist/` y `build/` quedan fuera de Git.
+
+## 9. Avance de la ola B (fase 7.3)
+
+Implementado y probado en Rust:
+
+| Capacidad | Estado |
+| :--- | :--- |
+| Plan y ejecución de `nas deploy` (particionado, mkfs, montaje, grupos, `fstab`) | ✅ |
+| Artefactos del sistema: `/etc/nas/role`, sysctl, udev readahead, logrotate, cron de scrub, reglas auditd | ✅ (escritura con permisos) |
+| `nas uninstall` del panel | ✅ |
+| `nas uninstall --scope os` (ajustes de kernel/udev/rotación/auditoría) | ✅ plan y ejecución |
+| `nas update` verify/apply/sign | ✅ |
+| Samba (`smb.conf`, usuarios, dominio AD), nginx+TLS, AIDE y UFW dentro de `nas deploy` | ⏳ Pendiente |
+| Validación en VM limpia extremo a extremo | ⏳ Pendiente (bloquea retirar `src/core`) |
+
+Mientras esos dos últimos puntos no estén verdes, `src/core/{deploy,uninstall,updater}.sh`,
+`src/lib/` y los BATS siguen vigentes: `nas deploy` aún no aprovisiona Samba, panel,
+TLS ni seguridad del SO con paridad completa.
