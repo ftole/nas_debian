@@ -9,11 +9,12 @@ El panel PHP (`web/`) es la referencia hasta la firma de paridad:
 
 | Archivo | Rol | Hash (F0) |
 | :--- | :--- | :--- |
-| `web/templates/layout.php` | Estructura del panel (masthead, sidebar, 14 vistas) | `assets.sha256` |
-| `web/templates/login.php` | Pantalla de acceso y su CSS | `assets.sha256` |
-| `web/public/css/app.css` | Identidad visual (Slate UI, temas) | `assets.sha256` |
-| `web/public/js/app.js` | Comportamiento del panel (5.400 líneas) | `assets.sha256` |
-| `web/public/js/vendor/*` | Visores offline (xlsx, jszip, docx-preview) | `assets.sha256` |
+| `legacy/web/templates/layout.php` | Estructura del panel (masthead, sidebar, 14 vistas) | `assets.sha256` |
+| `legacy/web/templates/login.php` | Pantalla de acceso y su CSS | `assets.sha256` |
+| `legacy/web/public/css/app.css` | Identidad visual (Slate UI, temas) | `assets.sha256` |
+| `legacy/web/public/js/app.js` | Comportamiento del panel (5.400 líneas) | `assets.sha256` |
+| `legacy/web/public/js/vendor/*` | Visores offline (xlsx, jszip, docx-preview) | `assets.sha256` |
+| `crates/nas-web/assets/**` | Copia empaquetada en el binario (mismos hashes) | `assets.sha256` |
 
 **Regla dura:** `app.css`, `app.js` y vendor se sirven **byte a byte**. Si un
 cambio fuera imprescindible, se documenta como excepción y se actualiza el hash
@@ -98,10 +99,17 @@ Con F5, **no queda ningún endpoint en 501**: se implementaron
 
 ### F6 — Comparación en vivo PHP vs Rust (completada)
 
+> [!NOTE]
+> El panel PHP ya fue retirado del servidor en la ola A de F7. Para reproducir la
+> comparación hay que reponerlo temporalmente desde `legacy/web` y
+> `/root/nas-deploy-backup/retire-<fecha>/`, o hacerlo sobre un servidor de pruebas.
+> El contrato (`tests/parity/`) y las pruebas `crates/nas-web/tests/parity.rs`
+> siguen ejecutándose en cada `cargo test`.
+
 Procedimiento (`scripts/php_parity_diff.py`, ejecutado en el servidor):
 
-1. Publicar el panel PHP en `127.0.0.1:8081` (nginx + `php-fpm-nas.sock`, raíz
-   `/var/www/nas-web/public`).
+1. Reponer el panel PHP en un servidor de pruebas en `127.0.0.1:8081`
+   (nginx + `php-fpm`, raíz `legacy/web/public`). En producción ya está retirado.
 2. Comparar con el panel Rust en `https://127.0.0.1` (cookie `Secure`) usando una
    cuenta del sistema con acceso Samba para PHP y una cuenta de `web_users` para Rust.
 3. Comparar por página IDs, clases, atributos `data-*`, recuentos y orden de secciones;
