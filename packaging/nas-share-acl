@@ -29,13 +29,15 @@ fi
 case "$LEVEL" in
     read)  PERMS="r-x" ;;
     write) PERMS="rwx" ;;
-    none)  setfacl -R -x "$ENTRY" "$PATH_ARG" 2>/dev/null || true
-           setfacl -R -d -x "$ENTRY" "$PATH_ARG" 2>/dev/null || true
+    none)  setfacl -x "$ENTRY" "$PATH_ARG" 2>/dev/null || true
+           setfacl -d -x "$ENTRY" "$PATH_ARG" 2>/dev/null || true
            echo "$PATH_ARG $ENTRY none"
            exit 0 ;;
     *) echo "nivel inválido" >&2; exit 2 ;;
 esac
 
-setfacl -R -m "$ENTRY:$PERMS" "$PATH_ARG"
-setfacl -R -d -m "$ENTRY:$PERMS" "$PATH_ARG"
+# No recursivo: el recurso raíz se actualiza al instante y la ACL por defecto
+# propaga el permiso a los archivos nuevos (evita recorridos de millones de inodos).
+setfacl -m "$ENTRY:$PERMS" "$PATH_ARG"
+setfacl -d -m "$ENTRY:$PERMS" "$PATH_ARG"
 echo "$PATH_ARG $ENTRY $LEVEL"
