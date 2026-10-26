@@ -75,7 +75,7 @@ Todo lo demás debe coincidir exactamente.
 | **F3** | 100 % de `endpoints.txt` implementado con contrato equivalente |
 | **F4** | Checklist funcional de las 14 vistas sin errores de consola |
 | **F5** | CI ejecuta `parity_extract.py --check`, la suite DOM/selectores y `tests/parity.rs` |
-| **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` |
+| **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` (completada) |
 
 ### F5 — Suite de paridad en CI (completada)
 
@@ -95,6 +95,47 @@ Además el flujo `.github/workflows/rust.yml` ejecuta
 Con F5, **no queda ningún endpoint en 501**: se implementaron
 `POST /api/system/update/run` (actualizador validado por sudoers) y el alias
 `POST /api/backups/`.
+
+### F6 — Comparación en vivo PHP vs Rust (completada)
+
+Procedimiento (`scripts/php_parity_diff.py`, ejecutado en el servidor):
+
+1. Publicar el panel PHP en `127.0.0.1:8081` (nginx + `php-fpm-nas.sock`, raíz
+   `/var/www/nas-web/public`).
+2. Comparar con el panel Rust en `https://127.0.0.1` (cookie `Secure`) usando una
+   cuenta del sistema con acceso Samba para PHP y una cuenta de `web_users` para Rust.
+3. Comparar por página IDs, clases, atributos `data-*`, recuentos y orden de secciones;
+   después la forma de las respuestas JSON de 21 endpoints.
+
+Resultado en `10.10.1.222`:
+
+```text
+/dashboard, /files, /shares, /users, /backups, /storage, /terminal, /domain, /services
+  → idéntico (527 IDs por página)
+
+21 endpoints → misma forma
+/api/audit   → solo en Rust (no existe en PHP; mejora, no regresión)
+```
+
+Como consecuencia se alinearon las respuestas del panel Rust con el contrato que
+consume `app.js`:
+
+| Endpoint | Ajuste |
+| :--- | :--- |
+| `/api/metrics` | `system`, `storage`, `services[]` y `counts` anidados |
+| `/api/storage` | `overview` + `disks[]` con `type`, `mount`, `children_count` |
+| `/api/storage/units` | unidad principal derivada de `overview_for` |
+| `/api/services` | nombre legible y etiqueta `activo/inactivo` |
+| `/api/diagnostics` | objeto con `overall_status`, contadores y `checks[]` |
+| `/api/files` | `current_path`, `breadcrumbs[]`, `items[]` con permisos y dueño |
+| `/api/files/trash` | `total`, `total_size_bytes` |
+| `/api/backups` | proyección plana (`cron`, `dest_path`, `last_status`, …) |
+| `/api/logs` | `user`, `ip`, `status`, `target`, `raw`, `count` |
+| `/api/domain/status` | `status`, `workgroup`, `message` |
+| `/api/system/*`, `/api/network`, `/api/shares`, `/api/users`, `/api/groups` | campos faltantes |
+
+También se corrigió la fuga de marcadores `%active_group_*%` en las clases CSS y se
+detecta Btrfs en `/proc/mounts` para mostrar los controles de scrub.
 
 ### F4 — Verificación funcional (completada)
 
