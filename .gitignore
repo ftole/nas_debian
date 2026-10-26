@@ -16,7 +16,6 @@ web/data/
 # Entorno de pruebas y credenciales locales
 .env
 .env.*
-!.env.example
 .nas_known_hosts
 server_pruebas.txt
 Servidor_*.txt
