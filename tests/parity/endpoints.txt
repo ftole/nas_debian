@@ -1,5 +1,8 @@
 /api/backups
 /api/backups/
+/api/backups/:id/logs
+/api/backups/:id/run
+/api/backups/:id/stop
 /api/backups/delete
 /api/backups/running
 /api/backups/test
@@ -14,8 +17,10 @@
 /api/files/create
 /api/files/delete
 /api/files/download
+/api/files/list
 /api/files/mkdir
 /api/files/move
+/api/files/raw
 /api/files/rename
 /api/files/save
 /api/files/trash
@@ -23,6 +28,7 @@
 /api/files/trash/empty
 /api/files/trash/restore
 /api/files/trash/restore-all
+/api/files/upload
 /api/groups
 /api/groups/delete
 /api/groups/rename
@@ -33,13 +39,19 @@
 /api/services/manage
 /api/shares
 /api/shares/access
+/api/shares/access/audit
 /api/shares/access/repair
 /api/shares/delete
 /api/shares/update
 /api/storage
+/api/storage/add-unit
 /api/storage/disks
+/api/storage/extend-pool
+/api/storage/format
 /api/storage/inspect
+/api/storage/lvm
 /api/storage/scrub
+/api/storage/subvolume
 /api/storage/subvolumes
 /api/storage/trim
 /api/storage/units
