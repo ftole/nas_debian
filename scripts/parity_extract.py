@@ -22,7 +22,8 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-WEB = ROOT / "web"
+# Tras la fase F7 el panel original vive en `legacy/web`.
+WEB = ROOT / "legacy" / "web" if (ROOT / "legacy" / "web").exists() else ROOT / "web"
 PARITY = ROOT / "tests" / "parity"
 
 LAYOUT = WEB / "templates" / "layout.php"
@@ -30,14 +31,14 @@ LOGIN = WEB / "templates" / "login.php"
 APP_JS = WEB / "public" / "js" / "app.js"
 
 ASSET_FILES = [
-    "web/public/css/app.css",
-    "web/public/js/app.js",
-    "web/public/js/vendor/xlsx.full.min.js",
-    "web/public/js/vendor/jszip.min.js",
-    "web/public/js/vendor/docx-preview.min.js",
-    "web/public/favicon.svg",
-    "web/templates/layout.php",
-    "web/templates/login.php",
+    "public/css/app.css",
+    "public/js/app.js",
+    "public/js/vendor/xlsx.full.min.js",
+    "public/js/vendor/jszip.min.js",
+    "public/js/vendor/docx-preview.min.js",
+    "public/favicon.svg",
+    "templates/layout.php",
+    "templates/login.php",
 ]
 
 
@@ -113,9 +114,9 @@ def build_contract() -> dict:
     return {
         "generated_by": "scripts/parity_extract.py",
         "sources": {
-            "layout": "web/templates/layout.php",
-            "login": "web/templates/login.php",
-            "app_js": "web/public/js/app.js",
+            "layout": LAYOUT.relative_to(ROOT).as_posix(),
+            "login": LOGIN.relative_to(ROOT).as_posix(),
+            "app_js": APP_JS.relative_to(ROOT).as_posix(),
         },
         "layout": layout,
         "login": login,
@@ -134,10 +135,11 @@ def build_contract() -> dict:
 def build_hashes() -> str:
     lines = []
     for relative in ASSET_FILES:
-        path = ROOT / relative
+        path = WEB / relative
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         size = path.stat().st_size
-        lines.append(f"{digest}  {size:>8}  {relative}")
+        shown = path.relative_to(ROOT).as_posix()
+        lines.append(f"{digest}  {size:>8}  {shown}")
     return "\n".join(lines) + "\n"
 
 
