@@ -199,3 +199,41 @@ fn migrate_status_lista_componentes_legacy() {
         .iter()
         .any(|item| item["path"] == "src/core/deploy.sh" && item["wave"] == "B"));
 }
+
+#[test]
+fn uninstall_sin_confirmacion_solo_muestra_el_plan() {
+    let output = nas()
+        .args(["--json", "uninstall"])
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["data"]["executed"], false);
+    assert!(payload["data"]["steps"].as_array().unwrap().len() > 5);
+    let steps = serde_json::to_string(&payload["data"]["steps"]).unwrap();
+    assert!(!steps.contains("/srv/nas"));
+}
+
+#[test]
+fn update_pubkey_deriva_la_clave_publica() {
+    let dir = std::env::temp_dir().join(format!("nas-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let key = dir.join("release.key");
+    std::fs::write(
+        &key,
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    )
+    .expect("clave");
+
+    let output = nas()
+        .args(["--json", "update", "pubkey", "--key"])
+        .arg(&key)
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+    assert_eq!(
+        payload["data"]["pubkey"],
+        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
