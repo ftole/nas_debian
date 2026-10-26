@@ -17,7 +17,10 @@ El servidor cuenta con el comando global `nas` disponible en cualquier terminal:
 | `sudo nas shares|users|backups ...` | Gestión de recursos, cuentas y tareas | Para administración programática desde SSH. |
 | `sudo nas update` | Actualiza el software y recompila Rust | Para aplicar nuevas versiones con validación y rollback. |
 | `sudo nas audit verify` | Verifica la cadena de auditoría | En revisiones de seguridad periódicas. |
-| `sudo nas uninstall` | Desinstalación y limpieza total | Para desmantelar el software y restablecer el servidor. |
+| `sudo nas uninstall --yes` | Desinstala la plataforma (panel, CLI y helpers) | Conserva `/srv/nas`; añade `--purge` para borrar también `/var/lib/nas` y `/etc/nas`. |
+| `sudo nas uninstall` | Muestra el plan sin ejecutar | Revisión previa antes de desinstalar. |
+| `sudo nas update sign --manifest <json> --key <clave>` | Firma un manifiesto de release (Ed25519) | Publicación de versiones verificables. |
+| `sudo nas update pubkey --key <clave>` | Deriva la clave pública de la privada | Configurar `--pubkey` en verify/apply. |
 
 > El panel web (`/dashboard`) ofrece las mismas 14 vistas y la misma interfaz
 > Slate UI que el panel original, servida desde `nas-web.service`.
