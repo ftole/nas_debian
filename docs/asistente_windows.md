@@ -15,7 +15,7 @@ agrega un **front-end de producción** adicional.
 | Desplegar | Asistente guiado (rol ARCHIVOS/BACKUP, disco, Workgroup, NetBIOS, admin, `--keep-data`) que clona el proyecto desde GitHub y ejecuta `deploy.sh`. |
 | Estado / diagnóstico | `nas status` y comprobaciones de servicios, SQLite y almacenamiento. |
 | Actualizar | Actualizador existente (`updater.sh --yes`). |
-| Servicios | Reiniciar / recargar / revisar smbd, nmbd, wsdd2, nginx, php-fpm y cron. |
+| Servicios | Reiniciar / recargar / revisar smbd, nmbd, wsdd2, nginx y cron (histórico: php-fpm del panel retirado). |
 | Logs | Bitácoras de systemd, administrativa y de respaldos. |
 | Consola SSH | Shell interactiva directa al servidor. |
 | Desinstalar | Limpieza total con doble confirmación (`DESINSTALAR`). |
