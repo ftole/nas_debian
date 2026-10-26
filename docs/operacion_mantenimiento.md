@@ -10,11 +10,17 @@ El servidor cuenta con el comando global `nas` disponible en cualquier terminal:
 
 | Comando | Acción | Cuándo utilizarlo |
 | :--- | :--- | :--- |
-| `sudo nas` | Abre el asistente interactivo (TUI) | Para gestionar recursos, usuarios, tareas o desplegar módulos sin entorno web. |
-| `sudo nas status` | Diagnóstico de salud en vivo | Para revisar de un vistazo el estado de discos, servicios de red, recursos y copias. |
-| `sudo nas update` | Actualiza el software desde GitHub | Para aplicar nuevas características y parches con validación de sintaxis y rollback. |
-| `sudo nas version` | Muestra la versión instalada | Para auditoría y comprobar el commit exacto de Git en ejecución. |
-| `sudo nas uninstall` | Desinstalación y limpieza total | Para desmantelar el software y restablecer el servidor a su estado base limpio. |
+| `sudo nas-tui` | Abre el asistente visual (ratatui) | Para revisar el dashboard, servicios y respaldos desde consola. |
+| `sudo nas status` | Diagnóstico de salud en vivo | Para revisar de un vistazo discos, servicios de red y copias. |
+| `sudo nas --json status` | Estado en JSON | Para integrarlo en scripts o monitorización. |
+| `sudo nas storage ...` | Almacenamiento, LVM y Btrfs | Para operaciones de disco sin interfaz web. |
+| `sudo nas shares|users|backups ...` | Gestión de recursos, cuentas y tareas | Para administración programática desde SSH. |
+| `sudo nas update` | Actualiza el software y recompila Rust | Para aplicar nuevas versiones con validación y rollback. |
+| `sudo nas audit verify` | Verifica la cadena de auditoría | En revisiones de seguridad periódicas. |
+| `sudo nas uninstall` | Desinstalación y limpieza total | Para desmantelar el software y restablecer el servidor. |
+
+> El panel web (`/dashboard`) ofrece las mismas 14 vistas y la misma interfaz
+> Slate UI que el panel original, servida desde `nas-web.service`.
 
 ---
 
@@ -185,7 +191,7 @@ Si por políticas corporativas de auditoría o entornos aislados prefieres prepa
 
 3. Instala los paquetes base de administración y seguridad:
    ```bash
-   apt install -y curl wget ca-certificates htop ufw sudo fail2ban unattended-upgrades git whiptail
+   apt install -y curl wget ca-certificates htop ufw sudo fail2ban unattended-upgrades git build-essential pkg-config
    ```
 
 4. Asegura la cuenta de administración y concede privilegios `sudo`:
@@ -246,13 +252,20 @@ Si por políticas corporativas de auditoría o entornos aislados prefieres prepa
 
 ### Fase 3: Despliegue del Software NAS
 
-Una vez preparado el servidor, clona el repositorio e inicia el asistente o el despliegue CLI:
+Una vez preparado el servidor, usa el instalador oficial (compila el workspace Rust,
+instala binarios, servicio y Nginx):
+
 ```bash
 sudo git clone https://github.com/ftole/nas_debian.git /opt/nas_debian
-sudo ln -sf /opt/nas_debian/install.sh /usr/local/bin/nas
-sudo chmod +x /usr/local/bin/nas
+cd /opt/nas_debian
+sudo bash install.sh
 
-# Iniciar asistente interactivo:
-sudo nas
+# Verificación
+sudo nas status
+systemctl is-active nas-web
+curl -fsS http://127.0.0.1:8080/healthz
 ```
+
+El aprovisionamiento del sistema operativo (particionado, formateo, sysctl, auditd,
+AIDE) sigue a cargo de `src/core/deploy.sh` hasta completar la ola B.
 
