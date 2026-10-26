@@ -1614,6 +1614,10 @@ page_handler!(page_diagnostics, "diagnostics");
 page_handler!(page_storage, "storage");
 page_handler!(page_files, "files");
 page_handler!(page_domain, "domain");
+page_handler!(page_networking, "networking");
+page_handler!(page_applications, "applications");
+page_handler!(page_updates, "updates");
+page_handler!(page_logs, "logs");
 
 /// Vista del terminal (solo superadministrador).
 pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
