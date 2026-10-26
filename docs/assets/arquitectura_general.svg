@@ -62,13 +62,13 @@
 
     <!-- Interfaz CLI -->
     <rect x="20" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="600">CLI Global 'nas' &amp; Asistente</text>
-    <text x="32" y="71" fill="#94a3b8" font-size="10.5">Bash 5 + whiptail (9 módulos interactivos)</text>
+    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="600">CLI 'nas' y asistente 'nas-tui'</text>
+    <text x="32" y="71" fill="#94a3b8" font-size="10.5">Rust: nas (CLI) + nas-tui (ratatui)</text>
 
     <!-- Web Backend MVC -->
     <rect x="315" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="600">Panel Web MVC (PHP 8 + Nginx)</text>
-    <text x="327" y="71" fill="#94a3b8" font-size="10.5">Nginx-light + PHP-FPM ondemand (~0MB)</text>
+    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="600">Panel Web (Rust + axum + Nginx)</text>
+    <text x="327" y="71" fill="#94a3b8" font-size="10.5">nas-web.service + proxy_pass (~0MB en reposo)</text>
 
     <!-- Web Frontend Slate UI -->
     <rect x="610" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
