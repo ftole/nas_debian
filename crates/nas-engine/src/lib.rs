@@ -10,6 +10,7 @@
 /// Políticas de respaldo: snapshots, retención y espacio.
 pub mod backup;
 /// Especificación y generación de tareas de respaldo.
+pub mod backup_control;
 pub mod backup_spec;
 /// Planificación del despliegue del servidor.
 pub mod deploy;
@@ -31,11 +32,14 @@ pub mod services;
 pub mod status;
 /// Inventario de almacenamiento.
 pub mod storage;
+/// Operaciones privilegiadas de discos (formateo, LVM, subvolúmenes).
+pub mod storage_ops;
 /// Tareas de respaldo y sus planes de ejecución.
 pub mod tasks;
 /// Terminal web sobre sesiones tmux.
 pub mod terminal;
 /// Verificación y planificación de actualizaciones firmadas.
+pub mod uninstall;
 pub mod update;
 /// Inventario de usuarios y grupos locales.
 pub mod users;
