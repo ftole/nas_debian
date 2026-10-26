@@ -65,3 +65,61 @@ nas migrate status
 
 `nas migrate status` muestra qué componentes legacy siguen presentes y cuál es su
 sustituto en Rust, para decidir cuándo ejecutar la ola B.
+
+## 6. Ola A ejecutada (2026-10-26)
+
+Árbol de trabajo:
+
+```text
+web/                → legacy/web/
+src/asistente.sh    → legacy/asistente.sh
+src/modules/        → legacy/modules/
+tests del stack PHP/Python/BATS → legacy/tests/
+bin/nas-cli, nas_admin.*, nas-assistant.spec, test_remote.* → retirados
+```
+
+Assets del panel antes de mover `web/` para que el binario no dependa del
+árbol legado:
+
+```text
+web/public/js/app.js                     → crates/nas-web/assets/js/app.js
+web/public/js/vendor/*.js                → crates/nas-web/assets/js/vendor/
+```
+
+Los hashes de `tests/parity/assets.sha256` no cambiaron: los archivos son
+idénticos byte a byte.
+
+Servidor `10.10.1.222`:
+
+```text
+respaldo: /root/nas-deploy-backup/retire-<fecha>/
+  sudoers-nas-web, nas-web.conf, www-nas-web.tar.gz, opt-nas_debian-src.tar.gz
+retirado: /etc/php/8.4/fpm/pool.d/nas-web.conf
+retirado: /etc/sudoers.d/nas-web
+retirado: /var/www/nas-web
+conservado: /opt/nas_debian (fuente y actualizador)
+```
+
+Verificación posterior:
+
+```text
+nas-web: active · nginx: active · smbd: active
+healthz 200 · panel 200 · testparm OK · 4 tareas de respaldo intactas
+```
+
+### Rollback de la ola A
+
+```bash
+BK=/root/nas-deploy-backup/retire-<fecha>
+tar -xzf "$BK/www-nas-web.tar.gz" -C /var/www
+install -m 0440 "$BK/sudoers-nas-web" /etc/sudoers.d/nas-web
+install -m 0644 "$BK/nas-web.conf" /etc/php/8.4/fpm/pool.d/nas-web.conf
+systemctl reload php8.4-fpm
+# restaurar el sitio nginx con fastcgi (respaldo nginx-before-cutover-*.conf)
+```
+
+### Integración continua tras el retiro
+
+`.github/workflows/ci.yml` conserva ShellCheck y BATS del motor de despliegue,
+valida la sintaxis del JavaScript empaquetado y ejecuta el contrato de paridad;
+los jobs de PHP y pytest del stack retirado se eliminaron.
