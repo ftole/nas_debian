@@ -182,9 +182,15 @@ impl FileRoot {
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "elemento".to_string());
-        let target = trash.join(format!("{stamp}_{name}"));
+        let id = format!("{stamp}_{name}");
+        let target = trash.join(&id);
 
         std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        // Guarda la ruta relativa original para restaurar a su ubicación exacta.
+        if let Err(error) = self.write_trash_meta(&id, relative) {
+            let _ = std::fs::rename(&target, &source);
+            return Err(error);
+        }
         Ok(target)
     }
 
@@ -536,6 +542,9 @@ impl FileRoot {
         for item in std::fs::read_dir(&trash).map_err(|e| NasError::io(&trash, e))? {
             let item = item.map_err(|e| NasError::io(&trash, e))?;
             let id = item.file_name().to_string_lossy().to_string();
+            if id.starts_with('.') {
+                continue;
+            }
             let metadata = item.metadata().ok();
             let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
 
@@ -557,30 +566,80 @@ impl FileRoot {
         Ok(entries)
     }
 
-    /// Restaura un elemento de la papelera a la raíz.
+    /// Restaura un elemento de la papelera a su ruta original.
     pub fn restore_trash(&self, id: &str) -> NasResult<String> {
         let source = self.trash_path(id)?;
+        let relative = self
+            .read_trash_meta(id)
+            .unwrap_or_else(|| split_trash_name(id).1.to_string());
         let (_, name) = split_trash_name(id);
-        let mut target = self.root.join(name);
+
+        let mut target = self.resolve(&relative)?;
+        if target == self.root || target.parent().is_none() {
+            target = self.root.join(name);
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
+        }
+
         let mut counter = 1;
         while target.exists() {
-            target = self.root.join(format!("{name}.{counter}"));
+            let candidate = format!("{name}.{counter}");
+            target = match target.parent() {
+                Some(parent) => parent.join(&candidate),
+                None => self.root.join(&candidate),
+            };
             counter += 1;
         }
+
         std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        let _ = self.remove_trash_meta(id);
         Ok(target
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default())
+            .strip_prefix(&self.root)
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| name.to_string()))
     }
 
     /// Elimina definitivamente un elemento de la papelera.
     pub fn delete_trash(&self, id: &str) -> NasResult<()> {
         let path = self.trash_path(id)?;
-        if path.is_dir() {
+        let result = if path.is_dir() {
             std::fs::remove_dir_all(&path).map_err(|e| NasError::io(&path, e))
         } else {
             std::fs::remove_file(&path).map_err(|e| NasError::io(&path, e))
+        };
+        let _ = self.remove_trash_meta(id);
+        result
+    }
+
+    fn trash_meta_dir(&self) -> PathBuf {
+        self.root.join(".trash").join(".meta")
+    }
+
+    fn write_trash_meta(&self, id: &str, relative: &str) -> NasResult<()> {
+        let dir = self.trash_meta_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| NasError::io(&dir, e))?;
+        let path = dir.join(id);
+        std::fs::write(&path, relative).map_err(|e| NasError::io(&path, e))
+    }
+
+    fn read_trash_meta(&self, id: &str) -> Option<String> {
+        let path = self.trash_meta_dir().join(id);
+        let value = std::fs::read_to_string(path).ok()?;
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    fn remove_trash_meta(&self, id: &str) -> std::io::Result<()> {
+        let path = self.trash_meta_dir().join(id);
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
         }
     }
 
@@ -662,10 +721,27 @@ mod trash_tests {
         assert_eq!(entries[0].name, "nota.txt");
 
         let restored = root.restore_trash(&entries[0].id).expect("restore");
-        assert_eq!(restored, "nota.txt");
+        assert_eq!(restored, "SISTEMAS/nota.txt");
+        assert!(root.read("SISTEMAS/nota.txt", 1024).is_ok());
 
-        root.trash("nota.txt").expect("trash 2");
+        root.trash("SISTEMAS/nota.txt").expect("trash 2");
         assert_eq!(root.empty_trash().expect("vaciar"), 1);
+        assert!(root.trash_entries().expect("lista").is_empty());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn restaura_a_la_ruta_original_con_subdirectorios() {
+        let root = root("anidado");
+        root.write("A/B/nota.txt", "datos").expect("write");
+        root.trash("A/B/nota.txt").expect("trash");
+
+        let entries = root.trash_entries().expect("lista");
+        assert_eq!(entries[0].name, "nota.txt");
+
+        let restored = root.restore_trash(&entries[0].id).expect("restore");
+        assert_eq!(restored, "A/B/nota.txt");
+        assert_eq!(root.read("A/B/nota.txt", 64).expect("contenido"), b"datos");
         assert!(root.trash_entries().expect("lista").is_empty());
         let _ = std::fs::remove_dir_all(root.root());
     }
