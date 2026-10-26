@@ -142,7 +142,9 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
     /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
     /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \
-    /usr/local/sbin/nas-backup-manage *, \n    /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \n    /usr/bin/true
+    /usr/local/sbin/nas-backup-manage *, \
+    /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
+    /usr/bin/true
 SUDO
 chmod 0440 "$SUDOERS_FILE"
 if command -v visudo >/dev/null 2>&1; then
