@@ -31,6 +31,8 @@ pub struct SystemMetrics {
     pub ram_usage_pct: f64,
     /// Hora local del servidor (`YYYY-MM-DD HH:MM:SS`).
     pub server_time: String,
+    /// Marca de tiempo UNIX del servidor.
+    pub server_timestamp: i64,
     /// Zona horaria IANA.
     pub timezone: String,
     /// Abreviatura de la zona horaria.
@@ -115,6 +117,7 @@ fn collect_linux(runner: &Runner) -> SystemMetrics {
         ram_used_gb,
         ram_usage_pct,
         server_time: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        server_timestamp: now.timestamp(),
         timezone,
         timezone_abbr: now.format("%Z").to_string(),
         timezone_offset: offset,
@@ -183,6 +186,7 @@ fn simulated() -> SystemMetrics {
         ram_used_gb: 4.2,
         ram_usage_pct: 26.25,
         server_time: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+        server_timestamp: now.timestamp(),
         timezone: "UTC".to_string(),
         timezone_abbr: now.format("%Z").to_string(),
         timezone_offset: offset,
