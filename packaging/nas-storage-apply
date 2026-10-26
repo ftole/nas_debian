@@ -1,0 +1,174 @@
+#!/bin/bash
+# ==============================================================================
+# Operaciones de almacenamiento validadas para el panel (ejecuta como root).
+# Uso: nas-storage-apply <accion> <confirmacion> [args...]
+#   format      SI-FORMATEAR <device> <ext4|btrfs> <desmontar 0|1>
+#   lvm         SI-FORMATEAR <disk> <vg> <lv> <size> <fstype> <desmontar 0|1>
+#   subvolume   SI-FORMATEAR <nombre>
+#   add-unit    SI-FORMATEAR <device> <unidad> <fstype>
+#   extend-pool SI-FORMATEAR <device>
+# ==============================================================================
+set -euo pipefail
+
+ACTION="${1:-}"; CONFIRM="${2:-}"; shift 2 || true
+
+case "$CONFIRM" in
+    SI-FORMATEAR|SI-DESTRUIR-DATOS) ;;
+    *) echo "confirmación requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)" >&2; exit 2 ;;
+esac
+
+valid_device() { [[ "$1" =~ ^/dev/[A-Za-z0-9/_.-]{1,60}$ ]]; }
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; }
+valid_fs() { case "$1" in ext4|btrfs) return 0 ;; *) return 1 ;; esac; }
+
+os_disk_guard() {
+    local device="$1" mount src parent
+    for mount in / /boot /boot/efi; do
+        src="$(findmnt -no SOURCE "$mount" 2>/dev/null || true)"
+        [ -n "$src" ] || continue
+        parent="$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1 || true)"
+        if [ -n "$parent" ] && [ "/dev/$parent" = "$device" ]; then
+            echo "operación prohibida: es el disco del sistema operativo" >&2
+            exit 3
+        fi
+        if [ "$src" = "$device" ]; then
+            echo "operación prohibida: es el disco del sistema operativo" >&2
+            exit 3
+        fi
+    done
+}
+
+unmount_device() {
+    local device="$1" point
+    while IFS= read -r point; do
+        [ -n "$point" ] || continue
+        umount "$point" 2>/dev/null || true
+    done < <(lsblk -no MOUNTPOINT "$device" 2>/dev/null || true)
+}
+
+ensure_fstab() {
+    local source="$1" options="$2" target="${3:-/srv/nas}"
+    if awk -v t="$target" '$2==t && $1 !~ /^#/ {found=1} END{exit found?0:1}' /etc/fstab 2>/dev/null; then
+        return 0
+    fi
+    printf '%s %s auto %s 0 0\n' "$source" "$target" "$options" >> /etc/fstab
+}
+
+mount_options_for() {
+    local fstype="$1" device="$2"
+    if [ "$fstype" = "btrfs" ]; then
+        echo "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+        return
+    fi
+    case "$(cat "/sys/block/$(basename "$device")/queue/rotational" 2>/dev/null || echo 0)" in
+        1) echo "rw,noatime,commit=2,errors=remount-ro" ;;
+        *) echo "rw,noatime,commit=5,errors=remount-ro" ;;
+    esac
+}
+
+partition_for() {
+    local device="$1" base
+    base="$(basename "$device")"
+    case "$base" in
+        nvme*|mmcblk*) echo "${device}p1" ;;
+        *) echo "${device}1" ;;
+    esac
+}
+
+# Formatea un dispositivo (sin montar todavía) y devuelve la ruta formateada.
+format_only() {
+    local device="$1" fstype="$2" target
+    valid_device "$device" || { echo "dispositivo inválido" >&2; exit 2; }
+    valid_fs "$fstype" || { echo "filesystem no soportado" >&2; exit 2; }
+    [ -b "$device" ] || { echo "el dispositivo $device no existe o no es de bloque" >&2; exit 3; }
+    os_disk_guard "$device"
+
+    target="$device"
+    if [ "$(lsblk -nd -o TYPE "$device" 2>/dev/null | tr -d '[:space:]')" = "disk" ]; then
+        parted -s "$device" mklabel gpt mkpart primary "$fstype" 0% 100%
+        partprobe "$device" 2>/dev/null || true
+        target="$(partition_for "$device")"
+    fi
+
+    if [ "$fstype" = "btrfs" ]; then
+        mkfs.btrfs -f -L NAS_DATA "$target" >/dev/null
+    else
+        mkfs.ext4 -F -m 1 -L NAS_DATA "$target" >/dev/null
+    fi
+    echo "$target"
+}
+
+case "$ACTION" in
+    format)
+        DEVICE="${1:-}"; FSTYPE="${2:-ext4}"; UNMOUNT="${3:-0}"
+        [ "$UNMOUNT" = "1" ] && unmount_device "$DEVICE"
+        TARGET="$(format_only "$DEVICE" "$FSTYPE")" || exit $?
+        OPTIONS="$(mount_options_for "$FSTYPE" "$(basename "$DEVICE")")"
+        mkdir -p /srv/nas
+        mount -o "$OPTIONS" "$TARGET" /srv/nas
+        ensure_fstab "$TARGET" "$OPTIONS"
+        echo "$TARGET formateado en $FSTYPE y montado en /srv/nas"
+        ;;
+    lvm)
+        DISK="${1:-}"; VG="${2:-}"; LV="${3:-}"; SIZE="${4:-100%FREE}"; FSTYPE="${5:-ext4}"; UNMOUNT="${6:-0}"
+        valid_device "$DISK" || { echo "dispositivo inválido" >&2; exit 2; }
+        valid_name "$VG" || { echo "VG inválido" >&2; exit 2; }
+        valid_name "$LV" || { echo "LV inválido" >&2; exit 2; }
+        valid_fs "$FSTYPE" || { echo "filesystem no soportado" >&2; exit 2; }
+        os_disk_guard "$DISK"
+        [ "$UNMOUNT" = "1" ] && unmount_device "$DISK"
+
+        pvcreate -y -ff "$DISK" >/dev/null
+        if vgs "$VG" >/dev/null 2>&1; then
+            vgextend "$VG" "$DISK" >/dev/null
+        else
+            vgcreate "$VG" "$DISK" >/dev/null
+        fi
+        lvcreate -y -n "$LV" -l "$SIZE" "$VG" >/dev/null
+        PATH_LV="/dev/$VG/$LV"
+        if [ "$FSTYPE" = "btrfs" ]; then
+            mkfs.btrfs -f -L NAS_DATA "$PATH_LV" >/dev/null
+        else
+            mkfs.ext4 -F -m 1 -L NAS_DATA "$PATH_LV" >/dev/null
+        fi
+        OPTIONS="$( [ "$FSTYPE" = "btrfs" ] && echo "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag" || echo "rw,noatime,commit=2,errors=remount-ro" )"
+        mkdir -p /srv/nas
+        mount -o "$OPTIONS" "$PATH_LV" /srv/nas
+        ensure_fstab "$PATH_LV" "$OPTIONS"
+        echo "volumen $PATH_LV montado en /srv/nas"
+        ;;
+    subvolume)
+        NAME="${1:-}"
+        valid_name "$NAME" || { echo "nombre inválido" >&2; exit 2; }
+        btrfs subvolume create "/srv/nas/$NAME" >/dev/null
+        echo "subvolumen /srv/nas/$NAME creado"
+        ;;
+    add-unit)
+        DEVICE="${1:-}"; UNIT="${2:-}"; FSTYPE="${3:-ext4}"
+        valid_name "$UNIT" || { echo "unidad inválida" >&2; exit 2; }
+        TARGET="$(format_only "$DEVICE" "$FSTYPE")" || exit $?
+        OPTIONS="$(mount_options_for "$FSTYPE" "$(basename "$DEVICE")")"
+        mkdir -p "/srv/nas/unidades/$UNIT"
+        mount -o "$OPTIONS" "$TARGET" "/srv/nas/unidades/$UNIT"
+        ensure_fstab "$TARGET" "$OPTIONS" "/srv/nas/unidades/$UNIT"
+        echo "unidad $UNIT montada en /srv/nas/unidades/$UNIT"
+        ;;
+    extend-pool)
+        DEVICE="${1:-}"
+        valid_device "$DEVICE" || { echo "dispositivo inválido" >&2; exit 2; }
+        SOURCE="$(findmnt -no SOURCE /srv/nas 2>/dev/null || true)"
+        VG="$(lvs --noheadings -o vg_name "$SOURCE" 2>/dev/null | tr -d '[:space:]' || true)"
+        if [ -z "$VG" ]; then
+            echo "/srv/nas no está sobre LVM" >&2
+            exit 3
+        fi
+        pvcreate -y -ff "$DEVICE" >/dev/null
+        vgextend "$VG" "$DEVICE" >/dev/null
+        lvextend -l +100%FREE "$SOURCE" >/dev/null
+        echo "pool $VG extendido con $DEVICE"
+        ;;
+    *)
+        echo "acción desconocida: $ACTION" >&2
+        exit 2
+        ;;
+esac
