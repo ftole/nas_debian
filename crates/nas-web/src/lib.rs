@@ -90,6 +90,10 @@ pub fn router(state: AppState) -> Router {
         .route("/domain", get(routes::page_domain))
         .route("/terminal", get(routes::page_terminal))
         .route("/audit", get(routes::page_audit))
+        .route("/logs", get(routes::page_logs))
+        .route("/networking", get(routes::page_networking))
+        .route("/applications", get(routes::page_applications))
+        .route("/updates", get(routes::page_updates))
         .route("/api/metrics", get(routes::metrics))
         .route("/api/network", get(routes::network))
         .route(
