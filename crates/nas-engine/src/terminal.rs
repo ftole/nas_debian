@@ -4,7 +4,7 @@
 //! socket de tmux propio (`-L nas`) y con un nombre validado. Los argumentos
 //! viajan siempre separados y los textos se envían con terminador `--`.
 
-use nas_exec::{CommandSpec, Runner};
+use nas_exec::{CommandSpec, Runner, SudoMode};
 use serde::Serialize;
 
 /// Prefijo de las sesiones gestionadas por el panel.
@@ -63,7 +63,21 @@ pub fn is_valid_geometry(cols: u16, rows: u16) -> bool {
     (20..=500).contains(&cols) && (5..=300).contains(&rows)
 }
 
-/// Construye `sudo -n -u <usuario> tmux -L nas <args>`.
+/// Ruta del helper root con lista blanca de acciones.
+pub const HELPER: &str = "/usr/local/sbin/nas-terminal";
+
+/// Construye `sudo -n /usr/local/sbin/nas-terminal -u <usuario> <args>`.
+fn helper(user: &str, args: &[&str]) -> CommandSpec {
+    let mut argv: Vec<String> = vec!["-u".to_string(), user.to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    CommandSpec::new(HELPER)
+        .args(argv)
+        .sudo(SudoMode::Passwordless)
+        .timeout(std::time::Duration::from_secs(30))
+}
+
+/// Construye `sudo -n -u <usuario> tmux -L nas <args>` (legado, sin uso).
+#[allow(dead_code)]
 fn tmux(user: &str, args: &[&str]) -> CommandSpec {
     let mut argv: Vec<String> = vec![
         "-n".to_string(),
@@ -95,7 +109,7 @@ pub fn exists(runner: &Runner, user: &str, name: &str) -> Result<bool, String> {
     }
 
     let output = runner
-        .run(&tmux(user, &["has-session", "-t", name]))
+        .run(&helper(user, &["exists"]))
         .map_err(|error| error.to_string())?;
     Ok(output.is_success())
 }
@@ -121,10 +135,7 @@ pub fn start(runner: &Runner, user: &str, cols: u16, rows: u16) -> Result<Termin
     let cols = cols.to_string();
     let rows = rows.to_string();
     let output = runner
-        .run(&tmux(
-            user,
-            &["new-session", "-d", "-s", &name, "-x", &cols, "-y", &rows],
-        ))
+        .run(&helper(user, &["start", &cols, &rows]))
         .map_err(|error| error.to_string())?;
 
     if output.is_success() {
@@ -152,23 +163,46 @@ pub fn send(
         return Err("entrada inválida para el terminal".to_string());
     }
 
+    let action = if enter { "raw_enter" } else { "raw" };
     let output = runner
-        .run(&tmux(user, &["send-keys", "-t", name, "--", data]))
+        .run(&helper(user, &[action, data]))
+        .map_err(|error| error.to_string())?;
+    if output.is_success() {
+        Ok(())
+    } else {
+        Err(failure(output))
+    }
+}
+
+/// Captura el panel y el directorio actual de la sesión.
+pub fn capture_details(
+    runner: &Runner,
+    user: &str,
+    _name: &str,
+) -> Result<(String, String), String> {
+    if !is_valid_session_name(&session_name(user)) {
+        return Err("sesión inválida".to_string());
+    }
+    let output = runner
+        .run(&helper(user, &["capture"]))
         .map_err(|error| error.to_string())?;
     if !output.is_success() {
+        if output.stderr.contains("can't find session") || output.stderr.contains("no server") {
+            return Ok((String::new(), String::new()));
+        }
         return Err(failure(output));
     }
-
-    if enter {
-        let output = runner
-            .run(&tmux(user, &["send-keys", "-t", name, "Enter"]))
-            .map_err(|error| error.to_string())?;
-        if !output.is_success() {
-            return Err(failure(output));
+    let mut text = String::new();
+    let mut cwd = String::new();
+    for line in output.stdout.lines() {
+        if let Some(value) = line.strip_prefix("___NAS_CWD___") {
+            cwd = value.trim().to_string();
+            continue;
         }
+        text.push_str(line);
+        text.push('\n');
     }
-
-    Ok(())
+    Ok((text, cwd))
 }
 
 /// Captura el contenido visible del panel.
@@ -178,12 +212,20 @@ pub fn capture(runner: &Runner, user: &str, name: &str) -> Result<String, String
     }
 
     let output = runner
-        .run(&tmux(user, &["capture-pane", "-p", "-t", name]))
+        .run(&helper(user, &["capture"]))
         .map_err(|error| error.to_string())?;
 
     if output.is_success() {
-        Ok(output.stdout)
-    } else if output.stderr.contains("can't find session") {
+        let mut text = String::new();
+        for line in output.stdout.lines() {
+            if line.starts_with("___NAS_CWD___") {
+                continue;
+            }
+            text.push_str(line);
+            text.push('\n');
+        }
+        Ok(text)
+    } else if output.stderr.contains("can't find session") || output.stderr.contains("no server") {
         Ok(String::new())
     } else {
         Err(failure(output))
@@ -202,10 +244,7 @@ pub fn resize(runner: &Runner, user: &str, name: &str, cols: u16, rows: u16) -> 
     let cols = cols.to_string();
     let rows = rows.to_string();
     let output = runner
-        .run(&tmux(
-            user,
-            &["resize-window", "-t", name, "-x", &cols, "-y", &rows],
-        ))
+        .run(&helper(user, &["resize", &cols, &rows]))
         .map_err(|error| error.to_string())?;
 
     if output.is_success() {
@@ -222,7 +261,7 @@ pub fn kill(runner: &Runner, user: &str, name: &str) -> Result<(), String> {
     }
 
     let output = runner
-        .run(&tmux(user, &["kill-session", "-t", name]))
+        .run(&helper(user, &["kill"]))
         .map_err(|error| error.to_string())?;
 
     if output.is_success() {
