@@ -1630,16 +1630,6 @@ pub struct DiagBody {
     pub r#type: String,
 }
 
-fn not_implemented(feature: &str) -> Response {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        axum::Json(ApiResponse::<serde_json::Value>::error(format!(
-            "{feature} aún no está portado a Rust (F3)"
-        ))),
-    )
-        .into_response()
-}
-
 fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
     let output = Runner::new()
         .run(&command)
@@ -2408,14 +2398,74 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
     }
 }
 
-/// Acciones aún no portadas (devuelven 501 con mensaje claro).
-/// Acción pendiente.
-pub async fn pending_backups_write() -> Response {
-    not_implemented("La creación o edición de tareas de respaldo")
-}
-/// Acción pendiente.
-pub async fn pending_system_update() -> Response {
-    not_implemented("La actualización del sistema desde el panel")
+/// Ejecuta la actualización en caliente del servidor desde el panel.
+pub async fn system_update_run(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    let _ = state
+        .auth
+        .db()
+        .append_audit(&actor, "system_update", "sistema", "STARTED", "");
+
+    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let candidates = [
+            "/opt/nas_debian/src/core/updater.sh",
+            "/opt/nas/src/core/updater.sh",
+            "/usr/local/lib/nas/src/core/updater.sh",
+        ];
+        let script = candidates
+            .iter()
+            .find(|path| std::path::Path::new(path).is_file())
+            .ok_or_else(|| "no se encontró el script de actualización (updater.sh)".to_string())?;
+
+        let output = Runner::new()
+            .run(
+                &nas_exec::CommandSpec::new("/bin/bash")
+                    .args([(*script).to_string(), "--yes".to_string()])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(300)),
+            )
+            .map_err(|error| error.to_string())?;
+
+        if output.is_success() {
+            Ok(output.stdout)
+        } else {
+            Err(if output.stderr.is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            })
+        }
+    })
+    .await
+    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+
+    match result {
+        Ok(output) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "system_update", "sistema", "SUCCESS", "");
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "output": output, "version": env!("CARGO_PKG_VERSION") }),
+                "Actualización del sistema completada",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&actor, "system_update", "sistema", "FAILED", &error);
+            server_error(&error)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
