@@ -74,8 +74,27 @@ Todo lo demás debe coincidir exactamente.
 | **F2** | Hash del `app.js` servido == hash de `assets.sha256` |
 | **F3** | 100 % de `endpoints.txt` implementado con contrato equivalente |
 | **F4** | Checklist funcional de las 14 vistas sin errores de consola |
-| **F5** | CI ejecuta `parity_extract.py --check` y la suite DOM/selectores |
+| **F5** | CI ejecuta `parity_extract.py --check`, la suite DOM/selectores y `tests/parity.rs` |
 | **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` |
+
+### F5 — Suite de paridad en CI (completada)
+
+`crates/nas-web/tests/parity.rs` valida el HTML servido contra
+`tests/parity/contract.json` y `endpoints.txt` en cada `cargo test`:
+
+| Prueba | Comprobación |
+| :--- | :--- |
+| `dashboard_preserva_ids_clases_y_globales` | 527 IDs, 156 clases, atributos `data-*`, globales y 14 secciones `view-*` |
+| `login_preserva_ids_y_formulario` | IDs del formulario de acceso y campo CSRF |
+| `todos_los_identificadores_de_app_js_existen` | 340 IDs consultados por `app.js` |
+| `endpoints_del_contrato_existen_y_no_son_501` | 60 rutas: ninguna desaparece ni queda sin implementar |
+
+Además el flujo `.github/workflows/rust.yml` ejecuta
+`python3 scripts/parity_extract.py --check` y `python3 scripts/qa_ui_audit.py --static`.
+
+Con F5, **no queda ningún endpoint en 501**: se implementaron
+`POST /api/system/update/run` (actualizador validado por sudoers) y el alias
+`POST /api/backups/`.
 
 ### F4 — Verificación funcional (completada)
 
