@@ -2,7 +2,7 @@
 
 > Guía de instalación, verificación y rollback de la plataforma Rust
 > (`nas`, `nas-web`, `nas-tui`). El panel PHP histórico ya fue retirado
-> (fase F7, ola A) y solo permanece en `legacy/web` como referencia.
+> (fase F7) y se recupera desde la etiqueta `legacy-php-final` si hace falta comparar.
 
 ## 1. Requisitos
 
