@@ -35,7 +35,7 @@ No se detectaron vulnerabilidades **Críticas**. Los controles de seguridad crí
 | Aislamiento de rol **operator** (`grp_web`) | ✔ 403 en `/api/storage`, `/api/terminal/exec`, `/api/domain`, `/api/system/reboot`, `/api/system/updates`, `/api/backups` |
 | Cabeceras de seguridad HTTP | ✔ CSP, X-Frame-Options SAMEORIGIN, nosniff, X-XSS, Referrer-Policy, Permissions-Policy — **✘ HSTS ausente** (ver M2) |
 | TLS | ✔ Solo TLSv1.2/1.3, cifrados `HIGH:!aNULL:!MD5` |
-| Integridad/cadena | ✔ CI (ShellCheck+BATS+Flake8+Pytest+PHP), tags GPG firmadas en `install/updater`, `.env` en `.gitignore` |
+| Integridad/cadena | ✔ CI (ShellCheck+BATS+paridad Rust), tags GPG firmadas en `install/updater`, assets con SHA-256 fijado en `tests/parity/assets.sha256`, `.env` en `.gitignore` |
 | Auditoría del kernel | ✔ Reglas auditd (sudoers, smb.conf, credenciales, nas-terminal) y AIDE con revisión diaria (`dailyaidecheck.timer`) |
 | Respaldo | ✔ Snapshot inmutable (`chattr +i`), deduplicación por hardlinks (inodo compartido, `links=2`), **restauración verificada con hashes IGUALES** |
 | Host base | ✔ `PermitRootLogin no`, AppArmor activo, fail2ban activo, unattended-upgrades, journald persistente |
@@ -83,8 +83,8 @@ Ninguno.
 - El middleware bloquea `/api/backups` en rol ARCHIVOS. Para usar la central de respaldo en producción, desplegar con rol `ARCHIVOS_BACKUP` o `BACKUP`.
 - Nota de **configuración**, no falla; confirmar el rol objetivo antes de producción.
 
-**M6 — PHP `allow_url_fopen = On` y sin `disable_functions`.**
-- Recomendado `allow_url_fopen = Off` (la app no consume URLs remotas) y endurecer `disable_functions` para el pool fpm.
+**M6 — PHP `allow_url_fopen = On` y sin `disable_functions` (histórico).**
+- Aplicaba al panel PHP retirado en F7. El panel Rust no usa `allow_url_fopen` ni intérprete; el pool del panel fue eliminado del servidor.
 
 ### Bajos
 
@@ -105,8 +105,8 @@ Ninguno.
 | 4 | SSH solo claves + `AllowUsers` + timeout + X11 off | Medio | `deploy.sh` (sshd_config.d) |
 | 5 | Desactivar nfs-server/rpcbind/exim4; quitar regla 9090 | Medio | `deploy.sh` (apt/systemd/ufw) |
 | 6 | Caducidad de contraseñas + umask 027 + GRUB | Medio | `login.defs` / `deploy.sh` |
-| 7 | `allow_url_fopen = Off` para fpm | Medio | `deploy.sh` (php pool) |
-| 8 | `version.json` real en deploy; fijar deps Python; `pip-audit` en CI | Bajo | `deploy.sh`, `requirements-*`, CI |
+| 7 | ~~`allow_url_fopen = Off` para fpm~~ (histórico: panel PHP retirado) | Medio | — |
+| 8 | Versión real en release/manifiesto; deps Python legacy retiradas | Bajo | `Cargo.toml`, manifiesto de release |
 | 9 | Documentar RTO/RPO y runbook de restauración; limpiar residuos de prueba | Bajo | `docs/` |
 
 ---
