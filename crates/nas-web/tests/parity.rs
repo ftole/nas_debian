@@ -198,6 +198,14 @@ async fn dashboard_preserva_ids_clases_y_globales() {
         "users",
         "backups",
         "storage",
+        "terminal",
+        "logs",
+        "domain",
+        "services",
+        "networking",
+        "applications",
+        "updates",
+        "diagnostics",
     ]
     .iter()
     .map(|view| format!("view-{view}"))
