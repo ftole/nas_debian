@@ -362,7 +362,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
 | `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ✅ Portado, verificado y retirado a `legacy/web` |
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ✅ Sustituido y retirado a `legacy/` |
-| `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | 🟡 `update` nativo y `updater.sh` recompila Rust; `deploy`/`uninstall` pendientes (ola B) |
+| `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | 🟡 `update` (verify/apply/sign), `uninstall` de la plataforma y plan de `deploy` nativos; el aprovisionamiento del SO sigue en Bash (ola B) |
 
 ## 15. Seguridad implementada
 
