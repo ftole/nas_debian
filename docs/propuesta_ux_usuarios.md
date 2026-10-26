@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > Este documento contiene la **propuesta técnica y conceptual de rediseño de Experiencia de Usuario (UX)** para el módulo de Usuarios, Grupos y Permisos del panel web administrativo de **NAS Debian 13**.
-> **Nota de gobernanza (F7):** esta especificación es documental. El panel PHP al que se refiere ya fue retirado a `legacy/web/`; las mismas vistas y `app.js` siguen activos desde `crates/nas-web` (plantillas portadas y assets embebidos).
+> **Nota de gobernanza (F7):** esta especificación es documental. El panel PHP al que se refiere ya fue retirado (etiqueta `legacy-php-final`); las mismas vistas y `app.js` siguen activos desde `crates/nas-web` (plantillas portadas y assets embebidos).
 
 ---
 
