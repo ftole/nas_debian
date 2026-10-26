@@ -73,7 +73,7 @@ Todo lo demás debe coincidir exactamente.
 | **F0** (hecha) | `contract.json`, `selectors.txt`, `endpoints.txt` y `assets.sha256` generados y verificados por `--check` |
 | **F1** | Diff DOM normalizado vacío en las 14 vistas + login |
 | **F2** | Hash del `app.js` servido == hash de `assets.sha256` |
-| **F3** | 100 % de `endpoints.txt` implementado con contrato equivalente |
+| **F3** | 72 endpoints (incluidas rutas dinámicas `:id`) implementados con contrato equivalente |
 | **F4** | Checklist funcional de las 14 vistas sin errores de consola |
 | **F5** | CI ejecuta `parity_extract.py --check`, la suite DOM/selectores y `tests/parity.rs` |
 | **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` (completada) |
