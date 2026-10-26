@@ -360,7 +360,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | Tareas de respaldo (`backup_*.sh` del asistente) | `nas-engine::tasks` | ✅ lectura, validación y plan |
 | `test_remote.py` (SSH/SFTP) | `nas-ssh` + `nas-dev` | ✅ transporte OpenSSH, upload y sincronización |
 | `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
-| `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ✅ Portado, verificado y retirado a `legacy/web` |
+| `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ✅ Portado, verificado y retirado (referencia en `legacy-php-final`) |
 | `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ✅ Sustituido y retirado a `legacy/` |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | 🟡 `update` (verify/apply/sign), `uninstall` de la plataforma y plan de `deploy` nativos; el aprovisionamiento del SO sigue en Bash (ola B) |
 
