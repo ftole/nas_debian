@@ -24,6 +24,10 @@ problem() { printf '  [!] %s\n' "$*"; FAILED=1; }
 
 check_guards() {
     stage "Guardas previas"
+    if [ "${NAS_RETIRE_SKIP_GUARDS:-0}" = "1" ]; then
+        say "guardas de servidor omitidas (NAS_RETIRE_SKIP_GUARDS=1)"
+        return 0
+    fi
     if systemctl is-active --quiet nas-web 2>/dev/null; then
         say "nas-web activo"
     else
