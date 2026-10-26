@@ -89,6 +89,24 @@ impl ReleaseManifest {
     }
 }
 
+/// Firma el manifiesto con una clave privada Ed25519 (hex de 32 bytes).
+pub fn sign_manifest(manifest: &mut ReleaseManifest, signing_key: &str) -> NasResult<()> {
+    use ed25519_dalek::Signer;
+
+    let key_bytes = decode_fixed::<32>(signing_key, "clave privada")?;
+    let key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
+    let signature = key.sign(manifest.canonical_payload().as_bytes());
+    manifest.signature = Some(hex::encode(signature.to_bytes()));
+    Ok(())
+}
+
+/// Deriva la clave pública (hex) de una clave privada Ed25519 (hex).
+pub fn public_key_from_secret(signing_key: &str) -> NasResult<String> {
+    let key_bytes = decode_fixed::<32>(signing_key, "clave privada")?;
+    let key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
+    Ok(hex::encode(key.verifying_key().to_bytes()))
+}
+
 fn decode_fixed<const N: usize>(value: &str, label: &str) -> NasResult<[u8; N]> {
     let bytes = hex::decode(value.trim())
         .map_err(|error| NasError::Invalid(format!("{label} no es hexadecimal: {error}")))?;
