@@ -1,9 +1,9 @@
 {
   "generated_by": "scripts/parity_extract.py",
   "sources": {
-    "layout": "web/templates/layout.php",
-    "login": "web/templates/login.php",
-    "app_js": "web/public/js/app.js"
+    "layout": "legacy/web/templates/layout.php",
+    "login": "legacy/web/templates/login.php",
+    "app_js": "legacy/web/public/js/app.js"
   },
   "layout": {
     "ids": [
