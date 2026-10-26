@@ -111,6 +111,7 @@ install -m 0755 "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
 install -m 0755 "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
 install -m 0755 "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
 install -m 0755 "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-accounts
+install -m 0755 "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/nas-backup-manage
 install -d -m 2770 -o root -g www-data /var/lib/nas/staging 2>/dev/null || true
 
 echo "[5/7] Instalando unidad systemd"
