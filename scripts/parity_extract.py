@@ -91,6 +91,17 @@ def extract_app_js(text: str) -> dict:
     endpoints = unique_sorted(
         re.findall(r"(?:apiFetch|fetch)\(\s*[`'\"](/api/[^`'\"?${]+)", text)
     )
+    # URLs construidas con plantillas (p. ej. `/api/backups/${id}/run`)
+    for match in re.finditer(r"`([^`]*)`", text):
+        raw = match.group(1)
+        if "/api/" not in raw:
+            continue
+        normalized = re.sub(r"\$\{[^}]*\}", ":id", raw).split("?")[0]
+        if normalized.startswith("/api/"):
+            endpoints.append(normalized)
+    for match in re.finditer(r"['\"](/api/[a-z0-9_/-]*)['\"]", text):
+        endpoints.append(match.group(1))
+    endpoints = unique_sorted(endpoints)
     handler_calls = unique_sorted(
         re.findall(r"on(?:click|change|submit)=\\?\"([A-Za-z0-9_]+)\(", text)
     )
@@ -100,6 +111,26 @@ def extract_app_js(text: str) -> dict:
         "endpoints": endpoints,
         "inline_handlers": handler_calls,
     }
+
+
+def extract_endpoints(text: str) -> list[str]:
+    """Extrae rutas `/api/...` incluidas las construidas con plantillas JS."""
+    found = set()
+    # literales: '/api/x'  y  "api/x"
+    for match in re.finditer(r"['\"](/api/[^'\"\s]*)['\"]", text):
+        path = match.group(1)
+        if "$" not in path:
+            found.add(path)
+    # plantillas: `/api/backups/${id}/run?x=${y}`
+    for match in re.finditer(r"`([^`]*)`", text):
+        raw = match.group(1)
+        if "/api/" not in raw:
+            continue
+        normalized = re.sub(r"\$\{[^}]*\}", ":id", raw)
+        normalized = normalized.split("?")[0]
+        if normalized.startswith("/api/"):
+            found.add(normalized)
+    return sorted(found)
 
 
 def build_contract() -> dict:
@@ -160,6 +191,11 @@ def write_outputs(outputs: dict[str, str]) -> None:
         print(f"[parity] escrito tests/parity/{name}")
 
 
+def normalize_route(path: str) -> str:
+    """Unifica `{id}` (axum) con `:id` (JavaScript)."""
+    return re.sub(r"\{[a-z_]+\}", ":id", path)
+
+
 def check_routes() -> list[str]:
     """Devuelve los endpoints de app.js sin ruta equivalente en lib.rs."""
     lib = (ROOT / "crates" / "nas-web" / "src" / "lib.rs").read_text(encoding="utf-8")
@@ -172,10 +208,13 @@ def check_routes() -> list[str]:
         for line in (PARITY / "endpoints.txt").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    def normalize(path: str) -> str:
+        return re.sub(r"\{[^}]+\}", "{x}", path.replace(":id", "{x}"))
+
     return [
         endpoint
         for endpoint in endpoints
-        if re.sub(r"\{[^}]+\}", "{x}", endpoint) not in registered
+        if normalize(endpoint) not in registered
     ]
 
 
