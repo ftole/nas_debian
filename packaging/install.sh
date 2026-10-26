@@ -112,6 +112,8 @@ install -m 0755 "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
 install -m 0755 "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
 install -m 0755 "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-accounts
 install -m 0755 "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/nas-backup-manage
+install -m 0755 "$SCRIPT_DIR/nas-terminal" /usr/local/sbin/nas-terminal
+install -m 0755 "$SCRIPT_DIR/nas-storage-apply" /usr/local/sbin/nas-storage-apply
 install -d -m 2770 -o root -g www-data /var/lib/nas/staging 2>/dev/null || true
 
 echo "[5/7] Instalando unidad systemd"
@@ -142,7 +144,8 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
     /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
     /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \
-    /usr/local/sbin/nas-backup-manage *, \
+    /usr/local/sbin/nas-backup-manage *, /usr/local/sbin/nas-terminal *, \
+    /usr/local/sbin/nas-storage-apply *, \
     /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
     /usr/bin/true
 SUDO
