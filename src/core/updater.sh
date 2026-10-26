@@ -270,9 +270,11 @@ _hook_post_actualizacion() {
     fi
 
     # 4. Sincronizar aplicación web MVC en /var/www/nas-web si existe
-    if [ -d "/var/www/nas-web" ] && [ -d "$PROJECT_ROOT/web" ]; then
+    local web_src="$PROJECT_ROOT/web"
+    [ -d "$web_src" ] || web_src="$PROJECT_ROOT/legacy/web"
+    if [ -d "/var/www/nas-web" ] && [ -d "$web_src" ]; then
         if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/www/nas-web" ]; then
-            cp -rf "$PROJECT_ROOT/web/"* /var/www/nas-web/ 2>/dev/null || true
+            cp -rf "$web_src/"* /var/www/nas-web/ 2>/dev/null || true
             chown -R www-data:www-data /var/www/nas-web 2>/dev/null || true
             chmod -R 755 /var/www/nas-web 2>/dev/null || true
         fi
