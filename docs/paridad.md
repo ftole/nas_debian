@@ -77,6 +77,42 @@ Todo lo demás debe coincidir exactamente.
 | **F5** | CI ejecuta `parity_extract.py --check` y la suite DOM/selectores |
 | **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` |
 
+### F4 — Verificación funcional (completada)
+
+`scripts/qa_ui_audit.py` audita la interfaz portada en dos modos:
+
+| Modo | Comando | Cobertura |
+| :--- | :--- | :--- |
+| Estático (CI) | `python3 scripts/qa_ui_audit.py --static` | 340 IDs de `app.js`, 115 manejadores inline, 14 vistas frente a `layout.html` |
+| En vivo | `NAS_WEB_PANEL_PASSWORD=… python3 scripts/qa_ui_audit.py` | lo anterior + 24 endpoints GET de carga de vista |
+
+Resultados en `10.10.1.222`:
+
+```text
+[ids]      app.js consulta 340 IDs; faltan 0
+[handlers] 115 inline; sin definición: 0
+[vistas]   14 secciones; nav sin sección: 0
+[api]      24 endpoints GET verificados
+```
+
+Pruebas de carga útil (payload) ejecutadas contra el panel:
+
+| Flujo | Resultado |
+| :--- | :--- |
+| Archivos: crear, guardar, mover, papelera, restaurar, vaciar | OK |
+| Papelera anidada restaurada a su ruta original (`ZZQA_F/sub/nota.txt`) | OK |
+| Matriz de acceso Samba (`POST /api/shares/access`) | ACL aplicada en 0,14 s (`g:grp_samba:rwx` + default) |
+| Diagnóstico (`POST /api/diagnostics/run`) | `status: success` |
+| Dominio: descubrimiento con nombre inválido | `400 dominio inválido` |
+| Respaldos: crear, probar, listar, ejecutar, eliminar | OK (F3) |
+
+Correcciones derivadas de F4:
+
+* `nas-share-acl` aplica ACL **no recursivas** en la raíz del recurso más `default`
+  (antes recorría millones de inodos y bloqueaba la petición).
+* La papelera guarda la **ruta relativa original** en `.trash/.meta/<id>` y restaura
+  al directorio de origen creando los niveles necesarios.
+
 ## 6. Regla de trabajo
 
 - Primero **portar**, después mejorar. Cualquier mejora visual o funcional va en
