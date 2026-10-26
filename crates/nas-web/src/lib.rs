@@ -99,7 +99,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/services", get(routes::services))
         .route("/api/services/manage", post(routes::service_manage))
         .route("/api/diagnostics", get(routes::diagnostics))
-        .route("/api/backups", get(routes::backups))
+        .route(
+            "/api/backups",
+            get(routes::backups).post(routes::backup_create),
+        )
         .route("/api/backups/plan", post(routes::backup_plan))
         .route("/api/backups/run", post(routes::backup_run))
         .route("/api/audit", get(routes::audit))
@@ -139,9 +142,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users/groups", post(routes::user_groups))
         .route("/api/users/delete", post(routes::user_delete))
         .route("/api/backups/running", get(routes::backups_running))
-        .route("/api/backups/test", post(routes::pending_backups_write))
-        .route("/api/backups/update", post(routes::pending_backups_write))
-        .route("/api/backups/delete", post(routes::pending_backups_write))
+        .route("/api/backups/test", post(routes::backup_test))
+        .route("/api/backups/update", post(routes::backup_update))
+        .route("/api/backups/delete", post(routes::backup_delete))
         .route("/api/backups/", post(routes::pending_backups_write))
         .route("/api/storage/units", get(routes::storage_units))
         .route("/api/storage/subvolumes", get(routes::storage_subvolumes))
