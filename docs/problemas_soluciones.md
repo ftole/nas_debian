@@ -164,3 +164,6 @@ El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Acti
 | `smb.conf` con una ruta de pruebas tras comparar paneles | El panel PHP reescribe la configuración al cargar | No ejecutar ambos paneles con estado mutable; restaurar y validar con `testparm` tras la comparación |
 | Crear tarea de respaldo fallaba con "Read-only file system" | `ProtectSystem=yes` bloquea `/usr/local/bin` y `/etc/cron.d` | `ReadWritePaths` ampliado a los directorios donde los helpers instalan runners, cron y credenciales |
 | Vistas `/logs`, `/networking`, `/applications` y `/updates` daban 404 | El layout las incluía pero faltaban rutas de página | Rutas añadidas y verificadas por la suite de paridad (14 vistas) |
+| Rutas como `/api/backups/{id}/run` y `/api/storage/format` daban 404 | El extractor de contrato solo leía URLs literales, no plantillas JS ni variables | Extractor ampliado (72 endpoints) y rutas implementadas con pruebas |
+| Terminal web respondía "sudo: a password is required" | El panel invocaba `sudo -u tmux` sin regla sudoers | Helper `nas-terminal` con acciones fijas, instalado y autorizado; el panel lo invoca con `nas-exec` |
+| Formatear/LVM fallaban con "sudo: a password is required" | Operaciones privilegiadas dispersas sin reglas sudoers | Helper `nas-storage-apply` con validación propia (dispositivo, disco del SO, confirmación) |
