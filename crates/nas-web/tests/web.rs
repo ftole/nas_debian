@@ -919,3 +919,80 @@ async fn backups_valida_tareas() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn almacenamiento_valida_confirmacion_y_dispositivo() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/storage/format",
+            &cookie,
+            r#"{"device":"/dev/sdz","fstype":"ext4","confirm":""}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/storage/format",
+            &cookie,
+            r#"{"device":"../etc/passwd","fstype":"ext4","confirm":"SI-FORMATEAR"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/storage/lvm",
+            &cookie,
+            r#"{"disk":"/dev/sdz","vg":"vg","lv":"lv","fstype":"xfs","confirm":"SI-FORMATEAR"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn respaldos_rechazan_identificadores_invalidos() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    for path in [
+        "/api/backups/a%20b/run",
+        "/api/backups/..%2Fetc%2Fpasswd/stop",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(post_json(path, &cookie, "{}"))
+            .await
+            .expect("respuesta");
+        assert!(
+            response.status() == StatusCode::BAD_REQUEST
+                || response.status() == StatusCode::NOT_FOUND,
+            "{path} devolvió {}",
+            response.status()
+        );
+    }
+}
+
+#[tokio::test]
+async fn auditoria_de_acl_responde() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(get("/api/shares/access/audit", &cookie))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(payload["data"]["total"].is_number());
+    assert!(payload["data"]["shares"].is_object());
+}
