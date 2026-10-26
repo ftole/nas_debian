@@ -31,29 +31,37 @@
 
 ## 2. Inventario de Archivos del Proyecto
 
+> [!IMPORTANT]
+> **Estado de la migración (fase F7 completada):** la plataforma activa es **Rust**
+> (`crates/*`). El panel PHP, el asistente `whiptail`, el CLI PHP y las utilidades
+> Python se movieron a `legacy/` y se retiraron del servidor (pool PHP, sudoers y
+> `/var/www/nas-web`). Los assets del panel (`app.js`, CSS, vendor) viven ahora en
+> `crates/nas-web/assets/` y se sirven byte a byte desde el binario.
+
+
 Todos los archivos del proyecto son portables y se adaptan dinámicamente al directorio donde se alojen y al hardware del servidor:
 
 | Archivo / Ruta | Tipo | Descripción |
 | :--- | :--- | :--- |
-| `install.sh` | Script Bash CLI | **Instalador Remoto Oficial y Gestor CLI** para desplegar el comando `nas` delegando a `bin/nas-cli`, con auto-actualización (`update`) y desinstalación limpia. |
-| `bin/nas-cli` | PHP CLI Runner | **CLI Unificado Programático** para control total del servidor NAS (almacenamiento, LVM/Btrfs, Samba, copias de seguridad, papelera, usuarios, dominio AD, auditoría y servicios) en formato ANSI y `--json`. |
-| `nas_admin.bat` | Batch Script Windows | **Lanzador Automatizado para Windows** con autodetección de Python en múltiples rutas, aprovisionamiento transparente de `.venv` e instalación silenciosa de dependencias para ejecutar el asistente administrativo. |
-| `nas_admin.py` | Python CLI / TUI | **Asistente de Administración Remota para Windows y Linux** con menú interactivo (despliegue, diagnóstico, actualización, servicios, bitácoras, consola y desinstalación) y almacenamiento seguro de credenciales (Keyring / `.env`). |
-| `test_remote.py` | Python CLI / TUI | **Suite Interactiva de Pruebas Remotas y Diagnóstico** con persistencia en `.env`, auditoría SSH/SSL, Samba, deduplicación por hardlinks y rollback. |
-| `test_remote.sh` | Bash CLI / TUI | **Lanzador y Suite Bash para Pruebas Remotas** con OpenSSH (`accept-new`), curl y fallback nativo. |
+| `install.sh` | Script Bash CLI | **Instalador Remoto Oficial** que instala la toolchain de Rust, clona/actualiza el repositorio, compila el workspace y ejecuta `packaging/install.sh` (servicio, nginx, sudoers y helpers). |
+| `crates/nas-cli` | Rust CLI | **CLI Unificado `nas`** (almacenamiento, LVM/Btrfs, Samba, respaldos, papelera, usuarios, dominio AD, auditoría y servicios) con salida ANSI y `--json`. |
+| `crates/nas-web` | Rust (axum) | **Panel web**: plantillas portadas 1:1 de `layout.php`, assets embebidos byte a byte, API completa y helpers privilegiados acotados. |
+| `crates/nas-tui` | Rust (ratatui) | **Asistente visual de terminal** con dashboard, servicios, respaldos y diagnóstico. |
+| `crates/nas-engine` | Rust Lib | Lógica de sistema: almacenamiento, Samba, usuarios, respaldos, dominio, actualizaciones firmadas y diagnósticos. |
+| `crates/nas-exec` | Rust Lib | Ejecutor de comandos con allowlist, timeouts, redacción de secretos y modo sudo sin contraseña. |
 | `.env.example` | Plantilla Config | **Plantilla documentada de credenciales locales** para pruebas remotas en Debian 13. |
 | `requirements-assistant.txt` | Dependencias Python | Dependencias requeridas por el asistente de administración remota (`paramiko`, `keyring`, `colorama`). |
-| `src/asistente.sh` | Script Bash (TUI `whiptail`) | **Asistente Visual Interactivo** con colores nativos, detección dinámica de discos/IP/usuario, validación en vivo, ciclo de edición y 13 módulos de gestión. |
+| `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS`, `BACKUP` o `ARCHIVOS_BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
-| `src/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente: `deploy_wizard`, `groups`, `shares`, `backups`, `users`, `diagnostics`, `storage`, `trash`, `domain`, `logs`. |
-| `web/` | Web (Nginx + PHP-FPM) | Entorno Web nativo MVC PHP 8: Dashboard, Samba, Backups, Almacenamiento (incl. LVM/Btrfs), Usuarios, Sistema, Explorador de Archivos Drag-and-Drop, Terminal PTY real (tmux), Dominio AD y base de datos SQLite con estética Slate UI 100% offline (cero dependencias externas). |
+| `legacy/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente retirado en F7 (solo referencia histórica). |
+| `legacy/web/` | Web (PHP 8, retirado) | Panel PHP original conservado para comparación y rollback. El panel activo es `crates/nas-web`, que sirve las mismas vistas y assets desde el binario. |
 | `tests/test_cli.bats` | BATS | Pruebas unitarias de comandos y subcomandos de `nas-cli` (ANSI y `--json`). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `tests/test_remote.bats` | BATS | Pruebas unitarias del script de pruebas remotas `test_remote.sh`. |
+| `legacy/` | Material retirado | Panel PHP original, asistente `whiptail`, CLI PHP, utilidades Python y sus pruebas (conservados solo para rollback/consulta). |
 | `tests/test_remote_runner.py` | pytest | Pruebas unitarias de parsing .env, política accept-new de claves de host y ejecución remota. |
 | `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
 | `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas GPG, problemas/soluciones y diagramas SVG. |
