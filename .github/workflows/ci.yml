@@ -19,101 +19,40 @@ jobs:
 
       - name: Verificar sintaxis Bash (bash -n)
         run: |
-          find . -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n
+          find . -path ./legacy -prune -o -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n
 
       - name: Verificar invariantes de seguridad
         run: |
-          if grep -RIn --exclude-dir=tests \
+          if grep -RIn --exclude-dir=legacy --exclude-dir=tests \
               --include="*.py" \
               --include="*.sh" \
               "StrictHostKeyChecking=no" \
-              src install.sh; then
+              src install.sh scripts; then
             echo "ERROR: se detectó StrictHostKeyChecking=no en código ejecutable."
             exit 1
           fi
 
-      - name: Ejecutar ShellCheck en todos los scripts
+      - name: Ejecutar ShellCheck en los scripts vigentes
         run: |
-          # Buscar recursivamente todos los archivos .sh y analizarlos
-          find . -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
+          find src scripts -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
+          shellcheck -x install.sh
 
   test-bash:
-    name: Pruebas Unitarias (BATS)
+    name: Pruebas del motor Bash (BATS)
     runs-on: ubuntu-latest
     needs: lint-bash
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        
+
       - name: Instalar BATS
         run: sudo apt-get update && sudo apt-get install -y bats
-        
-      - name: Ejecutar Suite de Pruebas Unitarias
+
+      - name: Ejecutar suite del motor de despliegue
         run: bats tests/
 
-  lint-python:
-    name: Validar Sintaxis Python (Flake8)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      
-      - name: Configurar entorno Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-          
-      - name: Instalar dependencias
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          
-      - name: Analizar codigo Python
-        run: |
-          # Analisis amplio con la configuracion del proyecto (.flake8)
-          flake8 tests/
-
-  test-python:
-    name: Pruebas Unitarias Python (pytest)
-    runs-on: ubuntu-latest
-    needs: lint-python
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Configurar entorno Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
-      - name: Instalar dependencias
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Ejecutar pruebas del frontend/mockup
-        run: pytest tests/ -q
-
-  test-php:
-    name: Validar Entorno Web PHP 8 (Sintaxis y Tests)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Instalar PHP CLI y extensiones
-        run: sudo apt-get update && sudo apt-get install -y php-cli php-sqlite3 php-zip samba-common-bin
-
-      - name: Validar sintaxis PHP (php -l)
-        run: |
-          find web/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l
-          find tests/ -type f -name "*.php" -print0 | xargs -0 -n1 php -l
-
-      - name: Ejecutar Suite de Pruebas PHP
-        run: php tests/test_web.php
-
   lint-js:
-    name: Validar Sintaxis JavaScript (node --check)
+    name: Validar Sintaxis del Panel (node --check)
     runs-on: ubuntu-latest
     steps:
       - name: Descargar repositorio
@@ -124,7 +63,24 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verificar sintaxis de todo el JavaScript del panel
+      - name: Verificar sintaxis del JavaScript empaquetado
         run: |
-          # Un error de sintaxis en app.js inutiliza por completo la interfaz web
-          find web/public/js src/web/mockup -type f -name "*.js" -print0 | xargs -0 -n1 node --check
+          find crates/nas-web/assets/js -type f -name "*.js" -print0 | xargs -0 -n1 node --check
+
+  parity:
+    name: Contrato de Paridad del Panel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Verificar contrato, rutas y assets
+        run: python3 scripts/parity_extract.py --check
+
+      - name: Auditar la interfaz portada (IDs, manejadores y vistas)
+        run: python3 scripts/qa_ui_audit.py --static
