@@ -53,3 +53,6 @@ jobs:
 
       - name: Verificar contrato de paridad del panel
         run: python3 scripts/parity_extract.py --check
+
+      - name: Auditar la interfaz portada (IDs, manejadores y vistas)
+        run: python3 scripts/qa_ui_audit.py --static
