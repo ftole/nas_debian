@@ -140,7 +140,7 @@ El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Acti
 | **Intento de inyección de comandos en terminal/API** | Los argumentos no se interpretan por shell; se pasan como arreglo puro a `proc_open`. | Invocación estricta sin `/bin/sh -c`. | `test_web.php` |
 | **Comandos interactivos en terminal web (`nano`, `vi`)** | Se detectan preventivamente y se emite mensaje educativo guiando al visor web o SSH. | Filtro de binarios TTY en `TerminalService`. | `test_web.php` |
 | **Eliminación accidental de un archivo en la web** | El archivo se resguarda en la papelera `.trash/` y puede recuperarse intacto. | Sistema de Papelera con metadatos JSON. | Pruebas web |
-| **Caída de conexión a Internet** | El panel y todas sus pantallas abren con normalidad al 100%. | Arquitectura 100% Offline (cero dependencias remotas). | `test_mockup.py` |
+| **Caída de conexión a Internet** | El panel y todas sus pantallas abren con normalidad al 100%. | Arquitectura 100% Offline (assets embebidos, cero dependencias remotas). | `qa_ui_audit.py` |
 
 ---
 
@@ -149,3 +149,18 @@ El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Acti
 1. **Se prueba el artefacto real:** Las pruebas unitarias y de estrés evalúan directamente los runners generados, los servicios PHP y los scripts Bash, no maquetas estáticas.
 2. **Las pruebas verifican el resultado del fallo:** No basta con comprobar que un script retorne código distinto de cero; se comprueba que el mensaje sea claro, que los descriptores temporales se hayan eliminado y que el sistema permanezca en un estado coherente.
 3. **Hermetismo:** Las pruebas automáticas de CI no requieren privilegios de `root` ni tocan servicios reales del equipo de desarrollo.
+
+---
+
+## 4. Lecciones de la migración a Rust (F6/F7)
+
+| Síntoma | Causa raíz | Solución aplicada |
+| :--- | :--- | :--- |
+| La matriz de accesos Samba quedaba colgada minutos | `nas-share-acl` aplicaba `setfacl -R` sobre un repositorio de 200 GB | ACL **no recursiva** en la raíz + `default ACL` para herencia; el cambio tarda <1 s |
+| Restaurar de la papelera dejaba el archivo en la raíz | Solo se guardaba el nombre, no la ruta original | Metadatos `.trash/.meta/<id>` con la ruta relativa; restauración crea los directorios necesarios |
+| Sesión no válida al probar el panel por HTTP | Cookie `Secure` (correcta en producción) | Comparaciones y pruebas locales por HTTPS; `NAS_WEB_INSECURE_COOKIE=1` solo en desarrollo |
+| Login válido en Rust fallaba en PHP | PHP autentica contra cuentas del sistema; Rust contra `web_users` | Cuenta temporal del sistema + fila `web_users` para comparar; limpieza posterior |
+| Clases CSS literales `%active_group_…%` | El conversor PHP→HTML emite marcadores con un solo `%` | Marcadores normalizados a `%%token%%` y resueltos en `views.rs` |
+| `smb.conf` con una ruta de pruebas tras comparar paneles | El panel PHP reescribe la configuración al cargar | No ejecutar ambos paneles con estado mutable; restaurar y validar con `testparm` tras la comparación |
+| Crear tarea de respaldo fallaba con "Read-only file system" | `ProtectSystem=yes` bloquea `/usr/local/bin` y `/etc/cron.d` | `ReadWritePaths` ampliado a los directorios donde los helpers instalan runners, cron y credenciales |
+| Vistas `/logs`, `/networking`, `/applications` y `/updates` daban 404 | El layout las incluía pero faltaban rutas de página | Rutas añadidas y verificadas por la suite de paridad (14 vistas) |
