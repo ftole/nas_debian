@@ -33,7 +33,7 @@ bash scripts/retire-legacy.sh --apply    # aplica los git mv / git rm
 
 Fases que ejecuta:
 
-1. `web/` → `legacy/web/` (se conserva para rollback, no se borra).
+1. `web/` → `legacy/web/` (histórico; eliminado del árbol en F7.2, recuperable desde `legacy-php-final`).
 2. `bin/nas-cli`, `nas_admin.py`, `nas_admin.bat`, `nas-assistant.spec`,
    `test_remote.py`, `test_remote.sh` → `git rm`.
 3. `src/asistente.sh` y `src/modules/` → `legacy/` (sustituidos por `nas-tui`).
@@ -141,3 +141,16 @@ Antes de retirar `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/update
 
 Hasta entonces, el motor Bash permanece **vigente** y el retiro de la ola B no se
 ejecuta.
+
+## 8. Limpieza del árbol (fases 7.1 y 7.2)
+
+- Etiqueta de referencia: `legacy-php-final`.
+- Retirados: `legacy/tests/`, `requirements-*.txt`, `.env.example`,
+  `docs/asistente_windows.md`, `.github/workflows/build-windows.yml` y el
+  conversor `scripts/php2html.py` (archivado en `scripts/legacy/`).
+- El contrato de paridad se desacopló del árbol PHP: las plantillas originales
+  viven en `tests/parity/fixtures/` y los hashes se calculan sobre
+  `crates/nas-web/assets/`.
+- `legacy/web/` eliminado; se conserva `legacy/asistente.sh` y `legacy/modules/`
+  como referencia de comportamiento para la ola B.
+- `scratch/`, `target/`, `.venv/`, `dist/` y `build/` quedan fuera de Git.
