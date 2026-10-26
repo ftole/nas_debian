@@ -123,3 +123,21 @@ systemctl reload php8.4-fpm
 `.github/workflows/ci.yml` conserva ShellCheck y BATS del motor de despliegue,
 valida la sintaxis del JavaScript empaquetado y ejecuta el contrato de paridad;
 los jobs de PHP y pytest del stack retirado se eliminaron.
+
+## 7. Criterios de aceptación de la ola B
+
+Antes de retirar `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/updater.sh`,
+`src/lib` y los BATS asociados, deben cumplirse:
+
+| Criterio | Evidencia esperada |
+| :--- | :--- |
+| `nas deploy` reproduce el despliegue base | Servidor limpio Debian 13 con `/srv/nas`, Samba, nginx, sysctl, auditd y AIDE |
+| `nas deploy --keep-data` monta sin formatear | Disco con datos previos intacto y backup operativo |
+| Protección del disco del SO y de discos en uso | Rechazo verificado con tests de inyección de fallos |
+| `nas uninstall` deja el sistema en estado base | Comparación de servicios, montajes, usuarios y cron antes/después |
+| `nas update` actualiza y reinicia sin downtime largo | Servicio activo y versión nueva verificada |
+| Suite de paridad del motor Bash | BATS de `deploy`, `updater`, `failure_*` y `rotation` portados o sustituidos |
+| Rollback documentado y probado | Restauración de configuración y datos sin pérdida |
+
+Hasta entonces, el motor Bash permanece **vigente** y el retiro de la ola B no se
+ejecuta.
