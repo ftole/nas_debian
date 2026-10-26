@@ -1,7 +1,8 @@
 # Despliegue del panel NAS en Rust
 
-> Guía de instalación, cutover y rollback del panel Rust (`nas-web`) frente al
-> panel PHP histórico. El stack anterior se conserva intacto hasta completar F7.
+> Guía de instalación, verificación y rollback de la plataforma Rust
+> (`nas`, `nas-web`, `nas-tui`). El panel PHP histórico ya fue retirado
+> (fase F7, ola A) y solo permanece en `legacy/web` como referencia.
 
 ## 1. Requisitos
 
@@ -22,21 +23,26 @@ Artefactos: `target/release/{nas,nas-web,nas-tui,nasctl,nas-dev}`.
 ## 3. Instalación
 
 ```bash
-sudo bash packaging/install.sh              # instala todo
-sudo bash packaging/install.sh --no-nginx   # solo servicio y binarios
+sudo bash install.sh                          # clona/actualiza, compila e instala
+sudo bash packaging/install.sh                # reinstala servicio, nginx y helpers
+sudo bash packaging/install.sh --no-nginx     # solo servicio, helpers y sudoers
 ```
 
-El instalador:
+`install.sh` (raíz del repo) es el punto de entrada oficial:
 
-1. Copia los cinco binarios a `/usr/local/bin`.
-2. Crea el usuario de servicio `nas-web` y `/var/lib/nas` (0750).
-3. Genera `/etc/nas-web.env` (0600) con secreto aleatorio y hash SHA-256
-   de la contraseña solicitada por consola.
-4. Instala y habilita `nas-web.service` endurecido.
-5. Instala `/etc/sudoers.d/nas-web` (validado con `visudo -c`) limitado a
-   `systemctl`, `smbstatus`, `testparm`, `realm` y operaciones de staging.
-6. Configura el host virtual de Nginx con **`proxy_pass` a 127.0.0.1:8080**,
-   TLS, CSP y límite de subida de 512 MB (respaldando la configuración previa).
+1. Instala dependencias de compilación y la toolchain estable de Rust si falta.
+2. Clona o actualiza `/opt/nas_debian` (política opcional de tags firmadas).
+3. Ejecuta `cargo build --release --locked --workspace`.
+4. Copia `nas`, `nas-web`, `nas-tui`, `nasctl` y `nas-dev` a `/usr/local/bin`.
+5. Delega en `packaging/install.sh`, que:
+   - crea el usuario de servicio `nas-web` y `/var/lib/nas` (0750);
+   - genera `/etc/nas-web.env` (0600) con secreto aleatorio y hash SHA-256;
+   - instala y habilita `nas-web.service` endurecido;
+   - instala los helpers `nas-samba-apply`, `nas-share-dir`, `nas-share-acl`,
+     `nas-accounts` y `nas-backup-manage`;
+   - escribe `/etc/sudoers.d/nas-web-rust` (validado con `visudo -cf`);
+   - configura Nginx con **`proxy_pass` a 127.0.0.1:8080**, TLS, CSP y 512 MB
+     de subida, respaldando la configuración previa.
 
 ## 4. Variables de entorno (`/etc/nas-web.env`)
 
@@ -55,11 +61,10 @@ El instalador:
 ## 5. Cutover A/B
 
 ```text
-/opt/nas_debian/
-├── releases/
-│   ├── 0.1.0/        ← panel PHP actual
-│   └── 0.2.0/        ← panel Rust
-└── current -> releases/0.2.0
+/opt/nas_debian/          ← fuente clonada (usada por updater.sh)
+/usr/local/bin/nas-web     ← binario activo
+/etc/systemd/system/nas-web.service
+/etc/nginx/sites-available/nas-web
 ```
 
 1. Publicar la release Rust en `releases/<versión>` (tarball verificado con
@@ -68,25 +73,24 @@ El instalador:
 3. `nas-web.service` usa binarios de `/usr/local/bin` (independientes de la
    release), por lo que el cambio de panel se hace con Nginx:
    - **Rust**: `proxy_pass http://127.0.0.1:8080` (`packaging/nginx-nas-web.conf`).
-   - **PHP**: `fastcgi_pass unix:/run/php/php-fpm-nas.sock` (configuración previa).
+   - **PHP (retirado)**: `fastcgi_pass` ya no se usa; solo existe en los respaldos de rollback.
 4. `nginx -t && systemctl reload nginx`.
 
-## 6. Rollback al panel PHP
+## 6. Rollback del retiro (solo emergencia)
+
+El retiro de F7 conserva todo lo necesario en `/root/nas-deploy-backup/retire-<fecha>/`:
 
 ```bash
-# 1. Restaurar el host virtual respaldado por el instalador
-sudo cp -a /etc/nginx/sites-available/nas-web.bak.<fecha> /etc/nginx/sites-available/nas-web
-sudo nginx -t && sudo systemctl reload nginx
-
-# 2. Detener el backend Rust (opcional, libera 8080)
-sudo systemctl disable --now nas-web.service
-
-# 3. Verificar el panel PHP
-curl -k -I https://127.0.0.1/login
+BK=/root/nas-deploy-backup/retire-<fecha>
+sudo tar -xzf "$BK/www-nas-web.tar.gz" -C /var/www
+sudo install -m 0440 "$BK/sudoers-nas-web" /etc/sudoers.d/nas-web
+sudo install -m 0644 "$BK/nas-web.conf" /etc/php/8.4/fpm/pool.d/nas-web.conf
+sudo systemctl reload php8.4-fpm
+# restaurar el sitio nginx con fastcgi desde nginx-before-cutover-*.conf
 ```
 
 Los datos son compatibles: `nas-web` usa el mismo `/var/lib/nas/nas.sqlite`
-(tablas `web_users`, `web_sessions`, `web_audit`) y no borra nada del stack PHP.
+y no borra nada del stack anterior.
 
 ## 7. Checklist de verificación tras el cutover
 
@@ -96,15 +100,20 @@ Los datos son compatibles: `nas-web` usa el mismo `/var/lib/nas/nas.sqlite`
 | Salud del backend | `curl -fsS http://127.0.0.1:8080/healthz` |
 | Login y sesión | `curl -k -i -X POST -d 'username=admin&password=…' https://<host>/login` |
 | API | `curl -k -H 'Cookie: nas_session=…' https://<host>/api/metrics` |
-| Vistas | `https://<host>/dashboard`, `/shares`, `/files`, `/backups`, `/terminal` |
+| Vistas (14) | `/dashboard`, `/files`, `/shares`, `/users`, `/backups`, `/storage`, `/terminal`, `/logs`, `/domain`, `/services`, `/networking`, `/applications`, `/updates`, `/diagnostics` |
 | Respaldos | `nas backup list` y `nas backup run <tarea> --dry-run` |
 | Auditoría | `nas audit verify` y `https://<host>/audit` |
 | Rollback probado | restaurar sitio PHP y validar `/login` |
 
-## 8. Endurecimiento pendiente
+## 8. Endurecimiento aplicado y pendientes
 
-La unidad usa `NoNewPrivileges=no` porque el panel invoca `sudo -n` para
-`systemctl`, `realm` y `smbstatus`. Para activar `NoNewPrivileges=yes` hay que
-sustituir esas llamadas por un helper privilegiado (`nas-agent`) con acciones
-fijas, igual que el patrón `nas-terminal` del stack anterior. Está planificado
-como mejora posterior a F6.
+`nas-web.service` corre con `ProtectSystem=yes`, `PrivateTmp`, `NoNewPrivileges=no`
+(necesario para `sudo -n` de los helpers), `CapabilityBoundingSet` acotado y
+`ReadWritePaths` restringido a estado, datos, helpers y configuración.
+
+Mejoras pendientes (posteriores a F7):
+
+- Sustituir las llamadas `systemctl` directas restantes por acciones del futuro
+  `nas-agent`, lo que permitiría `NoNewPrivileges=yes`.
+- Portar `deploy.sh`/`uninstall.sh` (ola B) para que el aprovisionamiento sea
+  también nativo en Rust.
