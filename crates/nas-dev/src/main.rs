@@ -1048,7 +1048,7 @@ fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> SyncPlan {
                 "-a".into(),
                 "--delete".into(),
                 "--exclude=data/".into(),
-                format!("{stage}/web/"),
+                format!("{stage}/crates/nas-web/"),
                 format!("{}/", host.web),
             ],
         ),
