@@ -285,6 +285,7 @@ async fn endpoints_del_contrato_existen_y_no_son_501() {
 
     let mut failures = Vec::new();
     for path in list.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let path = &path.replace(":id", "zzqa_probe");
         let (mut status, mut body) = call(&app, "GET", path, &session).await;
         if status == StatusCode::METHOD_NOT_ALLOWED || status == StatusCode::NOT_FOUND {
             let (post_status, post_body) = call(&app, "POST", path, &session).await;
