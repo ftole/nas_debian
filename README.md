@@ -73,7 +73,7 @@ El sistema aprovecha al máximo el rendimiento nativo del kernel de Debian 13 en
 - **Almacenamiento Inteligente:** `ext4` transaccional anti-apagón para NAS y `Btrfs` con compresión `zstd:3` + scrub mensual para respaldos.
 - **Samba 4 con VFS Avanzado:** Módulos `acl_xattr`, `streams_xattr` y `full_audit` para emular ADS de Windows, permitir concurrencia masiva en Office y registrar operaciones.
 - **Descubrimiento Moderno WSDD2:** Los clientes Windows 10/11 ven el NAS al instante en el Explorador de Red sin protocolos antiguos inseguros.
-- **Panel Web MVC 100% Offline:** Nginx-light con PHP-FPM en modo `pm = ondemand` (~0 MB de RAM en reposo) y base de datos SQLite WAL (`/var/lib/nas/nas.sqlite`).
+- **Panel Web 100% Offline (Rust):** `nas-web.service` (axum) servido por Nginx con `proxy_pass` (~0 MB en reposo), assets embebidos y base SQLite WAL (`/var/lib/nas/nas.sqlite`).
 
 *(Consulta el inventario componente por componente en [Tecnologías Usadas](docs/tecnologias.md)).*
 
@@ -184,128 +184,71 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL WORKGROUP SRV
 
 ---
 
-## 🪟 Asistente de Administración Remota en Windows (`nas_admin.bat` / `nas_admin.py`)
+## 🪟 Administración Remota desde Windows
 
-Para administrar, desplegar y monitorear el servidor remotamente desde cualquier equipo Windows (mediante consola PowerShell, CMD o directamente con doble clic) sin preocuparse por dependencias de Python ni configuraciones manuales de entorno:
+La plataforma activa se administra con `nasctl` (inventario multi-host) y `nas`
+sobre OpenSSH, o con el panel web:
 
-### Lanzador Automatizado Oficial `nas_admin.bat` (Recomendado)
-El archivo `nas_admin.bat` gestiona de manera transparente todo el entorno de ejecución:
-1. **Detección inteligente de Python 3:** Localiza automáticamente el intérprete evaluando de forma sucesiva: el lanzador `py -3`, el ejecutable en la variable `PATH`, `python3`, el directorio de instalación estándar por usuario en `%LOCALAPPDATA%\Programs\Python\Python3*\python.exe` y las instalaciones a nivel de sistema en `%ProgramFiles%\Python`.
-2. **Entorno virtual aislado (`.venv`):** Si no existe el directorio `.venv`, lo crea automáticamente en la raíz del proyecto para aislar todas las librerías sin alterar el sistema operativo.
-3. **Instalación silenciosa de dependencias:** Comprueba las librerías requeridas y las instala automáticamente con `pip` desde `requirements-assistant.txt` (`paramiko`, `keyring`, `colorama`), garantizando cero errores de tipo `ModuleNotFoundError`.
-4. **Ejecución directa:** Abre el menú interactivo con navegación por colores o reenvía cualquier argumento recibido por línea de comandos.
+```powershell
+# Estado remoto por inventario (inventory.example.yaml)
+nasctl --inventory inventory.yaml status
 
-```cmd
-:: Iniciar el menú interactivo con doble clic o terminal:
-nas_admin.bat
+# Ejecución de un subcomando en todos los hosts del perfil
+nasctl --inventory inventory.yaml exec -- nas status
 
-:: Ejecutar acciones directas por línea de comandos:
-nas_admin.bat status      :: Chequeo de salud del servidor y recursos
-nas_admin.bat deploy      :: Iniciar asistente interactivo de despliegue remoto
-nas_admin.bat update      :: Sincronizar y actualizar versión en el servidor
-nas_admin.bat services    :: Gestionar demonios (Samba, Nginx, PHP, WSDD2)
-nas_admin.bat logs        :: Monitorear bitácoras del sistema y respaldos
-nas_admin.bat console     :: Abrir consola SSH interactiva directa
-nas_admin.bat config      :: Configurar credenciales y probar conexión
-nas_admin.bat uninstall   :: Desinstalación completa (requiere confirmación)
+# Panel web
+start https://10.10.1.222/
 ```
 
-### Invocación Manual de `nas_admin.py`
-Si operas en Linux o deseas invocar Python directamente en Windows:
-```bash
-# 1. Instalar dependencias requeridas
-pip install -r requirements-assistant.txt
+Los antiguos `nas_admin.bat` / `nas_admin.py` fueron **retirados en la fase F7** y
+solo se conservan en el historial de Git; su funcionalidad queda cubierta por
+`nasctl` + `nas` y por el panel web.
 
-# 2. Ejecutar asistente interactivo
-python nas_admin.py
-
-# 3. Invocar comandos directos
-python nas_admin.py status
-python nas_admin.py deploy
-```
 
 ---
 
-## 🧪 Pruebas Remotas y Diagnóstico Automatizado
-
-El proyecto incluye una suite interactiva y automatizada para realizar pruebas remotas continuas contra una máquina de pruebas Debian 13 desde Windows (PowerShell/CMD) o Bash/Linux.
-
-### Configuración Rápida (`.env`)
-
-Copia la plantilla `.env.example` y define los parámetros de conexión de tu máquina de pruebas:
+## 🧪 Pruebas y Verificación
 
 ```bash
-cp .env.example .env
+# Workspace Rust
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+
+# Contrato de paridad del panel (IDs, clases, endpoints y hashes de assets)
+python3 scripts/parity_extract.py --check
+
+# Auditoría de interfaz (estática; en vivo requiere credenciales)
+python3 scripts/qa_ui_audit.py --static
+
+# Empaquetado (systemd, nginx, instalador y sudoers)
+bash packaging/verify.sh
 ```
 
-Variables disponibles en `.env`:
-- `NAS_TEST_IP`: Dirección IP o host del servidor remoto Debian 13.
-- `NAS_TEST_PORT`: Puerto SSH (por defecto 22).
-- `NAS_TEST_USER`: Usuario con acceso sudo (ej. `sistemas`).
-- `NAS_TEST_PASSWORD`: Contraseña del usuario SSH.
-- `NAS_ROOT_PASSWORD`: Contraseña de root/sudo.
-
-*Si `.env` no existe, el asistente interactivo te solicitará cada dato en el primer inicio, probará la conexión y lo creará automáticamente.*
-
-### Ejecución de Pruebas
-
-```bash
-# En Windows o con Python 3:
-python test_remote.py
-
-# En Bash / Linux / WSL:
-bash test_remote.sh
-```
-
-### Acciones Directas por CLI
-
-Puedes ejecutar pruebas específicas sin ingresar al menú interactivo:
-
-```bash
-python test_remote.py install     # Despliegue limpio y verificación de servicios
-python test_remote.py web         # Auditoría HTTP->HTTPS, SSL, HSTS, CSRF y API
-python test_remote.py samba       # Comprobación SMB y registro full_audit
-python test_remote.py backups     # Snapshots con deduplicación por hardlinks
-python test_remote.py update      # Prueba de actualizador y rollback
-python test_remote.py uninstall   # Desinstalación y verificación de limpieza
-python test_remote.py suite       # Batería completa End-to-End con reporte tabular
-python test_remote.py status      # Diagnóstico en vivo de recursos y servicios
-python test_remote.py console     # Consola SSH interactiva directa
-```
-
----
+Las suites remotas interactivas (`test_remote.py`, `test_remote.sh`) y el
+asistente `nas_admin.*` fueron **retirados en F7**; su cobertura se trasladó a
+los tests Rust, al contrato de paridad y a `nasctl`.
 
 ## 📂 Estructura del Repositorio
 
 ```text
 nas_debian/
-├── install.sh             -> Instalador remoto oficial y gestor CLI `nas`
-├── nas_admin.bat          -> Lanzador automatizado para Windows (gestiona Python y .venv)
-├── nas_admin.py           -> Asistente de administración remota interactiva y CLI
-├── test_remote.py         -> Suite interactiva y CLI de pruebas remotas en Python
-├── test_remote.sh         -> Lanzador y suite de pruebas remotas en Bash
-├── .env.example           -> Plantilla documentada de credenciales para pruebas
-├── requirements-assistant.txt -> Dependencias del asistente Windows (paramiko, keyring, colorama)
-├── docs/                  -> Documentación técnica completa y guías operativas
-│   ├── assets/            -> Diagramas vectoriales SVG del sistema
-│   ├── arquitectura.md    -> Arquitectura detallada, capas y flujo de procesos
-│   ├── caracteristicas.md -> Capacidades del NAS, Office/Excel y panel web
-│   ├── diseno.md          -> Sistema de diseño Slate UI, tokens y UX
-│   ├── operacion_mantenimiento.md -> Operación diaria, backups y checklist
-│   ├── problemas_soluciones.md    -> Solución de problemas y modos de fallo FMEA
-│   ├── seguridad.md       -> Modelo de seguridad y blindaje en profundidad
-│   └── tecnologias.md     -> Cuadro maestro y justificación técnica
-├── src/
-│   ├── asistente.sh       -> Asistente visual TUI (menú principal)
-│   ├── core/              -> Motores de despliegue, actualización y desinstalación
-│   ├── lib/               -> Librerías auxiliares (colores, entorno, discos)
-│   └── modules/           -> Módulos del asistente (shares, backups, users, etc.)
-├── web/                   -> Panel web nativo MVC en PHP 8 (Nginx + PHP-FPM)
-├── tests/                 -> Pruebas automatizadas (BATS, pytest y PHP CLI)
-└── AGENTS.md              -> Contexto técnico maestro y reglas de ingeniería
+├── install.sh             -> Instalador oficial (toolchain Rust + build + packaging)
+├── Cargo.toml             -> Workspace Rust
+├── crates/
+│   ├── nas-core/          -> Configuración, rutas, errores y contrato
+│   ├── nas-exec/          -> Ejecución segura (argv, sudo, timeout, redacción)
+│   ├── nas-engine/        -> Almacenamiento, Samba, respaldos, dominio, diagnósticos
+│   ├── nas-cli/           -> Comando `nas` (ANSI y --json)
+│   ├── nas-web/           -> Panel axum + plantillas portadas + assets embebidos
+│   ├── nas-tui/           -> Asistente de terminal (ratatui)
+│   └── nasctl/, nas-dev/  -> Multi-host e inspección de desarrollo
+├── packaging/             -> Unidad systemd, nginx, helpers privilegiados e instalador
+├── scripts/               -> Contrato de paridad, auditoría UI y retiro legacy
+├── src/core/, src/lib/    -> Motor Bash de despliegue/desinstalación (ola B pendiente)
+├── tests/parity/          -> Contrato congelado (IDs, clases, endpoints y hashes)
+├── legacy/                -> Panel PHP, whiptail, CLI PHP y utilidades Python retiradas
+└── docs/                  -> Documentación técnica y operativa
 ```
-
----
 
 ## ⚖️ Licencia
 
