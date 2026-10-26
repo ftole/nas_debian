@@ -363,6 +363,7 @@ mod tests {
             ram_used_gb: 1.0,
             ram_usage_pct: 12.5,
             server_time: "2026-01-01 00:00:00".into(),
+            server_timestamp: 0,
             timezone: "UTC".into(),
             timezone_abbr: "UTC".into(),
             timezone_offset: 0,
