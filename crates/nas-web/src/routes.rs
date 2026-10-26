@@ -3384,3 +3384,222 @@ pub async fn group_delete(
         Err(error) => server_error(&error),
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct BackupTestBody {
+    #[serde(default)]
+    pub proto: String,
+    #[serde(default)]
+    pub ip: String,
+    #[serde(default)]
+    pub share: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BackupIdBody {
+    pub id: String,
+}
+
+fn run_backup_helper(args: &[&str], password: Option<&str>) -> Result<String, String> {
+    let mut spec = nas_exec::CommandSpec::new("/usr/local/sbin/nas-backup-manage")
+        .args(args.iter().map(|arg| (*arg).to_string()))
+        .sudo(nas_exec::SudoMode::Passwordless)
+        .timeout(std::time::Duration::from_secs(60));
+    if let Some(password) = password {
+        spec = spec.stdin_secret(nas_exec::SecretInput::new(password));
+    }
+
+    let output = Runner::new()
+        .run(&spec)
+        .map_err(|error| error.to_string())?;
+    if output.is_success() {
+        Ok(output.stdout)
+    } else {
+        Err(if output.stderr.is_empty() {
+            output.stdout
+        } else {
+            output.stderr
+        })
+    }
+}
+
+fn stage_backup_files(
+    spec: &nas_engine::backup_spec::BackupSpec,
+    proto: nas_engine::backup_spec::Proto,
+) -> Result<(), String> {
+    let dir = std::path::Path::new("/var/lib/nas/staging");
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let id = spec.id.trim();
+
+    std::fs::write(
+        dir.join(format!("nas_backup_{id}.sh")),
+        spec.render_runner(proto),
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::write(
+        dir.join(format!("nas_backup_{id}.cron")),
+        spec.render_cron(),
+    )
+    .map_err(|error| error.to_string())?;
+    let cred = spec.render_cred(proto);
+    if !cred.is_empty() {
+        std::fs::write(dir.join(format!("nas_backup_{id}.cred")), cred)
+            .map_err(|error| error.to_string())?;
+    } else {
+        let _ = std::fs::remove_file(dir.join(format!("nas_backup_{id}.cred")));
+    }
+    Ok(())
+}
+
+async fn install_backup(
+    state: AppState,
+    headers: HeaderMap,
+    body: nas_engine::backup_spec::BackupSpec,
+    actor_action: &'static str,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let proto = match body.validate() {
+        Ok(proto) => proto,
+        Err(error) => return error_response(error),
+    };
+    let id = body.id.trim().to_string();
+
+    if let Err(error) = stage_backup_files(&body, proto) {
+        return server_error(&error);
+    }
+
+    let helper_id = id.clone();
+    let result =
+        tokio::task::spawn_blocking(move || run_backup_helper(&["install", &helper_id], None))
+            .await
+            .unwrap_or_else(|_| Err("instalación interrumpida".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, actor_action, &id, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(format!(
+                "Tarea [{id}] programada"
+            )))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Crea una tarea de respaldo.
+pub async fn backup_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
+) -> Response {
+    install_backup(state, headers, body, "backup_create").await
+}
+
+/// Actualiza (reinstala) una tarea de respaldo.
+pub async fn backup_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
+) -> Response {
+    install_backup(state, headers, body, "backup_update").await
+}
+
+/// Elimina una tarea de respaldo (conserva los snapshots).
+pub async fn backup_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<BackupIdBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if body.id.is_empty()
+        || !body
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return bad_request("identificador inválido");
+    }
+
+    let id = body.id.clone();
+    let result = tokio::task::spawn_blocking(move || run_backup_helper(&["delete", &id], None))
+        .await
+        .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+
+    match result {
+        Ok(_) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_delete", &body.id, "SUCCESS", "");
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Tarea eliminada",
+            ))
+            .into_response()
+        }
+        Err(error) => server_error(&error),
+    }
+}
+
+/// Prueba la conectividad del origen de una tarea.
+pub async fn backup_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<BackupTestBody>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+
+    let proto = body.proto.clone();
+    let host = body.ip.clone();
+    let target = if body.proto == "cifs" {
+        body.share.clone()
+    } else {
+        body.path.clone()
+    };
+    let port = body.port.unwrap_or(22).to_string();
+    let user_name = body.user.clone();
+    let password = body.password.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        run_backup_helper(
+            &["test", &proto, &host, &target, &port, &user_name],
+            Some(&password),
+        )
+    })
+    .await
+    .unwrap_or_else(|_| Err("prueba interrumpida".to_string()));
+
+    match result {
+        Ok(output) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "output": output }),
+            "Conexión verificada",
+        ))
+        .into_response(),
+        Err(error) => server_error(&error),
+    }
+}
