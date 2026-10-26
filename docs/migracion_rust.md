@@ -14,12 +14,15 @@
 | **F2** | Respaldos, actualizaciones firmadas, despliegue, almacenamiento y usuarios | ✅ CLI completa (deploy/update con guardas) |
 | **F3** | `nas-web` (axum): API completa, vistas HTML, terminal, auditoría y ZIP | ✅ **Completado** |
 | **F4** | TUI (`ratatui`) con navegación, acciones y explorador | ✅ **Completado** |
-| **F5** | `nasctl` con ejecución remota sobre releases firmados | ⏳ Pendiente |
+| **F5** | `nasctl` con ejecución remota sobre releases firmados | ✅ **Completado** |
 | **F6** | Empaquetado, systemd endurecido, Nginx `proxy_pass`, cutover y rollback | ✅ **Completado** |
-| **F7** | Retirada escalonada del stack anterior | 🟡 Herramientas y plan listos (`nas migrate status`, `scripts/retire-legacy.sh`); ejecución **bloqueada hasta validar el cutover** |
+| **F7** | Retirada escalonada del stack anterior | 🟡 **Ola A completada** (panel PHP, CLI PHP, whiptail y Python retirados del servidor). **Ola B pendiente**: `deploy.sh`, `uninstall.sh`, `updater.sh` y BATS asociados |
 
-Mientras no se complete F7, **el sistema en producción sigue siendo el actual**
-(PHP + Bash + Python). El workspace Rust convive en `crates/` sin interferir.
+El sistema en producción (`10.10.1.222`) ejecuta **la plataforma Rust** desde el
+cutover de F6 y el retiro de F7 (ola A): `nas-web.service` sirve el panel con
+`proxy_pass`, los binarios `nas`/`nas-tui` están instalados y el material anterior
+vive en `legacy/`. El motor Bash (`src/core/deploy.sh`, `uninstall.sh`, `updater.sh`)
+permanece vigente para el aprovisionamiento hasta completar la ola B.
 
 ## 2. Estructura del workspace
 
@@ -348,7 +351,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 
 | Origen actual | Destino Rust | Estado |
 | :--- | :--- | :--- |
-| `bin/nas-cli` (PHP) | `crates/nas-cli` | 🟡 `status`, `network`, `services`, `diag`, `audit verify` |
+| `bin/nas-cli` (PHP) | `crates/nas-cli` | ✅ Retirado; CLI Rust completa (estado, almacenamiento, Samba, respaldos, usuarios, dominio, auditoría) |
 | `src/lib/helpers.sh` (detección de entorno) | `nas-core::config` | ✅ rol, workgroup y rutas |
 | Parsers repartidos en PHP/Bash/Python | `nas-engine::parsers` | ✅ `smb.conf`, `testparm`, `lsblk -J`, `ip -j`, `ss`, `btrfs scrub`, `resolv.conf` |
 | `getSystemMetrics` (PHP) | `nas-engine::status` | ✅ |
@@ -357,9 +360,9 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | Tareas de respaldo (`backup_*.sh` del asistente) | `nas-engine::tasks` | ✅ lectura, validación y plan |
 | `test_remote.py` (SSH/SFTP) | `nas-ssh` + `nas-dev` | ✅ transporte OpenSSH, upload y sincronización |
 | `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
-| `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ⏳ F3 |
-| `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ⏳ F4 |
-| `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | ⏳ F2 |
+| `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ✅ Portado, verificado y retirado a `legacy/web` |
+| `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ✅ Sustituido y retirado a `legacy/` |
+| `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | 🟡 `update` nativo y `updater.sh` recompila Rust; `deploy`/`uninstall` pendientes (ola B) |
 
 ## 15. Seguridad implementada
 
@@ -381,10 +384,11 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 
 ## 16. Siguientes pasos
 
-F2 (motor y CLI) queda cubierta. Lo pendiente es la capa de servicio:
+Capa de servicio completada (F3–F6) y ola A de F7 ejecutada. Pendiente:
 
-1. **F4 — `nas-tui`**: asistente `ratatui` con los 13 módulos.
-2. **F4 — `nas-tui`**: ratatui con los 13 módulos del asistente.
-3. **F5 — `nasctl` remoto**: ejecución sobre releases firmados por SSH.
-4. **F6 — empaquetado**: `.deb`, unidades systemd endurecidas y cutover.
-5. **F7 — retirada** de PHP/Bash/Python.
+1. **Ola B — `nas deploy` / `nas uninstall`**: portar `deploy.sh` y `uninstall.sh`
+   con paridad verificada en servidor limpio (`docs/retiro_legacy.md` §7).
+2. **Firma de releases**: tag firmada, manifiesto Ed25519 y job de publicación.
+3. **`nas-agent`**: sustituir llamadas `systemctl` del panel por acciones fijas
+   para poder activar `NoNewPrivileges=yes`.
+4. **Empaquetado `.deb`** (opcional) sobre `packaging/install.sh`.
