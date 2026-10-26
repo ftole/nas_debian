@@ -102,8 +102,22 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
         return *response;
     }
 
-    match tokio::task::spawn_blocking(|| collect_status(&Runner::new())).await {
-        Ok(metrics) => axum::Json(ApiResponse::ok(metrics, "Métricas del sistema")).into_response(),
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let metrics = collect_status(&runner);
+        let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
+        let payload = serde_json::json!({
+            "system": metrics,
+            "storage": storage,
+            "services": crate::legacy::service_rows(&runner),
+            "counts": crate::legacy::dashboard_counts(&paths),
+        });
+        payload
+    })
+    .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Métricas del sistema")).into_response(),
         Err(_) => server_error("no se pudieron recolectar las métricas"),
     }
 }
@@ -116,7 +130,22 @@ pub async fn network(State(state): State<AppState>, headers: HeaderMap) -> Respo
 
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || collect_network(&Runner::new(), &paths)).await {
-        Ok(overview) => axum::Json(ApiResponse::ok(overview, "Inventario de red")).into_response(),
+        Ok(overview) => {
+            let mut payload = serde_json::to_value(&overview).unwrap_or_default();
+            if let Some(interfaces) = payload
+                .get_mut("interfaces")
+                .and_then(|value| value.as_array_mut())
+            {
+                for interface in interfaces {
+                    let ipv4 = interface
+                        .get("ipv4")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    interface["ip"] = ipv4;
+                }
+            }
+            axum::Json(ApiResponse::ok(payload, "Inventario de red")).into_response()
+        }
         Err(_) => server_error("no se pudo recolectar el inventario de red"),
     }
 }
@@ -163,6 +192,7 @@ pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Respon
                         "write_list": share.write_list,
                         "comment": share.comment,
                         "scheme_name": scheme_name,
+                        "scheme": if share.guest_ok { 4 } else if share.read_only { 3 } else if !share.write_list.is_empty() { 2 } else { 1 },
                     })
                 })
                 .collect();
@@ -219,6 +249,7 @@ pub async fn users(State(state): State<AppState>, headers: HeaderMap) -> Respons
                     "full_name": user.full_name,
                     "uid": user.uid,
                     "shell": user.shell,
+                    "home": user.home,
                     "groups": member_of,
                     "is_admin": is_admin,
                     "is_superadmin": is_superadmin,
@@ -259,6 +290,10 @@ pub async fn groups(State(state): State<AppState>, headers: HeaderMap) -> Respon
                     "gid": group.gid,
                     "members": group.members,
                     "is_special": is_special,
+                    "is_master": matches!(
+                        group.name.as_str(),
+                        "grp_samba" | "grp_superadmin" | "grp_backups" | "grp_web"
+                    ),
                 })
             })
             .collect();
@@ -311,9 +346,14 @@ pub async fn files_list(
     };
     let path = query.path;
 
-    match tokio::task::spawn_blocking(move || root.list(&path)).await {
-        Ok(Ok(entries)) => {
-            axum::Json(ApiResponse::ok(entries, "Contenido del directorio")).into_response()
+    match tokio::task::spawn_blocking(move || {
+        let entries = root.list(&path)?;
+        Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
+    })
+    .await
+    {
+        Ok(Ok(payload)) => {
+            axum::Json(ApiResponse::ok(payload, "Contenido del directorio")).into_response()
         }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("listado interrumpido"),
@@ -661,11 +701,7 @@ pub async fn services(State(state): State<AppState>, headers: HeaderMap) -> Resp
         return *response;
     }
 
-    match tokio::task::spawn_blocking(|| {
-        nas_engine::services::collect(&Runner::new(), nas_engine::services::DEFAULT_SERVICES)
-    })
-    .await
-    {
+    match tokio::task::spawn_blocking(|| crate::legacy::service_rows(&Runner::new())).await {
         Ok(list) => axum::Json(ApiResponse::ok(list, "Estado de servicios")).into_response(),
         Err(_) => server_error("consulta de servicios interrumpida"),
     }
@@ -747,11 +783,36 @@ pub async fn diagnostics(State(state): State<AppState>, headers: HeaderMap) -> R
 
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
-        nas_engine::diagnostics::collect(&paths, &Runner::new())
+        let runner = Runner::new();
+        let checks = nas_engine::diagnostics::collect(&paths, &runner);
+        let services = crate::legacy::service_rows(&runner);
+        let active = services.iter().filter(|row| row["active"] == true).count();
+        let total = services.len();
+        let metrics = collect_status(&runner);
+        let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
+        let counts = crate::legacy::dashboard_counts(&paths);
+        let testparm_ok = runner
+            .run(&nas_exec::CommandSpec::new("testparm").arg("-s"))
+            .map(|output| output.is_success())
+            .unwrap_or(false);
+        serde_json::json!({
+            "overall_status": if active == total { "OK" } else { "Warning" },
+            "services_active": active,
+            "services_total": total,
+            "services": services,
+            "storage": storage,
+            "shares_count": counts["shares"],
+            "backups_count": counts["backups"],
+            "testparm_ok": testparm_ok,
+            "hostname": metrics.hostname,
+            "uptime": metrics.uptime,
+            "kernel": metrics.kernel,
+            "checks": checks,
+        })
     })
     .await
     {
-        Ok(checks) => axum::Json(ApiResponse::ok(checks, "Diagnóstico integral")).into_response(),
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Diagnóstico integral")).into_response(),
         Err(_) => server_error("diagnóstico interrumpido"),
     }
 }
@@ -769,10 +830,10 @@ pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Respo
             .into_iter()
             .map(|task| {
                 let last = last_snapshot(&task);
-                serde_json::json!({
-                    "task": task,
-                    "last_snapshot": last,
-                })
+                let mut row = crate::legacy::backup_row(&task);
+                row["task"] = serde_json::json!(task);
+                row["last_snapshot"] = serde_json::json!(last);
+                row
             })
             .collect::<Vec<_>>()
     })
@@ -905,11 +966,29 @@ pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Respo
 
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
-        nas_engine::storage::overview_for(&paths, &Runner::new())
+        let runner = Runner::new();
+        let overview = nas_engine::storage::overview_for(&paths, &runner)?;
+        let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
+        let disks: Vec<serde_json::Value> = disks
+            .iter()
+            .map(|disk| {
+                let mut row = serde_json::to_value(disk).unwrap_or_default();
+                let is_part = disk.fstype.as_deref().is_some_and(|fs| !fs.is_empty())
+                    || disk.name.chars().last().is_some_and(|c| c.is_ascii_digit());
+                row["type"] = serde_json::json!(if is_part { "part" } else { "disk" });
+                row["mount"] = serde_json::json!(disk.mountpoint.clone().unwrap_or_default());
+                row["children_count"] = serde_json::json!(0);
+                row
+            })
+            .collect();
+        Ok::<_, nas_core::NasError>(serde_json::json!({
+            "overview": overview,
+            "disks": disks,
+        }))
     })
     .await
     {
-        Ok(Ok(overview)) => axum::Json(ApiResponse::ok(overview, "Almacenamiento")).into_response(),
+        Ok(Ok(payload)) => axum::Json(ApiResponse::ok(payload, "Almacenamiento")).into_response(),
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("consulta de almacenamiento interrumpida"),
     }
@@ -957,7 +1036,30 @@ pub async fn domain_status(State(state): State<AppState>, headers: HeaderMap) ->
     }
 
     match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
-        Ok(status) => axum::Json(ApiResponse::ok(status, "Estado del dominio")).into_response(),
+        Ok(status) => {
+            let workgroup = std::fs::read_to_string("/etc/samba/smb.conf")
+                .ok()
+                .and_then(|text| {
+                    text.lines().find_map(|line| {
+                        line.trim()
+                            .strip_prefix("workgroup =")
+                            .map(str::trim)
+                            .map(str::to_string)
+                    })
+                })
+                .unwrap_or_else(|| "WORKGROUP".to_string());
+            let payload = serde_json::json!({
+                "status": if status.joined { "joined" } else { "not_joined" },
+                "workgroup": workgroup,
+                "message": if status.joined { "Equipo unido al dominio" } else { "Equipo no unido a un dominio" },
+                "joined": status.joined,
+                "realm": status.realm,
+                "domain": status.domain,
+                "sssd_active": status.sssd_active,
+                "details": status.details,
+            });
+            axum::Json(ApiResponse::ok(payload, "Estado del dominio")).into_response()
+        }
         Err(_) => server_error("consulta de dominio interrumpida"),
     }
 }
@@ -1673,6 +1775,13 @@ pub async fn logs(
                     let timestamp = parts.next().unwrap_or_default();
                     let unit = parts.next().unwrap_or("system");
                     let message = parts.next().unwrap_or(line);
+                    let status = if message.to_ascii_lowercase().contains("error")
+                        || message.to_ascii_lowercase().contains("fail")
+                    {
+                        "FAILED"
+                    } else {
+                        "SUCCESS"
+                    };
                     serde_json::json!({
                         "source": "system",
                         "unit": unit,
@@ -1680,7 +1789,15 @@ pub async fn logs(
                         "message": message,
                         "action": message,
                         "action_label": unit,
-                        "badge": "blue",
+                        "badge": if status == "FAILED" { "red" } else { "blue" },
+                        "target": unit,
+                        "status": status,
+                        "user": "sistema",
+                        "ip": "",
+                        "raw": line,
+                        "count": 1,
+                        "human": message,
+                        "level": if status == "FAILED" { "error" } else { "info" },
                     })
                 })
                 .collect();
@@ -1731,6 +1848,11 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
 
         let (mut users, groups) = nas_engine::users::load_local();
         users.retain(|user| !user.system);
+        let admin_members: std::collections::HashSet<String> = groups
+            .iter()
+            .filter(|group| matches!(group.name.as_str(), "sudo" | "grp_samba" | "grp_superadmin"))
+            .flat_map(|group| group.members.clone())
+            .collect();
         let groups: Vec<serde_json::Value> = groups
             .into_iter()
             .filter(|group| group.name.starts_with("grp_"))
@@ -1751,6 +1873,8 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
             .map(|user| {
                 let mut row = serde_json::Map::new();
                 row.insert("name".into(), serde_json::json!(user.name));
+                let is_admin = admin_members.contains(&user.name);
+                row.insert("is_admin".into(), serde_json::json!(is_admin));
                 for share in &parsed {
                     row.insert(
                         share.name.clone(),
@@ -1774,11 +1898,37 @@ pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) ->
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    axum::Json(ApiResponse::ok(
-        serde_json::json!({ "units": [] }),
-        "Unidades de almacenamiento",
-    ))
-    .into_response()
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        nas_engine::storage::overview_for(&paths, &Runner::new())
+    })
+    .await
+    {
+        Ok(Ok(overview)) => {
+            let unit = serde_json::json!({
+                "id": "principal",
+                "name": format!("Unidad Principal ({})", overview.path),
+                "path": overview.path,
+                "is_main": true,
+                "filesystem": overview.filesystem,
+                "total_gb": overview.total_gb,
+                "used_gb": overview.used_gb,
+                "free_gb": overview.free_gb,
+                "usage_percent": overview.usage_percent,
+            });
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "units": [unit] }),
+                "Unidades de almacenamiento",
+            ))
+            .into_response()
+        }
+        Ok(Err(_)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "units": [] }),
+            "Unidades de almacenamiento",
+        ))
+        .into_response(),
+        Err(_) => server_error("consulta de unidades interrumpida"),
+    }
 }
 
 /// Subvolúmenes Btrfs (vacío si el filesystem no es Btrfs).
@@ -1811,7 +1961,10 @@ pub async fn storage_scrub(State(state): State<AppState>, headers: HeaderMap) ->
     {
         Ok(Ok(text)) => {
             let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
-            axum::Json(ApiResponse::ok(status, "Estado de scrub")).into_response()
+            let mut payload = serde_json::to_value(&status).unwrap_or_default();
+            payload["success"] = serde_json::json!(true);
+            payload["output"] = serde_json::json!(text);
+            axum::Json(ApiResponse::ok(payload, "Estado de scrub")).into_response()
         }
         Ok(Err(error)) => server_error(&error),
         Err(_) => server_error("consulta de scrub interrumpida"),
@@ -1959,37 +2112,13 @@ pub async fn files_trash(State(state): State<AppState>, headers: HeaderMap) -> R
     };
 
     match tokio::task::spawn_blocking(move || root.trash_entries()).await {
-        Ok(Ok(items)) => {
-            let count = items.len();
-            let total: u64 = items.iter().map(|item| item.size).sum();
-            axum::Json(ApiResponse::ok(
-                serde_json::json!({
-                    "items": items,
-                    "count": count,
-                    "total_size": total,
-                    "total_size_formatted": format_size(total),
-                }),
-                "Papelera",
-            ))
-            .into_response()
-        }
+        Ok(Ok(items)) => axum::Json(ApiResponse::ok(
+            crate::legacy::trash_listing(&items),
+            "Papelera",
+        ))
+        .into_response(),
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("papelera interrumpida"),
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -2296,8 +2425,12 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
         serde_json::json!({
             "version": version["version"],
             "latest_version": version["version"],
+            "installed_commit": version["commit"],
+            "commit_date": version["date"],
             "has_updates": false,
-            "gpg_verified": false,
+            "channel": "dev",
+            "gpg_verified": version["gpg_verified"],
+            "release_notes": version["notes"],
             "commit": version["commit"],
         }),
         "Información de actualizaciones",
@@ -2356,14 +2489,22 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
         serde_json::json!({
             "samba": {
                 "active": active("smbd"),
+                "status": if active("smbd") { "activo" } else { "inactivo" },
                 "version": "4.x (Debian 13)",
                 "sessions": sessions,
                 "sessions_list": [],
                 "vfs_modules": "acl_xattr, streams_xattr",
             },
+            "wsdd2": {
+                "active": active("wsdd2"),
+                "nmbd_active": active("nmbd"),
+                "wsdd_active": active("wsdd2"),
+                "protocol": "WSD/LLMNR",
+            },
             "wsdd": { "active": active("wsdd2") },
             "web": {
                 "active": true,
+                "status": "activo",
                 "pool_mode": "ondemand",
                 "php_version": serde_json::Value::Null,
                 "memory_mb": 0,
