@@ -22,23 +22,25 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-# Tras la fase F7 el panel original vive en `legacy/web`.
-WEB = ROOT / "legacy" / "web" if (ROOT / "legacy" / "web").exists() else ROOT / "web"
 PARITY = ROOT / "tests" / "parity"
 
-LAYOUT = WEB / "templates" / "layout.php"
-LOGIN = WEB / "templates" / "login.php"
-APP_JS = WEB / "public" / "js" / "app.js"
+# Fase 7.2: el contrato se congela con fixtures propias y los assets del crate.
+FIXTURES = PARITY / "fixtures"
+ASSETS = ROOT / "crates" / "nas-web" / "assets"
+
+LAYOUT = FIXTURES / "layout.php"
+LOGIN = FIXTURES / "login.php"
+APP_JS = ASSETS / "js" / "app.js"
 
 ASSET_FILES = [
-    "public/css/app.css",
-    "public/js/app.js",
-    "public/js/vendor/xlsx.full.min.js",
-    "public/js/vendor/jszip.min.js",
-    "public/js/vendor/docx-preview.min.js",
-    "public/favicon.svg",
-    "templates/layout.php",
-    "templates/login.php",
+    "app.css",
+    "login.css",
+    "icons.svg",
+    "favicon.svg",
+    "js/app.js",
+    "js/vendor/xlsx.full.min.js",
+    "js/vendor/jszip.min.js",
+    "js/vendor/docx-preview.min.js",
 ]
 
 
@@ -166,7 +168,7 @@ def build_contract() -> dict:
 def build_hashes() -> str:
     lines = []
     for relative in ASSET_FILES:
-        path = WEB / relative
+        path = ASSETS / relative
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         size = path.stat().st_size
         shown = path.relative_to(ROOT).as_posix()
