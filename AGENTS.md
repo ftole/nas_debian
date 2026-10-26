@@ -52,7 +52,7 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `.env.example` | Plantilla Config | **Plantilla documentada de credenciales locales** para pruebas remotas en Debian 13. |
 | `requirements-assistant.txt` | Dependencias Python | Dependencias requeridas por el asistente de administración remota (`paramiko`, `keyring`, `colorama`). |
 | `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
-| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** con detección inteligente de entorno, protección de partición raíz, soporte de roles (`ARCHIVOS`, `BACKUP` o `ARCHIVOS_BACKUP`), formateo, Samba, Nginx + PHP-FPM y parches. |
+| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** (ola B pendiente de portar): detección de entorno, protección de partición raíz, roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), formateo, Samba, Nginx y parches de Debian 13. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
@@ -94,21 +94,21 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **Readahead Tuning udev (`60-nas-readahead.rules`)** | Subsistema de Bloques | Reglas udev persistentes para precarga de disco (`1024 KB` en SSD / `4096 KB` en HDD). | Aumenta el rendimiento sostenido en lecturas secuenciales pesadas a través de la red y agiliza las comparaciones diferenciales de `rsync`. |
 | **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
-| **Nginx-light + PHP-FPM ondemand + Slate UI** | Interfaz Web | Panel administrativo modular ultraligero sin servicios residentes pesados (gestión por pool ondemand). | Consumo despreciable de memoria en reposo (~0 MB), diseño espacioso Slate UI 100% offline (cero dependencias externas y cero Google Fonts). |
-| **Base de Datos SQLite Nativa (PDO)** | Almacenamiento Estructurado | SQLite en modo WAL (`/var/lib/nas/nas.sqlite`) sin demonios pesados residentes. | 0 MB de consumo de RAM en reposo; indexación ultrarrápida de auditoría, tareas, configuraciones e historial de comandos. |
+| **Rust + axum (`nas-web`) + Nginx `proxy_pass`** | Interfaz Web | Panel administrativo con las mismas 14 vistas y el mismo `app.js` del panel original, servido desde un binario único en `127.0.0.1:8080`. | Consumo despreciable en reposo (~0 MB), Slate UI 100% offline, assets embebidos con hash verificado y despliegue atómico de un solo binario. |
+| **Base de Datos SQLite Nativa (rusqlite)** | Almacenamiento Estructurado | SQLite en modo WAL (`/var/lib/nas/nas.sqlite`) con sesiones, auditoría, rate limiting e historial. | 0 MB de consumo en reposo; lecturas concurrentes y respaldo por copia del archivo. |
 | **Explorador de Archivos Drag-and-Drop** | Gestión de Almacenamiento Web | Módulo para explorar `/srv/nas` con subida interactiva y descarga ZIP al vuelo. | Transferencia bidireccional ágil entre equipos clientes Windows y el NAS directamente en el navegador, con permisos `0660` y pertenencia a `grp_samba`. |
 | **Visores de Ofimática 100% Offline (SheetJS + docx-preview + JSZip)** | Gestión de Archivos Web | Visualización en cliente de hojas de cálculo (`.xlsx`, `.xls`, `.ods`, `.csv`), documentos Word (`.docx`) y presentaciones PowerPoint (`.pptx`). | Cero consumo de CPU/RAM en el servidor, 100% privado y offline (sin conexión a internet, CDNs ni nubes externas), carga perezosa de librerías locales solo al previsualizar. |
 | **Terminal PTY Real (tmux + helper `nas-terminal`)** | Administración Web | Cada sesión web abre una sesión `tmux` propia ejecutada como el usuario autenticado mediante un helper root con lista blanca de acciones (`start`/`keys`/`capture`/`resize`/`kill`). | Terminal interactiva tipo Cockpit con soporte real de `sudo` (solicita contraseña), programas de pantalla completa y `Ctrl+C`, aislada por usuario y con directorio de inicio. |
 | **Gestión Avanzada de Discos (parted/LVM/Btrfs)** | Almacenamiento Web | Formateo y montaje en `/srv/nas`, creación de volúmenes LVM (PV/VG/LV) y subvolúmenes Btrfs desde el panel, con confirmación textual `SI-FORMATEAR`. | Aprovisionamiento de discos sin consola, con detección y protección estricta del disco del sistema operativo (`isOsDisk`). |
-| **PHP 8 MVC (Arquitectura Robusta)** | Backend API y Controladores | Servicios y controladores con ejecución estricta proc_open con array de argumentos. | Elimina vectores de inyección de comandos, ejecuta comprobaciones con privilegios acotados y ofrece lectura retrospectiva de bitácoras sin saturar la UI. |
-| **whiptail + Bash 5** | Interfaz Visual TUI | Asistente de terminal interactivo con detección automática de recursos y validaciones en vivo. | Gestión integral del servidor desde la consola local o sesiones SSH sin necesidad de interfaz gráfica X11. |
+| **`nas-exec` (ejecución segura)** | Backend y Helpers | Comandos con argv, allowlist, timeout, `env_clear()` y redacción de secretos; helpers root acotados (`nas-samba-apply`, `nas-share-acl`, `nas-accounts`, `nas-backup-manage`). | Elimina inyección de comandos y limita la escalada a acciones concretas autorizadas en `/etc/sudoers.d/nas-web-rust`. |
+| **`nas-tui` (ratatui)** | Interfaz Visual TUI | Asistente de terminal con dashboard, servicios, respaldos y diagnóstico. | Gestión integral desde consola local o SSH sin interfaz gráfica. |
 | **Control de Concurrencia con `flock`** | Programación de Tareas | Bloqueo por descriptor de archivo en `/var/lock/backup_<tarea>.lock`. | Garantiza la exclusión mutua de procesos impidiendo sobrecargas o escrituras simultáneas sobre una misma tarea. |
 | **Monitoreo de Umbrales de Espacio (`df -Pk`)** | Seguridad Operativa | Comprobación de capacidad previa al inicio de cada respaldo. | Emite alertas tempranas al superar el 85% de uso y cancela la copia si restan menos de 2 GB o se supera el 95%, evitando la corrupción por desbordamiento del filesystem. |
 | **`fstrim.timer`** | Mantenimiento para SSD | Tarea periódica de descarte de bloques no referenciados en almacenamiento flash. | Mantiene velocidades de escritura constantes y optimiza la vida útil de los dispositivos de estado sólido. |
 | **`logrotate` (`nas-backups`, `nas-deploy`)** | Mantenimiento de Bitácoras | Rotación semanal/mensual con directiva `copytruncate` y compresión `gzip`. | Mantiene controlados los registros de actividad evitando que saturen el espacio de almacenamiento. |
 | **WSDD2 con Override Systemd** | Descubrimiento de Red | Implementación ligera del protocolo Web Services Discovery y LLMNR. | Visibilidad instantánea en el explorador de red de Windows 10/11 sin activar protocolos obsoletos ni inseguros como NetBIOS broadcast o SMBv1. |
 | **ACLs POSIX (`setfacl`) con Herencia por Defecto** | Control de Acceso Granular | Configuración de permisos multi-grupo y reglas por defecto (`default ACL`) en carpetas compartidas. | Permite esquemas mixtos donde coexisten grupos con solo lectura y grupos con permisos de escritura exclusiva, garantizando que todo nuevo archivo herede los permisos correctos. |
-| **Lanzador de Administración Windows (`nas_admin.bat`)** | Administración y CLI Windows | Script Batch de arranque que autodetecta Python en múltiples rutas estándar (py launcher, PATH, LocalAppData, ProgramFiles), inicializa `.venv` e instala dependencias (`requirements-assistant.txt`). | Elimina errores de dependencias o configuración en clientes Windows; permite ejecutar el asistente remoto con doble clic o desde terminal sin preparación manual previa. |
+| **`nasctl` (multi-host)** | Administración Remota | Ejecución sobre inventario (`inventory.yaml`) con perfiles dev/prod y transporte OpenSSH. | Sustituye al asistente Python retirado, con validación de host, claves dedicadas y ejecución paralela controlada. |
 | **Rate Limiting Global en SQLite (`api_rate_limits`)** | Ciberseguridad Web y API | Limitación de peticiones sensibles y autenticación en `/var/lib/nas/nas.sqlite` con ventanas temporales y purga periódica. | Mitigación robusta contra fuerza bruta, ataques DoS y enumeración de usuarios sin requerir Redis ni demonios externos en memoria. |
 | **Hardening de Cabeceras HTTP Nginx (CSP, HSTS, X-Frame)** | Seguridad Web | Directivas de seguridad HTTP estrictas (`Content-Security-Policy`, `HSTS`, `X-Content-Type-Options`, `X-Frame-Options`, `Permissions-Policy`). | Blindaje contra cross-site scripting (XSS), secuestro de clics (clickjacking), inyección de contenido y degradación de protocolo SSL. |
 
@@ -233,10 +233,11 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
 1. **Visibilidad en Red Windows (WSDD2):**
    * *Problema:* `wsdd2` en Debian 13 usa `DynamicUser=true` y falla al ejecutar `testparm` para leer `smb.conf`.
    * *Solución:* Override en `/etc/default/wsdd2` y `/etc/systemd/system/wsdd2.service.d/override.conf` con `WSDD2_OPTS="-N <NETBIOS> -G <WORKGROUP> -H <NETBIOS>"`.
-2. **Entorno Web Nativo Ultraligero (Nginx-light + PHP-FPM ondemand + Slate UI):**
-   * *Arquitectura:* Aplicación MVC en PHP 8 (`/var/www/nas-web`) servida por Nginx-light y pool PHP-FPM en modo `pm = ondemand`. Base de datos SQLite integrada en `/var/lib/nas/nas.sqlite` con WAL mode (0 MB en reposo).
-   * *Estilos:* 100% Offline con diseño moderno y sereno Slate UI, tipografía nativa del sistema (`system-ui`), espaciado no saturado y 36 iconos SVG incrustados; cero llamadas a CDNs y desacoplamiento total de Cockpit.
-   * *Seguridad:* Invocación estricta de utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`) mediante `proc_open` con listas de argumentos y archivo sudoers acotado (`/etc/sudoers.d/nas-web`).
+2. **Panel Web en Rust (`nas-web` + axum + Slate UI):**
+   * *Arquitectura:* Binario único servido por `nas-web.service` en `127.0.0.1:8080` y publicado por Nginx con `proxy_pass`. Las vistas se generaron desde `layout.php`/`login.php` y los assets (`app.js`, CSS, vendor) se sirven embebidos byte a byte.
+   * *Estilos:* 100% Offline con Slate UI, tipografía nativa del sistema (`system-ui`), 36 iconos SVG incrustados; cero CDNs.
+   * *Seguridad:* `nas-exec` con argv/allowlist/timeout, helpers root acotados y `/etc/sudoers.d/nas-web-rust` validado con `visudo -cf`; unidad systemd endurecida (`ProtectSystem`, `PrivateTmp`, `CapabilityBoundingSet`, `ReadWritePaths`).
+   * *Paridad:* contrato en `tests/parity/`, pruebas `crates/nas-web/tests/parity.rs` y comparación en vivo PHP vs Rust previa al retiro.
 3. **Optimización y Hardening del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
    * Ampliación de descriptores inotify (`max_user_watches = 524288`), keepalive TCP SMB (`tcp_keepalive_time = 120`), retención de caché VFS (`vfs_cache_pressure = 30`) y control estricto de memoria sucia (`vm.dirty_bytes = 268435456`, `dirty_background_bytes = 67108864`).
    * Ciberseguridad de red y memoria: anti-spoofing RFC 3704 (`rp_filter = 1`), mitigación SYN flood (`tcp_syncookies = 1`), desactivación total de IPv6 en el entorno (`net.ipv6.conf.*.disable_ipv6 = 1` y UFW `IPV6=no`), ocultamiento de memoria del kernel (`kptr_restrict = 2`), restricción de buffer de logs (`dmesg_restrict = 1`) y bloqueo de ptrace no privilegiado (`yama.ptrace_scope = 2`).
@@ -253,7 +254,7 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
    * Habilitación de `fstrim.timer` para optimización de bloques flash y rotación programada con compresión mediante `logrotate` en `/etc/logrotate.d/nas-backups` y `nas-deploy`.
 
 > [!NOTE]
-> Las directivas globales `set -e` fueron removidas de los módulos importables (`source`) como `updater.sh` para prevenir crashes abruptos del TUI al cancelar diálogos de `whiptail`.
+> Las directivas globales `set -e` se mantienen fuera de los módulos importables (`source`) como `updater.sh` para evitar abortos abruptos del motor al integrarse con otros scripts.
 
 ---
 
@@ -279,15 +280,20 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SR
 printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-SRV admin - ARCHIVOS_BACKUP
 ```
 
-### Administración Remota desde Windows:
-```cmd
-:: Lanzador de administración interactiva (gestiona Python y dependencias automáticamente):
-nas_admin.bat
+### Administración Remota desde Windows / Linux:
+```powershell
+# Estado remoto por inventario (ver inventory.example.yaml)
+nasctl --inventory inventory.yaml status
 
-:: Ejecución de acciones directas desde Windows:
-nas_admin.bat status
-nas_admin.bat deploy
+# Ejecutar un subcomando en todos los hosts del perfil
+nasctl --inventory inventory.yaml exec -- nas status
+
+# Panel web
+start https://10.10.1.222/
 ```
+
+> `nas_admin.bat`, `nas_admin.py` y `test_remote.*` fueron retirados en F7; su
+> cobertura vive ahora en `nasctl`, el CLI Rust y la suite de pruebas.
 
 > [!IMPORTANT]
 > Por seguridad, `deploy.sh` **aborta** si el disco dedicado está en uso (montado, PV de LVM o miembro de RAID); `--force` solo confirma sin preguntar (sin saltar chequeos). Para formatear un disco en uso se exige `--ignore-in-use` con confirmación textual explícita (`SI-FORMATEAR`). La clave puede enviarse por `stdin` usando `-` en su lugar (evita exponerla en `ps`).
