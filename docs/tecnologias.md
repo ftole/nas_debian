@@ -9,7 +9,7 @@ Este documento recopila de forma detallada y ordenada todas las tecnologías, li
 En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermedias o servicios pesados en Java o Electron, este servidor apuesta por la **potencia nativa de Debian 13 (Trixie)**:
 
 1. **Cero consumo superfluo:** En reposo, los servicios administrativos consumen ~0 MB de RAM.
-2. **Herramientas estándar de la industria:** Todo se apoya en utilidades UNIX comprobadas a lo largo de décadas (`samba`, `rsync`, `btrfs`, `ext4`, `nginx`, `sqlite3`, `whiptail`).
+2. **Herramientas estándar de la industria:** Todo se apoya en utilidades UNIX comprobadas a lo largo de décadas (`samba`, `rsync`, `btrfs`, `ext4`, `nginx`, `sqlite3`) y una plataforma propia en Rust.
 3. **Resiliencia ante fallos reales:** Diseñado específicamente para no corromper datos ante cortes de energía, desconexiones de red repentinas o saturación de disco.
 4. **100% Offline:** Sin dependencias externas ni rastreadores, funcionando perfectamente en redes locales aisladas.
 
@@ -71,10 +71,11 @@ En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermed
 
 | Tecnología / Subsistema | Componente | ¿Para qué sirve? | Beneficio técnico directo |
 | :--- | :--- | :--- | :--- |
-| **Nginx-light** | Servidor Web HTTP/HTTPS | Servidor web ultraligero y seguro. | Mínimo consumo de recursos, terminación SSL/TLS y proxy rápido hacia PHP-FPM. |
-| **PHP 8 + PHP-FPM ondemand** | Backend de Aplicación | Arquitectura MVC pura servida con `pm = ondemand`. | Consumo nulo en reposo (~0 MB de RAM cuando no se navega); apagado automático de procesos ociosos. |
-| **Invocación Segura `proc_open`** | Backend PHP | Ejecución de comandos del sistema pasando arrays de argumentos. | **Elimina por diseño la inyección de comandos**: los argumentos no son evaluados por `/bin/sh`, garantizando ejecución estricta. |
-| **SQLite en modo WAL** | Base de Datos Estructurada | Archivo `/var/lib/nas/nas.sqlite` con PDO. | 0 MB de consumo en memoria en reposo; indexación ultrarrápida de auditoría (`audit_logs`), historial de terminal (`terminal_history`), configuración y papelera (`trash_items`). |
+| **Nginx-light** | Servidor Web HTTP/HTTPS | Terminación TLS y publicación del panel. | Mínimo consumo, cabeceras de seguridad (HSTS, CSP) y `proxy_pass` hacia `nas-web`. |
+| **Rust + axum + tokio** | Backend de Aplicación | Servicio asíncrono `nas-web.service` escuchando en `127.0.0.1:8080`. | Binario único sin intérprete; memoria estable y arranque inmediato; 0 procesos ociosos en reposo. |
+| **`nas-exec`** | Ejecución de comandos | Allowlist, array de argumentos, timeouts y redacción de secretos. | **Elimina por diseño la inyección de comandos** y evita exponer contraseñas en `ps` o bitácoras. |
+| **SQLite en modo WAL (rusqlite)** | Base de Datos Estructurada | Archivo `/var/lib/nas/nas.sqlite` con sesiones, auditoría (`web_audit`), límites (`api_rate_limits`), historial y usuarios del panel (`web_users`). | 0 MB en reposo, lecturas concurrentes sin bloqueos y respaldo por simple copia del archivo. |
+| **Assets embebidos (`include_bytes!`)** | Frontend Servido por el Binario | `app.js`, CSS, favicon y librerías de ofimática viajan dentro de `nas-web`. | Integridad verificable por SHA-256 (`tests/parity/assets.sha256`) y despliegue sin carpeta `public/`. |
 | **Slate UI 100% Offline** | Frontend Web | CSS unificado con variables de tema (Claro/Oscuro) y JS nativo en ES6+. | Cero CDNs y cero fuentes remotas; 36 iconos SVG nativos; carga instantánea y funcionamiento autónomo sin Internet. |
 
 ---
@@ -83,8 +84,8 @@ En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermed
 
 | Tecnología / Subsistema | Componente | ¿Para qué sirve? | Beneficio técnico directo |
 | :--- | :--- | :--- | :--- |
-| **whiptail + Bash 5** | Interfaz Visual TUI | Menú interactivo con paleta ANSI de 9 módulos. | Administración completa desde terminal local o sesiones remotas SSH sin requerir entorno gráfico X11. |
-| **Gestor CLI `nas`** | `/usr/local/bin/nas` | Comando global del sistema con subcomandos (`update`, `status`, `version`, `uninstall`). | Punto de entrada unificado y cómodo para el administrador en cualquier terminal. |
+| **`nas-tui` (ratatui)** | Interfaz Visual TUI | Dashboard, servicios, respaldos y diagnóstico en terminal. | Administración completa desde consola local o sesiones SSH sin entorno gráfico X11. |
+| **CLI `nas` (Rust)** | `/usr/local/bin/nas` | Comando global con subcomandos de estado, almacenamiento, Samba, respaldos, usuarios y auditoría (ANSI y `--json`). | Punto de entrada unificado, apto para automatización por scripts y CI. |
 | **`logrotate`** | Mantenimiento de Registros | Rotación con `copytruncate` y compresión `gzip`. | Mantiene controladas las bitácoras evitando que crezcan indefinidamente y saturen el disco. |
 | **UFW + fail2ban** | Seguridad de Red | Cortafuegos de paquetes y bloqueo de fuerza bruta. | Política estricta de denegación por defecto; autorización exclusiva de los puertos esenciales del servicio. |
 
@@ -95,8 +96,8 @@ En lugar de crear un sistema dependiente de Docker, máquinas virtuales intermed
 ### ¿Por qué SQLite WAL en vez de MySQL o PostgreSQL?
 Un servidor NAS no debe desperdiciar cientos de megabytes de RAM manteniendo demonios de bases de datos residentes solo para guardar configuraciones y registros de auditoría. Con SQLite en modo WAL (*Write-Ahead Logging*), las consultas son inmediatas, las lecturas y escrituras no se bloquean, el archivo se respalda con un simple `cp` y el consumo en memoria en reposo es exactamente **0 MB**.
 
-### ¿Por qué PHP-FPM en modo `pm = ondemand`?
-Los paneles de administración tradicionales mantienen procesos web ocupando memoria las 24 horas del día, incluso de noche cuando nadie está conectado. Con `ondemand`, Nginx levanta los procesos de PHP en milisegundos cuando un administrador abre el navegador y los cierra cuando termina, dejando toda la memoria libre para la caché del sistema de archivos de Samba.
+### ¿Por qué un binario Rust en lugar de un intérprete web?
+Un panel tradicional mantiene un intérprete y decenas de procesos residentes. `nas-web` es un único binario compilado que atiende por `proxy_pass` con memoria estable y sin calentamiento; las vistas y el JavaScript originales se sirven embebidos, por lo que no hay carpeta `public/` que sincronizar ni CDNs externas que cargar.
 
 ### ¿Por qué rsync y hardlinks en vez de soluciones complejas de snapshots?
 Las soluciones propietarias o basadas en bases de datos de deduplicación añaden capas de complejidad que pueden volverse irreparables si la base de datos se corrompe. Con `rsync` y enlaces duros (*hardlinks*), cada snapshot es simplemente un árbol de directorios estándar de Linux. Si el servidor fallara, los archivos se pueden leer y copiar directamente conectando el disco a cualquier equipo Linux, sin requerir software especial.
