@@ -17,7 +17,7 @@ pub const SERVICE_LABELS: [(&str, &str); 6] = [
     ("wsdd2", "Descubrimiento Web Services (WSD)"),
     ("nginx", "Servidor Web Nginx"),
     ("cron", "Planificador de Tareas Cron"),
-    ("php8.4-fpm", "Manejador de Procesos PHP-FPM (ondemand)"),
+    ("nas-web", "Panel Administrativo NAS (Rust/axum)"),
 ];
 
 /// Estado de servicios con nombre legible y etiqueta.
@@ -106,7 +106,11 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         .unwrap_or_default();
     let last_status = if last_line.is_empty() {
         "PENDIENTE"
-    } else if last_line.contains("abortado") || last_line.contains("omitido") {
+    } else if last_line.contains("abortado")
+        || last_line.contains("omitido")
+        || last_line.contains("ERROR")
+        || last_line.contains("FALLO")
+    {
         "FAILED"
     } else {
         "OK"
@@ -133,6 +137,14 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         nas_engine::tasks::SourceKind::Local => ("LOCAL", task.path.clone().unwrap_or_default()),
     };
 
+    let dest_unit = task
+        .destination_root
+        .strip_prefix("/srv/nas/unidades/")
+        .and_then(|rest| rest.split('/').next())
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or("principal");
+    let running = is_backup_task_running(id);
+
     json!({
         "id": id,
         "protocol": protocol,
@@ -144,17 +156,36 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         "source": source,
         "destination": source,
         "dest_path": format!("{}/{}", task.destination_root, id),
-        "dest_unit": "principal",
+        "dest_unit": dest_unit,
         "cron": cron,
         "cron_desc": cron_description(&cron),
         "retention": task.retention,
         "last_status": last_status,
         "last_run": last_run,
-        "running": false,
-        "percent": if last_status == "OK" { 100 } else { 0 },
+        "running": running,
+        "percent": if running { 50 } else if last_status == "OK" { 100 } else { 0 },
         "elapsed": "00:00:00",
         "remaining": "00:00:00",
         "speed": "0.00kB/s",
+    })
+}
+
+fn is_backup_task_running(id: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    let needle = format!("backup_{id}.sh");
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str() else {
+            return false;
+        };
+        if !pid.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        std::fs::read(entry.path().join("cmdline"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).contains(&needle))
+            .unwrap_or(false)
     })
 }
 
