@@ -49,32 +49,27 @@ if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     useradd --system --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-# Grupos necesarios: www-data para compartir la base SQLite del panel PHP y
-# grp_samba para operar sobre /srv/nas. En instalaciones nuevas pueden no existir.
-usermod -aG www-data "$SERVICE_USER" 2>/dev/null || true
+# Grupos necesarios: grp_samba para operar sobre /srv/nas y systemd-journal para bitácoras.
+groupadd -f grp_samba 2>/dev/null || true
+groupadd -f grp_web 2>/dev/null || true
+groupadd -f grp_superadmin 2>/dev/null || true
 usermod -aG grp_samba "$SERVICE_USER" 2>/dev/null || true
 usermod -aG systemd-journal "$SERVICE_USER" 2>/dev/null || true
 
-if [ -d "$STATE_DIR" ]; then
-    # Migración en sitio: se conserva el propietario (www-data) para no romper
-    # el panel PHP y permitir el rollback; el grupo conserva acceso de escritura.
-    echo "    $STATE_DIR ya existe: se conserva su propietario (migración en sitio)"
-    chmod 2770 "$STATE_DIR" 2>/dev/null || true
-    chgrp www-data "$STATE_DIR" 2>/dev/null || true
-else
-    install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
-fi
-install -d -m 2770 "$STATE_DIR/audit" 2>/dev/null || true
-chgrp www-data "$STATE_DIR/audit" 2>/dev/null || true
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
+chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR" 2>/dev/null || true
+chmod 0750 "$STATE_DIR" 2>/dev/null || true
 
-# Base de datos compartida: lectura/escritura para www-data y nas-web.
+install -d -m 2770 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
+chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
+
 if [ -f "$STATE_DIR/nas.sqlite" ]; then
-    chgrp www-data "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
-    chmod 0660 "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
+    chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
+    chmod 0640 "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
 fi
 
-install -d -m 0775 "$DATA_ROOT" 2>/dev/null || true
-install -d -m 0750 /etc/nas
+install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" 2>/dev/null || true
+install -d -m 0755 /etc/nas
 
 echo "[3/7] Configurando variables de entorno"
 if [ ! -f "$ENV_FILE" ]; then
@@ -83,7 +78,7 @@ if [ ! -f "$ENV_FILE" ]; then
         password="$NAS_WEB_PASSWORD"
         echo "    Contraseña tomada de NAS_WEB_PASSWORD"
     else
-        echo "    Defina la contraseña del panel (se guardará como SHA-256):"
+        echo "    Defina la contraseña del panel (se actualizará a PBKDF2-HMAC-SHA512 en el primer acceso):"
         read -r -s -p "    Contraseña: " password; echo
     fi
     hash="$(printf '%s' "$password" | sha256sum | cut -d' ' -f1)"
@@ -107,14 +102,14 @@ else
 fi
 
 echo "[4/7] Instalando helpers privilegiados de Samba"
-install -m 0755 "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
-install -m 0755 "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
-install -m 0755 "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
-install -m 0755 "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-accounts
-install -m 0755 "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/nas-backup-manage
-install -m 0755 "$SCRIPT_DIR/nas-terminal" /usr/local/sbin/nas-terminal
-install -m 0755 "$SCRIPT_DIR/nas-storage-apply" /usr/local/sbin/nas-storage-apply
-install -d -m 2770 -o root -g www-data /var/lib/nas/staging 2>/dev/null || true
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-accounts
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/nas-backup-manage
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-terminal" /usr/local/sbin/nas-terminal
+install -m 0755 -o root -g root "$SCRIPT_DIR/nas-storage-apply" /usr/local/sbin/nas-storage-apply
+install -d -m 2770 -o root -g "$SERVICE_USER" /var/lib/nas/staging 2>/dev/null || true
 
 echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
@@ -123,6 +118,7 @@ systemctl enable --now nas-web.service
 systemctl --no-pager --lines=0 status nas-web.service || true
 
 echo "[6/7] Instalando reglas sudo acotadas para el panel"
+rm -f /etc/sudoers.d/nas-web
 cat > "$SUDOERS_FILE" <<'SUDO'
 nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, \
     /usr/bin/systemctl restart smbd, /usr/bin/systemctl reload smbd, \
@@ -132,14 +128,16 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl restart wsdd2, /usr/bin/systemctl reload wsdd2, \
     /usr/bin/systemctl start nginx, /usr/bin/systemctl stop nginx, \
     /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx, \
-    /usr/bin/systemctl restart php8.4-fpm, /usr/bin/systemctl reload php8.4-fpm, \
-    /usr/bin/systemctl restart sssd, \
+    /usr/bin/systemctl start nas-web, /usr/bin/systemctl stop nas-web, \
+    /usr/bin/systemctl restart nas-web, /usr/bin/systemctl reload nas-web, \
+    /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \
+    /usr/bin/systemd-run *, \
     /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
-    /usr/sbin/realm list, /usr/sbin/realm join *, /usr/sbin/realm leave, \
-    /usr/bin/rm -rf /var/lib/nas/dev-sync/*, /usr/bin/rm -rf /srv/nas/.trash/*, \
-    /usr/bin/mkdir -p /var/lib/nas/dev-sync/*, /usr/bin/mkdir -p /srv/nas/*, \
+    /usr/sbin/realm list, /usr/sbin/realm discover *, /usr/sbin/realm join *, /usr/sbin/realm leave, \
+    /usr/bin/rm -rf /var/lib/nas/dev-sync/*, \
+    /usr/bin/mkdir -p /var/lib/nas/dev-sync/*, \
     /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
-    /usr/bin/tmux, /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
+    /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
     /usr/bin/fstrim -v /srv/nas, \
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
     /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
@@ -151,7 +149,11 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
 SUDO
 chmod 0440 "$SUDOERS_FILE"
 if command -v visudo >/dev/null 2>&1; then
-    visudo -cf "$SUDOERS_FILE" >/dev/null || { echo "[-] sudoers inválido" >&2; rm -f "$SUDOERS_FILE"; exit 1; }
+    if ! visudo -cf "$SUDOERS_FILE" >/dev/null; then
+        echo "[-] sudoers inválido" >&2
+        rm -f "$SUDOERS_FILE"
+        exit 1
+    fi
 fi
 
 if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
@@ -169,11 +171,15 @@ if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
         exit 1
     fi
 else
-    echo "[6/7] Nginx omitido (--no-nginx o no instalado)"
+    echo "[7/7] Nginx omitido (--no-nginx o no instalado)"
 fi
 
 echo "[verificación]"
-curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo "    healthz OK" || echo "    [!] healthz no responde aún"
+if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null; then
+    echo "    healthz OK"
+else
+    echo "    [!] healthz no responde aún"
+fi
 echo
 echo "Instalación completada."
 echo "  Panel:      https://<servidor>/  (usuario admin)"
