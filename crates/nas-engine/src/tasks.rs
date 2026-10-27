@@ -88,22 +88,25 @@ fn extract(text: &str, key: &str) -> Option<String> {
         }
 
         let value = raw_value.trim();
-        let value = value
+        let unquoted = if let Some(inner) = value
             .strip_prefix('"')
             .and_then(|rest| rest.strip_suffix('"'))
-            .or_else(|| {
-                value
-                    .strip_prefix('\'')
-                    .and_then(|rest| rest.strip_suffix('\''))
-            })
-            .unwrap_or(value)
-            .trim();
+        {
+            inner.trim().to_string()
+        } else if let Some(inner) = value
+            .strip_prefix('\'')
+            .and_then(|rest| rest.strip_suffix('\''))
+        {
+            inner.replace("'\\''", "'").trim().to_string()
+        } else {
+            value.to_string()
+        };
 
-        if value.is_empty() || value.contains("PLACEHOLDER") || value.starts_with('$') {
+        if unquoted.is_empty() || unquoted.contains("PLACEHOLDER") || unquoted.starts_with('$') {
             return None;
         }
 
-        return Some(value.to_string());
+        return Some(unquoted);
     }
 
     None
@@ -299,21 +302,34 @@ impl BackupTask {
                 let user = self.user.clone().unwrap_or_default();
                 let path = self.path.clone().unwrap_or_default();
                 let port = self.port.unwrap_or(22);
-                let ssh =
-                    format!("ssh -p {port} -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
+                let ssh = format!(
+                    "ssh -p {port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
+                );
 
-                steps.push(vec![
-                    "sshpass".into(),
-                    "-e".into(),
+                let mut step = vec!["sshpass".into()];
+                if let Some(cred) = &self.credentials_file {
+                    step.push("-f".into());
+                    step.push(cred.clone());
+                } else {
+                    step.push("-e".into());
+                }
+                step.extend([
                     "rsync".into(),
                     "-aAXH".into(),
                     "--numeric-ids".into(),
                     "--safe-links".into(),
+                    "--timeout=300".into(),
+                ]);
+                if let Some(last) = last_snapshot {
+                    step.push(format!("--link-dest={}", to_unix(last)));
+                }
+                step.extend([
                     "-e".into(),
                     ssh,
-                    format!("{user}@{ip}:{path}/"),
+                    format!("{user}@{ip}:{}/", path.trim_end_matches('/')),
                     staging.clone(),
                 ]);
+                steps.push(step);
             }
             SourceKind::Local => {
                 let path = self.path.clone().unwrap_or_default();
@@ -595,6 +611,7 @@ fn run_step(
         .first()
         .cloned()
         .ok_or_else(|| NasError::Invalid("paso del plan vacío".into()))?;
+    let is_rsync = matches!(program.as_str(), "rsync" | "sshpass");
 
     let mut spec = CommandSpec::new(program)
         .args(argv[1..].to_vec())
@@ -603,7 +620,11 @@ fn run_step(
         spec = spec.sudo(SudoMode::Passwordless);
     }
 
-    runner.run(&spec)?.ensure_success()
+    let output = runner.run(&spec)?;
+    if is_rsync && output.code == 24 {
+        return Ok(output);
+    }
+    output.ensure_success()
 }
 
 fn append_log(path: &Path, level: &str, message: &str) {
