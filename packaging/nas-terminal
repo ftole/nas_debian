@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
-# Sesiones PTY del panel sobre tmux, aisladas por usuario.
-# Uso: nas-terminal -u <usuario> <start|capture|raw|raw_enter|resize|kill|exists> [args]
+# Sesiones PTY del panel sobre tmux, aisladas por usuario fuera del sandbox web.
+# Uso: nas-terminal -u <usuario> <start|capture|raw|raw_enter|key|resize|kill|exists> [args]
 # ==============================================================================
 set -euo pipefail
 
@@ -13,15 +13,44 @@ fi
 
 ACTION="${1:-}"; shift || true
 
-TARGET_USER="$(printf '%s' "$TARGET_USER" | tr -cd 'a-zA-Z0-9_.-' | cut -c1-32)"
-if [ -z "$TARGET_USER" ] || ! id "$TARGET_USER" >/dev/null 2>&1; then
-    TARGET_USER="$(id -un)"
+if [[ ! "$TARGET_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "usuario POSIX inválido para terminal" >&2
+    exit 2
 fi
 
+case "$TARGET_USER" in
+    root|daemon|bin|sys|sync|nobody|nogroup|www-data|nas-web|sshd|messagebus|systemd-*)
+        echo "cuenta del sistema no autorizada para terminal interactiva" >&2
+        exit 2
+        ;;
+esac
+
+if ! TARGET_UID="$(id -u "$TARGET_USER" 2>/dev/null)"; then
+    echo "el usuario POSIX '$TARGET_USER' no existe en el servidor" >&2
+    exit 2
+fi
+
+if [ "$TARGET_UID" -lt 1000 ] || [ "$TARGET_UID" -ge 60000 ]; then
+    echo "UID $TARGET_UID no autorizado para terminal interactiva" >&2
+    exit 2
+fi
+
+TARGET_GROUP="$(id -gn "$TARGET_USER")"
 SESSION="nas-web-${TARGET_USER}"
+UNIT_NAME="nas-pty-${TARGET_USER}"
+SOCK_DIR="/run/nas-terminal/${TARGET_UID}"
+SOCK="${SOCK_DIR}/tmux.sock"
+
 HOME_DIR="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-[ -d "$HOME_DIR" ] || HOME_DIR=/srv/nas
-[ -d "$HOME_DIR" ] || HOME_DIR=/tmp
+if [ ! -d "$HOME_DIR" ]; then
+    HOME_DIR="/srv/nas"
+fi
+if [ ! -d "$HOME_DIR" ]; then
+    HOME_DIR="/"
+fi
+
+install -d -m 0755 -o root -g root /run/nas-terminal
+install -d -m 0700 -o "$TARGET_USER" -g "$TARGET_GROUP" "$SOCK_DIR"
 
 run_as() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -31,40 +60,93 @@ run_as() {
     fi
 }
 
+has_systemd_bus() {
+    command -v systemd-run >/dev/null 2>&1 && [ -S /run/systemd/private ]
+}
+
 case "$ACTION" in
     start)
         COLS="${1:-200}"; ROWS="${2:-50}"
         case "$COLS" in (*[!0-9]*|'') COLS=200 ;; esac
         case "$ROWS" in (*[!0-9]*|'') ROWS=50 ;; esac
-        if ! run_as tmux has-session -t "$SESSION" 2>/dev/null; then
-            run_as env PAGER=cat SYSTEMD_PAGER=cat TERM=xterm-256color \
-                tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$HOME_DIR" /bin/bash
+        if ! run_as tmux -S "$SOCK" has-session -t "$SESSION" 2>/dev/null; then
+            if has_systemd_bus && ! systemctl is-active --quiet "${UNIT_NAME}.service" 2>/dev/null; then
+                systemctl reset-failed "${UNIT_NAME}.service" 2>/dev/null || true
+                systemd-run --quiet \
+                    --unit="$UNIT_NAME" \
+                    --property="Type=forking" \
+                    --property="User=$TARGET_USER" \
+                    --property="Group=$TARGET_GROUP" \
+                    --property="UMask=0022" \
+                    --property="WorkingDirectory=$HOME_DIR" \
+                    --setenv=HOME="$HOME_DIR" \
+                    --setenv=USER="$TARGET_USER" \
+                    --setenv=LOGNAME="$TARGET_USER" \
+                    --setenv=SHELL=/bin/bash \
+                    --setenv=TERM=xterm-256color \
+                    --setenv=PAGER=cat \
+                    --setenv=SYSTEMD_PAGER=cat \
+                    --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+                    /usr/bin/tmux -S "$SOCK" new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$HOME_DIR" /bin/bash -l
+            else
+                run_as env \
+                    HOME="$HOME_DIR" \
+                    USER="$TARGET_USER" \
+                    LOGNAME="$TARGET_USER" \
+                    SHELL=/bin/bash \
+                    PAGER=cat \
+                    SYSTEMD_PAGER=cat \
+                    TERM=xterm-256color \
+                    tmux -S "$SOCK" new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$HOME_DIR" /bin/bash -l
+            fi
         fi
         echo "session=$SESSION"
         ;;
     exists)
-        run_as tmux has-session -t "$SESSION" 2>/dev/null
+        run_as tmux -S "$SOCK" has-session -t "$SESSION" 2>/dev/null
         ;;
     raw)
-        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
+        run_as tmux -S "$SOCK" send-keys -t "$SESSION" -l -- "${1:-}"
         ;;
     raw_enter)
-        run_as tmux send-keys -t "$SESSION" -l -- "${1:-}"
-        run_as tmux send-keys -t "$SESSION" Enter
+        run_as tmux -S "$SOCK" send-keys -t "$SESSION" -l -- "${1:-}"
+        run_as tmux -S "$SOCK" send-keys -t "$SESSION" Enter
+        ;;
+    key)
+        KEY_NAME="${1:-}"
+        case "$KEY_NAME" in
+            ENTER|Enter)      TMUX_KEY="Enter" ;;
+            TAB|Tab)          TMUX_KEY="Tab" ;;
+            CTRL_C|C-c)       TMUX_KEY="C-c" ;;
+            CTRL_D|C-d)       TMUX_KEY="C-d" ;;
+            CTRL_L|C-l)       TMUX_KEY="C-l" ;;
+            ESC|Escape)       TMUX_KEY="Escape" ;;
+            BSpace|BACKSPACE) TMUX_KEY="BSpace" ;;
+            Up)               TMUX_KEY="Up" ;;
+            Down)             TMUX_KEY="Down" ;;
+            Left)             TMUX_KEY="Left" ;;
+            Right)            TMUX_KEY="Right" ;;
+            *) echo "tecla no soportada: $KEY_NAME" >&2; exit 2 ;;
+        esac
+        run_as tmux -S "$SOCK" send-keys -t "$SESSION" "$TMUX_KEY"
         ;;
     capture)
-        run_as tmux capture-pane -e -t "$SESSION" -p
-        CWD="$(run_as tmux display-message -p -F '#{pane_current_path}' -t "$SESSION" 2>/dev/null || echo "$HOME_DIR")"
+        run_as tmux -S "$SOCK" capture-pane -e -t "$SESSION" -p
+        CWD="$(run_as tmux -S "$SOCK" display-message -p -F '#{pane_current_path}' -t "$SESSION" 2>/dev/null || echo "$HOME_DIR")"
         printf '___NAS_CWD___%s\n' "$CWD"
         ;;
     resize)
         COLS="${1:-200}"; ROWS="${2:-50}"
         case "$COLS" in (*[!0-9]*|'') COLS=200 ;; esac
         case "$ROWS" in (*[!0-9]*|'') ROWS=50 ;; esac
-        run_as tmux resize-window -t "$SESSION" -x "$COLS" -y "$ROWS" 2>/dev/null || true
+        run_as tmux -S "$SOCK" resize-window -t "$SESSION" -x "$COLS" -y "$ROWS" 2>/dev/null || true
         ;;
     kill)
-        run_as tmux kill-session -t "$SESSION" 2>/dev/null || true
+        run_as tmux -S "$SOCK" kill-session -t "$SESSION" 2>/dev/null || true
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl stop "${UNIT_NAME}.service" 2>/dev/null || true
+            systemctl reset-failed "${UNIT_NAME}.service" 2>/dev/null || true
+        fi
         ;;
     *)
         echo "accion desconocida: $ACTION" >&2
