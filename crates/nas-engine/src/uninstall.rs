@@ -100,6 +100,7 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
                 "/usr/local/sbin/nas-accounts",
                 "/usr/local/sbin/nas-backup-manage",
                 "/usr/local/sbin/nas-terminal",
+                "/usr/local/sbin/nas-storage-apply",
             ],
             true,
         ),
