@@ -19,13 +19,13 @@ pub mod views;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Request};
-use axum::http::{header::HeaderName, HeaderValue};
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::http::{header::HeaderName, header::COOKIE, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use nas_core::{NasPaths, ServerRole};
+use nas_core::{ApiResponse, NasPaths, ServerRole};
 
 pub use auth::Auth;
 pub use db::Db;
@@ -67,6 +67,7 @@ impl AppState {
 
 /// Construye el enrutador con todas las rutas y las cabeceras de seguridad.
 pub fn router(state: AppState) -> Router {
+    let csrf_state = state.clone();
     Router::new()
         .route("/healthz", get(routes::healthz))
         .route("/css/app.css", get(routes::css))
@@ -77,6 +78,7 @@ pub fn router(state: AppState) -> Router {
         .route("/js/vendor/docx-preview.min.js", get(routes::vendor_docx))
         .route("/favicon.svg", get(routes::favicon))
         .route("/login", get(routes::login_form).post(routes::login_submit))
+        .route("/api/auth/login", post(routes::api_login))
         .route("/logout", post(routes::logout))
         .route("/", get(routes::dashboard))
         .route("/dashboard", get(routes::page_dashboard))
@@ -199,29 +201,61 @@ pub fn router(state: AppState) -> Router {
             "/api/files/upload",
             post(routes::files_upload).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
         )
+        .layer(axum::middleware::from_fn_with_state(csrf_state, csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
         .with_state(state)
+}
+
+async fn csrf_guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let is_mutating = matches!(
+        *request.method(),
+        Method::POST | Method::PUT | Method::DELETE | Method::PATCH
+    );
+    let path = request.uri().path();
+    if is_mutating && path != "/login" && path != "/api/auth/login" {
+        let cookies = request
+            .headers()
+            .get(COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let now = chrono::Utc::now().timestamp();
+        if let Ok(Some(_)) = state.auth.authenticate(cookies, now) {
+            let csrf = request
+                .headers()
+                .get("x-csrf-token")
+                .and_then(|value| value.to_str().ok());
+            if !state.auth.verify_session_csrf(cookies, csrf) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    axum::Json(ApiResponse::<serde_json::Value>::error(
+                        "token CSRF inválido o ausente",
+                    )),
+                )
+                    .into_response();
+            }
+        }
+    }
+    next.run(request).await
 }
 
 async fn security_headers(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
 
-    let mut set = |name: &'static str, value: &'static str| {
-        headers.insert(
-            HeaderName::from_static(name),
-            HeaderValue::from_static(value),
-        );
+    let mut set_default = |name: &'static str, value: &'static str| {
+        headers
+            .entry(HeaderName::from_static(name))
+            .or_insert_with(|| HeaderValue::from_static(value));
     };
 
-    set(
+    set_default(
         "content-security-policy",
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'",
     );
-    set("x-frame-options", "SAMEORIGIN");
-    set("x-content-type-options", "nosniff");
-    set("referrer-policy", "strict-origin-when-cross-origin");
-    set(
+    set_default("x-frame-options", "SAMEORIGIN");
+    set_default("x-content-type-options", "nosniff");
+    set_default("referrer-policy", "strict-origin-when-cross-origin");
+    set_default(
         "permissions-policy",
         "camera=(), microphone=(), geolocation=(), payment=()",
     );
