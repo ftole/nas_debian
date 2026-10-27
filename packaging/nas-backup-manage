@@ -1,8 +1,11 @@
 #!/bin/bash
 # ==============================================================================
-# Instala, elimina y prueba tareas de respaldo validadas por el panel.
-# Uso: nas-backup-manage <install|delete|test> [args...]
+# Instala, elimina, ejecuta y prueba tareas de respaldo validadas por el panel.
+# Uso: nas-backup-manage <install|run|stop|logs|delete|test> [args...]
 #   install <id>   usa /var/lib/nas/staging/nas_backup_<id>.{sh,cron,cred}
+#   run     <id>
+#   stop    <id>
+#   logs    <id> [lines]
 #   delete  <id>
 #   test    <proto> <ip> <share|path> <port> <user>   (contraseña por stdin)
 # ==============================================================================
@@ -12,7 +15,22 @@ ACTION="${1:-}"; shift || true
 STAGING="/var/lib/nas/staging"
 
 valid_id() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; }
-valid_host() { [[ "$1" =~ ^[A-Za-z0-9._:-]{1,253}$ ]]; }
+valid_host() {
+    [[ "$1" =~ ^[A-Za-z0-9._:-]{1,253}$ ]] && [[ "$1" != -* ]] && [[ "$1" != *..* ]]
+}
+valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+valid_ssh_user() {
+    [[ "$1" =~ ^[A-Za-z0-9._-]{1,64}$ ]] && [[ "$1" != -* ]]
+}
+valid_cifs_user() {
+    [[ "$1" =~ ^[A-Za-z0-9._\\/@-]{1,64}$ ]] && [[ "$1" != -* ]]
+}
+
+has_systemd_bus() {
+    command -v systemd-run >/dev/null 2>&1 && [ -S /run/systemd/private ]
+}
 
 case "$ACTION" in
     install)
@@ -26,18 +44,24 @@ case "$ACTION" in
         [ -f "$CRON" ] || { echo "falta cron preparado" >&2; exit 3; }
         bash -n "$RUNNER" || { echo "runner con sintaxis inválida" >&2; exit 4; }
 
-        install -d -m 0755 /usr/local/bin /etc/cron.d /etc/backup-credentials
-        install -d -m 2770 /srv/nas/BACKUPS_HISTORICOS
-        install -d -m 2770 "/srv/nas/BACKUPS_HISTORICOS/$ID" 2>/dev/null || true
-        chown root:grp_samba "/srv/nas/BACKUPS_HISTORICOS/$ID" 2>/dev/null || true
+        DEST_ROOT="/srv/nas/BACKUPS_HISTORICOS"
+        PARSED_ROOT="$(sed -n "s/^DEST_ROOT=['\"]\\([^'\"]*\\)['\"]$/\\1/p" "$RUNNER" | head -n 1 || true)"
+        if [[ "$PARSED_ROOT" == /srv/nas/* ]] && [[ "$PARSED_ROOT" != *..* ]]; then
+            DEST_ROOT="$PARSED_ROOT"
+        fi
+
+        install -d -m 0755 /usr/local/bin /etc/cron.d
+        install -d -m 0700 -o root -g root /etc/backup-credentials
+        install -d -m 2770 "$DEST_ROOT" 2>/dev/null || true
+        install -d -m 2770 "$DEST_ROOT/$ID" 2>/dev/null || true
+        chown root:grp_samba "$DEST_ROOT" "$DEST_ROOT/$ID" 2>/dev/null || true
 
         install -m 0755 -o root -g root "$RUNNER" "/usr/local/bin/backup_${ID}.sh"
         install -m 0644 -o root -g root "$CRON" "/etc/cron.d/backup_${ID}"
         if [ -f "$CRED" ] && [ -s "$CRED" ]; then
             install -m 0600 -o root -g root "$CRED" "/etc/backup-credentials/${ID}.cred"
-            rm -f "$CRED"
         fi
-        rm -f "$RUNNER" "$CRON"
+        rm -f "$CRED" "$RUNNER" "$CRON"
         echo "tarea $ID instalada"
         ;;
     run)
@@ -45,24 +69,38 @@ case "$ACTION" in
         valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
         RUNNER="/usr/local/bin/backup_${ID}.sh"
         [ -x "$RUNNER" ] || { echo "no existe el runner $RUNNER" >&2; exit 3; }
-        if pgrep -f "backup_${ID}.sh" >/dev/null 2>&1; then
+        if pgrep -f "/usr/local/bin/backup_${ID}\\.sh" >/dev/null 2>&1; then
             echo "la tarea $ID ya está en ejecución"
             exit 0
         fi
-        setsid nohup "$RUNNER" >/dev/null 2>&1 < /dev/null &
+        if has_systemd_bus; then
+            UNIT="nas-backup-${ID}-$(date +%s)"
+            systemd-run --quiet --no-block --collect \
+                --unit="$UNIT" \
+                --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+                "$RUNNER"
+        else
+            setsid nohup "$RUNNER" >/dev/null 2>&1 < /dev/null &
+        fi
         echo "tarea $ID iniciada"
         ;;
     stop)
         ID="${1:-}"
         valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
-        mapfile -t PIDS < <(pgrep -f "backup_${ID}.sh" 2>/dev/null || true)
+        if command -v systemctl >/dev/null 2>&1; then
+            mapfile -t UNITS < <(systemctl list-units --type=service --state=running --no-legend "nas-backup-${ID}-*.service" 2>/dev/null | awk '{print $1}' || true)
+            if [ "${#UNITS[@]}" -gt 0 ]; then
+                systemctl stop "${UNITS[@]}" 2>/dev/null || true
+            fi
+        fi
+        mapfile -t PIDS < <(pgrep -f "/usr/local/bin/backup_${ID}\\.sh" 2>/dev/null || true)
         if [ "${#PIDS[@]}" -eq 0 ]; then
-            echo "la tarea $ID no está en ejecución"
+            echo "tarea $ID detenida"
             exit 0
         fi
         kill -TERM "${PIDS[@]}" 2>/dev/null || true
         sleep 1
-        mapfile -t PIDS < <(pgrep -f "backup_${ID}.sh" 2>/dev/null || true)
+        mapfile -t PIDS < <(pgrep -f "/usr/local/bin/backup_${ID}\\.sh" 2>/dev/null || true)
         if [ "${#PIDS[@]}" -gt 0 ]; then
             kill -KILL "${PIDS[@]}" 2>/dev/null || true
         fi
@@ -73,7 +111,9 @@ case "$ACTION" in
         LINES="${2:-200}"
         valid_id "$ID" || { echo "id inválido" >&2; exit 2; }
         case "$LINES" in (*[!0-9]*|'') LINES=200 ;; esac
-        [ "$LINES" -ge 1 ] && [ "$LINES" -le 500 ] || LINES=200
+        if [ "$LINES" -lt 1 ] || [ "$LINES" -gt 500 ]; then
+            LINES=200
+        fi
         LOG="/srv/nas/LOGS_BACKUP/backup_${ID}.log"
         if [ ! -f "$LOG" ]; then
             echo "(sin bitácora todavía para $ID)"
@@ -94,25 +134,56 @@ case "$ACTION" in
         case "$PROTO" in
             cifs)
                 valid_host "$HOST" || { echo "host inválido" >&2; exit 2; }
-                [ -n "$TARGET" ] && [ -n "$USER_NAME" ] || { echo "recurso o usuario vacío" >&2; exit 2; }
+                if [ -z "$TARGET" ] || [ -z "$USER_NAME" ]; then
+                    echo "recurso o usuario vacío" >&2
+                    exit 2
+                fi
+                if [[ "$TARGET" == */* ]] || [[ "$TARGET" == *\\* ]]; then
+                    echo "nombre de recurso CIFS inválido" >&2
+                    exit 2
+                fi
+                valid_cifs_user "$USER_NAME" || { echo "usuario CIFS inválido" >&2; exit 2; }
+                if [ "${NAS_ESCAPED:-0}" != "1" ] && has_systemd_bus; then
+                    printf '%s\n' "$PASSWORD" | systemd-run --quiet --pipe --wait --collect \
+                        --setenv=NAS_ESCAPED=1 \
+                        /usr/local/sbin/nas-backup-manage test "$PROTO" "$HOST" "$TARGET" "$PORT" "$USER_NAME"
+                    exit $?
+                fi
                 TMPCRED="$(mktemp)"; TMPMOUNT="$(mktemp -d)"
-                printf 'username=%s\npassword=%s\n' "$USER_NAME" "$PASSWORD" > "$TMPCRED"
                 chmod 0600 "$TMPCRED"
+                if [[ "$USER_NAME" == *\\* ]]; then
+                    DOM="${USER_NAME%%\\*}"
+                    ACC="${USER_NAME#*\\}"
+                    printf 'domain=%s\nusername=%s\npassword=%s\n' "$DOM" "$ACC" "$PASSWORD" > "$TMPCRED"
+                elif [[ "$USER_NAME" == */* ]]; then
+                    DOM="${USER_NAME%%/*}"
+                    ACC="${USER_NAME#*/}"
+                    printf 'domain=%s\nusername=%s\npassword=%s\n' "$DOM" "$ACC" "$PASSWORD" > "$TMPCRED"
+                else
+                    printf 'username=%s\npassword=%s\n' "$USER_NAME" "$PASSWORD" > "$TMPCRED"
+                fi
                 trap 'umount "$TMPMOUNT" 2>/dev/null || true; rmdir "$TMPMOUNT" 2>/dev/null || true; rm -f "$TMPCRED"' EXIT
                 mount -t cifs "//$HOST/$TARGET" "$TMPMOUNT" -o "credentials=$TMPCRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl"
                 echo "conexión CIFS verificada: //$HOST/$TARGET"
                 ;;
             ssh)
                 valid_host "$HOST" || { echo "host inválido" >&2; exit 2; }
-                [ -n "$USER_NAME" ] || { echo "usuario vacío" >&2; exit 2; }
+                valid_port "$PORT" || { echo "puerto SSH inválido" >&2; exit 2; }
+                valid_ssh_user "$USER_NAME" || { echo "usuario SSH inválido" >&2; exit 2; }
+                install -d -m 0700 -o root -g root /root/.ssh
                 SSHPASS="$PASSWORD" sshpass -e ssh -p "$PORT" \
+                    -l "$USER_NAME" \
                     -o StrictHostKeyChecking=accept-new \
                     -o UserKnownHostsFile=/root/.ssh/known_hosts_backup \
-                    -o ConnectTimeout=10 "$USER_NAME@$HOST" true
+                    -o ConnectTimeout=10 \
+                    -- "$HOST" true
                 echo "conexión SSH verificada: $USER_NAME@$HOST:$PORT"
                 ;;
             local)
-                [ -d "$TARGET" ] || { echo "ruta local inexistente: $TARGET" >&2; exit 3; }
+                if [[ "$TARGET" != /* ]] || [[ "$TARGET" == *..* ]] || [ ! -d "$TARGET" ]; then
+                    echo "ruta local inexistente o inválida: $TARGET" >&2
+                    exit 3
+                fi
                 echo "ruta local verificada: $TARGET"
                 ;;
             *)
