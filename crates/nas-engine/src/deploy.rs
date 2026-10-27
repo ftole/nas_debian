@@ -238,10 +238,13 @@ impl DeployParams {
                     "0%".into(),
                     "100%".into(),
                 ]);
+                steps.push(vec!["partprobe".into(), self.disk.clone()]);
+                steps.push(vec!["udevadm".into(), "settle".into()]);
 
                 match self.filesystem {
                     FileSystem::Ext4 => steps.push(vec![
                         "mkfs.ext4".into(),
+                        "-F".into(),
                         "-m".into(),
                         "1".into(),
                         "-L".into(),
@@ -260,17 +263,19 @@ impl DeployParams {
         }
 
         steps.push(vec!["mkdir".into(), "-p".into(), "/srv/nas".into()]);
-        steps.push(vec![
-            "mount".into(),
-            "-o".into(),
-            self.mount_options(),
-            target,
-            "/srv/nas".into(),
-        ]);
+        if self.disk != "LOCAL" {
+            steps.push(vec![
+                "mount".into(),
+                "-o".into(),
+                self.mount_options(),
+                target,
+                "/srv/nas".into(),
+            ]);
+        }
         for dir in ["SISTEMAS", "BACKUPS_HISTORICOS", "LOGS_BACKUP"] {
             steps.push(vec!["mkdir".into(), "-p".into(), format!("/srv/nas/{dir}")]);
         }
-        tips(&mut steps);
+        tips(&mut steps, &self.admin_user);
 
         steps
     }
@@ -298,10 +303,16 @@ impl DeployParams {
     }
 }
 
-fn tips(steps: &mut Vec<Vec<String>>) {
-    for group in ["grp_samba", "grp_web", "grp_superadmin"] {
+fn tips(steps: &mut Vec<Vec<String>>, admin_user: &str) {
+    for group in ["grp_samba", "grp_web", "grp_superadmin", "grp_backups"] {
         steps.push(vec!["groupadd".into(), "-f".into(), group.into()]);
     }
+    steps.push(vec![
+        "usermod".into(),
+        "-aG".into(),
+        "sudo,adm,grp_samba,grp_superadmin".into(),
+        admin_user.into(),
+    ]);
     steps.push(vec![
         "chown".into(),
         "-R".into(),
@@ -309,20 +320,56 @@ fn tips(steps: &mut Vec<Vec<String>>) {
         "/srv/nas".into(),
     ]);
     steps.push(vec!["chmod".into(), "2770".into(), "/srv/nas".into()]);
+    steps.push(vec!["sysctl".into(), "--system".into()]);
+    steps.push(vec![
+        "udevadm".into(),
+        "control".into(),
+        "--reload-rules".into(),
+    ]);
 }
 
 impl DeployParams {
+    /// Configuración base limpia `[global]` de Samba optimizada para Debian 13.
+    pub fn base_smb_conf(&self) -> String {
+        format!(
+            "[global]\n\
+   workgroup = {}\n\
+   netbios name = {}\n\
+   server string = Servidor NAS Debian 13\n\
+   server role = standalone server\n\
+   security = user\n\
+   map to guest = Bad User\n\
+   server min protocol = SMB2_10\n\
+   server max protocol = SMB3_11\n\
+   server signing = mandatory\n\
+   smb encrypt = desired\n\
+   smb3 directory leases = no\n\
+   kernel change notify = yes\n\
+   change notify = yes\n\
+   vfs objects = acl_xattr streams_xattr\n\
+   map acl inherit = yes\n\
+   store dos attributes = yes\n\
+   inherit permissions = yes\n\
+   strict sync = yes\n\
+   use sendfile = yes\n\
+   aio read size = 16384\n\
+   aio write size = 16384\n\
+   max open files = 65535\n\
+   load printers = no\n\
+   printing = bsd\n\
+   printcap name = /dev/null\n\
+   disable spoolss = yes\n",
+            self.workgroup, self.netbios
+        )
+    }
+
     /// Archivos de configuración del sistema que escribe el despliegue nativo.
     pub fn artifacts(&self) -> Vec<Artifact> {
         let mut artifacts = vec![
             Artifact {
                 path: "/etc/nas/role".into(),
                 mode: 0o644,
-                content: format!(
-                    "{}
-",
-                    self.role.as_str()
-                ),
+                content: format!("{}\n", self.role.as_str()),
             },
             Artifact {
                 path: "/etc/sysctl.d/99-nas-tuning.conf".into(),
@@ -350,15 +397,32 @@ impl DeployParams {
             artifacts.push(Artifact {
                 path: "/etc/cron.d/nas-btrfs-scrub".into(),
                 mode: 0o644,
-                content: "SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
-"
-                .to_string(),
+                content: "SHELL=/bin/bash\n\
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\
+0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1\n"
+                    .to_string(),
             });
         }
 
         artifacts
+    }
+
+    /// Conjunto completo de artefactos del despliegue (incluye superadmin y `smb.conf` base).
+    pub fn all_artifacts(&self) -> Vec<Artifact> {
+        let mut list = self.artifacts();
+        list.push(Artifact {
+            path: "/etc/nas/superadmin".into(),
+            mode: 0o644,
+            content: format!("{}\n", self.admin_user),
+        });
+        if !self.keep_data {
+            list.push(Artifact {
+                path: "/etc/samba/smb.conf".into(),
+                mode: 0o644,
+                content: self.base_smb_conf(),
+            });
+        }
+        list
     }
 
     /// Valida y falla con el primer conjunto de problemas encontrados.
