@@ -146,10 +146,11 @@ impl FileRoot {
         Ok(entries)
     }
 
-    /// Crea un directorio (y sus padres).
+    /// Crea un directorio (y sus padres) con permisos de grupo Samba (`2770`).
     pub fn mkdir(&self, relative: &str) -> NasResult<PathBuf> {
         let path = self.resolve(relative)?;
         std::fs::create_dir_all(&path).map_err(|e| NasError::io(&path, e))?;
+        set_dir_permissions(&path);
         Ok(path)
     }
 
@@ -157,15 +158,42 @@ impl FileRoot {
     pub fn rename(&self, from: &str, to: &str) -> NasResult<PathBuf> {
         let source = self.resolve(from)?;
         let target = self.resolve(to)?;
+        if source == self.root || target == self.root {
+            return Err(NasError::Denied("no se puede mover la raíz".into()));
+        }
         if !source.exists() {
             return Err(NasError::NotFound(format!("no existe: {from}")));
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
         }
         std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
         Ok(target)
     }
 
+    /// Elimina definitivamente un archivo o carpeta sin pasar por la papelera.
+    pub fn delete_permanent(&self, relative: &str) -> NasResult<()> {
+        let target = self.resolve(relative)?;
+        if target == self.root {
+            return Err(NasError::Denied("no se puede eliminar la raíz".into()));
+        }
+        if !target.exists() {
+            return Err(NasError::NotFound(format!("no existe: {relative}")));
+        }
+        if target.is_dir() {
+            std::fs::remove_dir_all(&target).map_err(|e| NasError::io(&target, e))
+        } else {
+            std::fs::remove_file(&target).map_err(|e| NasError::io(&target, e))
+        }
+    }
+
     /// Mueve un elemento a la papelera interna (`.trash`).
     pub fn trash(&self, relative: &str) -> NasResult<PathBuf> {
+        self.trash_with_actor(relative, "sistemas")
+    }
+
+    /// Mueve un elemento a la papelera interna registrando el usuario que lo eliminó.
+    pub fn trash_with_actor(&self, relative: &str, actor: &str) -> NasResult<PathBuf> {
         let source = self.resolve(relative)?;
         if source == self.root {
             return Err(NasError::Denied("no se puede eliminar la raíz".into()));
@@ -176,18 +204,19 @@ impl FileRoot {
 
         let trash = self.root.join(".trash");
         std::fs::create_dir_all(&trash).map_err(|e| NasError::io(&trash, e))?;
+        set_dir_permissions(&trash);
 
-        let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let stamp_ms = next_unique_trash_ms(&trash);
         let name = source
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "elemento".to_string());
-        let id = format!("{stamp}_{name}");
+        let id = format!("{stamp_ms}_{name}");
         let target = trash.join(&id);
+        let deleted_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
         std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
-        // Guarda la ruta relativa original para restaurar a su ubicación exacta.
-        if let Err(error) = self.write_trash_meta(&id, relative) {
+        if let Err(error) = self.write_trash_meta(&id, relative, &name, actor, &deleted_at) {
             let _ = std::fs::rename(&target, &source);
             return Err(error);
         }
@@ -504,11 +533,19 @@ mod ziptests {
 /// Entrada de la papelera interna.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TrashEntry {
-    /// Identificador (nombre del archivo en `.trash`).
+    /// Identificador único en `.trash` (`<epoch_ms>_<nombre>`).
     pub id: String,
     /// Nombre original del elemento.
     pub name: String,
-    /// Tamaño en bytes.
+    /// Alias de nombre consumido por el frontend (`app.js`).
+    pub filename: String,
+    /// Ruta relativa original antes del envío a la papelera.
+    pub original_path: String,
+    /// Usuario que envió el elemento a la papelera.
+    pub deleted_by: String,
+    /// Indica si el elemento es un directorio.
+    pub is_dir: bool,
+    /// Tamaño real en bytes (recursivo para carpetas).
     pub size: u64,
     /// Tamaño legible.
     pub size_formatted: String,
@@ -516,8 +553,20 @@ pub struct TrashEntry {
     pub deleted_at: String,
 }
 
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct TrashMetaRecord {
+    #[serde(default)]
+    original_path: String,
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    deleted_by: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
 impl FileRoot {
-    /// Escribe un archivo de texto dentro de la raíz.
+    /// Escribe un archivo de texto dentro de la raíz con permisos `0660`.
     pub fn write(&self, relative: &str, contents: &str) -> NasResult<u64> {
         let path = self.resolve(relative)?;
         if path == self.root {
@@ -527,11 +576,13 @@ impl FileRoot {
             .parent()
             .ok_or_else(|| NasError::Invalid("ruta sin padre".into()))?;
         std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
+        set_dir_permissions(parent);
         std::fs::write(&path, contents).map_err(|e| NasError::io(&path, e))?;
+        set_file_permissions(&path);
         Ok(contents.len() as u64)
     }
 
-    /// Lista la papelera interna con metadatos.
+    /// Lista la papelera interna con metadatos completos.
     pub fn trash_entries(&self) -> NasResult<Vec<TrashEntry>> {
         let trash = self.root.join(".trash");
         if !trash.is_dir() {
@@ -545,34 +596,77 @@ impl FileRoot {
             if id.starts_with('.') {
                 continue;
             }
+            let entry_path = item.path();
             let metadata = item.metadata().ok();
-            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+            let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
+            let size = if is_dir {
+                dir_size_recursive(&entry_path)
+            } else {
+                metadata.as_ref().map_or(0, |m| m.len())
+            };
 
-            let (stamp, name) = split_trash_name(&id);
-            let name = name.to_string();
-            let deleted_at = chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M%S")
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|_| stamp.to_string());
+            let (stamp, raw_name) = split_trash_name(&id);
+            let meta = self.read_trash_meta_record(&id);
+            let name = meta
+                .as_ref()
+                .map(|m| m.filename.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(raw_name)
+                .to_string();
+            let original_path = meta
+                .as_ref()
+                .map(|m| m.original_path.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(name.as_str())
+                .to_string();
+            let deleted_by = meta
+                .as_ref()
+                .map(|m| m.deleted_by.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("sistemas")
+                .to_string();
+            let deleted_at = meta
+                .as_ref()
+                .map(|m| m.deleted_at.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format_trash_stamp(stamp));
 
             entries.push(TrashEntry {
                 id,
+                filename: name.clone(),
                 name,
+                original_path,
+                deleted_by,
+                is_dir,
                 size,
                 size_formatted: human_size(size),
                 deleted_at,
             });
         }
-        entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        entries.sort_by(|a, b| {
+            b.deleted_at
+                .cmp(&a.deleted_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         Ok(entries)
     }
 
     /// Restaura un elemento de la papelera a su ruta original.
     pub fn restore_trash(&self, id: &str) -> NasResult<String> {
-        let source = self.trash_path(id)?;
-        let relative = self
-            .read_trash_meta(id)
-            .unwrap_or_else(|| split_trash_name(id).1.to_string());
-        let (_, name) = split_trash_name(id);
+        let (real_id, source) = self.resolve_trash_entry(id)?;
+        let (_, fallback_name) = split_trash_name(&real_id);
+        let meta = self.read_trash_meta_record(&real_id);
+        let name = meta
+            .as_ref()
+            .map(|m| m.filename.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(fallback_name);
+        let relative = meta
+            .as_ref()
+            .map(|m| m.original_path.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| name.to_string());
 
         let mut target = self.resolve(&relative)?;
         if target == self.root || target.parent().is_none() {
@@ -580,6 +674,7 @@ impl FileRoot {
         }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
+            set_dir_permissions(parent);
         }
 
         let mut counter = 1;
@@ -593,7 +688,7 @@ impl FileRoot {
         }
 
         std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
-        let _ = self.remove_trash_meta(id);
+        let _ = self.remove_trash_meta(&real_id);
         Ok(target
             .strip_prefix(&self.root)
             .map(|path| path.to_string_lossy().replace('\\', "/"))
@@ -602,13 +697,13 @@ impl FileRoot {
 
     /// Elimina definitivamente un elemento de la papelera.
     pub fn delete_trash(&self, id: &str) -> NasResult<()> {
-        let path = self.trash_path(id)?;
+        let (real_id, path) = self.resolve_trash_entry(id)?;
         let result = if path.is_dir() {
             std::fs::remove_dir_all(&path).map_err(|e| NasError::io(&path, e))
         } else {
             std::fs::remove_file(&path).map_err(|e| NasError::io(&path, e))
         };
-        let _ = self.remove_trash_meta(id);
+        let _ = self.remove_trash_meta(&real_id);
         result
     }
 
@@ -616,22 +711,48 @@ impl FileRoot {
         self.root.join(".trash").join(".meta")
     }
 
-    fn write_trash_meta(&self, id: &str, relative: &str) -> NasResult<()> {
+    fn write_trash_meta(
+        &self,
+        id: &str,
+        relative: &str,
+        filename: &str,
+        actor: &str,
+        deleted_at: &str,
+    ) -> NasResult<()> {
         let dir = self.trash_meta_dir();
         std::fs::create_dir_all(&dir).map_err(|e| NasError::io(&dir, e))?;
+        let record = TrashMetaRecord {
+            original_path: relative.to_string(),
+            filename: filename.to_string(),
+            deleted_by: if actor.trim().is_empty() {
+                "sistemas".to_string()
+            } else {
+                actor.trim().to_string()
+            },
+            deleted_at: deleted_at.to_string(),
+        };
+        let json = serde_json::to_string(&record)
+            .map_err(|e| NasError::Invalid(format!("metadatos de papelera: {e}")))?;
         let path = dir.join(id);
-        std::fs::write(&path, relative).map_err(|e| NasError::io(&path, e))
+        std::fs::write(&path, json).map_err(|e| NasError::io(&path, e))
     }
 
-    fn read_trash_meta(&self, id: &str) -> Option<String> {
+    fn read_trash_meta_record(&self, id: &str) -> Option<TrashMetaRecord> {
         let path = self.trash_meta_dir().join(id);
         let value = std::fs::read_to_string(path).ok()?;
-        let value = value.trim().to_string();
-        if value.is_empty() {
-            None
-        } else {
-            Some(value)
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
         }
+        if trimmed.starts_with('{') {
+            if let Ok(record) = serde_json::from_str::<TrashMetaRecord>(trimmed) {
+                return Some(record);
+            }
+        }
+        Some(TrashMetaRecord {
+            original_path: trimmed.to_string(),
+            ..TrashMetaRecord::default()
+        })
     }
 
     fn remove_trash_meta(&self, id: &str) -> std::io::Result<()> {
@@ -655,27 +776,136 @@ impl FileRoot {
         Ok(removed)
     }
 
-    fn trash_path(&self, id: &str) -> NasResult<PathBuf> {
-        if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
+    fn resolve_trash_entry(&self, id: &str) -> NasResult<(String, PathBuf)> {
+        let id = id.trim();
+        if id.is_empty()
+            || id.starts_with('.')
+            || id.contains('/')
+            || id.contains('\\')
+            || id.contains("..")
+            || id.contains('\0')
+        {
             return Err(NasError::Denied(
                 "identificador de papelera inválido".into(),
             ));
         }
-        let path = self.root.join(".trash").join(id);
-        if !path.exists() {
-            return Err(NasError::NotFound(format!("no existe en papelera: {id}")));
+        let trash = self.root.join(".trash");
+        let exact = trash.join(id);
+        if exact.exists() {
+            return Ok((id.to_string(), exact));
         }
-        Ok(path)
+        if id.bytes().all(|b| b.is_ascii_digit()) && trash.is_dir() {
+            let prefix = format!("{id}_");
+            if let Ok(entries) = std::fs::read_dir(&trash) {
+                let mut matches: Vec<(String, PathBuf)> = entries
+                    .flatten()
+                    .filter_map(|entry| {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        name.starts_with(&prefix).then(|| (name, entry.path()))
+                    })
+                    .collect();
+                if matches.len() == 1 {
+                    return Ok(matches.remove(0));
+                }
+            }
+        }
+        Err(NasError::NotFound(format!("no existe en papelera: {id}")))
     }
 }
 
-fn split_trash_name(id: &str) -> (&str, &str) {
-    // Formato: YYYYMMDD_HHMMSS_nombre
-    if id.len() > 16 && id.as_bytes().get(15) == Some(&b'_') {
-        (&id[..15], &id[16..])
-    } else {
-        ("", id)
+/// Aplica permisos `0660` sobre un archivo recién creado o subido (Unix).
+#[cfg(unix)]
+pub fn set_file_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660));
+}
+
+/// No-op fuera de Unix.
+#[cfg(not(unix))]
+pub fn set_file_permissions(_path: &Path) {}
+
+#[cfg(unix)]
+fn set_dir_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o2770));
+}
+
+#[cfg(not(unix))]
+fn set_dir_permissions(_path: &Path) {}
+
+fn next_unique_trash_ms(trash: &Path) -> i64 {
+    let mut candidate = chrono::Utc::now().timestamp_millis().max(1);
+    let existing: Vec<String> = std::fs::read_dir(trash)
+        .ok()
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    while existing
+        .iter()
+        .any(|name| name.starts_with(&format!("{candidate}_")))
+    {
+        candidate += 1;
     }
+    candidate
+}
+
+fn dir_size_recursive(root: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+fn split_trash_name(id: &str) -> (&str, &str) {
+    // Formato legado: YYYYMMDD_HHMMSS_nombre
+    if id.len() > 16 && id.as_bytes().get(8) == Some(&b'_') && id.as_bytes().get(15) == Some(&b'_')
+    {
+        return (&id[..15], &id[16..]);
+    }
+    // Formato milisegundos únicos: <epoch_ms>_<nombre>
+    if let Some((prefix, rest)) = id.split_once('_') {
+        if !prefix.is_empty() && prefix.bytes().all(|b| b.is_ascii_digit()) && !rest.is_empty() {
+            return (prefix, rest);
+        }
+    }
+    ("", id)
+}
+
+fn format_trash_stamp(stamp: &str) -> String {
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M%S") {
+        return dt.format("%Y-%m-%d %H:%M:%S").to_string();
+    }
+    if let Ok(ms) = stamp.parse::<i64>() {
+        if let Some(dt) = chrono::DateTime::from_timestamp_millis(ms) {
+            return dt
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+        }
+    }
+    stamp.to_string()
 }
 
 fn human_size(bytes: u64) -> String {
@@ -751,6 +981,31 @@ mod trash_tests {
         let root = root("seguridad");
         assert!(root.restore_trash("../etc/passwd").is_err());
         assert!(root.delete_trash("a/b").is_err());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn soporta_id_numerico_parseint_tamano_recursivo_y_borrado_permanente() {
+        let root = root("parseint");
+        root.write("CARPETA/a.txt", "12345").expect("a");
+        root.write("CARPETA/b.txt", "6789").expect("b");
+        root.trash_with_actor("CARPETA", "admin").expect("trash");
+
+        let entries = root.trash_entries().expect("lista");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].filename, "CARPETA");
+        assert_eq!(entries[0].original_path, "CARPETA");
+        assert_eq!(entries[0].deleted_by, "admin");
+        assert!(entries[0].is_dir);
+        assert_eq!(entries[0].size, 9);
+
+        let numeric_prefix = entries[0].id.split('_').next().expect("prefijo");
+        assert!(numeric_prefix.bytes().all(|b| b.is_ascii_digit()));
+        let restored = root.restore_trash(numeric_prefix).expect("restore numeric");
+        assert_eq!(restored, "CARPETA");
+        root.delete_permanent("CARPETA")
+            .expect("borrado permanente");
+        assert!(!root.root().join("CARPETA").exists());
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
