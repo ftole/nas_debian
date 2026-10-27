@@ -25,7 +25,7 @@ teardown() {
 generate_runners() {
     cat > "$SANDBOX/runners/backup_t_local.sh" <<EOF
 #!/bin/bash
-set -e
+set -euo pipefail
 TASK='t_local'
 SRC_PATH='$SANDBOX/src'
 BKP_DIR='$SANDBOX/bkp/t_local'
@@ -71,12 +71,13 @@ mkdir -p "\$STAGE_SNAPSHOT"
 rsync "\${RSYNC_OPTS[@]}" "\$SRC_PATH/" "\$STAGE_SNAPSHOT/" >> "\$LOG_FILE" 2>&1 || exit 1
 mv "\$STAGE_SNAPSHOT" "\$FINAL_SNAPSHOT"
 SNAPSHOT_OK=true
+chattr -R +i "\$FINAL_SNAPSHOT" 2>/dev/null || true
 EOF
     chmod +x "$SANDBOX/runners/backup_t_local.sh"
 
     cat > "$SANDBOX/runners/backup_t_cifs.sh" <<EOF
 #!/bin/bash
-set -e
+set -euo pipefail
 TASK='t_cifs'
 SRC_IP='10.0.0.1'
 SRC_SHARE='docs'
@@ -105,7 +106,7 @@ EOF
 
     cat > "$SANDBOX/runners/backup_t_ssh.sh" <<EOF
 #!/bin/bash
-set -e
+set -euo pipefail
 TASK='t_ssh'
 SRC_IP='10.0.0.2'
 SRC_PORT=22
