@@ -57,6 +57,8 @@ pub struct CommandSpec {
     pub sudo: SudoMode,
     /// Variables de entorno adicionales.
     pub env: Vec<(String, String)>,
+    /// Conserva espacios iniciales/finales en `stdout` sin recortar.
+    pub preserve_whitespace: bool,
 }
 
 impl CommandSpec {
@@ -69,7 +71,14 @@ impl CommandSpec {
             stdin_data: None,
             sudo: SudoMode::None,
             env: Vec::new(),
+            preserve_whitespace: false,
         }
+    }
+
+    /// Conserva los espacios en blanco de `stdout` tal cual los emite el proceso.
+    pub fn preserve_whitespace(mut self) -> Self {
+        self.preserve_whitespace = true;
+        self
     }
 
     /// Añade un argumento.
@@ -324,9 +333,15 @@ impl Runner {
         let stdout = self.redactor.redact(&String::from_utf8_lossy(&stdout_raw));
         let stderr = self.redactor.redact(&String::from_utf8_lossy(&stderr_raw));
 
+        let stdout_final = if spec.preserve_whitespace {
+            stdout
+        } else {
+            stdout.trim().to_string()
+        };
+
         Ok(CommandOutput {
             code,
-            stdout: stdout.trim().to_string(),
+            stdout: stdout_final,
             stderr: stderr.trim().to_string(),
             timed_out,
             duration: started.elapsed(),
