@@ -129,3 +129,10 @@ disco_en_uso_critico() {
     fi
     return 1
 }
+
+# Valida una expresión cron estándar de 5 campos numéricos/caracteres válidos.
+validar_cron() {
+    local cron="${1:-}"
+    [[ "$cron" =~ ^[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+$ ]]
+}
+
