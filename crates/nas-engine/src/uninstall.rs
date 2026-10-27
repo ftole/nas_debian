@@ -35,8 +35,13 @@ fn step(description: &str, argv: &[&str], optional: bool) -> Step {
     }
 }
 
-/// Construye el plan de desinstalación.
+/// Construye el plan de desinstalación del panel.
 pub fn plan(purge_state: bool) -> UninstallPlan {
+    plan_with_scope(purge_state, false)
+}
+
+/// Construye el plan incluyendo, opcionalmente, los ajustes del sistema operativo.
+pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
     let mut steps = vec![
         step(
             "detener y deshabilitar el panel",
@@ -105,6 +110,41 @@ pub fn plan(purge_state: bool) -> UninstallPlan {
         ),
     ];
 
+    if os_scope {
+        steps.push(step(
+            "retirar ajustes de kernel y udev",
+            &[
+                "rm",
+                "-f",
+                "/etc/sysctl.d/99-nas-tuning.conf",
+                "/etc/udev/rules.d/60-nas-readahead.rules",
+                "/etc/udev/rules.d/80-udisks2-hide-os.rules",
+            ],
+            true,
+        ));
+        steps.push(step(
+            "retirar rotación y auditoría",
+            &[
+                "rm",
+                "-f",
+                "/etc/logrotate.d/nas-backups",
+                "/etc/audit/rules.d/nas.rules",
+                "/etc/cron.d/nas-btrfs-scrub",
+            ],
+            true,
+        ));
+        steps.push(step(
+            "recargar sysctl y udev",
+            &["sysctl", "--system"],
+            true,
+        ));
+        steps.push(step(
+            "recargar reglas udev",
+            &["udevadm", "control", "--reload-rules"],
+            true,
+        ));
+    }
+
     if purge_state {
         steps.push(step(
             "retirar el estado del panel (conserva /srv/nas)",
@@ -123,7 +163,7 @@ pub fn plan(purge_state: bool) -> UninstallPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::plan;
+    use super::{plan, plan_with_scope};
 
     #[test]
     fn plan_sin_purga_conserva_estado() {
@@ -159,5 +199,35 @@ mod tests {
             plan.steps[0].argv,
             vec!["systemctl", "disable", "--now", "nas-web.service"]
         );
+    }
+}
+
+#[cfg(test)]
+mod os_tests {
+    use super::plan_with_scope;
+
+    #[test]
+    fn alcance_os_incluye_ajustes_del_sistema() {
+        let plan = plan_with_scope(false, true);
+        let paths: Vec<String> = plan
+            .steps
+            .iter()
+            .flat_map(|step| step.argv.iter().cloned())
+            .collect();
+        assert!(paths.contains(&"/etc/sysctl.d/99-nas-tuning.conf".to_string()));
+        assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules".to_string()));
+        assert!(paths.contains(&"/etc/audit/rules.d/nas.rules".to_string()));
+        assert!(paths.contains(&"sysctl".to_string()));
+    }
+
+    #[test]
+    fn alcance_panel_no_toca_ajustes_del_sistema() {
+        let plan = plan_with_scope(false, false);
+        let paths: Vec<String> = plan
+            .steps
+            .iter()
+            .flat_map(|step| step.argv.iter().cloned())
+            .collect();
+        assert!(!paths.contains(&"/etc/sysctl.d/99-nas-tuning.conf".to_string()));
     }
 }
