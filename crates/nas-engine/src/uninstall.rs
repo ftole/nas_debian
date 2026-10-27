@@ -163,7 +163,7 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan, plan_with_scope};
+    use super::plan;
 
     #[test]
     fn plan_sin_purga_conserva_estado() {
