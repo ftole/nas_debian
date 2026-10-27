@@ -31,20 +31,42 @@ fn hostname() -> String {
 }
 
 /// Formulario de acceso.
-pub async fn login_form() -> Html<String> {
-    Html(views::login(&hostname(), None))
+pub async fn login_form(State(state): State<AppState>) -> Html<String> {
+    let now = Utc::now().timestamp();
+    let csrf = state.auth.issue_login_csrf(now);
+    Html(views::login_with_context(
+        &hostname(),
+        "127.0.0.1",
+        &csrf,
+        None,
+    ))
 }
 
 /// Credenciales enviadas por el formulario.
 #[derive(Debug, Deserialize)]
 pub struct LoginForm {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub csrf_token: Option<String>,
 }
 
 /// Procesa el acceso y emite la cookie de sesión.
 pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
     let now = Utc::now().timestamp();
+    if !state
+        .auth
+        .verify_login_csrf(form.csrf_token.as_deref(), now)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Html(views::login(
+                &hostname(),
+                Some("Token CSRF inválido o expirado."),
+            )),
+        )
+            .into_response();
+    }
     let session = match state.auth.login(&form.username, &form.password, now) {
         Ok(Some(session)) => {
             let _ = state
@@ -58,10 +80,13 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "web", "FAILED", "");
+            let csrf = state.auth.issue_login_csrf(now);
             return (
                 StatusCode::UNAUTHORIZED,
-                Html(views::login(
+                Html(views::login_with_context(
                     &hostname(),
+                    "127.0.0.1",
+                    &csrf,
                     Some("Usuario o contraseña incorrectos."),
                 )),
             )
@@ -75,6 +100,70 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
         response.headers_mut().insert(SET_COOKIE, header);
     }
     response
+}
+
+/// Endpoint JSON para autenticación API (/api/auth/login).
+pub async fn api_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(form): axum::Json<LoginForm>,
+) -> Response {
+    let now = Utc::now().timestamp();
+    let csrf_header = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
+    let token = form.csrf_token.as_deref().or(csrf_header);
+    if !state.auth.verify_login_csrf(token, now) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "token CSRF inválido o ausente",
+            )),
+        )
+            .into_response();
+    }
+    match state.auth.login(&form.username, &form.password, now) {
+        Ok(Some(session)) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&form.username, "login", "api", "SUCCESS", "");
+            let role = state
+                .auth
+                .db()
+                .user_role(&form.username)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "admin".into());
+            let csrf = state.auth.csrf_for_session(&session);
+            let mut response = axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "username": form.username,
+                    "role": role,
+                    "session": session,
+                    "csrf_token": csrf,
+                }),
+                "Sesión iniciada",
+            ))
+            .into_response();
+            if let Ok(header) = HeaderValue::from_str(&state.auth.set_cookie_header(&session)) {
+                response.headers_mut().insert(SET_COOKIE, header);
+            }
+            response
+        }
+        Ok(None) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&form.username, "login", "api", "FAILED", "");
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(ApiResponse::<serde_json::Value>::error(
+                    "Usuario o contraseña incorrectos.",
+                )),
+            )
+                .into_response()
+        }
+        Err(error) => server_error(&error.to_string()),
+    }
 }
 
 /// Cierra la sesión eliminando la cookie y el registro en la base de datos.
@@ -315,17 +404,43 @@ pub struct FilesQuery {
     root: Option<String>,
 }
 
-/// Cuerpo con una única ruta.
+/// Cuerpo con una única ruta o con nombre.
 #[derive(Debug, Deserialize)]
 pub struct PathBody {
-    path: String,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Cuerpo para renombrar o mover.
 #[derive(Debug, Deserialize)]
 pub struct RenameBody {
-    from: String,
-    to: String,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub old_path: String,
+    #[serde(default)]
+    pub new_name: String,
+    #[serde(default)]
+    pub path: String,
+}
+
+/// Cuerpo para borrado (papelera o definitivo).
+#[derive(Debug, Deserialize)]
+pub struct DeleteBody {
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub permanent: bool,
 }
 
 fn file_root(state: &AppState) -> Result<FileRoot, Box<Response>> {
@@ -342,7 +457,7 @@ pub async fn files_list(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -371,7 +486,7 @@ pub async fn files_download(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -416,13 +531,33 @@ pub async fn files_mkdir(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
-    let path = body.path;
+    let target = match body.name.filter(|n| !n.trim().is_empty()) {
+        Some(name) => {
+            let safe_name = match sanitize_filename(name.trim()) {
+                Ok(n) => n,
+                Err(e) => return error_response(e),
+            };
+            let parent = body.path.trim().trim_matches('/');
+            if parent.is_empty() {
+                safe_name
+            } else {
+                format!("{parent}/{safe_name}")
+            }
+        }
+        None => {
+            let p = body.path.trim().trim_matches('/').to_string();
+            if p.is_empty() {
+                return bad_request("debe indicar una ruta o nombre de directorio");
+            }
+            p
+        }
+    };
 
-    match tokio::task::spawn_blocking(move || root.mkdir(&path)).await {
+    match tokio::task::spawn_blocking(move || root.mkdir(&target)).await {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Directorio creado",
         ))
@@ -441,12 +576,38 @@ pub async fn files_rename(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
 
-    match tokio::task::spawn_blocking(move || root.rename(&body.from, &body.to)).await {
+    let (from, to) = if !body.from.trim().is_empty() && !body.to.trim().is_empty() {
+        (body.from.trim().to_string(), body.to.trim().to_string())
+    } else {
+        let src = if !body.old_path.trim().is_empty() {
+            body.old_path.trim().to_string()
+        } else if !body.path.trim().is_empty() {
+            body.path.trim().to_string()
+        } else {
+            return bad_request("ruta de origen requerida");
+        };
+        let new_name = body.new_name.trim();
+        if new_name.is_empty() {
+            return bad_request("nuevo nombre requerido");
+        }
+        let safe_name = match sanitize_filename(new_name) {
+            Ok(name) => name,
+            Err(error) => return error_response(error),
+        };
+        let src_clean = src.trim_matches('/');
+        let dest = match src_clean.rsplit_once('/') {
+            Some((parent, _)) => format!("{parent}/{safe_name}"),
+            None => safe_name,
+        };
+        (src_clean.to_string(), dest)
+    };
+
+    match tokio::task::spawn_blocking(move || root.rename(&from, &to)).await {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Elemento renombrado",
         ))
@@ -456,16 +617,16 @@ pub async fn files_rename(
     }
 }
 
-/// Envía un elemento a la papelera interna.
+/// Envía un elemento a la papelera interna o lo borra definitivamente.
 pub async fn files_delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<PathBody>,
+    axum::Json(body): axum::Json<DeleteBody>,
 ) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -478,16 +639,39 @@ pub async fn files_delete(
         .flatten()
         .unwrap_or_default();
     let audit_path = path.clone();
+    let permanent = body.permanent;
 
-    match tokio::task::spawn_blocking(move || root.trash(&path)).await {
+    let outcome = tokio::task::spawn_blocking(move || {
+        if permanent {
+            root.delete_permanent(&path).map(|_| None)
+        } else {
+            root.trash(&path).map(Some)
+        }
+    })
+    .await;
+
+    match outcome {
         Ok(Ok(target)) => {
+            let action = if permanent {
+                "file_delete_permanent"
+            } else {
+                "file_delete"
+            };
             let _ = state
                 .auth
                 .db()
-                .append_audit(&user, "file_delete", &audit_path, "SUCCESS", "");
+                .append_audit(&user, action, &audit_path, "SUCCESS", "");
+            let msg = if permanent {
+                "Elemento eliminado definitivamente"
+            } else {
+                "Elemento movido a la papelera"
+            };
             axum::Json(ApiResponse::ok(
-                serde_json::json!({ "trash": target.display().to_string() }),
-                "Elemento movido a la papelera",
+                serde_json::json!({
+                    "trash": target.map(|t| t.display().to_string()),
+                    "permanent": permanent,
+                }),
+                msg,
             ))
             .into_response()
         }
@@ -960,6 +1144,30 @@ pub struct DomainJoinBody {
     password: String,
 }
 
+fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Value, NasError> {
+    let runner = Runner::new();
+    let overview = nas_engine::storage::overview_for(paths, &runner)?;
+    let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
+    let disks: Vec<serde_json::Value> = disks
+        .iter()
+        .map(|disk| {
+            let mut row = serde_json::to_value(disk).unwrap_or_default();
+            let is_part = disk.children_count == 0
+                && (disk.fstype.as_deref().is_some_and(|fs| !fs.is_empty())
+                    || disk.name.chars().last().is_some_and(|c| c.is_ascii_digit()));
+            row["type"] = serde_json::json!(if is_part { "part" } else { "disk" });
+            row["mount"] = serde_json::json!(disk.mountpoint.clone().unwrap_or_default());
+            row["children_count"] = serde_json::json!(disk.children_count);
+            row["is_os_disk"] = serde_json::json!(disk.protected);
+            row
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "overview": overview,
+        "disks": disks,
+    }))
+}
+
 /// Resumen del volumen de datos.
 pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
@@ -967,43 +1175,24 @@ pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Respo
     }
 
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
-        let runner = Runner::new();
-        let overview = nas_engine::storage::overview_for(&paths, &runner)?;
-        let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
-        let disks: Vec<serde_json::Value> = disks
-            .iter()
-            .map(|disk| {
-                let mut row = serde_json::to_value(disk).unwrap_or_default();
-                let is_part = disk.fstype.as_deref().is_some_and(|fs| !fs.is_empty())
-                    || disk.name.chars().last().is_some_and(|c| c.is_ascii_digit());
-                row["type"] = serde_json::json!(if is_part { "part" } else { "disk" });
-                row["mount"] = serde_json::json!(disk.mountpoint.clone().unwrap_or_default());
-                row["children_count"] = serde_json::json!(0);
-                row
-            })
-            .collect();
-        Ok::<_, nas_core::NasError>(serde_json::json!({
-            "overview": overview,
-            "disks": disks,
-        }))
-    })
-    .await
-    {
+    match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
         Ok(Ok(payload)) => axum::Json(ApiResponse::ok(payload, "Almacenamiento")).into_response(),
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("consulta de almacenamiento interrumpida"),
     }
 }
 
-/// Discos físicos detectados.
+/// Discos físicos detectados y resumen de capacidad (contrato consumido por `loadStorage()`).
 pub async fn storage_disks(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
 
-    match tokio::task::spawn_blocking(|| nas_engine::storage::disks(&Runner::new())).await {
-        Ok(Ok(disks)) => axum::Json(ApiResponse::ok(disks, "Discos detectados")).into_response(),
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
+        Ok(Ok(payload)) => {
+            axum::Json(ApiResponse::ok(payload, "Discos detectados")).into_response()
+        }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("inventario de discos interrumpido"),
     }
@@ -1015,8 +1204,12 @@ pub async fn storage_inspect(
     headers: HeaderMap,
     axum::Json(body): axum::Json<DeviceBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
 
     let device = body.device;
@@ -1037,9 +1230,10 @@ pub async fn domain_status(State(state): State<AppState>, headers: HeaderMap) ->
         return *response;
     }
 
+    let samba_conf = state.paths.samba_conf.clone();
     match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
         Ok(status) => {
-            let workgroup = std::fs::read_to_string("/etc/samba/smb.conf")
+            let workgroup = std::fs::read_to_string(&samba_conf)
                 .ok()
                 .and_then(|text| {
                     text.lines().find_map(|line| {
@@ -1183,12 +1377,13 @@ impl Default for TerminalSessionBody {
     }
 }
 
-/// Cuerpo para enviar texto al terminal.
+/// Cuerpo para enviar texto o teclas especiales al terminal.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct TerminalSendBody {
     data: String,
     enter: bool,
+    raw: bool,
 }
 
 impl Default for TerminalSendBody {
@@ -1196,6 +1391,7 @@ impl Default for TerminalSendBody {
         Self {
             data: String::new(),
             enter: true,
+            raw: false,
         }
     }
 }
@@ -1217,6 +1413,53 @@ fn is_superadmin(state: &AppState, user: &str) -> bool {
         .is_some_and(|role| role == "superadmin")
 }
 
+fn is_interactive_posix_user(user: &nas_engine::users::UserEntry) -> bool {
+    !user.system
+        && !nas_engine::users::is_protected_system_account(&user.name, Some(user.uid))
+        && (1000..60_000).contains(&user.uid)
+        && !user.shell.ends_with("nologin")
+        && !user.shell.ends_with("/false")
+}
+
+/// Resuelve la cuenta POSIX no-root bajo la cual correrá `tmux` para el superadministrador.
+fn resolve_terminal_posix_user(web_user: &str) -> Result<String, String> {
+    let (users, groups) = nas_engine::users::load_local();
+    if let Some(found) = users
+        .iter()
+        .find(|u| u.name == web_user && is_interactive_posix_user(u))
+    {
+        return Ok(found.name.clone());
+    }
+
+    if let Ok(designated) = std::fs::read_to_string("/etc/nas/superadmin") {
+        let designated = designated.trim();
+        if let Some(found) = users
+            .iter()
+            .find(|u| u.name == designated && is_interactive_posix_user(u))
+        {
+            return Ok(found.name.clone());
+        }
+    }
+
+    for group_name in ["grp_superadmin", "sudo"] {
+        if let Some(group) = groups.iter().find(|g| g.name == group_name) {
+            for member in &group.members {
+                if let Some(found) = users
+                    .iter()
+                    .find(|u| u.name == *member && is_interactive_posix_user(u))
+                {
+                    return Ok(found.name.clone());
+                }
+            }
+        }
+    }
+
+    Err(
+        "no existe una cuenta POSIX interactiva de superadministrador (verifique /etc/nas/superadmin)"
+            .to_string(),
+    )
+}
+
 /// Inicia (o reutiliza) la sesión de terminal del usuario.
 pub async fn terminal_session(
     State(state): State<AppState>,
@@ -1234,11 +1477,12 @@ pub async fn terminal_session(
         return bad_request("geometría del terminal fuera de rango");
     }
 
-    let session_user = user.clone();
+    let web_user = user.clone();
     let cols = body.cols;
     let rows = body.rows;
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::start(&Runner::new(), &session_user, cols, rows)
+        let posix_user = resolve_terminal_posix_user(&web_user)?;
+        nas_engine::terminal::start(&Runner::new(), &posix_user, cols, rows)
     })
     .await
     .unwrap_or_else(|_| Err("apertura de terminal interrumpida".to_string()));
@@ -1263,7 +1507,7 @@ pub async fn terminal_session(
     }
 }
 
-/// Envía texto a la sesión del usuario.
+/// Envía texto o teclas especiales a la sesión del usuario.
 pub async fn terminal_send(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1280,12 +1524,19 @@ pub async fn terminal_send(
         return bad_request("entrada inválida para el terminal");
     }
 
-    let session_user = user.clone();
-    let name = nas_engine::terminal::session_name(&user);
+    let web_user = user.clone();
     let data = body.data;
-    let enter = body.enter;
+    let enter = body.enter && !body.raw;
+    let raw = body.raw;
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::send(&Runner::new(), &session_user, &name, &data, enter)
+        let posix_user = resolve_terminal_posix_user(&web_user)?;
+        let name = nas_engine::terminal::session_name(&posix_user);
+        let runner = Runner::new();
+        if !raw && nas_engine::terminal::is_allowed_key(&data) {
+            nas_engine::terminal::send_key(&runner, &posix_user, &name, &data)
+        } else {
+            nas_engine::terminal::send(&runner, &posix_user, &name, &data, enter)
+        }
     })
     .await
     .unwrap_or_else(|_| Err("envío interrumpido".to_string()));
@@ -1309,18 +1560,25 @@ pub async fn terminal_capture(State(state): State<AppState>, headers: HeaderMap)
         return forbidden("el terminal está reservado al superadministrador");
     }
 
-    let session_user = user.clone();
-    let name = nas_engine::terminal::session_name(&user);
-    let captured_name = name.clone();
+    let web_user = user.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::capture_details(&Runner::new(), &session_user, &captured_name)
+        let posix_user = resolve_terminal_posix_user(&web_user)?;
+        let name = nas_engine::terminal::session_name(&posix_user);
+        let (output, cwd) =
+            nas_engine::terminal::capture_details(&Runner::new(), &posix_user, &name)?;
+        Ok::<_, String>((output, cwd, posix_user, name))
     })
     .await
     .unwrap_or_else(|_| Err("captura interrumpida".to_string()));
 
     match outcome {
-        Ok((output, cwd)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "output": output, "cwd": cwd, "user": user, "session": name }),
+        Ok((output, cwd, posix_user, name)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({
+                "output": output,
+                "cwd": cwd,
+                "user": posix_user,
+                "session": name,
+            }),
             "Captura del terminal",
         ))
         .into_response(),
@@ -1345,12 +1603,13 @@ pub async fn terminal_resize(
         return bad_request("geometría del terminal fuera de rango");
     }
 
-    let session_user = user.clone();
-    let name = nas_engine::terminal::session_name(&user);
+    let web_user = user.clone();
     let cols = body.cols;
     let rows = body.rows;
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::resize(&Runner::new(), &session_user, &name, cols, rows)
+        let posix_user = resolve_terminal_posix_user(&web_user)?;
+        let name = nas_engine::terminal::session_name(&posix_user);
+        nas_engine::terminal::resize(&Runner::new(), &posix_user, &name, cols, rows)
     })
     .await
     .unwrap_or_else(|_| Err("redimensionado interrumpido".to_string()));
@@ -1374,17 +1633,18 @@ pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) ->
         return forbidden("el terminal está reservado al superadministrador");
     }
 
-    let session_user = user.clone();
-    let name = nas_engine::terminal::session_name(&user);
-    let killed_name = name.clone();
+    let web_user = user.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::terminal::kill(&Runner::new(), &session_user, &killed_name)
+        let posix_user = resolve_terminal_posix_user(&web_user)?;
+        let name = nas_engine::terminal::session_name(&posix_user);
+        nas_engine::terminal::kill(&Runner::new(), &posix_user, &name)?;
+        Ok::<_, String>(name)
     })
     .await
     .unwrap_or_else(|_| Err("cierre interrumpido".to_string()));
 
     match outcome {
-        Ok(()) => {
+        Ok(name) => {
             let _ = state
                 .auth
                 .db()
@@ -1489,7 +1749,7 @@ fn server_ip() -> String {
         .unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
-fn render_shell(state: &AppState, user: &str, active: &str) -> Response {
+fn render_shell(state: &AppState, headers: &HeaderMap, user: &str, active: &str) -> Response {
     let role = state
         .auth
         .db()
@@ -1499,7 +1759,7 @@ fn render_shell(state: &AppState, user: &str, active: &str) -> Response {
         .unwrap_or_default();
     let is_admin = matches!(role.as_str(), "admin" | "superadmin");
     let is_super = role == "superadmin";
-    let csrf = views::csrf_token();
+    let csrf = state.auth.csrf_for_cookies(cookie_header(headers));
 
     let shell = views::Shell {
         active,
@@ -1600,7 +1860,25 @@ macro_rules! page_handler {
     ($name:ident, $active:literal) => {
         pub async fn $name(State(state): State<AppState>, headers: HeaderMap) -> Response {
             match require_auth(&state, &headers) {
-                Ok(user) => render_shell(&state, &user, $active),
+                Ok(user) => render_shell(&state, &headers, &user, $active),
+                Err(_) => login_redirect(),
+            }
+        }
+    };
+}
+
+macro_rules! admin_page_handler {
+    ($name:ident, $active:literal) => {
+        pub async fn $name(State(state): State<AppState>, headers: HeaderMap) -> Response {
+            match require_auth(&state, &headers) {
+                Ok(user) if is_admin(&state, &user) => {
+                    render_shell(&state, &headers, &user, $active)
+                }
+                Ok(user) => (
+                    StatusCode::FORBIDDEN,
+                    render_shell(&state, &headers, &user, $active),
+                )
+                    .into_response(),
                 Err(_) => login_redirect(),
             }
         }
@@ -1608,26 +1886,45 @@ macro_rules! page_handler {
 }
 
 page_handler!(page_dashboard, "dashboard");
-page_handler!(page_shares, "shares");
 page_handler!(page_users, "users");
-page_handler!(page_backups, "backups");
 page_handler!(page_services, "services");
 page_handler!(page_diagnostics, "diagnostics");
-page_handler!(page_storage, "storage");
 page_handler!(page_files, "files");
-page_handler!(page_domain, "domain");
 page_handler!(page_networking, "networking");
 page_handler!(page_applications, "applications");
-page_handler!(page_updates, "updates");
 page_handler!(page_logs, "logs");
+
+admin_page_handler!(page_storage, "storage");
+admin_page_handler!(page_domain, "domain");
+admin_page_handler!(page_updates, "updates");
+
+/// Vista de recursos compartidos (oculta si el rol es exclusivamente `BACKUP`).
+pub async fn page_shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match require_auth(&state, &headers) {
+        Ok(_) if !state.role.has_shares() => Redirect::to("/dashboard").into_response(),
+        Ok(user) => render_shell(&state, &headers, &user, "shares"),
+        Err(_) => login_redirect(),
+    }
+}
+
+/// Vista de respaldos (oculta si el rol es exclusivamente `ARCHIVOS`).
+pub async fn page_backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match require_auth(&state, &headers) {
+        Ok(_) if !state.role.has_backups() => Redirect::to("/dashboard").into_response(),
+        Ok(user) => render_shell(&state, &headers, &user, "backups"),
+        Err(_) => login_redirect(),
+    }
+}
 
 /// Vista del terminal (solo superadministrador).
 pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match require_auth(&state, &headers) {
-        Ok(user) if is_superadmin(&state, &user) => render_shell(&state, &user, "terminal"),
+        Ok(user) if is_superadmin(&state, &user) => {
+            render_shell(&state, &headers, &user, "terminal")
+        }
         Ok(user) => (
             StatusCode::FORBIDDEN,
-            render_shell(&state, &user, "terminal"),
+            render_shell(&state, &headers, &user, "terminal"),
         )
             .into_response(),
         Err(_) => login_redirect(),
@@ -1637,8 +1934,12 @@ pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) ->
 /// Vista de auditoría (solo administradores).
 pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match require_auth(&state, &headers) {
-        Ok(user) if is_admin(&state, &user) => render_shell(&state, &user, "logs"),
-        Ok(user) => (StatusCode::FORBIDDEN, render_shell(&state, &user, "logs")).into_response(),
+        Ok(user) if is_admin(&state, &user) => render_shell(&state, &headers, &user, "logs"),
+        Ok(user) => (
+            StatusCode::FORBIDDEN,
+            render_shell(&state, &headers, &user, "logs"),
+        )
+            .into_response(),
         Err(_) => login_redirect(),
     }
 }
@@ -1652,7 +1953,7 @@ pub async fn files_zip(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -1676,7 +1977,7 @@ pub async fn files_zip(
             );
             if let Ok(value) = HeaderValue::from_str(&format!(
                 "attachment; filename=\"{}.zip\"",
-                name.replace('"', "")
+                name.replace(['"', '\r', '\n'], "")
             )) {
                 response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
             }
@@ -1701,6 +2002,8 @@ pub struct ExtQuery {
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
+    pub share: Option<String>,
+    #[serde(default)]
     pub root: Option<String>,
     #[serde(default)]
     pub q: Option<String>,
@@ -1708,16 +2011,55 @@ pub struct ExtQuery {
     pub grouped: Option<u8>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct TrashBody {
-    #[serde(default)]
-    pub id: String,
+fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::String(text) => Ok(text),
+        serde_json::Value::Number(num) => Ok(num.to_string()),
+        serde_json::Value::Null => Ok(String::new()),
+        other => Err(serde::de::Error::custom(format!(
+            "identificador inválido: {other}"
+        ))),
+    }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
+pub struct TrashBody {
+    #[serde(default, deserialize_with = "deserialize_string_or_int")]
+    pub id: String,
+    #[serde(default)]
+    pub root: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct CreateFileBody {
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub r#type: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct MoveBody {
+    #[serde(default, alias = "source")]
     pub from: String,
+    #[serde(default, alias = "destination", alias = "target")]
     pub to: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default, alias = "destination_dir")]
+    pub target_dir: String,
+    #[serde(default)]
+    pub root: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1725,6 +2067,8 @@ pub struct SaveBody {
     pub path: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default)]
+    pub root: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1819,6 +2163,9 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
     let path = state.paths.samba_conf.clone();
 
     match tokio::task::spawn_blocking(move || {
@@ -1899,19 +2246,17 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
     }
 }
 
-/// Unidades de almacenamiento adicionales (aún sin montajes extra).
+/// Unidades de almacenamiento (principal + unidades adicionales bajo `/srv/nas/unidades/*`).
 pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
-        nas_engine::storage::overview_for(&paths, &Runner::new())
-    })
-    .await
-    {
-        Ok(Ok(overview)) => {
-            let unit = serde_json::json!({
+        let runner = Runner::new();
+        let mut units = Vec::new();
+        if let Ok(overview) = nas_engine::storage::overview_for(&paths, &runner) {
+            units.push(serde_json::json!({
                 "id": "principal",
                 "name": format!("Unidad Principal ({})", overview.path),
                 "path": overview.path,
@@ -1921,15 +2266,48 @@ pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) ->
                 "used_gb": overview.used_gb,
                 "free_gb": overview.free_gb,
                 "usage_percent": overview.usage_percent,
-            });
-            axum::Json(ApiResponse::ok(
-                serde_json::json!({ "units": [unit] }),
-                "Unidades de almacenamiento",
-            ))
-            .into_response()
+            }));
         }
-        Ok(Err(_)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "units": [] }),
+
+        let extra_dir = paths.data_root.join("unidades");
+        if let Ok(entries) = std::fs::read_dir(&extra_dir) {
+            let mut dirs: Vec<std::path::PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect();
+            dirs.sort();
+            for unit_path in dirs {
+                let Some(id) = unit_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|id| nas_engine::storage_ops::valid_name(id))
+                else {
+                    continue;
+                };
+                let mut unit_paths = (*paths).clone();
+                unit_paths.data_root = unit_path.clone();
+                if let Ok(overview) = nas_engine::storage::overview_for(&unit_paths, &runner) {
+                    units.push(serde_json::json!({
+                        "id": id,
+                        "name": format!("Unidad {id} ({})", overview.path),
+                        "path": overview.path,
+                        "is_main": false,
+                        "filesystem": overview.filesystem,
+                        "total_gb": overview.total_gb,
+                        "used_gb": overview.used_gb,
+                        "free_gb": overview.free_gb,
+                        "usage_percent": overview.usage_percent,
+                    }));
+                }
+            }
+        }
+        units
+    })
+    .await
+    {
+        Ok(units) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "units": units }),
             "Unidades de almacenamiento",
         ))
         .into_response(),
@@ -1942,50 +2320,117 @@ pub async fn storage_subvolumes(State(state): State<AppState>, headers: HeaderMa
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    axum::Json(ApiResponse::ok(
-        serde_json::json!({ "subvolumes": [] }),
-        "Subvolúmenes",
-    ))
-    .into_response()
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
+            .map(|o| o.is_btrfs)
+            .unwrap_or(false);
+        if !is_btrfs {
+            return Vec::<serde_json::Value>::new();
+        }
+        let target = paths.data_root.to_string_lossy().to_string();
+        runner
+            .run(
+                &nas_exec::CommandSpec::new("btrfs")
+                    .args(["subvolume", "list", &target])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(15)),
+            )
+            .ok()
+            .filter(|out| out.is_success())
+            .map(|out| {
+                out.stdout
+                    .lines()
+                    .filter_map(|line| {
+                        let (_, rel) = line.split_once(" path ")?;
+                        let id = line.split_whitespace().nth(1).unwrap_or_default();
+                        Some(serde_json::json!({
+                            "id": id,
+                            "name": rel.trim(),
+                            "path": format!("{}/{}", target.trim_end_matches('/'), rel.trim()),
+                        }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+    .await
+    {
+        Ok(subvolumes) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "subvolumes": subvolumes }),
+            "Subvolúmenes",
+        ))
+        .into_response(),
+        Err(_) => server_error("consulta de subvolúmenes interrumpida"),
+    }
 }
 
-/// Estado del scrub Btrfs.
+/// Estado del scrub Btrfs (responde `200` degradado si `/srv/nas` no es Btrfs).
 pub async fn storage_scrub(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
 
-    match tokio::task::spawn_blocking(|| {
-        run_json(
+    let paths = state.paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
+            .map(|o| o.is_btrfs)
+            .unwrap_or(false);
+        if !is_btrfs {
+            return serde_json::json!({
+                "running": false,
+                "status": "no disponible",
+                "errors": 0,
+                "success": true,
+                "output": "El volumen principal no utiliza Btrfs.",
+            });
+        }
+        let target = paths.data_root.to_string_lossy().to_string();
+        match run_json(
             nas_exec::CommandSpec::new("btrfs")
-                .args(["scrub", "status", "/srv/nas"])
+                .args(["scrub", "status", &target])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(15)),
-        )
+        ) {
+            Ok(text) => {
+                let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
+                let mut payload = serde_json::to_value(&status).unwrap_or_default();
+                payload["success"] = serde_json::json!(true);
+                payload["output"] = serde_json::json!(text);
+                payload
+            }
+            Err(error) => serde_json::json!({
+                "running": false,
+                "status": "no disponible",
+                "errors": 0,
+                "success": true,
+                "output": error,
+            }),
+        }
     })
     .await
     {
-        Ok(Ok(text)) => {
-            let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
-            let mut payload = serde_json::to_value(&status).unwrap_or_default();
-            payload["success"] = serde_json::json!(true);
-            payload["output"] = serde_json::json!(text);
-            axum::Json(ApiResponse::ok(payload, "Estado de scrub")).into_response()
-        }
-        Ok(Err(error)) => server_error(&error),
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Estado de scrub")).into_response(),
         Err(_) => server_error("consulta de scrub interrumpida"),
     }
 }
 
 /// Inicia el scrub Btrfs.
 pub async fn storage_scrub_start(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
-    match tokio::task::spawn_blocking(|| {
+    let target = state.paths.data_root.to_string_lossy().to_string();
+    match tokio::task::spawn_blocking(move || {
         run_json(
             nas_exec::CommandSpec::new("btrfs")
-                .args(["scrub", "start", "/srv/nas"])
+                .args(["scrub", "start", &target])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(30)),
         )
@@ -2004,13 +2449,18 @@ pub async fn storage_scrub_start(State(state): State<AppState>, headers: HeaderM
 
 /// Ejecuta fstrim sobre el volumen.
 pub async fn storage_trim(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
-    match tokio::task::spawn_blocking(|| {
+    let target = state.paths.data_root.to_string_lossy().to_string();
+    match tokio::task::spawn_blocking(move || {
         run_json(
             nas_exec::CommandSpec::new("fstrim")
-                .args(["-v", "/srv/nas"])
+                .args(["-v", &target])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(120)),
         )
@@ -2086,7 +2536,7 @@ pub async fn files_content(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2108,11 +2558,15 @@ pub async fn files_content(
 }
 
 /// Lista la papelera interna.
-pub async fn files_trash(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn files_trash(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ExtQuery>,
+) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2137,7 +2591,7 @@ pub async fn trash_restore(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2158,10 +2612,14 @@ pub async fn trash_delete(
     headers: HeaderMap,
     axum::Json(body): axum::Json<TrashBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2176,11 +2634,20 @@ pub async fn trash_delete(
 }
 
 /// Vacía la papelera.
-pub async fn trash_empty(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+pub async fn trash_empty(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<axum::Json<TrashBody>>,
+) -> Response {
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
-    let root = match file_root(&state) {
+    let root_param = body.as_ref().and_then(|b| b.root.as_deref());
+    let root = match file_root_for(&state, root_param) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2196,11 +2663,16 @@ pub async fn trash_empty(State(state): State<AppState>, headers: HeaderMap) -> R
 }
 
 /// Restaura todos los elementos de la papelera.
-pub async fn trash_restore_all(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn trash_restore_all(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<axum::Json<TrashBody>>,
+) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root_param = body.as_ref().and_then(|b| b.root.as_deref());
+    let root = match file_root_for(&state, root_param) {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -2226,30 +2698,135 @@ pub async fn trash_restore_all(State(state): State<AppState>, headers: HeaderMap
     }
 }
 
-/// Crea un archivo o carpeta (alias de mkdir para nombres con extensión).
+/// Crea un archivo vacío/inicial o carpeta según el payload del explorador.
 pub async fn files_create(
     State(state): State<AppState>,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<PathBody>,
+    axum::Json(body): axum::Json<CreateFileBody>,
 ) -> Response {
-    files_mkdir(State(state), headers, axum::Json(body)).await
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root_for(&state, body.root.as_deref()) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    if body.name.trim().is_empty() {
+        let path = body.path.trim().to_string();
+        return match tokio::task::spawn_blocking(move || root.mkdir(&path)).await {
+            Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Directorio creado",
+            ))
+            .into_response(),
+            Ok(Err(error)) => error_response(error),
+            Err(_) => server_error("creación interrumpida"),
+        };
+    }
+
+    let safe_name = match sanitize_filename(body.name.trim()) {
+        Ok(name) => name,
+        Err(error) => return error_response(error),
+    };
+    let parent = body.path.trim().trim_matches('/');
+    let rel = if parent.is_empty() {
+        safe_name
+    } else {
+        format!("{parent}/{safe_name}")
+    };
+    let created = rel.clone();
+    let is_folder = body.r#type == "folder" || body.r#type == "dir";
+    let content = body.content;
+
+    let outcome = tokio::task::spawn_blocking(move || {
+        if is_folder {
+            root.mkdir(&rel).map(|_| 0u64)
+        } else {
+            root.write(&rel, &content)
+        }
+    })
+    .await;
+
+    match outcome {
+        Ok(Ok(bytes)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({ "path": created, "bytes": bytes }),
+            "Elemento creado",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("creación interrumpida"),
+    }
 }
 
-/// Mueve un elemento.
+/// Mueve un elemento entre directorios del explorador.
 pub async fn files_move(
     State(state): State<AppState>,
     headers: HeaderMap,
     axum::Json(body): axum::Json<MoveBody>,
 ) -> Response {
-    files_rename(
-        State(state),
-        headers,
-        axum::Json(RenameBody {
-            from: body.from,
-            to: body.to,
-        }),
-    )
-    .await
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let root = match file_root_for(&state, body.root.as_deref()) {
+        Ok(root) => root,
+        Err(response) => return *response,
+    };
+
+    let (from, to) = {
+        let source = if !body.from.trim().is_empty() {
+            body.from.trim().trim_matches('/').to_string()
+        } else if !body.path.trim().is_empty() {
+            body.path.trim().trim_matches('/').to_string()
+        } else {
+            String::new()
+        };
+
+        if source.is_empty() {
+            return bad_request("debe indicar origen y destino");
+        }
+
+        let dest = if !body.to.trim().is_empty() {
+            body.to.trim().trim_matches('/').to_string()
+        } else if !body.target_dir.trim().is_empty() {
+            let Some(basename) = source.rsplit('/').next().filter(|s| !s.is_empty()) else {
+                return bad_request("ruta de origen inválida");
+            };
+            let target_dir = body.target_dir.trim().trim_matches('/');
+            if target_dir.is_empty() {
+                basename.to_string()
+            } else {
+                format!("{target_dir}/{basename}")
+            }
+        } else {
+            return bad_request("debe indicar origen y destino");
+        };
+
+        (source, dest)
+    };
+
+    match tokio::task::spawn_blocking(move || root.rename(&from, &to)).await {
+        Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Elemento movido exitosamente",
+        ))
+        .into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("movimiento interrumpido"),
+    }
+}
+
+fn format_bytes_human(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut idx = 0usize;
+    while size >= 1024.0 && idx + 1 < UNITS.len() {
+        size /= 1024.0;
+        idx += 1;
+    }
+    if idx == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{size:.1} {}", UNITS[idx])
+    }
 }
 
 /// Guarda el contenido de un archivo.
@@ -2261,16 +2838,24 @@ pub async fn files_save(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
+    let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
     match tokio::task::spawn_blocking(move || root.write(&body.path, &body.content)).await {
-        Ok(Ok(bytes)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "bytes": bytes }),
-            "Archivo guardado",
-        ))
-        .into_response(),
+        Ok(Ok(bytes)) => {
+            let formatted = format_bytes_human(bytes);
+            axum::Json(serde_json::json!({
+                "success": true,
+                "message": "Archivo guardado",
+                "size_formatted": formatted,
+                "data": {
+                    "bytes": bytes,
+                    "size_formatted": formatted,
+                }
+            }))
+            .into_response()
+        }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("guardado interrumpido"),
     }
@@ -2282,8 +2867,12 @@ pub async fn domain_discover(
     headers: HeaderMap,
     axum::Json(body): axum::Json<DomainDiscoverBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
     }
     if !nas_engine::domain::is_valid_domain(&body.domain) {
         return bad_request("dominio inválido");
@@ -2336,6 +2925,7 @@ pub async fn diagnostics_run(
     } else {
         body.r#type.clone()
     };
+    let data_root = state.paths.data_root.to_string_lossy().to_string();
 
     let outcome = tokio::task::spawn_blocking(move || match kind.as_str() {
         "ping" => run_json(
@@ -2355,7 +2945,7 @@ pub async fn diagnostics_run(
         ),
         "disk" => run_json(
             nas_exec::CommandSpec::new("df")
-                .args(["-Pk", "/srv/nas"])
+                .args(["-Pk", &data_root])
                 .timeout(std::time::Duration::from_secs(10)),
         ),
         _ => run_json(
@@ -2367,24 +2957,30 @@ pub async fn diagnostics_run(
     .await;
 
     match outcome {
-        Ok(Ok(output)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "status": "success", "output": output }),
-            "Prueba completada",
-        ))
+        Ok(Ok(output)) => axum::Json(serde_json::json!({
+            "success": true,
+            "status": "success",
+            "message": "Prueba completada",
+            "output": output,
+            "data": { "status": "success", "output": output },
+        }))
         .into_response(),
         Ok(Err(error)) => (
             StatusCode::OK,
-            axum::Json(ApiResponse::ok(
-                serde_json::json!({ "status": "failed", "output": error }),
-                "La prueba falló",
-            )),
+            axum::Json(serde_json::json!({
+                "success": true,
+                "status": "failed",
+                "message": "La prueba falló",
+                "output": error,
+                "data": { "status": "failed", "output": error },
+            })),
         )
             .into_response(),
         Err(_) => server_error("prueba interrumpida"),
     }
 }
 
-/// Reinicia el servidor.
+/// Reinicia el servidor de forma diferida para devolver respuesta HTTP limpia.
 pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let user = match require_auth(&state, &headers) {
         Ok(user) => user,
@@ -2400,11 +2996,19 @@ pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) ->
 
     match tokio::task::spawn_blocking(|| {
         run_json(
-            nas_exec::CommandSpec::new("systemctl")
-                .arg("reboot")
+            nas_exec::CommandSpec::new("systemd-run")
+                .args(["--no-block", "--collect", "systemctl", "reboot"])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(15)),
         )
+        .or_else(|_| {
+            run_json(
+                nas_exec::CommandSpec::new("systemctl")
+                    .arg("reboot")
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(15)),
+            )
+        })
     })
     .await
     {
@@ -2425,7 +3029,12 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
     let version = std::fs::read_to_string(state.paths.repo.join("version.json"))
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .unwrap_or_else(|| serde_json::json!({ "version": "0.1.0", "commit": "dev" }));
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "commit": "local",
+            })
+        });
 
     axum::Json(ApiResponse::ok(
         serde_json::json!({
@@ -2434,7 +3043,7 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
             "installed_commit": version["commit"],
             "commit_date": version["date"],
             "has_updates": false,
-            "channel": "dev",
+            "channel": "stable",
             "gpg_verified": version["gpg_verified"],
             "release_notes": version["notes"],
             "commit": version["commit"],
@@ -2444,6 +3053,14 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
     .into_response()
 }
 
+fn process_rss_mb() -> u64 {
+    std::fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|text| text.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|pages| (pages * 4096) / (1024 * 1024))
+        .unwrap_or(0)
+}
+
 /// Estado de las aplicaciones y tecnologías.
 pub async fn system_applications(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
@@ -2451,6 +3068,7 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
     }
 
     let paths = state.paths.clone();
+    let backup_dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
         let active = |unit: &str| {
@@ -2472,17 +3090,28 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
                     .timeout(std::time::Duration::from_secs(15)),
             )
             .ok();
-        let sessions = smbstatus
-            .as_ref()
-            .map(|out| {
-                out.stdout
-                    .lines()
-                    .filter(|line| line.trim_start().starts_with(|c: char| c.is_ascii_digit()))
-                    .count()
-            })
-            .unwrap_or(0);
+        let mut sessions_list = Vec::new();
+        if let Some(out) = &smbstatus {
+            for line in out.stdout.lines() {
+                let trimmed = line.trim_start();
+                if !trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+                    continue;
+                }
+                let cols: Vec<&str> = trimmed.split_whitespace().collect();
+                if cols.len() >= 4 {
+                    sessions_list.push(serde_json::json!({
+                        "pid": cols[0],
+                        "username": cols[1],
+                        "group": cols[2],
+                        "machine": cols[3],
+                        "ip": cols.get(4).copied().unwrap_or(""),
+                    }));
+                }
+            }
+        }
+        let sessions = sessions_list.len();
 
-        let tasks = nas_engine::tasks::BackupTask::discover("/usr/local/bin")
+        let tasks = nas_engine::tasks::BackupTask::discover(&backup_dir)
             .map(|tasks| tasks.len())
             .unwrap_or(0);
         let overview = nas_engine::storage::overview_for(&paths, &runner).ok();
@@ -2491,49 +3120,60 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
             .map(|o| o.filesystem.clone())
             .unwrap_or_else(|| "desconocido".into());
         let is_btrfs = overview.as_ref().is_some_and(|o| o.is_btrfs);
+        let smbd_active = active("smbd");
+        let nginx_active = active("nginx");
+        let wsdd_active = active("wsdd2");
+        let nmbd_active = active("nmbd");
+        let auditd_active = active("auditd");
+        let aide_active = active("dailyaidecheck.timer");
+        let audit_rules = if std::path::Path::new("/etc/audit/rules.d/nas.rules").is_file() {
+            "reglas activas (/etc/audit/rules.d/nas.rules)"
+        } else {
+            "sin reglas personalizadas"
+        };
 
         serde_json::json!({
             "samba": {
-                "active": active("smbd"),
-                "status": if active("smbd") { "activo" } else { "inactivo" },
+                "active": smbd_active,
+                "status": if smbd_active { "activo" } else { "inactivo" },
                 "version": "4.x (Debian 13)",
                 "sessions": sessions,
-                "sessions_list": [],
-                "vfs_modules": "acl_xattr, streams_xattr",
+                "sessions_list": sessions_list,
+                "vfs_modules": ["acl_xattr", "streams_xattr"],
             },
             "wsdd2": {
-                "active": active("wsdd2"),
-                "nmbd_active": active("nmbd"),
-                "wsdd_active": active("wsdd2"),
+                "active": wsdd_active,
+                "nmbd_active": nmbd_active,
+                "wsdd_active": wsdd_active,
                 "protocol": "WSD/LLMNR",
             },
-            "wsdd": { "active": active("wsdd2") },
+            "wsdd": { "active": wsdd_active },
             "web": {
-                "active": true,
-                "status": "activo",
-                "pool_mode": "ondemand",
-                "php_version": serde_json::Value::Null,
-                "memory_mb": 0,
+                "active": nginx_active,
+                "status": if nginx_active { "activo" } else { "inactivo" },
+                "pool_mode": "axum/tokio",
+                "php_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
+                "memory_mb": process_rss_mb(),
             },
             "btrfs": {
                 "active": is_btrfs,
                 "filesystem": fs,
-                "compression": "zstd:3",
+                "compression": if is_btrfs { "zstd:3" } else { "n/a" },
                 "scrub_status": if is_btrfs { "programado" } else { "no disponible" },
-                "scrub_errors": "0",
+                "scrub_errors": "0 errores",
                 "schedule": "mensual (día 1, 02:00)",
             },
             "rsync": {
                 "tasks_count": tasks,
-                "protocols": "SSH + CIFS",
+                "protocols": ["CIFS 3.1.1", "SSH"],
                 "deduplication": ">85% (link-dest)",
                 "staging": "atómico",
             },
             "security": {
-                "active": active("auditd"),
-                "auditd_active": active("auditd"),
-                "aide_active": active("dailyaidecheck.timer"),
-                "audit_rules": 0,
+                "active": auditd_active,
+                "auditd_active": auditd_active,
+                "aide_active": aide_active,
+                "audit_rules": audit_rules,
                 "fim_status": "AIDE configurado",
             },
         })
@@ -2545,7 +3185,7 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
     }
 }
 
-/// Ejecuta la actualización en caliente del servidor desde el panel.
+/// Ejecuta la actualización en caliente del servidor fuera del sandbox de `nas-web.service`.
 pub async fn system_update_run(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let actor = match require_auth(&state, &headers) {
         Ok(user) => user,
@@ -2559,28 +3199,50 @@ pub async fn system_update_run(State(state): State<AppState>, headers: HeaderMap
         .db()
         .append_audit(&actor, "system_update", "sistema", "STARTED", "");
 
+    let repo_candidate = state.paths.repo.join("src/core/updater.sh");
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let candidates = [
-            "/opt/nas_debian/src/core/updater.sh",
-            "/opt/nas/src/core/updater.sh",
-            "/usr/local/lib/nas/src/core/updater.sh",
-        ];
+        let mut candidates = vec![repo_candidate];
+        candidates.extend([
+            std::path::PathBuf::from("/opt/nas_debian/src/core/updater.sh"),
+            std::path::PathBuf::from("/opt/nas/src/core/updater.sh"),
+            std::path::PathBuf::from("/usr/local/lib/nas/src/core/updater.sh"),
+        ]);
         let script = candidates
             .iter()
-            .find(|path| std::path::Path::new(path).is_file())
+            .find(|path| path.is_file())
             .ok_or_else(|| "no se encontró el script de actualización (updater.sh)".to_string())?;
 
-        let output = Runner::new()
+        let runner = Runner::new();
+        let active = runner
             .run(
-                &nas_exec::CommandSpec::new("/bin/bash")
-                    .args([(*script).to_string(), "--yes".to_string()])
+                &nas_exec::CommandSpec::new("systemctl")
+                    .args(["is-active", "nas-system-update"])
+                    .timeout(std::time::Duration::from_secs(5)),
+            )
+            .map(|out| matches!(out.stdout.trim(), "active" | "activating"))
+            .unwrap_or(false);
+        if active {
+            return Err("ya hay una actualización del sistema en ejecución".to_string());
+        }
+
+        let output = runner
+            .run(
+                &nas_exec::CommandSpec::new("systemd-run")
+                    .args([
+                        "--no-block".to_string(),
+                        "--collect".to_string(),
+                        "--unit=nas-system-update".to_string(),
+                        "/bin/bash".to_string(),
+                        script.to_string_lossy().to_string(),
+                        "--yes".to_string(),
+                    ])
                     .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(300)),
+                    .timeout(std::time::Duration::from_secs(30)),
             )
             .map_err(|error| error.to_string())?;
 
         if output.is_success() {
-            Ok(output.stdout)
+            Ok("Actualización iniciada en segundo plano (unidad nas-system-update).".to_string())
         } else {
             Err(if output.stderr.is_empty() {
                 output.stdout
@@ -2600,7 +3262,7 @@ pub async fn system_update_run(State(state): State<AppState>, headers: HeaderMap
                 .append_audit(&actor, "system_update", "sistema", "SUCCESS", "");
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "output": output, "version": env!("CARGO_PKG_VERSION") }),
-                "Actualización del sistema completada",
+                "Actualización del sistema iniciada",
             ))
             .into_response()
         }
@@ -2637,6 +3299,16 @@ pub struct ShareNameBody {
     pub name: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct ShareRepairBody {
+    #[serde(default)]
+    pub share: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub force: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ShareAccessBody {
     pub share: String,
@@ -2655,16 +3327,17 @@ fn share_path(name: &str, unit: &str) -> String {
 }
 
 fn normalize_group(group: &str) -> String {
-    if group.starts_with('@') {
-        group.to_string()
+    let trimmed = group.trim();
+    if trimmed.starts_with('@') {
+        trimmed.to_string()
     } else {
-        format!("@{group}")
+        format!("@{trimmed}")
     }
 }
 
 fn share_spec(body: &ShareBody, path: &str) -> nas_engine::samba::ShareSpec {
     let groups: Vec<String> = body.groups.iter().map(|g| normalize_group(g)).collect();
-    let write = if body.write_group.is_empty() {
+    let write = if body.write_group.trim().is_empty() {
         None
     } else {
         Some(normalize_group(&body.write_group))
@@ -2694,6 +3367,16 @@ fn share_spec(body: &ShareBody, path: &str) -> nas_engine::samba::ShareSpec {
         },
         comment: body.comment.clone(),
     }
+}
+
+fn validate_share_spec(spec: &nas_engine::samba::ShareSpec) -> Result<(), NasError> {
+    nas_engine::samba::validate_name(&spec.name)?;
+    nas_engine::samba::validate_path(&spec.path)?;
+    nas_engine::samba::validate_comment(&spec.comment)?;
+    for entry in spec.valid_users.iter().chain(spec.write_list.iter()) {
+        nas_engine::samba::validate_principal(entry)?;
+    }
+    Ok(())
 }
 
 fn stage_and_apply(conf: &str) -> Result<(), String> {
@@ -2795,22 +3478,27 @@ pub async fn share_create(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if nas_engine::samba::validate_name(&body.name).is_err() {
-        return bad_request("nombre de recurso inválido");
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
+    let unit = body.unit.trim().to_string();
+    if !unit.is_empty() && unit != "principal" && !nas_engine::storage_ops::valid_name(&unit) {
+        return bad_request("unidad de almacenamiento inválida");
     }
 
-    let path = share_path(body.name.trim(), body.unit.trim());
-    if let Err(error) = nas_engine::samba::validate_path(&path) {
+    let path = share_path(body.name.trim(), &unit);
+    let spec = share_spec(&body, &path);
+    if let Err(error) = validate_share_spec(&spec) {
         return error_response(error);
     }
-    let spec = share_spec(&body, &path);
-    let share_name = body.name.clone();
+    let share_name = spec.name.clone();
+    let conf_path = state.paths.samba_conf.clone();
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let updated =
             nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
-        create_share_dir(&spec.name, "principal")?;
+        create_share_dir(&spec.name, &unit)?;
         stage_and_apply(&updated)?;
         apply_spec_acls(&spec);
         Ok(())
@@ -2850,11 +3538,21 @@ pub async fn share_update(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
+    if let Err(error) = nas_engine::samba::validate_name(body.name.trim()) {
+        return error_response(error);
+    }
+    if let Err(error) = nas_engine::samba::validate_comment(&body.comment) {
+        return error_response(error);
+    }
 
-    let share_name = body.name.clone();
+    let share_name = body.name.trim().to_string();
+    let conf_path = state.paths.samba_conf.clone();
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let existing = nas_engine::parsers::smb::parse_shares(&conf)
             .into_iter()
             .find(|share| share.name.eq_ignore_ascii_case(body.name.trim()))
@@ -2863,6 +3561,7 @@ pub async fn share_update(
             .path
             .unwrap_or_else(|| share_path(body.name.trim(), "principal"));
         let spec = share_spec(&body, &path);
+        validate_share_spec(&spec).map_err(|error| error.to_string())?;
         let updated =
             nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
         stage_and_apply(&updated)?;
@@ -2907,10 +3606,17 @@ pub async fn share_delete(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
+    if let Err(error) = nas_engine::samba::validate_name(body.name.trim()) {
+        return error_response(error);
+    }
 
-    let name = body.name.clone();
+    let name = body.name.trim().to_string();
+    let conf_path = state.paths.samba_conf.clone();
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let updated =
             nas_engine::samba::remove_share(&conf, &name).map_err(|error| error.to_string())?;
         stage_and_apply(&updated)
@@ -2953,20 +3659,30 @@ pub async fn share_access_update(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
     if !matches!(body.level.as_str(), "none" | "read" | "write") {
         return bad_request("nivel de acceso inválido");
     }
+    if let Err(error) = nas_engine::samba::validate_name(body.share.trim()) {
+        return error_response(error);
+    }
 
-    let share_name = body.share.clone();
+    let share_name = body.share.trim().to_string();
     let level_name = body.level.clone();
-    let principal = if body.kind == "users" {
-        body.name.clone()
+    let principal = if matches!(body.kind.as_str(), "user" | "users") {
+        body.name.trim().to_string()
     } else {
         normalize_group(&body.name)
     };
+    if let Err(error) = nas_engine::samba::validate_principal(&principal) {
+        return error_response(error);
+    }
+    let conf_path = state.paths.samba_conf.clone();
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let mut shares = nas_engine::parsers::smb::parse_shares(&conf);
         let share = shares
             .iter_mut()
@@ -3053,7 +3769,7 @@ pub async fn share_access_update(
 pub async fn share_access_repair(
     State(state): State<AppState>,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<ShareNameBody>,
+    axum::Json(body): axum::Json<ShareRepairBody>,
 ) -> Response {
     let user = match require_auth(&state, &headers) {
         Ok(user) => user,
@@ -3062,13 +3778,23 @@ pub async fn share_access_repair(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
+    let _ = body.force;
+    let target_filter = if body.share.trim().is_empty() {
+        body.name.trim().to_string()
+    } else {
+        body.share.trim().to_string()
+    };
+    let conf_path = state.paths.samba_conf.clone();
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<usize, String> {
-        let conf = std::fs::read_to_string("/etc/samba/smb.conf").map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let shares = nas_engine::parsers::smb::parse_shares(&conf);
         let mut applied = 0;
         for share in shares {
-            if !body.name.is_empty() && !share.name.eq_ignore_ascii_case(body.name.trim()) {
+            if !target_filter.is_empty() && !share.name.eq_ignore_ascii_case(&target_filter) {
                 continue;
             }
             let Some(path) = share.path.clone() else {
@@ -3184,6 +3910,52 @@ fn valid_grp(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
+fn is_master_grp(name: &str) -> bool {
+    matches!(
+        name,
+        "grp_samba" | "grp_web" | "grp_superadmin" | "grp_backups"
+    )
+}
+
+fn configured_superadmin() -> Option<String> {
+    std::fs::read_to_string("/etc/nas/superadmin")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn is_protected_posix_account(username: &str) -> bool {
+    let (users, _) = nas_engine::users::load_local();
+    let found = users.into_iter().find(|u| u.name == username);
+    let uid = found.as_ref().map(|u| u.uid);
+    if nas_engine::users::is_protected_system_account(username, uid) {
+        return true;
+    }
+    found.is_some_and(|u| u.system)
+}
+
+fn is_target_superadmin(state: &AppState, username: &str) -> bool {
+    if configured_superadmin().as_deref() == Some(username) {
+        return true;
+    }
+    if state
+        .auth
+        .db()
+        .user_role(username)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("superadmin")
+    {
+        return true;
+    }
+    let (_, groups) = nas_engine::users::load_local();
+    groups
+        .into_iter()
+        .find(|g| g.name == "grp_superadmin")
+        .is_some_and(|g| g.members.iter().any(|m| m == username))
+}
+
 fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String> {
     let mut spec = nas_exec::CommandSpec::new("/usr/local/sbin/nas-accounts")
         .args(args.iter().map(|arg| (*arg).to_string()))
@@ -3219,8 +3991,14 @@ pub async fn user_create(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if !valid_username(&body.username) || !body.groups.iter().all(|group| valid_grp(group)) {
-        return bad_request("usuario o grupo inválido");
+    if !valid_username(&body.username)
+        || is_protected_posix_account(&body.username)
+        || !body.groups.iter().all(|group| valid_grp(group))
+    {
+        return bad_request("usuario o grupo inválido o reservado");
+    }
+    if body.is_superadmin && !is_superadmin(&state, &actor) {
+        return forbidden("solo el superadministrador puede otorgar rango de superadministrador");
     }
     if body.password.len() < 6 {
         return bad_request("la contraseña debe tener al menos 6 caracteres");
@@ -3230,7 +4008,8 @@ pub async fn user_create(
     let groups = body.groups.join(",");
     let samba = if body.samba_enabled { "1" } else { "0" };
     let full_name = body.full_name.clone();
-    let can_web = body.can_web;
+    let grant_admin = body.is_admin || body.is_superadmin;
+    let can_web = body.can_web || grant_admin;
     let password = body.password.clone();
 
     let result = tokio::task::spawn_blocking(move || {
@@ -3240,7 +4019,7 @@ pub async fn user_create(
                 &username,
                 &full_name,
                 "-",
-                "0",
+                if grant_admin { "1" } else { "0" },
                 if can_web { "1" } else { "0" },
                 samba,
                 &groups,
@@ -3254,18 +4033,16 @@ pub async fn user_create(
     match result {
         Ok(_) => {
             if can_web {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(body.password.as_bytes());
-                let hash = hex::encode(hasher.finalize());
-                let role = if body.is_superadmin {
-                    "superadmin"
-                } else if body.is_admin {
-                    "admin"
-                } else {
-                    "operator"
-                };
-                let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+                if let Ok(hash) = crate::Auth::hash_password(&body.password) {
+                    let role = if body.is_superadmin {
+                        "superadmin"
+                    } else if body.is_admin {
+                        "admin"
+                    } else {
+                        "operator"
+                    };
+                    let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+                }
             }
             let _ =
                 state
@@ -3291,8 +4068,18 @@ pub async fn user_update(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if !valid_username(&body.username) {
-        return bad_request("usuario inválido");
+    if !valid_username(&body.username)
+        || is_protected_posix_account(&body.username)
+        || !body.groups.iter().all(|group| valid_grp(group))
+    {
+        return bad_request("usuario o grupo inválido o reservado");
+    }
+    let target_is_super = is_target_superadmin(&state, &body.username);
+    if (target_is_super || body.is_superadmin) && !is_superadmin(&state, &actor) {
+        return forbidden("no se puede modificar el rango del superadministrador");
+    }
+    if !body.password.is_empty() && body.password.len() < 6 {
+        return bad_request("la contraseña debe tener al menos 6 caracteres");
     }
 
     let username = body.username.clone();
@@ -3300,26 +4087,32 @@ pub async fn user_update(
     let samba = if body.samba_enabled { "1" } else { "0" };
     let full_name = body.full_name.clone();
     let password = body.password.clone();
-    let can_web = body.can_web;
+    let grant_admin = target_is_super || body.is_superadmin || body.is_admin;
+    let can_web = target_is_super || body.can_web || grant_admin;
 
     let result = tokio::task::spawn_blocking(move || {
-        let password = if password.is_empty() {
-            "cambiar123".to_string()
+        let pass_mode = if password.is_empty() {
+            "--keep-password"
         } else {
-            password
+            "-"
+        };
+        let secret = if password.is_empty() {
+            None
+        } else {
+            Some(password.as_str())
         };
         run_accounts(
             &[
                 "update-user",
                 &username,
                 &full_name,
-                "-",
-                "0",
-                "1",
+                pass_mode,
+                if grant_admin { "1" } else { "0" },
+                if can_web { "1" } else { "0" },
                 samba,
                 &groups,
             ],
-            Some(&password),
+            secret,
         )
     })
     .await
@@ -3327,15 +4120,26 @@ pub async fn user_update(
 
     match result {
         Ok(_) => {
-            if can_web && !body.password.is_empty() {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(body.password.as_bytes());
-                let hash = hex::encode(hasher.finalize());
-                let _ = state
-                    .auth
-                    .db()
-                    .upsert_user(&body.username, &hash, "operator");
+            let role = if target_is_super || body.is_superadmin {
+                "superadmin"
+            } else if body.is_admin {
+                "admin"
+            } else {
+                "operator"
+            };
+            if can_web {
+                if !body.password.is_empty() {
+                    if let Ok(hash) = crate::Auth::hash_password(&body.password) {
+                        let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+                    }
+                } else if let Ok(Some(existing_hash)) = state.auth.db().user_hash(&body.username) {
+                    let _ = state
+                        .auth
+                        .db()
+                        .upsert_user(&body.username, &existing_hash, role);
+                }
+            } else {
+                let _ = state.auth.db().delete_user(&body.username);
             }
             let _ =
                 state
@@ -3364,8 +4168,11 @@ pub async fn user_toggle(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if !valid_username(&body.username) {
-        return bad_request("usuario inválido");
+    if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
+        return bad_request("usuario inválido o reservado del sistema");
+    }
+    if !body.enabled && (body.username == actor || is_target_superadmin(&state, &body.username)) {
+        return forbidden("no se puede suspender la cuenta propia ni al superadministrador");
     }
 
     let username = body.username.clone();
@@ -3378,6 +4185,9 @@ pub async fn user_toggle(
 
     match result {
         Ok(_) => {
+            if !body.enabled {
+                let _ = state.auth.db().delete_user_sessions(&body.username);
+            }
             let _ =
                 state
                     .auth
@@ -3405,8 +4215,11 @@ pub async fn user_delete(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if !valid_username(&body.username) || body.username == "www-data" {
-        return bad_request("usuario inválido o protegido");
+    if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
+        return bad_request("usuario inválido o protegido del sistema");
+    }
+    if body.username == actor || is_target_superadmin(&state, &body.username) {
+        return forbidden("no se puede eliminar la cuenta propia ni al superadministrador");
     }
 
     let username = body.username.clone();
@@ -3417,6 +4230,7 @@ pub async fn user_delete(
 
     match result {
         Ok(_) => {
+            let _ = state.auth.db().delete_user(&body.username);
             let _ =
                 state
                     .auth
@@ -3444,8 +4258,14 @@ pub async fn user_groups(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    if !valid_username(&body.username) || !valid_grp(&body.group) {
+    if !valid_username(&body.username)
+        || is_protected_posix_account(&body.username)
+        || !valid_grp(&body.group)
+    {
         return bad_request("usuario o grupo inválido");
+    }
+    if body.group == "grp_superadmin" {
+        return forbidden("el grupo grp_superadmin es inmutable");
     }
 
     let action = if body.action == "add" {
@@ -3523,8 +4343,12 @@ pub async fn group_rename(
     } else {
         body.new.clone()
     };
-    if !valid_grp(&body.old) || !valid_grp(&new_name) {
-        return bad_request("nombre de grupo inválido");
+    if !valid_grp(&body.old)
+        || !valid_grp(&new_name)
+        || is_master_grp(&body.old)
+        || is_master_grp(&new_name)
+    {
+        return bad_request("nombre de grupo inválido o grupo maestro protegido");
     }
 
     let old = body.old.clone();
@@ -3557,8 +4381,8 @@ pub async fn group_delete(
         return forbidden("se requieren privilegios de administrador");
     }
     let name = body.name.trim().to_string();
-    if !valid_grp(&name) {
-        return bad_request("grupo inválido");
+    if !valid_grp(&name) || is_master_grp(&name) {
+        return bad_request("grupo inválido o grupo maestro protegido");
     }
 
     let target = name.clone();
@@ -3669,6 +4493,9 @@ async fn install_backup(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
 
     let proto = match body.validate() {
         Ok(proto) => proto,
@@ -3732,6 +4559,9 @@ pub async fn backup_delete(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
     if body.id.is_empty()
         || !body
             .id
@@ -3767,8 +4597,15 @@ pub async fn backup_test(
     headers: HeaderMap,
     axum::Json(body): axum::Json<BackupTestBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
 
     let proto = body.proto.clone();
@@ -3994,6 +4831,9 @@ pub async fn backup_run_id(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
     let Some(id) = backup_action_id(&id) else {
         return bad_request("identificador de tarea inválido");
     };
@@ -4037,6 +4877,9 @@ pub async fn backup_stop_id(
     };
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
     let Some(id) = backup_action_id(&id) else {
         return bad_request("identificador de tarea inválido");
@@ -4093,7 +4936,7 @@ pub async fn backup_logs_id(
 
     match outcome {
         Ok(output) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "id": id, "output": output }),
+            serde_json::json!({ "id": id, "output": output, "logs": output }),
             "Bitácora de la tarea",
         ))
         .into_response(),
@@ -4106,6 +4949,13 @@ fn file_root_for(state: &AppState, root: Option<&str>) -> Result<FileRoot, Box<R
     let requested = root.unwrap_or("").trim();
     let base = if requested.is_empty() || requested == "nas" || requested == "principal" {
         state.paths.data_root.clone()
+    } else if requested == "backups" {
+        if !state.role.has_backups() {
+            return Err(Box::new(forbidden(
+                "el rol ARCHIVOS no expone respaldos históricos",
+            )));
+        }
+        state.paths.data_root.join("BACKUPS_HISTORICOS")
     } else {
         if !nas_engine::storage_ops::valid_name(requested) {
             return Err(Box::new(bad_request("unidad de almacenamiento inválida")));
@@ -4158,6 +5008,18 @@ pub async fn files_list_rooted(
     }
 }
 
+fn is_active_web_payload(name: &str) -> bool {
+    let extension = name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        extension.as_str(),
+        "svg" | "svgz" | "html" | "htm" | "xhtml" | "xml" | "mhtml" | "xsl" | "xslt"
+    )
+}
+
 fn inline_content_type(name: &str) -> &'static str {
     let extension = name
         .rsplit('.')
@@ -4171,7 +5033,6 @@ fn inline_content_type(name: &str) -> &'static str {
         "webp" => "image/webp",
         "bmp" => "image/bmp",
         "ico" => "image/x-icon",
-        "svg" => "image/svg+xml",
         "pdf" => "application/pdf",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
@@ -4183,7 +5044,7 @@ fn inline_content_type(name: &str) -> &'static str {
     }
 }
 
-/// Sirve un archivo para previsualización en línea (`/api/files/raw`).
+/// Sirve un archivo para previsualización en línea (`/api/files/raw`) aislando vectores XSS.
 pub async fn files_raw(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -4200,20 +5061,36 @@ pub async fn files_raw(
     let name = path
         .rsplit('/')
         .next()
+        .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_default();
+        .unwrap_or_else(|| "archivo.bin".to_string());
 
     match tokio::task::spawn_blocking(move || root.read(&path, 64 * 1024 * 1024)).await {
         Ok(Ok(bytes)) => {
+            let force_attachment = is_active_web_payload(&name);
             let mut response = Response::new(axum::body::Body::from(bytes));
-            let content_type = HeaderValue::from_static(inline_content_type(&name));
+            let content_type = if force_attachment {
+                HeaderValue::from_static("application/octet-stream")
+            } else {
+                HeaderValue::from_static(inline_content_type(&name))
+            };
+            let disposition = if force_attachment {
+                "attachment"
+            } else {
+                "inline"
+            };
+            let safe_name = name.replace(['"', '\r', '\n'], "");
             let response_headers = response.headers_mut();
             response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
             if let Ok(value) =
-                HeaderValue::from_str(&format!("inline; filename=\"{}\"", name.replace('"', "")))
+                HeaderValue::from_str(&format!("{disposition}; filename=\"{safe_name}\""))
             {
                 response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
             }
+            response_headers.insert(
+                "content-security-policy",
+                HeaderValue::from_static("default-src 'none'; sandbox"),
+            );
             response_headers.insert(
                 "x-content-type-options",
                 HeaderValue::from_static("nosniff"),
@@ -4237,8 +5114,13 @@ fn acl_entries(runner: &Runner, path: &str) -> Option<String> {
         .map(|output| output.stdout)
 }
 
-fn acl_has(text: &str, entry: &str, perms: &str, default: bool) -> bool {
-    let prefix = if default { "default:group:" } else { "group:" };
+fn acl_has(text: &str, entry: &str, is_group: bool, perms: &str, default: bool) -> bool {
+    let prefix = match (default, is_group) {
+        (true, true) => "default:group:",
+        (false, true) => "group:",
+        (true, false) => "default:user:",
+        (false, false) => "user:",
+    };
     text.lines().any(|line| {
         let line = line.trim();
         line.strip_prefix(prefix)
@@ -4256,8 +5138,14 @@ pub async fn shares_access_audit(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
+    if !state.role.has_shares() {
+        return forbidden("el rol BACKUP no expone recursos compartidos");
+    }
     let path = state.paths.samba_conf.clone();
-    let only = query.path.clone().filter(|value| !value.is_empty());
+    let only = query
+        .share
+        .or(query.path)
+        .filter(|value| !value.trim().is_empty());
 
     match tokio::task::spawn_blocking(move || {
         let conf = std::fs::read_to_string(&path).unwrap_or_default();
@@ -4267,7 +5155,7 @@ pub async fn shares_access_audit(
 
         for share in parse_shares(&conf) {
             if let Some(only) = &only {
-                if !share.name.eq_ignore_ascii_case(only) {
+                if !share.name.eq_ignore_ascii_case(only.trim()) {
                     continue;
                 }
             }
@@ -4275,32 +5163,41 @@ pub async fn shares_access_audit(
             let mut discrepancies = Vec::new();
             let acl = acl_entries(&runner, &path);
 
-            let mut expected: Vec<(String, &'static str)> = Vec::new();
+            let mut expected: Vec<(String, bool, &'static str)> = Vec::new();
             for entry in &share.valid_users {
+                let is_group = entry.starts_with('@');
                 let name = entry.trim_start_matches('@').to_string();
-                expected.push((name, "r-x"));
+                expected.push((name, is_group, "r-x"));
             }
             for entry in &share.write_list {
+                let is_group = entry.starts_with('@');
                 let name = entry.trim_start_matches('@').to_string();
-                if let Some(item) = expected.iter_mut().find(|(n, _)| *n == name) {
-                    item.1 = "rwx";
+                if let Some(item) = expected
+                    .iter_mut()
+                    .find(|(n, g, _)| *n == name && *g == is_group)
+                {
+                    item.2 = "rwx";
                 } else {
-                    expected.push((name, "rwx"));
+                    expected.push((name, is_group, "rwx"));
                 }
             }
-            if !expected.iter().any(|(name, _)| name == "grp_samba") {
-                expected.push(("grp_samba".to_string(), "rwx"));
+            if !expected
+                .iter()
+                .any(|(name, is_group, _)| *is_group && name == "grp_samba")
+            {
+                expected.push(("grp_samba".to_string(), true, "rwx"));
             }
 
             match &acl {
                 None => discrepancies.push(format!("no se pudo leer la ACL de {path}")),
                 Some(text) => {
-                    for (name, perms) in &expected {
-                        if !acl_has(text, name, perms, false) {
-                            discrepancies.push(format!("falta group:{name}:{perms}"));
+                    for (name, is_group, perms) in &expected {
+                        let kind = if *is_group { "group" } else { "user" };
+                        if !acl_has(text, name, *is_group, perms, false) {
+                            discrepancies.push(format!("falta {kind}:{name}:{perms}"));
                         }
-                        if !acl_has(text, name, perms, true) {
-                            discrepancies.push(format!("falta default:group:{name}:{perms}"));
+                        if !acl_has(text, name, *is_group, perms, true) {
+                            discrepancies.push(format!("falta default:{kind}:{name}:{perms}"));
                         }
                     }
                 }
