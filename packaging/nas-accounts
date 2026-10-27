@@ -2,102 +2,254 @@
 # ==============================================================================
 # Gestión validada de cuentas del sistema y de Samba para el panel.
 # Uso: nas-accounts <accion> [args...]
-#   create-user  <usuario> <nombre> <password|-> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
-#   update-user  <usuario> <nombre> <password|-> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
-#   toggle-user  <usuario> <enable:0|1>
-#   delete-user  <usuario>
-#   add-member   <usuario> <grupo>
+#   create-user   <usuario> <nombre> <password|-> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
+#   update-user   <usuario> <nombre> <password|-|--keep-password> <admin:0|1> <web:0|1> <samba:0|1> <grupos,csv>
+#   toggle-user   <usuario> <enable:0|1>
+#   delete-user   <usuario>
+#   add-member    <usuario> <grupo>
 #   remove-member <usuario> <grupo>
-#   create-group <grupo>
-#   rename-group <viejo> <nuevo>
-#   delete-group <grupo>
+#   create-group  <grupo>
+#   rename-group  <viejo> <nuevo>
+#   delete-group  <grupo>
+#   status
 # La contraseña se lee por stdin cuando el argumento es "-".
 # ==============================================================================
 set -euo pipefail
 
 ACTION="${1:-}"; shift || true
 
-valid_user() { [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
-valid_group() { [[ "$1" =~ ^grp_[a-z0-9_-]{1,28}$ ]]; }
-
-read_password() {
-    if [ "${1:-}" = "-" ]; then
-        IFS= read -r PASSWORD
-    else
-        PASSWORD="$1"
-    fi
-    [ "${#PASSWORD}" -ge 6 ] || { echo "contraseña demasiado corta" >&2; exit 3; }
+valid_user() {
+    local u="${1:-}"
+    [[ "$u" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || return 1
+    case "$u" in
+        root|daemon|bin|sys|sync|nobody|nogroup|www-data|nas-web|sshd|messagebus|systemd-*)
+            return 1
+            ;;
+    esac
+    return 0
 }
 
-apply_groups() {
-    local user="$1" groups="$2"
-    [ -n "$groups" ] || return 0
-    local IFS=','
-    for g in $groups; do
-        valid_group "$g" || { echo "grupo inválido: $g" >&2; exit 4; }
+valid_group() { [[ "${1:-}" =~ ^grp_[a-z0-9_-]{1,28}$ ]]; }
+
+is_superadmin_account() {
+    local u="$1"
+    if [ -f /etc/nas/superadmin ]; then
+        local sa
+        sa="$(tr -d ' \t\r\n' < /etc/nas/superadmin || true)"
+        if [ -n "$sa" ] && [ "$u" = "$sa" ]; then
+            return 0
+        fi
+    fi
+    if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx 'grp_superadmin'; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_manageable_existing_user() {
+    local u="$1"
+    valid_user "$u" || { echo "usuario inválido o reservado del sistema" >&2; exit 2; }
+    local uid
+    if ! uid="$(id -u "$u" 2>/dev/null)"; then
+        echo "el usuario no existe" >&2
+        exit 6
+    fi
+    if [ "$uid" -lt 1000 ] || [ "$uid" -ge 60000 ]; then
+        echo "operación prohibida sobre cuenta del sistema (UID $uid)" >&2
+        exit 7
+    fi
+}
+
+sanitize_gecos() {
+    printf '%s' "${1:-}" | tr -d ':\r\n\000'
+}
+
+read_password() {
+    local arg="${1:-}"
+    local allow_empty="${2:-0}"
+    PASSWORD=""
+    HAS_PASSWORD="0"
+    if [ "$arg" = "--keep-password" ] || [ -z "$arg" ]; then
+        if [ "$allow_empty" = "1" ]; then
+            return 0
+        fi
+        echo "contraseña requerida" >&2
+        exit 3
+    fi
+    if [ "$arg" = "-" ]; then
+        IFS= read -r PASSWORD || true
+        if [ -z "$PASSWORD" ] && [ "$allow_empty" = "1" ]; then
+            return 0
+        fi
+    else
+        PASSWORD="$arg"
+    fi
+    if [ "${#PASSWORD}" -lt 6 ]; then
+        echo "contraseña demasiado corta (mínimo 6 caracteres)" >&2
+        exit 3
+    fi
+    HAS_PASSWORD="1"
+}
+
+ensure_special_group() {
+    local g="$1"
+    if ! getent group "$g" >/dev/null 2>&1; then
+        groupadd "$g" 2>/dev/null || true
+    fi
+}
+
+sync_user_groups() {
+    local user="$1" admin_flag="$2" web_flag="$3" csv_groups="$4"
+    local primary_group
+    primary_group="$(id -gn "$user" 2>/dev/null || echo "")"
+
+    declare -A keep_map=()
+    local existing
+    existing="$(id -nG "$user" 2>/dev/null || echo "")"
+    local g
+    for g in $existing; do
+        if [ -z "$g" ] || [ "$g" = "$primary_group" ]; then
+            continue
+        fi
+        if [[ "$g" != grp_* ]] || [ "$g" = "grp_superadmin" ]; then
+            keep_map["$g"]=1
+        fi
     done
-    usermod -G "$groups" "$user"
+
+    if [ -n "$csv_groups" ]; then
+        local IFS=','
+        for g in $csv_groups; do
+            [ -n "$g" ] || continue
+            valid_group "$g" || { echo "grupo inválido: $g" >&2; exit 4; }
+            if getent group "$g" >/dev/null 2>&1; then
+                keep_map["$g"]=1
+            else
+                echo "el grupo no existe: $g" >&2
+                exit 4
+            fi
+        done
+    fi
+
+    if [ "$admin_flag" = "1" ]; then
+        ensure_special_group "grp_samba"
+        keep_map["grp_samba"]=1
+    elif [ "$web_flag" = "1" ]; then
+        ensure_special_group "grp_web"
+        keep_map["grp_web"]=1
+    fi
+
+    local final_list=()
+    for g in "${!keep_map[@]}"; do
+        final_list+=("$g")
+    done
+
+    if [ "${#final_list[@]}" -eq 0 ]; then
+        usermod -G "" "$user"
+    else
+        local joined
+        joined="$(IFS=','; echo "${final_list[*]}")"
+        usermod -G "$joined" "$user"
+    fi
 }
 
 samba_set() {
-    local user="$1" enable="$2"
+    local user="$1" enable="$2" has_pass="$3"
     if [ "$enable" = "1" ]; then
-        printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | smbpasswd -a -s "$user" >/dev/null
+        if [ "$has_pass" = "1" ]; then
+            printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | smbpasswd -a -s "$user" >/dev/null
+        fi
         smbpasswd -e "$user" >/dev/null 2>&1 || true
     else
-        smbpasswd -x "$user" >/dev/null 2>&1 || true
+        smbpasswd -d "$user" >/dev/null 2>&1 || true
     fi
 }
 
 case "$ACTION" in
     create-user)
-        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; USER_GROUPS="${7:-}"
-        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
-        id -u "$USER_NAME" >/dev/null 2>&1 && { echo "el usuario ya existe" >&2; exit 5; }
-        read_password "$PASS_ARG"
-        useradd -m -s /bin/bash -c "$FULL" "$USER_NAME"
+        USER_NAME="${1:-}"
+        FULL="$(sanitize_gecos "${2:-}")"
+        PASS_ARG="${3:--}"
+        ADMIN="${4:-0}"
+        WEB="${5:-0}"
+        SAMBA="${6:-0}"
+        USER_GROUPS="${7:-}"
+        valid_user "$USER_NAME" || { echo "usuario inválido o reservado del sistema" >&2; exit 2; }
+        if id -u "$USER_NAME" >/dev/null 2>&1; then
+            echo "el usuario ya existe" >&2
+            exit 5
+        fi
+        read_password "$PASS_ARG" "0"
+        USER_SHELL="/usr/sbin/nologin"
+        if [ "$ADMIN" = "1" ]; then
+            USER_SHELL="/bin/bash"
+        fi
+        useradd -m -s "$USER_SHELL" -c "$FULL" "$USER_NAME"
         printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
-        apply_groups "$USER_NAME" "$USER_GROUPS"
-        samba_set "$USER_NAME" "$SAMBA"
+        sync_user_groups "$USER_NAME" "$ADMIN" "$WEB" "$USER_GROUPS"
+        samba_set "$USER_NAME" "$SAMBA" "1"
         echo "usuario $USER_NAME creado"
         ;;
     update-user)
-        USER_NAME="${1:-}"; FULL="${2:-}"; PASS_ARG="${3:--}"; SAMBA="${6:-0}"; USER_GROUPS="${7:-}"
-        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
-        id -u "$USER_NAME" >/dev/null 2>&1 || { echo "el usuario no existe" >&2; exit 6; }
-        read_password "$PASS_ARG"
+        USER_NAME="${1:-}"
+        FULL="$(sanitize_gecos "${2:-}")"
+        PASS_ARG="${3:---keep-password}"
+        ADMIN="${4:-0}"
+        WEB="${5:-0}"
+        SAMBA="${6:-0}"
+        USER_GROUPS="${7:-}"
+        ensure_manageable_existing_user "$USER_NAME"
+        read_password "$PASS_ARG" "1"
         usermod -c "$FULL" "$USER_NAME"
-        printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
-        apply_groups "$USER_NAME" "$USER_GROUPS"
-        samba_set "$USER_NAME" "$SAMBA"
+        if [ "$ADMIN" = "1" ] || is_superadmin_account "$USER_NAME"; then
+            usermod -s /bin/bash "$USER_NAME"
+        elif ! id -nG "$USER_NAME" 2>/dev/null | tr ' ' '\n' | grep -qx 'sudo'; then
+            usermod -s /usr/sbin/nologin "$USER_NAME"
+        fi
+        if [ "$HAS_PASSWORD" = "1" ]; then
+            printf '%s:%s\n' "$USER_NAME" "$PASSWORD" | chpasswd
+        fi
+        sync_user_groups "$USER_NAME" "$ADMIN" "$WEB" "$USER_GROUPS"
+        samba_set "$USER_NAME" "$SAMBA" "$HAS_PASSWORD"
         echo "usuario $USER_NAME actualizado"
         ;;
     toggle-user)
         USER_NAME="${1:-}"; ENABLE="${2:-1}"
-        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        ensure_manageable_existing_user "$USER_NAME"
+        if [ "$ENABLE" != "1" ] && is_superadmin_account "$USER_NAME"; then
+            echo "la cuenta superadministradora no puede suspenderse" >&2
+            exit 7
+        fi
         if [ "$ENABLE" = "1" ]; then
             usermod -e "" "$USER_NAME" 2>/dev/null || true
             usermod -U "$USER_NAME" 2>/dev/null || true
             smbpasswd -e "$USER_NAME" >/dev/null 2>&1 || true
+            echo "usuario $USER_NAME reactivado"
         else
             usermod -L "$USER_NAME"
             usermod -e 1 "$USER_NAME"
             smbpasswd -d "$USER_NAME" >/dev/null 2>&1 || true
+            echo "usuario $USER_NAME suspendido"
         fi
-        echo "usuario $USER_NAME $([ "$ENABLE" = "1" ] && echo reactivado || echo suspendido)"
         ;;
     delete-user)
         USER_NAME="${1:-}"
-        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
-        [ "$USER_NAME" = "www-data" ] && { echo "cuenta protegida" >&2; exit 7; }
+        ensure_manageable_existing_user "$USER_NAME"
+        if is_superadmin_account "$USER_NAME"; then
+            echo "la cuenta superadministradora está protegida" >&2
+            exit 7
+        fi
         smbpasswd -x "$USER_NAME" >/dev/null 2>&1 || true
-        userdel "$USER_NAME"
+        userdel -r "$USER_NAME" 2>/dev/null || userdel "$USER_NAME"
         echo "usuario $USER_NAME eliminado"
         ;;
     add-member|remove-member)
         USER_NAME="${1:-}"; GROUP="${2:-}"
-        valid_user "$USER_NAME" || { echo "usuario inválido" >&2; exit 2; }
+        ensure_manageable_existing_user "$USER_NAME"
         valid_group "$GROUP" || { echo "grupo inválido" >&2; exit 4; }
+        if [ "$GROUP" = "grp_superadmin" ]; then
+            echo "el grupo grp_superadmin está protegido" >&2
+            exit 8
+        fi
         if [ "$ACTION" = "add-member" ]; then
             gpasswd -a "$USER_NAME" "$GROUP" >/dev/null
         else
@@ -115,6 +267,9 @@ case "$ACTION" in
         OLD="${1:-}"; NEW="${2:-}"
         valid_group "$OLD" || { echo "grupo inválido" >&2; exit 4; }
         valid_group "$NEW" || { echo "grupo inválido" >&2; exit 4; }
+        case "$OLD" in grp_samba|grp_web|grp_superadmin|grp_backups)
+            echo "grupo protegido" >&2; exit 8 ;;
+        esac
         groupmod -n "$NEW" "$OLD"
         echo "grupo $OLD renombrado a $NEW"
         ;;
@@ -126,6 +281,36 @@ case "$ACTION" in
         esac
         groupdel "$GROUP"
         echo "grupo $GROUP eliminado"
+        ;;
+    status)
+        declare -A SMB_ACTIVE=()
+        if command -v pdbedit >/dev/null 2>&1; then
+            while IFS= read -r line; do
+                [ -n "$line" ] || continue
+                u="${line%%:*}"
+                flags="$(printf '%s' "$line" | awk -F: '{print $4}' || true)"
+                if [ -n "$u" ] && [[ "$flags" != *D* ]]; then
+                    SMB_ACTIVE["$u"]=1
+                fi
+            done < <(pdbedit -L -w 2>/dev/null || true)
+        fi
+        while IFS=: read -r uname _ uid _ _ _ _; do
+            [ -n "$uname" ] || continue
+            case "$uid" in (*[!0-9]*|'') continue ;; esac
+            if [ "$uid" -lt 1000 ] || [ "$uid" -ge 60000 ]; then
+                continue
+            fi
+            enabled=1
+            st="$(passwd -S "$uname" 2>/dev/null | awk '{print $2}' || true)"
+            if [ "$st" = "L" ]; then
+                enabled=0
+            fi
+            if chage -l "$uname" 2>/dev/null | grep -qiE '1970|Jan 02, 1970|account expires.*1970'; then
+                enabled=0
+            fi
+            smb="${SMB_ACTIVE[$uname]:-0}"
+            printf '%s\t%s\t%s\n' "$uname" "$enabled" "$smb"
+        done < /etc/passwd
         ;;
     *)
         echo "acción desconocida: $ACTION" >&2
