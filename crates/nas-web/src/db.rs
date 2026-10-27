@@ -78,6 +78,29 @@ impl Db {
     fn prepare(conn: &Connection) -> NasResult<()> {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db_error)?;
+
+        let has_window_start: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('api_rate_limits') WHERE name = 'window_start'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='api_rate_limits'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if table_exists && !has_window_start {
+            let _ = conn.execute("DROP TABLE api_rate_limits", []);
+        }
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS web_users (
                  username TEXT PRIMARY KEY,
@@ -101,7 +124,14 @@ impl Db {
                  result TEXT NOT NULL,
                  detail TEXT NOT NULL DEFAULT ''
              );
-             CREATE INDEX IF NOT EXISTS idx_web_audit_ts ON web_audit(ts DESC);",
+             CREATE INDEX IF NOT EXISTS idx_web_audit_ts ON web_audit(ts DESC);
+             CREATE TABLE IF NOT EXISTS api_rate_limits (
+                 key TEXT NOT NULL,
+                 window_start INTEGER NOT NULL,
+                 hits INTEGER NOT NULL,
+                 PRIMARY KEY (key, window_start)
+             );
+             CREATE INDEX IF NOT EXISTS idx_api_rate_limits_window ON api_rate_limits(window_start);",
         )
         .map_err(db_error)
     }
@@ -244,9 +274,71 @@ impl Db {
         Ok(entries)
     }
 
-    /// Purga sesiones expiradas y devuelve cuántas eliminó.
+    /// Revoca todas las sesiones activas de un usuario concreto.
+    pub fn delete_user_sessions(&self, username: &str) -> NasResult<usize> {
+        let conn = self.conn.lock().expect("mutex de base de datos");
+        conn.execute(
+            "DELETE FROM web_sessions WHERE username = ?1",
+            params![username],
+        )
+        .map_err(db_error)
+    }
+
+    /// Elimina un usuario web y revoca sus sesiones activas.
+    pub fn delete_user(&self, username: &str) -> NasResult<()> {
+        let conn = self.conn.lock().expect("mutex de base de datos");
+        conn.execute(
+            "DELETE FROM web_sessions WHERE username = ?1",
+            params![username],
+        )
+        .map_err(db_error)?;
+        conn.execute(
+            "DELETE FROM web_users WHERE username = ?1",
+            params![username],
+        )
+        .map_err(db_error)?;
+        Ok(())
+    }
+
+    /// Registra un intento sobre `key` y devuelve `true` si sigue dentro del umbral.
+    pub fn check_rate_limit(
+        &self,
+        key: &str,
+        now: i64,
+        window_secs: i64,
+        max_hits: i64,
+    ) -> NasResult<bool> {
+        let span = window_secs.max(1);
+        let window_start = now - now.rem_euclid(span);
+        let conn = self.conn.lock().expect("mutex de base de datos");
+        let _ = conn.execute(
+            "DELETE FROM api_rate_limits WHERE window_start < ?1",
+            params![now.saturating_sub(span * 4)],
+        );
+        conn.execute(
+            "INSERT INTO api_rate_limits (key, window_start, hits)
+             VALUES (?1, ?2, 1)
+             ON CONFLICT(key, window_start) DO UPDATE SET hits = hits + 1",
+            params![key, window_start],
+        )
+        .map_err(db_error)?;
+        let hits: i64 = conn
+            .query_row(
+                "SELECT hits FROM api_rate_limits WHERE key = ?1 AND window_start = ?2",
+                params![key, window_start],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        Ok(hits <= max_hits)
+    }
+
+    /// Purga sesiones expiradas y ventanas antiguas, devolviendo cuántas sesiones eliminó.
     pub fn purge_expired(&self, now: i64) -> NasResult<usize> {
         let conn = self.conn.lock().expect("mutex de base de datos");
+        let _ = conn.execute(
+            "DELETE FROM api_rate_limits WHERE window_start < ?1",
+            params![now.saturating_sub(3600)],
+        );
         conn.execute(
             "DELETE FROM web_sessions WHERE expires_at <= ?1",
             params![now],
@@ -315,5 +407,30 @@ mod tests {
             Some("admin".to_string())
         );
         assert_eq!(db.user_hash("fantasma").expect("hash"), None);
+    }
+
+    #[test]
+    fn aplica_rate_limiting_y_revoca_sesiones_por_usuario() {
+        let db = Db::in_memory().expect("db");
+        for _ in 0..3 {
+            assert!(db
+                .check_rate_limit("login:admin", 1_000, 60, 3)
+                .expect("ok"));
+        }
+        assert!(!db
+            .check_rate_limit("login:admin", 1_010, 60, 3)
+            .expect("bloqueado"));
+        assert!(db
+            .check_rate_limit("login:admin", 1_070, 60, 3)
+            .expect("nueva ventana"));
+
+        db.upsert_user("operador", &"cc".repeat(32), "operator")
+            .expect("alta");
+        db.create_session("s1", "operador", 9_000).expect("s1");
+        db.create_session("s2", "operador", 9_000).expect("s2");
+        assert_eq!(db.delete_user_sessions("operador").expect("revoca"), 2);
+        assert_eq!(db.session_user("s1", 1_000).expect("s1"), None);
+        db.delete_user("operador").expect("baja");
+        assert_eq!(db.user_role("operador").expect("rol"), None);
     }
 }
