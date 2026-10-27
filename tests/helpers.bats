@@ -68,8 +68,8 @@ setup() {
 }
 
 @test "validar_cron acepta expresiones validas y rechaza invalidas" {
-    # shellcheck source=src/modules/backups.sh
-    source "src/modules/backups.sh"
+    # shellcheck source=src/lib/helpers.sh
+    source "src/lib/helpers.sh"
     run validar_cron "0 23 * * *"
     [ "$status" -eq 0 ]
     run validar_cron "0 23 * *"
