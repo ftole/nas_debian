@@ -135,28 +135,35 @@ _hook_post_actualizacion() {
         fi
     fi
 
-    local term_dest="${NAS_TERMINAL_DEST:-/usr/local/sbin/nas-terminal}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_TERM_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
-        local tmp_term
-        tmp_term="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal.$$")"
-        if awk '
-            /^cat << '\''NAS_TERM_EOF'\'' > \/usr\/local\/sbin\/nas-terminal$/ { capture=1; next }
-            capture && /^NAS_TERM_EOF$/ { capture=0; exit }
-            capture { print }
-        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_term" 2>/dev/null && [ -s "$tmp_term" ]; then
-            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
-                mkdir -p "$(dirname "$term_dest")" 2>/dev/null || true
-                cp -f "$tmp_term" "$term_dest" 2>/dev/null || true
-                chmod 0755 "$term_dest" 2>/dev/null || true
-                chown root:root "$term_dest" 2>/dev/null || true
+    if [ -n "${NAS_TERMINAL_DEST:-}" ]; then
+        local term_dest="$NAS_TERMINAL_DEST"
+        if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_TERM_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+            local tmp_term
+            tmp_term="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal.$$")"
+            if awk '
+                /^cat << '\''NAS_TERM_EOF'\'' > \/usr\/local\/sbin\/nas-terminal$/ { capture=1; next }
+                capture && /^NAS_TERM_EOF$/ { capture=0; exit }
+                capture { print }
+            ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_term" 2>/dev/null && [ -s "$tmp_term" ]; then
+                if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$(dirname "$term_dest")" ]; then
+                    mkdir -p "$(dirname "$term_dest")" 2>/dev/null || true
+                    cp -f "$tmp_term" "$term_dest" 2>/dev/null || true
+                    chmod 0755 "$term_dest" 2>/dev/null || true
+                    chown root:root "$term_dest" 2>/dev/null || true
+                fi
             fi
+            rm -f "$tmp_term" 2>/dev/null || true
         fi
-        rm -f "$tmp_term" 2>/dev/null || true
+    elif [ "${EUID:-$(id -u)}" -eq 0 ] && [ -d "$PROJECT_ROOT/packaging" ]; then
+        for helper in nas-samba-apply nas-share-dir nas-share-acl nas-accounts nas-backup-manage nas-terminal nas-storage-apply; do
+            if [ -f "$PROJECT_ROOT/packaging/$helper" ]; then
+                install -m 0755 -o root -g root "$PROJECT_ROOT/packaging/$helper" "/usr/local/sbin/$helper" 2>/dev/null || true
+            fi
+        done
     fi
 
-    local cap_dest="${NAS_CAPTURE_DEST:-/usr/local/bin/nas-terminal-capture}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CAPTURE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
-        local tmp_cap
+    if [ -n "${NAS_CAPTURE_DEST:-}" ] && [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CAPTURE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local cap_dest="$NAS_CAPTURE_DEST" tmp_cap
         tmp_cap="$(mktemp 2>/dev/null || echo "/tmp/nas-terminal-capture.$$")"
         if awk '
             /^cat << '\''NAS_CAPTURE_EOF'\'' > \/usr\/local\/bin\/nas-terminal-capture$/ { capture=1; next }
@@ -173,9 +180,8 @@ _hook_post_actualizacion() {
         rm -f "$tmp_cap" 2>/dev/null || true
     fi
 
-    local chp_dest="${NAS_CHPASSWD_DEST:-/usr/local/sbin/nas-chpasswd}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CHPASSWD_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
-        local tmp_chp
+    if [ -n "${NAS_CHPASSWD_DEST:-}" ] && [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_CHPASSWD_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local chp_dest="$NAS_CHPASSWD_DEST" tmp_chp
         tmp_chp="$(mktemp 2>/dev/null || echo "/tmp/nas-chpasswd.$$")"
         if awk '
             /^cat << '\''NAS_CHPASSWD_EOF'\'' > \/usr\/local\/sbin\/nas-chpasswd$/ { capture=1; next }
@@ -192,9 +198,8 @@ _hook_post_actualizacion() {
         rm -f "$tmp_chp" 2>/dev/null || true
     fi
 
-    local gecos_dest="${NAS_GECOS_DEST:-/usr/local/sbin/nas-user-gecos}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_GECOS_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
-        local tmp_gecos
+    if [ -n "${NAS_GECOS_DEST:-}" ] && [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_GECOS_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local gecos_dest="$NAS_GECOS_DEST" tmp_gecos
         tmp_gecos="$(mktemp 2>/dev/null || echo "/tmp/nas-gecos.$$")"
         if awk '
             /^cat << '\''NAS_GECOS_EOF'\'' > \/usr\/local\/sbin\/nas-user-gecos$/ { capture=1; next }
@@ -211,9 +216,8 @@ _hook_post_actualizacion() {
         rm -f "$tmp_gecos" 2>/dev/null || true
     fi
 
-    local admin_dest="${NAS_ADMIN_MANAGE_DEST:-/usr/local/sbin/nas-admin-manage}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_ADMIN_MANAGE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
-        local tmp_admin
+    if [ -n "${NAS_ADMIN_MANAGE_DEST:-}" ] && [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && grep -q 'NAS_ADMIN_MANAGE_EOF' "$PROJECT_ROOT/src/core/deploy.sh" 2>/dev/null; then
+        local admin_dest="$NAS_ADMIN_MANAGE_DEST" tmp_admin
         tmp_admin="$(mktemp 2>/dev/null || echo "/tmp/nas-admin-manage.$$")"
         if awk '
             /^cat << '\''NAS_ADMIN_MANAGE_EOF'\'' > \/usr\/local\/sbin\/nas-admin-manage$/ { capture=1; next }
@@ -230,86 +234,81 @@ _hook_post_actualizacion() {
         rm -f "$tmp_admin" 2>/dev/null || true
     fi
 
-    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "/var/lib/nas" ]; then
-        mkdir -p /var/lib/nas/staging 2>/dev/null || true
-        chown -R www-data:www-data /var/lib/nas 2>/dev/null || true
-        chmod 0770 /var/lib/nas 2>/dev/null || true
-        chmod 0700 /var/lib/nas/staging 2>/dev/null || true
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        if id -u nas-web >/dev/null 2>&1; then
+            install -d -m 0750 -o nas-web -g nas-web /var/lib/nas 2>/dev/null || true
+            install -d -m 2770 -o root -g nas-web /var/lib/nas/staging 2>/dev/null || true
+            install -d -m 2770 -o nas-web -g nas-web /var/lib/nas/audit 2>/dev/null || true
+            chown nas-web:nas-web /var/lib/nas/nas.sqlite* 2>/dev/null || true
+            chmod 0640 /var/lib/nas/nas.sqlite* 2>/dev/null || true
+        fi
     fi
 
-    local sudoers_dir="${NAS_SUDOERS_DIR:-/etc/sudoers.d}"
-    local sudoers_dest="${NAS_SUDOERS_DEST:-$sudoers_dir/nas-web}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$sudoers_dir" ]; then
-        local php_ver tmp_sudoers
-        php_ver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
-        tmp_sudoers="$(mktemp 2>/dev/null || echo "/tmp/nas_sudoers.$$")"
-        if awk '
-            /^cat << SUDOERS_EOF > \/etc\/sudoers\.d\/nas-web$/ { capture=1; next }
-            capture && /^SUDOERS_EOF$/ { capture=0; exit }
-            capture { print }
-        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_sudoers" 2>/dev/null && [ -s "$tmp_sudoers" ]; then
-            sed -i -e "s/\${PHP_VER}/$php_ver/g" -e 's/\\\\/\\/g' "$tmp_sudoers" 2>/dev/null || true
-            local valido=1
-            if command -v visudo >/dev/null 2>&1; then
-                if ! visudo -c -f "$tmp_sudoers" >/dev/null 2>&1; then
-                    valido=0
+    if [ -n "${NAS_SUDOERS_DEST:-}" ] || [ -n "${NAS_SUDOERS_DIR:-}" ]; then
+        local sudoers_dir="${NAS_SUDOERS_DIR:-/etc/sudoers.d}"
+        local sudoers_dest="${NAS_SUDOERS_DEST:-$sudoers_dir/nas-web}"
+        if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$sudoers_dir" ]; then
+            local php_ver tmp_sudoers
+            php_ver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+            tmp_sudoers="$(mktemp 2>/dev/null || echo "/tmp/nas_sudoers.$$")"
+            if awk '
+                /^cat << SUDOERS_EOF > \/etc\/sudoers\.d\/nas-web$/ { capture=1; next }
+                capture && /^SUDOERS_EOF$/ { capture=0; exit }
+                capture { print }
+            ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_sudoers" 2>/dev/null && [ -s "$tmp_sudoers" ]; then
+                sed -i -e "s/\${PHP_VER}/$php_ver/g" -e 's/\\\\/\\/g' "$tmp_sudoers" 2>/dev/null || true
+                local valido=1
+                if command -v visudo >/dev/null 2>&1; then
+                    if ! visudo -c -f "$tmp_sudoers" >/dev/null 2>&1; then
+                        valido=0
+                    fi
                 fi
-            fi
-            if [ "$valido" -eq 1 ]; then
-                if [ ! -f "$sudoers_dest" ] || ! cmp -s "$tmp_sudoers" "$sudoers_dest" 2>/dev/null; then
-                    if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$sudoers_dir" ]; then
-                        mkdir -p "$sudoers_dir" 2>/dev/null || true
-                        cp -f "$tmp_sudoers" "$sudoers_dest" 2>/dev/null || true
-                        chmod 0440 "$sudoers_dest" 2>/dev/null || true
-                        chown root:root "$sudoers_dest" 2>/dev/null || true
+                if [ "$valido" -eq 1 ]; then
+                    if [ ! -f "$sudoers_dest" ] || ! cmp -s "$tmp_sudoers" "$sudoers_dest" 2>/dev/null; then
+                        if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$sudoers_dir" ]; then
+                            mkdir -p "$sudoers_dir" 2>/dev/null || true
+                            cp -f "$tmp_sudoers" "$sudoers_dest" 2>/dev/null || true
+                            chmod 0440 "$sudoers_dest" 2>/dev/null || true
+                            chown root:root "$sudoers_dest" 2>/dev/null || true
+                        fi
                     fi
                 fi
             fi
+            rm -f "$tmp_sudoers" 2>/dev/null || true
         fi
-        rm -f "$tmp_sudoers" 2>/dev/null || true
     fi
 
-    # 4. Recompilar e instalar la plataforma Rust
-    if [ -f "$PROJECT_ROOT/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+    # 4. Recompilar e instalar la plataforma Rust y sincronizar packaging/install.sh
+    export PATH="/root/.cargo/bin:$PATH"
+    if [ "${EUID:-$(id -u)}" -eq 0 ] && [ -f "$PROJECT_ROOT/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
         if ( cd "$PROJECT_ROOT" && cargo build --release --locked --workspace >/dev/null 2>&1 ); then
-            for bin in nas nas-web nas-tui nasctl nas-dev; do
-                if [ -f "$PROJECT_ROOT/target/release/$bin" ] && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-                    install -m 0755 "$PROJECT_ROOT/target/release/$bin" "/usr/local/bin/$bin" 2>/dev/null || true
-                fi
-            done
-            if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-                systemctl restart nas-web 2>/dev/null || true
+            if [ -f "$PROJECT_ROOT/packaging/install.sh" ]; then
+                bash "$PROJECT_ROOT/packaging/install.sh" --no-nginx >/dev/null 2>&1 || true
+            else
+                for bin in nas nas-web nas-tui nasctl nas-dev; do
+                    if [ -f "$PROJECT_ROOT/target/release/$bin" ]; then
+                        install -m 0755 "$PROJECT_ROOT/target/release/$bin" "/usr/local/bin/$bin" 2>/dev/null || true
+                    fi
+                done
             fi
+            systemctl restart nas-web 2>/dev/null || true
             echo "[updater] plataforma Rust recompilada e instalada"
         else
             echo "[updater] aviso: la compilación Rust falló; se conserva la versión anterior" >&2
         fi
     fi
 
-    # 5. Sincronizar configuración Nginx (redirección 301 y cabeceras HSTS) si existe
+    # 5. Sincronizar configuración Nginx de proxy inverso Rust si procede
     local nginx_sites="${NAS_NGINX_SITES:-/etc/nginx/sites-available}"
     local nginx_dest="${NAS_NGINX_DEST:-$nginx_sites/nas-web}"
-    if [ -f "$PROJECT_ROOT/src/core/deploy.sh" ] && [ -d "$nginx_sites" ]; then
-        local tmp_nginx
-        tmp_nginx="$(mktemp 2>/dev/null || echo "/tmp/nas_nginx.$$")"
-        if awk '
-            /^cat << '\''NGINX_EOF'\'' > \/etc\/nginx\/sites-available\/nas-web$/ { capture=1; next }
-            capture && /^NGINX_EOF$/ { capture=0; exit }
-            capture { print }
-        ' "$PROJECT_ROOT/src/core/deploy.sh" > "$tmp_nginx" 2>/dev/null && [ -s "$tmp_nginx" ]; then
-            if [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$nginx_sites" ]; then
-                if [ ! -f "$nginx_dest" ] || ! cmp -s "$tmp_nginx" "$nginx_dest" 2>/dev/null; then
-                    cp -f "$tmp_nginx" "$nginx_dest" 2>/dev/null || true
-                    chmod 0644 "$nginx_dest" 2>/dev/null || true
-                    if command -v nginx >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-                        if nginx -t >/dev/null 2>&1; then
-                            systemctl reload nginx 2>/dev/null || true
-                        fi
-                    fi
-                fi
+    if [ "${EUID:-$(id -u)}" -eq 0 ] && [ -f "$PROJECT_ROOT/packaging/nginx-nas-web.conf" ] && [ -d "$nginx_sites" ]; then
+        if [ ! -f "$nginx_dest" ] || ! cmp -s "$PROJECT_ROOT/packaging/nginx-nas-web.conf" "$nginx_dest" 2>/dev/null; then
+            cp -f "$PROJECT_ROOT/packaging/nginx-nas-web.conf" "$nginx_dest" 2>/dev/null || true
+            chmod 0644 "$nginx_dest" 2>/dev/null || true
+            if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx 2>/dev/null || true
             fi
         fi
-        rm -f "$tmp_nginx" 2>/dev/null || true
     fi
 
     # 6. Sincronizar directivas de notificación, leasing y seguridad de Samba si faltan
@@ -318,8 +317,6 @@ _hook_post_actualizacion() {
         if ! grep -qi "smb3 directory leases" "$smb_conf"; then
             sed -i '/\[global\]/a \   smb3 directory leases = no\n   kernel change notify = yes\n   change notify = yes' "$smb_conf" 2>/dev/null || true
         fi
-        # Reafirmar el endurecimiento SMB del despliegue (firma obligatoria). Sin este
-        # paso, las instalaciones anteriores a la correccion conservan "server signing = auto".
         if grep -qiE '^[[:space:]]*server signing[[:space:]]*=' "$smb_conf"; then
             sed -i -E 's|^[[:space:]]*server signing[[:space:]]*=.*|   server signing = mandatory|I' "$smb_conf" 2>/dev/null || true
         else
@@ -375,31 +372,6 @@ NTP_CONF
             systemctl unmask systemd-timesyncd 2>/dev/null || true
             systemctl enable systemd-timesyncd 2>/dev/null || true
             systemctl restart systemd-timesyncd 2>/dev/null || true
-        fi
-    fi
-
-    # 9. Sincronizar zona horaria en la configuración de PHP (FPM y CLI)
-    local sys_tz php_pool_conf
-    sys_tz="$(timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo 'America/Mexico_City')"
-    [ -z "$sys_tz" ] && sys_tz="America/Mexico_City"
-    for _php_ini in /etc/php/*/fpm/php.ini /etc/php/*/cli/php.ini; do
-        if [ -f "$_php_ini" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$_php_ini" ]; }; then
-            sed -i "s|^;*date.timezone =.*|date.timezone = $sys_tz|" "$_php_ini" 2>/dev/null || true
-        fi
-    done
-    php_pool_conf="$(find /etc/php -maxdepth 4 -name 'nas-web.conf' 2>/dev/null | head -n1)"
-    if [ -n "$php_pool_conf" ] && [ -f "$php_pool_conf" ] && { [ "${EUID:-$(id -u)}" -eq 0 ] || [ -w "$php_pool_conf" ]; }; then
-        if grep -q "php_admin_value\[date.timezone\]" "$php_pool_conf"; then
-            sed -i "s|^php_admin_value\[date.timezone\].*|php_admin_value[date.timezone] = $sys_tz|" "$php_pool_conf" 2>/dev/null || true
-        else
-            echo "php_admin_value[date.timezone] = $sys_tz" >> "$php_pool_conf"
-        fi
-    fi
-    if command -v systemctl >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-        local php_fpm_svc
-        php_fpm_svc="$(systemctl list-unit-files --type=service 'php*-fpm.service' 2>/dev/null | awk '/php.*-fpm/ {print $1; exit}')"
-        if [ -n "$php_fpm_svc" ]; then
-            systemctl reload "$php_fpm_svc" 2>/dev/null || systemctl restart "$php_fpm_svc" 2>/dev/null || true
         fi
     fi
 
