@@ -198,11 +198,20 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     Template::new(LAYOUT).render(&flags, &tokens)
 }
 
-/// Renderiza la pantalla de acceso.
+/// Renderiza la pantalla de acceso con valores por defecto.
 pub fn login(hostname: &str, error: Option<&str>) -> String {
+    login_with_context(hostname, "127.0.0.1", &csrf_token(), error)
+}
+
+/// Renderiza la pantalla de acceso con IP y token CSRF firmado.
+pub fn login_with_context(hostname: &str, ip: &str, csrf: &str, error: Option<&str>) -> String {
     let mut tokens: HashMap<&str, String> = HashMap::new();
-    token(&mut tokens, "hostname", escape(hostname));
-    token(&mut tokens, "csrf_token", csrf_token());
+    let safe_host = escape(hostname);
+    let safe_ip = escape(ip);
+    token(&mut tokens, "hostname", safe_host.clone());
+    token(&mut tokens, "safeHostname", safe_host);
+    token(&mut tokens, "safeServerIp", safe_ip);
+    token(&mut tokens, "csrf_token", escape(csrf));
     token(&mut tokens, "asset_version", "1");
     token(
         &mut tokens,
