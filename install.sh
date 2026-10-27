@@ -35,7 +35,6 @@ C_CYAN="\033[1;36m"
 C_GREEN="\033[1;32m"
 C_YELLOW="\033[1;33m"
 C_RED="\033[1;31m"
-C_WHITE="\033[1;37m"
 
 # Verifica la firma GPG de un tag contra la huella esperada.
 verificar_firma_tag() {
