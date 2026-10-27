@@ -174,6 +174,43 @@ pub fn send(
     }
 }
 
+/// Teclas especiales admitidas por el helper `nas-terminal key`.
+pub fn is_allowed_key(key: &str) -> bool {
+    matches!(
+        key,
+        "ENTER"
+            | "TAB"
+            | "CTRL_C"
+            | "CTRL_D"
+            | "CTRL_L"
+            | "ESC"
+            | "BACKSPACE"
+            | "Up"
+            | "Down"
+            | "Left"
+            | "Right"
+    )
+}
+
+/// Envía una tecla especial validada (`TAB`, `CTRL_C`, `ENTER`, etc.) a la sesión.
+pub fn send_key(runner: &Runner, user: &str, name: &str, key: &str) -> Result<(), String> {
+    if !is_valid_session_name(name) {
+        return Err(format!("sesión inválida: {name}"));
+    }
+    if !is_allowed_key(key) {
+        return Err(format!("tecla especial no permitida: {key}"));
+    }
+
+    let output = runner
+        .run(&helper(user, &["key", key]))
+        .map_err(|error| error.to_string())?;
+    if output.is_success() {
+        Ok(())
+    } else {
+        Err(failure(output))
+    }
+}
+
 /// Captura el panel y el directorio actual de la sesión.
 pub fn capture_details(
     runner: &Runner,
@@ -184,10 +221,11 @@ pub fn capture_details(
         return Err("sesión inválida".to_string());
     }
     let output = runner
-        .run(&helper(user, &["capture"]))
+        .run(&helper(user, &["capture"]).preserve_whitespace())
         .map_err(|error| error.to_string())?;
     if !output.is_success() {
-        if output.stderr.contains("can't find session") || output.stderr.contains("no server") {
+        let stderr = output.stderr.trim();
+        if stderr.contains("can't find session") || stderr.contains("no server") {
             return Ok((String::new(), String::new()));
         }
         return Err(failure(output));
@@ -212,7 +250,7 @@ pub fn capture(runner: &Runner, user: &str, name: &str) -> Result<String, String
     }
 
     let output = runner
-        .run(&helper(user, &["capture"]))
+        .run(&helper(user, &["capture"]).preserve_whitespace())
         .map_err(|error| error.to_string())?;
 
     if output.is_success() {
@@ -305,5 +343,14 @@ mod tests {
         assert!(is_valid_geometry(200, 50));
         assert!(!is_valid_geometry(10, 50));
         assert!(!is_valid_geometry(200, 1000));
+    }
+
+    #[test]
+    fn valida_teclas_especiales() {
+        assert!(super::is_allowed_key("TAB"));
+        assert!(super::is_allowed_key("CTRL_C"));
+        assert!(super::is_allowed_key("ENTER"));
+        assert!(!super::is_allowed_key("rm -rf /"));
+        assert!(!super::is_allowed_key(""));
     }
 }
