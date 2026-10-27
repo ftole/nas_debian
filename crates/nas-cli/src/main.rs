@@ -82,6 +82,9 @@ enum Command {
         /// Elimina también el estado del panel (`/var/lib/nas` y `/etc/nas`).
         #[arg(long)]
         purge: bool,
+        /// Alcance: `panel` (por defecto) o `os` (incluye ajustes del sistema).
+        #[arg(long, default_value = "panel")]
+        scope: String,
         /// Elevar privilegios con `sudo -n`.
         #[arg(long)]
         sudo: bool,
@@ -392,9 +395,10 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         Command::Uninstall {
             yes,
             purge,
+            scope,
             sudo,
             dry_run,
-        } => uninstall_command(yes, purge, sudo, dry_run, cli.json),
+        } => uninstall_command(yes, purge, &scope, sudo, dry_run, cli.json),
         Command::Storage { action } => match action {
             StorageAction::List => storage_list(cli.json),
         },
@@ -1119,14 +1123,38 @@ fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     Ok(params)
 }
 
+fn write_artifacts(artifacts: &[nas_engine::deploy::Artifact]) -> Result<(), String> {
+    for artifact in artifacts {
+        let path = std::path::Path::new(&artifact.path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("no se pudo crear {}: {error}", parent.display()))?;
+        }
+        std::fs::write(path, &artifact.content)
+            .map_err(|error| format!("no se pudo escribir {}: {error}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(artifact.mode));
+        }
+    }
+    Ok(())
+}
+
 fn uninstall_command(
     confirmed: bool,
     purge: bool,
+    scope: &str,
     sudo: bool,
     dry_run: bool,
     json: bool,
 ) -> NasResult<ExitCode> {
-    let plan = nas_engine::uninstall::plan(purge);
+    if !matches!(scope, "panel" | "os") {
+        return Err(NasError::Invalid(
+            "alcance inválido: use panel u os".to_string(),
+        ));
+    }
+    let plan = nas_engine::uninstall::plan_with_scope(purge, scope == "os");
     if dry_run || !confirmed {
         if json {
             print_json(&ApiResponse::ok(
@@ -1234,6 +1262,7 @@ fn deploy_plan(request: &DeployArgs, json: bool) -> NasResult<ExitCode> {
                 "mount_options": params.mount_options(),
                 "partition": params.partition_path(),
                 "steps": steps,
+                "artifacts": params.artifacts().iter().map(|a| a.path.clone()).collect::<Vec<_>>(),
                 "deploy_sh": quote_all(&invocation),
             }),
             "Plan de despliegue",
@@ -1341,6 +1370,12 @@ fn deploy_apply(
         if let Err(error) = run_step(&runner, step, options.sudo, 900) {
             failure = Some(error);
             break;
+        }
+    }
+
+    if failure.is_none() {
+        if let Err(error) = write_artifacts(&params.artifacts()) {
+            failure = Some(NasError::Denied(error));
         }
     }
 
