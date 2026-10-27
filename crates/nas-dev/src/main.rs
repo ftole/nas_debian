@@ -970,13 +970,13 @@ chmod 600 /home/{user}/.ssh/authorized_keys
 
 # 3. Sudo acotado a los comandos del plan (revisar y endurecer antes de usar)
 cat > /etc/sudoers.d/nas-dev <<'SUDO'
-{user} ALL=(root) NOPASSWD: /usr/bin/mkdir, /usr/bin/rm, /usr/bin/tar, /usr/bin/mv, /usr/bin/rsync, /usr/bin/curl, /usr/bin/test, /usr/bin/systemctl reload nginx, /usr/bin/systemctl reload php8.4-fpm
+{user} ALL=(root) NOPASSWD: /usr/bin/mkdir, /usr/bin/rm, /usr/bin/tar, /usr/bin/mv, /usr/bin/rsync, /usr/bin/curl, /usr/bin/test, /usr/bin/systemctl reload nginx, /usr/bin/systemctl restart nas-web
 SUDO
 chmod 0440 /etc/sudoers.d/nas-dev
 visudo -cf /etc/sudoers.d/nas-dev
 
 # 4. Docroot y estado aislados de producción
-install -d -m 775 -o www-data -g www-data {web}
+install -d -m 775 -o nas-web -g nas-web {web}
 install -d -m 750 -o {user} -g {user} {state}/dev-sync/incoming {state}/dev-sync/stage {state}/dev-sync/backups
 
 # 5. Verificación
@@ -1027,7 +1027,11 @@ fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> SyncPlan {
         ),
         RemoteStep::new(
             "verificar árbol",
-            vec!["test".into(), "-d".into(), format!("{stage}/web")],
+            vec![
+                "test".into(),
+                "-d".into(),
+                format!("{stage}/crates/nas-web"),
+            ],
         ),
         RemoteStep::new(
             "snapshot del docroot",
@@ -1058,8 +1062,8 @@ fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> SyncPlan {
         )
         .optional(),
         RemoteStep::new(
-            "recargar php-fpm",
-            vec!["systemctl".into(), "reload".into(), "php8.4-fpm".into()],
+            "reiniciar nas-web",
+            vec!["systemctl".into(), "restart".into(), "nas-web".into()],
         )
         .optional(),
         RemoteStep::new(
