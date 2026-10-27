@@ -237,3 +237,22 @@ fn update_pubkey_deriva_la_clave_publica() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn uninstall_alcance_os_planifica_ajustes_del_sistema() {
+    let output = nas()
+        .args(["--json", "uninstall", "--scope", "os"])
+        .output()
+        .expect("ejecuta");
+    let payload = json_of(&output);
+    let steps = serde_json::to_string(&payload["data"]["steps"]).unwrap();
+    assert!(steps.contains("99-nas-tuning.conf"));
+    assert!(steps.contains("nas.rules"));
+    assert_eq!(payload["data"]["executed"], false);
+
+    let bad = nas()
+        .args(["uninstall", "--scope", "todo"])
+        .output()
+        .expect("ejecuta");
+    assert!(!bad.status.success());
+}
