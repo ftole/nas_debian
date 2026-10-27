@@ -20,21 +20,27 @@ jobs:
       - name: Verificar sintaxis Bash (bash -n)
         run: |
           find . -path ./legacy -prune -o -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n
+          for f in packaging/nas-*; do
+            case "$f" in *.env*|*.service|*.conf) continue ;; esac
+            bash -n "$f"
+          done
 
       - name: Verificar invariantes de seguridad
         run: |
           if grep -RIn --exclude-dir=legacy --exclude-dir=tests \
-              --include="*.py" \
-              --include="*.sh" \
               "StrictHostKeyChecking=no" \
-              src install.sh scripts; then
+              src packaging install.sh scripts; then
             echo "ERROR: se detectó StrictHostKeyChecking=no en código ejecutable."
             exit 1
           fi
 
       - name: Ejecutar ShellCheck en los scripts vigentes
         run: |
-          find src scripts -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
+          find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
+          for f in packaging/nas-*; do
+            case "$f" in *.env*|*.service|*.conf) continue ;; esac
+            shellcheck -x "$f"
+          done
           shellcheck -x install.sh
 
   test-bash:
@@ -50,6 +56,27 @@ jobs:
 
       - name: Ejecutar suite del motor de despliegue
         run: bats tests/
+
+  rust:
+    name: Validar Plataforma Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Instalar toolchain estable de Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Verificar formato (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: Análisis estático estricto (cargo clippy)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Ejecutar suite de pruebas Rust
+        run: cargo test --workspace --locked
 
   lint-js:
     name: Validar Sintaxis del Panel (node --check)
