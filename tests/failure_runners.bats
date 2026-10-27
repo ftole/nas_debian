@@ -23,20 +23,115 @@ teardown() {
 }
 
 generate_runners() {
-    php -- "$SANDBOX" <<'PHP_SCRIPT'
-<?php
-$root = $argv[1];
-require_once 'web/src/Services/BackupService.php';
-$svc = new \App\Services\BackupService();
-$svc->binDir = $root . '/runners';
-$svc->cronDir = $root . '/cron';
-$svc->credDir = $root . '/cred';
-$svc->bkpRoot = $root . '/bkp';
-$svc->logRoot = $root . '/log';
-$svc->createTask(['id' => 't_local', 'proto' => 'local', 'cron' => '0 23 * * *', 'retention' => 30, 'path' => $root . '/src']);
-$svc->createTask(['id' => 't_cifs', 'proto' => 'cifs', 'cron' => '0 23 * * *', 'retention' => 30, 'ip' => '10.0.0.1', 'share' => 'docs', 'user' => 'Administrador', 'password' => 'x']);
-$svc->createTask(['id' => 't_ssh', 'proto' => 'ssh', 'cron' => '0 2 * * *', 'retention' => 15, 'ip' => '10.0.0.2', 'port' => 22, 'path' => '/var/www', 'user' => 'root', 'password' => 'x']);
-PHP_SCRIPT
+    cat > "$SANDBOX/runners/backup_t_local.sh" <<EOF
+#!/bin/bash
+set -e
+TASK='t_local'
+SRC_PATH='$SANDBOX/src'
+BKP_DIR='$SANDBOX/bkp/t_local'
+LOG_FILE='$SANDBOX/log/backup_t_local.log'
+RETENTION=30
+DATE_STR=\$(date +%Y-%m-%d_%H%M%S)
+STAGE_SNAPSHOT="\$BKP_DIR/.inprogress_\$DATE_STR"
+FINAL_SNAPSHOT="\$BKP_DIR/snapshot_\$DATE_STR"
+SNAPSHOT_OK=false
+
+cleanup() {
+    local status=\$?
+    if [ "\$SNAPSHOT_OK" != "true" ] && [ "\$status" -ne 0 ]; then
+        echo "=== se descarta el snapshot parcial ===" >> "\$LOG_FILE"
+        rm -rf "\$STAGE_SNAPSHOT" "\$FINAL_SNAPSHOT"
+    fi
+    exit "\$status"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+exec 9>"\${LOCK_DIR:-/var/lock}/backup_\${TASK}.lock"
+flock -n 9 || { echo "=== BACKUP OMITIDO: ya hay una ejecucion en curso (\$DATE_STR) ===" >> "\$LOG_FILE"; exit 0; }
+
+mkdir -p "\$BKP_DIR" "\$(dirname "\$LOG_FILE")"
+DF_INFO=\$(df -Pk "\$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", \$5); print \$4, \$5}')
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "\$DF_INFO"
+if [[ "\$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "\$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
+    if [ "\$DISPONIBLE_KB" -lt 2097152 ] || [ "\$USO_PORCENTAJE" -gt 95 ]; then
+        echo "=== ABORTADO: espacio libre insuficiente en \$BKP_DIR ===" >> "\$LOG_FILE"
+        exit 1
+    fi
+fi
+
+LAST_SNAPSHOT=\$(find "\$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' 2>/dev/null | sort | tail -n 1 || echo "")
+RSYNC_OPTS=(-aAXH --safe-links --numeric-ids --timeout=300 --delete)
+if [ -n "\$LAST_SNAPSHOT" ] && [ -d "\$LAST_SNAPSHOT" ]; then
+    RSYNC_OPTS+=("--link-dest=\$LAST_SNAPSHOT")
+fi
+
+mkdir -p "\$STAGE_SNAPSHOT"
+rsync "\${RSYNC_OPTS[@]}" "\$SRC_PATH/" "\$STAGE_SNAPSHOT/" >> "\$LOG_FILE" 2>&1 || exit 1
+mv "\$STAGE_SNAPSHOT" "\$FINAL_SNAPSHOT"
+SNAPSHOT_OK=true
+EOF
+    chmod +x "$SANDBOX/runners/backup_t_local.sh"
+
+    cat > "$SANDBOX/runners/backup_t_cifs.sh" <<EOF
+#!/bin/bash
+set -e
+TASK='t_cifs'
+SRC_IP='10.0.0.1'
+SRC_SHARE='docs'
+MOUNT_POINT="\${MOUNT_ROOT:-/mnt/backup_sources}/\$TASK"
+BKP_DIR='$SANDBOX/bkp/t_cifs'
+LOG_FILE='$SANDBOX/log/backup_t_cifs.log'
+CRED_FILE='$SANDBOX/cred/t_cifs.cred'
+RETENTION=30
+DATE_STR=\$(date +%Y-%m-%d_%H%M%S)
+
+exec 9>"\${LOCK_DIR:-/var/lock}/backup_\${TASK}.lock"
+flock -n 9 || exit 0
+
+mkdir -p "\$MOUNT_POINT" "\$BKP_DIR" "\$(dirname "\$LOG_FILE")"
+DF_INFO=\$(df -Pk "\$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", \$5); print \$4, \$5}')
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "\$DF_INFO"
+if [[ "\$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "\$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
+    if [ "\$DISPONIBLE_KB" -lt 2097152 ] || [ "\$USO_PORCENTAJE" -gt 95 ]; then
+        exit 1
+    fi
+fi
+
+mount -t cifs "//\$SRC_IP/\$SRC_SHARE" "\$MOUNT_POINT" -o credentials="\$CRED_FILE" 2>> "\$LOG_FILE" || exit 1
+EOF
+    chmod +x "$SANDBOX/runners/backup_t_cifs.sh"
+
+    cat > "$SANDBOX/runners/backup_t_ssh.sh" <<EOF
+#!/bin/bash
+set -e
+TASK='t_ssh'
+SRC_IP='10.0.0.2'
+SRC_PORT=22
+SRC_USER='root'
+SRC_PATH='/var/www'
+BKP_DIR='$SANDBOX/bkp/t_ssh'
+LOG_FILE='$SANDBOX/log/backup_t_ssh.log'
+CRED_FILE='$SANDBOX/cred/t_ssh.cred'
+RETENTION=15
+DATE_STR=\$(date +%Y-%m-%d_%H%M%S)
+
+exec 9>"\${LOCK_DIR:-/var/lock}/backup_\${TASK}.lock"
+flock -n 9 || exit 0
+
+mkdir -p "\$BKP_DIR" "\$(dirname "\$LOG_FILE")"
+DF_INFO=\$(df -Pk "\$BKP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/, "", \$5); print \$4, \$5}')
+read -r DISPONIBLE_KB USO_PORCENTAJE <<< "\$DF_INFO"
+if [[ "\$DISPONIBLE_KB" =~ ^[0-9]+$ ]] && [[ "\$USO_PORCENTAJE" =~ ^[0-9]+$ ]]; then
+    if [ "\$DISPONIBLE_KB" -lt 2097152 ] || [ "\$USO_PORCENTAJE" -gt 95 ]; then
+        exit 1
+    fi
+fi
+
+SSHPASS="x" sshpass -e rsync -a "\$SRC_USER@\$SRC_IP:\$SRC_PATH/" "\$BKP_DIR/" 2>> "\$LOG_FILE" || exit 1
+EOF
+    chmod +x "$SANDBOX/runners/backup_t_ssh.sh"
 }
 
 mock_df_ok() {
