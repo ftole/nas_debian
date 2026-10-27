@@ -52,6 +52,8 @@ pub struct Disk {
     pub protected: bool,
     /// Indica si está montado en algún punto.
     pub in_use: bool,
+    /// Número de particiones o volúmenes hijos directos.
+    pub children_count: usize,
 }
 
 /// Uso completo de un sistema de archivos según `df -Pk`.
@@ -105,8 +107,9 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
 
     if let Some(device) = &device {
         if let Some(disk) = parent_disk(device) {
+            let disk_path = format!("/dev/{disk}");
             let rotational = runner
-                .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", &disk]))
+                .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", &disk_path]))
                 .ok()
                 .and_then(|out| out.stdout.trim().parse::<u8>().ok());
             match rotational {
@@ -155,16 +158,27 @@ pub fn disks(runner: &Runner) -> NasResult<Vec<Disk>> {
     let os_source = findmnt_value(runner, "/", "SOURCE");
     let os_disk = os_source.as_deref().and_then(parent_disk);
 
-    Ok(devices
+    Ok(compute_disks_from_lsblk(&devices, os_disk.as_deref()))
+}
+
+fn compute_disks_from_lsblk(devices: &[lsblk::BlockDevice], os_disk: Option<&str>) -> Vec<Disk> {
+    devices
         .iter()
         .filter(|device| device.kind == "disk")
         .map(|device| {
             let flat = device.flatten();
             let mountpoint = flat.iter().find_map(|entry| entry.mountpoint.clone());
             let in_use = flat.iter().any(|entry| entry.mountpoint.is_some());
-            let protected = os_disk
-                .as_deref()
-                .is_some_and(|name| name == device.device_path());
+            let has_os_mount = flat.iter().any(|entry| {
+                matches!(
+                    entry.mountpoint.as_deref(),
+                    Some("/" | "/boot" | "/boot/efi" | "[SWAP]")
+                )
+            });
+            let matches_os_disk = os_disk.is_some_and(|name| {
+                name == device.name || format!("/dev/{name}") == device.device_path()
+            });
+            let protected = has_os_mount || matches_os_disk;
 
             Disk {
                 name: device.name.clone(),
@@ -176,9 +190,10 @@ pub fn disks(runner: &Runner) -> NasResult<Vec<Disk>> {
                 rotational: device.rotational,
                 protected,
                 in_use,
+                children_count: device.children.len(),
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Inspección detallada de un dispositivo `/dev/...`.
@@ -253,15 +268,19 @@ fn findmnt_value(runner: &Runner, path: &str, column: &str) -> Option<String> {
 }
 
 fn parent_disk(device: &str) -> Option<String> {
-    let name = device.rsplit('/').next()?;
+    let name = device.rsplit('/').next()?.trim();
     if name.is_empty() {
         return None;
     }
-    let disk = if let Some(index) = name.find("p").filter(|_| name.starts_with("nvme")) {
-        &name[..index]
-    } else {
-        name.trim_end_matches(|c: char| c.is_ascii_digit())
-    };
+    if name.starts_with("nvme") || name.starts_with("mmcblk") {
+        if let Some((disk, part)) = name.rsplit_once('p') {
+            if !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()) {
+                return Some(disk.to_string());
+            }
+        }
+        return Some(name.to_string());
+    }
+    let disk = name.trim_end_matches(|c: char| c.is_ascii_digit());
     if disk.is_empty() {
         None
     } else {
@@ -306,8 +325,49 @@ mod tests {
     #[test]
     fn deduce_el_disco_padre() {
         assert_eq!(parent_disk("/dev/sdb1").as_deref(), Some("sdb"));
+        assert_eq!(parent_disk("/dev/sdb").as_deref(), Some("sdb"));
         assert_eq!(parent_disk("/dev/nvme0n1p2").as_deref(), Some("nvme0n1"));
-        assert_eq!(parent_disk("/dev/mmcblk0p1").as_deref(), Some("mmcblk0p"));
+        assert_eq!(parent_disk("/dev/nvme0n1").as_deref(), Some("nvme0n1"));
+        assert_eq!(parent_disk("/dev/mmcblk0p1").as_deref(), Some("mmcblk0"));
+        assert_eq!(parent_disk("/dev/mmcblk0").as_deref(), Some("mmcblk0"));
         assert_eq!(parent_disk(""), None);
+    }
+
+    #[test]
+    fn marca_protegido_el_disco_del_sistema_y_cuenta_hijos() {
+        let sample = r#"{
+            "blockdevices": [
+                {
+                    "name": "nvme0n1",
+                    "size": "476.9G",
+                    "type": "disk",
+                    "mountpoint": null,
+                    "fstype": null,
+                    "model": "NVMe OS",
+                    "rota": false,
+                    "children": [
+                        {"name": "nvme0n1p1", "size": "512M", "type": "part", "mountpoint": "/boot/efi", "fstype": "vfat", "model": null, "rota": false},
+                        {"name": "nvme0n1p2", "size": "476.4G", "type": "part", "mountpoint": "/", "fstype": "ext4", "model": null, "rota": false}
+                    ]
+                },
+                {
+                    "name": "sdb",
+                    "size": "1.8T",
+                    "type": "disk",
+                    "mountpoint": null,
+                    "fstype": null,
+                    "model": "NAS HDD",
+                    "rota": true,
+                    "children": []
+                }
+            ]
+        }"#;
+        let parsed = crate::parsers::lsblk::parse(sample).expect("lsblk");
+        let list = super::compute_disks_from_lsblk(&parsed, Some("nvme0n1"));
+        assert_eq!(list.len(), 2);
+        assert!(list[0].protected);
+        assert_eq!(list[0].children_count, 2);
+        assert!(!list[1].protected);
+        assert_eq!(list[1].children_count, 0);
     }
 }
