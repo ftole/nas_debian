@@ -17,7 +17,7 @@ setup() {
     # Generar un runner local con retención baja (2 snapshots)
     cat > "$SANDBOX/runners/backup_t_rot.sh" <<EOF
 #!/bin/bash
-set -e
+set -euo pipefail
 TASK='t_rot'
 SRC_PATH='$SANDBOX/src'
 BKP_DIR='$SANDBOX/bkp/t_rot'
@@ -30,15 +30,17 @@ FINAL_SNAPSHOT="\$BKP_DIR/snapshot_\$DATE_STR"
 mkdir -p "\$STAGE_SNAPSHOT" "\$(dirname "\$LOG_FILE")"
 rsync -a "\$SRC_PATH/" "\$STAGE_SNAPSHOT/" || exit 1
 mv "\$STAGE_SNAPSHOT" "\$FINAL_SNAPSHOT"
+chattr -R +i "\$FINAL_SNAPSHOT" 2>/dev/null || true
 
-ALL_SNAPS=\$(find "\$BKP_DIR" -maxdepth 1 -type d -name "snapshot_*" 2>/dev/null | sort || true)
-COUNT=\$(echo "\$ALL_SNAPS" | grep -c "snapshot_" || echo 0)
-if [ "\$COUNT" -gt "\$RETENTION" ]; then
-    DIFF=\$((COUNT - RETENTION))
-    echo "\$ALL_SNAPS" | head -n "\$DIFF" | while read -r old_snap; do
-        if [ -n "\$old_snap" ]; then
-            rm -rf "\$old_snap"
-        fi
+mapfile -t ALL_SNAPS < <(find "\$BKP_DIR" -maxdepth 1 -type d -name "snapshot_*" 2>/dev/null | LC_ALL=C sort)
+TOTAL_SNAPS="\${#ALL_SNAPS[@]}"
+if [ "\$TOTAL_SNAPS" -gt "\$RETENTION" ]; then
+    TO_REMOVE=\$((TOTAL_SNAPS - RETENTION))
+    for ((i = 0; i < TO_REMOVE; i++)); do
+        OLD="\${ALL_SNAPS[\$i]}"
+        chattr -R -i "\$OLD" 2>/dev/null || true
+        chmod -R u+w "\$OLD" 2>/dev/null || true
+        rm -rf -- "\$OLD"
     done
 fi
 EOF
