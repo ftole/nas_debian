@@ -921,7 +921,11 @@ fn audit_verify(json: bool) -> NasResult<ExitCode> {
         println!("AUDITORÍA: {detail}");
     }
 
-    result.map(|_| ExitCode::SUCCESS)
+    if ok {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(1))
+    }
 }
 
 fn update_sign(
@@ -1123,9 +1127,36 @@ fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     Ok(params)
 }
 
-fn write_artifacts(artifacts: &[nas_engine::deploy::Artifact]) -> Result<(), String> {
-    for artifact in artifacts {
+fn write_artifacts(
+    runner: &Runner,
+    artifacts: &[nas_engine::deploy::Artifact],
+    sudo: bool,
+) -> Result<(), String> {
+    for (idx, artifact) in artifacts.iter().enumerate() {
         let path = std::path::Path::new(&artifact.path);
+        if sudo {
+            let staged =
+                std::env::temp_dir().join(format!("nas-artifact-{}-{idx}", std::process::id()));
+            std::fs::write(&staged, &artifact.content)
+                .map_err(|error| format!("no se pudo preparar {}: {error}", staged.display()))?;
+            let mode_str = format!("{:04o}", artifact.mode);
+            let argv = vec![
+                "install".to_string(),
+                "-D".to_string(),
+                "-m".to_string(),
+                mode_str,
+                "-o".to_string(),
+                "root".to_string(),
+                "-g".to_string(),
+                "root".to_string(),
+                staged.to_string_lossy().to_string(),
+                artifact.path.clone(),
+            ];
+            let res = run_step(runner, &argv, true, 30);
+            let _ = std::fs::remove_file(&staged);
+            res.map_err(|error| format!("no se pudo instalar {}: {error}", artifact.path))?;
+            continue;
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("no se pudo crear {}: {error}", parent.display()))?;
@@ -1262,7 +1293,7 @@ fn deploy_plan(request: &DeployArgs, json: bool) -> NasResult<ExitCode> {
                 "mount_options": params.mount_options(),
                 "partition": params.partition_path(),
                 "steps": steps,
-                "artifacts": params.artifacts().iter().map(|a| a.path.clone()).collect::<Vec<_>>(),
+                "artifacts": params.all_artifacts().iter().map(|a| a.path.clone()).collect::<Vec<_>>(),
                 "deploy_sh": quote_all(&invocation),
             }),
             "Plan de despliegue",
@@ -1374,7 +1405,7 @@ fn deploy_apply(
     }
 
     if failure.is_none() {
-        if let Err(error) = write_artifacts(&params.artifacts()) {
+        if let Err(error) = write_artifacts(&runner, &params.all_artifacts(), options.sudo) {
             failure = Some(NasError::Denied(error));
         }
     }
