@@ -22,7 +22,9 @@ pub fn is_allowed_action(action: &str) -> bool {
 
 /// Indica si el servicio está en la lista blanca.
 pub fn is_allowed_service(service: &str) -> bool {
-    DEFAULT_SERVICES.contains(&service) || (service.starts_with("php") && service.ends_with("-fpm"))
+    DEFAULT_SERVICES.contains(&service)
+        || service == "nas-web"
+        || (service.starts_with("php") && service.ends_with("-fpm"))
 }
 
 /// Consulta el estado de los servicios indicados.
@@ -91,5 +93,10 @@ mod tests {
         assert_eq!(statuses.len(), 2);
         assert_eq!(statuses[0].service, "smbd");
         assert_eq!(statuses[1].service, "nginx");
+    }
+
+    #[test]
+    fn autoriza_servicio_nas_web() {
+        assert!(is_allowed_service("nas-web"));
     }
 }
