@@ -117,6 +117,8 @@ impl AuditLog {
             std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
         }
 
+        let _guard = AuditLockGuard::acquire(&self.path)?;
+
         let previous = self.last_hash()?;
         let sealed = entry.seal(&previous);
         let line = serde_json::to_string(&sealed)?;
@@ -131,10 +133,11 @@ impl AuditLog {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            let _ = file.set_permissions(std::fs::Permissions::from_mode(0o640));
         }
 
         writeln!(file, "{line}").map_err(|e| NasError::io(&self.path, e))?;
+        file.flush().map_err(|e| NasError::io(&self.path, e))?;
 
         Ok(sealed)
     }
@@ -172,6 +175,59 @@ impl AuditLog {
         }
 
         Ok(count)
+    }
+}
+
+struct AuditLockGuard {
+    lock_path: PathBuf,
+}
+
+impl AuditLockGuard {
+    fn acquire(log_path: &Path) -> NasResult<Self> {
+        let mut os = log_path.as_os_str().to_os_string();
+        os.push(".lock");
+        let lock_path = PathBuf::from(os);
+
+        for attempt in 0..400 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(_) => return Ok(Self { lock_path }),
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::AlreadyExists
+                        || err.kind() == std::io::ErrorKind::PermissionDenied =>
+                {
+                    if attempt == 200 {
+                        if let Ok(meta) = std::fs::metadata(&lock_path) {
+                            if let Ok(modified) = meta.modified() {
+                                if modified
+                                    .elapsed()
+                                    .map(|age| age.as_secs() > 30)
+                                    .unwrap_or(false)
+                                {
+                                    let _ = std::fs::remove_file(&lock_path);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(err) => return Err(NasError::io(&lock_path, err)),
+            }
+        }
+        Err(NasError::Denied(format!(
+            "bitácora de auditoría bloqueada: {}",
+            lock_path.display()
+        )))
+    }
+}
+
+impl Drop for AuditLockGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
@@ -238,6 +294,33 @@ mod tests {
             .expect("append");
         assert_eq!(entry.prev_hash, "0");
         assert_eq!(entry.hash.len(), 64);
+        let _ = std::fs::remove_file(log.path());
+    }
+
+    #[test]
+    fn concurrencia_preserva_cadena_integra() {
+        let log = std::sync::Arc::new(temp_log("concurrent"));
+        let mut handles = Vec::new();
+        for t in 0..8 {
+            let log = std::sync::Arc::clone(&log);
+            handles.push(std::thread::spawn(move || {
+                for i in 0..5 {
+                    log.append(AuditEntry::new(
+                        format!("actor-{t}"),
+                        "local",
+                        "test",
+                        format!("item-{i}"),
+                        "SUCCESS",
+                        "ok",
+                    ))
+                    .expect("append concurrent");
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("thread");
+        }
+        assert_eq!(log.verify().expect("cadena íntegra"), 40);
         let _ = std::fs::remove_file(log.path());
     }
 }
