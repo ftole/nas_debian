@@ -8,6 +8,56 @@
 use nas_core::{NasError, NasResult, ServerRole};
 use serde::Serialize;
 
+/// Archivo de configuración generado por el despliegue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    /// Ruta absoluta de destino.
+    pub path: String,
+    /// Contenido completo.
+    pub content: String,
+    /// Permisos octales.
+    pub mode: u32,
+}
+
+const SYSCTL_TUNING: &str = "# Ajustes NAS (generado por nas deploy)
+fs.inotify.max_user_watches = 524288
+vm.dirty_bytes = 268435456
+vm.dirty_background_bytes = 67108864
+vm.vfs_cache_pressure = 30
+net.ipv4.tcp_keepalive_time = 120
+net.ipv4.tcp_keepalive_intvl = 15
+net.ipv4.tcp_keepalive_probes = 4
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.tcp_syncookies = 1
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.yama.ptrace_scope = 2
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+";
+
+const UDEV_READAHEAD: &str = "# Readahead por tipo de medio (generado por nas deploy)
+ACTION==\"add|change\", KERNEL==\"sd[a-z]|nvme[0-9]n[0-9]\", ATTR{queue/rotational}==\"1\", ATTR{queue/read_ahead_kb}=\"4096\"
+ACTION==\"add|change\", KERNEL==\"sd[a-z]|nvme[0-9]n[0-9]\", ATTR{queue/rotational}==\"0\", ATTR{queue/read_ahead_kb}=\"1024\"
+";
+
+const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+";
+
+const AUDIT_RULES: &str = "-w /etc/sudoers -p wa -k sudoers_changes
+-w /etc/sudoers.d/ -p wa -k sudoers_changes
+-w /etc/samba/smb.conf -p wa -k samba_config
+-w /etc/backup-credentials/ -p wa -k backup_credentials
+-w /usr/local/sbin/nas-terminal -p x -k nas_terminal
+";
+
 /// Sistema de archivos objetivo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -262,6 +312,55 @@ fn tips(steps: &mut Vec<Vec<String>>) {
 }
 
 impl DeployParams {
+    /// Archivos de configuración del sistema que escribe el despliegue nativo.
+    pub fn artifacts(&self) -> Vec<Artifact> {
+        let mut artifacts = vec![
+            Artifact {
+                path: "/etc/nas/role".into(),
+                mode: 0o644,
+                content: format!(
+                    "{}
+",
+                    self.role.as_str()
+                ),
+            },
+            Artifact {
+                path: "/etc/sysctl.d/99-nas-tuning.conf".into(),
+                mode: 0o644,
+                content: SYSCTL_TUNING.to_string(),
+            },
+            Artifact {
+                path: "/etc/udev/rules.d/60-nas-readahead.rules".into(),
+                mode: 0o644,
+                content: UDEV_READAHEAD.to_string(),
+            },
+            Artifact {
+                path: "/etc/logrotate.d/nas-backups".into(),
+                mode: 0o644,
+                content: LOGROTATE_BACKUPS.to_string(),
+            },
+            Artifact {
+                path: "/etc/audit/rules.d/nas.rules".into(),
+                mode: 0o640,
+                content: AUDIT_RULES.to_string(),
+            },
+        ];
+
+        if !self.role.as_str().eq("ARCHIVOS") {
+            artifacts.push(Artifact {
+                path: "/etc/cron.d/nas-btrfs-scrub".into(),
+                mode: 0o644,
+                content: "SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1
+"
+                .to_string(),
+            });
+        }
+
+        artifacts
+    }
+
     /// Valida y falla con el primer conjunto de problemas encontrados.
     pub fn ensure_valid(&self) -> NasResult<()> {
         let problems = self.validate();
@@ -395,5 +494,66 @@ mod tests {
         assert!(argv.contains(&"BACKUP".to_string()));
         assert!(argv.contains(&"--force".to_string()));
         assert!(argv.contains(&"--keep-data".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod artifact_tests {
+    use super::{Artifact, DeployParams, FileSystem};
+    use nas_core::ServerRole;
+
+    fn params(role: ServerRole) -> DeployParams {
+        DeployParams {
+            disk: "/dev/sdb".into(),
+            workgroup: "TEAM-JOFRATO".into(),
+            netbios: "SRV-NAS".into(),
+            admin_user: "admin".into(),
+            role,
+            keep_data: false,
+            filesystem: FileSystem::Ext4,
+            rotational: true,
+        }
+    }
+
+    #[test]
+    fn escribe_rol_y_ajustes_del_sistema() {
+        let artifacts = params(ServerRole::Arquivos).artifacts();
+        let paths: Vec<&str> = artifacts.iter().map(|a| a.path.as_str()).collect();
+        assert!(paths.contains(&"/etc/nas/role"));
+        assert!(paths.contains(&"/etc/sysctl.d/99-nas-tuning.conf"));
+        assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules"));
+        assert!(paths.contains(&"/etc/logrotate.d/nas-backups"));
+        assert!(paths.contains(&"/etc/audit/rules.d/nas.rules"));
+
+        let role = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/nas/role")
+            .map(|a| a.content.clone())
+            .expect("rol");
+        assert_eq!(role.trim(), "ARCHIVOS");
+    }
+
+    #[test]
+    fn solo_backup_programa_el_scrub() {
+        let arquivos = params(ServerRole::Arquivos).artifacts();
+        assert!(!arquivos.iter().any(|a| a.path.contains("nas-btrfs-scrub")));
+
+        let backup = params(ServerRole::Backup).artifacts();
+        let scrub = backup
+            .iter()
+            .find(|a| a.path == "/etc/cron.d/nas-btrfs-scrub")
+            .expect("scrub");
+        assert!(scrub.content.contains("btrfs scrub start"));
+    }
+
+    #[test]
+    fn permisos_de_auditoria_son_restringidos() {
+        let artifacts = params(ServerRole::ArquivosBackup).artifacts();
+        let audit: &Artifact = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/audit/rules.d/nas.rules")
+            .expect("audit");
+        assert_eq!(audit.mode, 0o640);
+        assert_eq!(artifacts.len(), 6);
     }
 }
