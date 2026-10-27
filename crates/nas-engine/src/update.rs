@@ -30,11 +30,26 @@ pub struct ReleaseManifest {
     pub signature: Option<String>,
 }
 
+fn is_valid_version(version: &str) -> bool {
+    !version.is_empty()
+        && version.len() <= 64
+        && !version.contains("..")
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
 impl ReleaseManifest {
     /// Interpreta el manifiesto desde JSON.
     pub fn from_json(text: &str) -> NasResult<Self> {
         let manifest: Self = serde_json::from_str(text)
             .map_err(|error| NasError::Invalid(format!("manifiesto inválido: {error}")))?;
+        if !is_valid_version(&manifest.version) {
+            return Err(NasError::Invalid(format!(
+                "versión inválida en el manifiesto: {}",
+                manifest.version
+            )));
+        }
         Ok(manifest)
     }
 
@@ -147,8 +162,8 @@ pub fn build_plan(
         ],
         vec![
             "systemctl".to_string(),
-            "reload".to_string(),
-            "php8.4-fpm".to_string(),
+            "restart".to_string(),
+            "nas-web".to_string(),
         ],
     ];
 
@@ -321,5 +336,21 @@ mod tests {
     fn plan_sin_version_previa_no_tiene_rollback() {
         let plan = build_plan(&manifest(), "/opt/nas_debian", "/tmp/nas.tar.gz", None);
         assert!(plan.rollback.is_empty());
+    }
+
+    #[test]
+    fn rechaza_version_con_traversal_y_reinicia_nas_web() {
+        let bad = r#"{"version":"../../etc","commit":"abc","artifact":"a.tar.gz","sha256":"00","published_at":"2026-01-01T00:00:00Z"}"#;
+        assert!(ReleaseManifest::from_json(bad).is_err());
+
+        let plan = build_plan(&manifest(), "/opt/nas_debian", "/tmp/nas.tar.gz", None);
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step == &vec!["systemctl", "restart", "nas-web"]));
+        assert!(!plan
+            .steps
+            .iter()
+            .any(|step| step.iter().any(|arg| arg.contains("php"))));
     }
 }
