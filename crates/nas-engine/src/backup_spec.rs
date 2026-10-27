@@ -238,27 +238,37 @@ LOG_DIR='/srv/nas/LOGS_BACKUP'
 CRED_FILE={q_cred}
 MODE="$SOURCE_TYPE"
 CRED="$CRED_FILE"
-BKP_DIR={q_dest}
-LOG="$LOG_DIR/backup_${{TASK}}.log"
-MOUNT="/mnt/backup_sources/$TASK"
+BKP_DIR="${{BKP_DIR:-{q_dest}}}"
+LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
+MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 STAGE="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL="$BKP_DIR/snapshot_$DATE_STR"
+SNAPSHOT_OK=false
 
 log() {{ printf '[%s] [%s] %s\n' "$(date '+%F %T')" "$TASK" "$*" >> "$LOG"; }}
 cleanup() {{
+    local status=$?
     if mountpoint -q "$MOUNT" 2>/dev/null; then umount "$MOUNT" || true; fi
-    if [ -d "$STAGE" ]; then rm -rf -- "$STAGE"; fi
+    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
+        log "=== se descarta el snapshot parcial ==="
+        rm -rf -- "$STAGE" "$FINAL"
+    elif [ -d "$STAGE" ]; then
+        rm -rf -- "$STAGE"
+    fi
+    exit "$status"
 }}
-trap cleanup EXIT TERM INT
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 mkdir -p "$BKP_DIR" "$LOG_DIR"
-exec 9>"/var/lock/backup_$TASK.lock"
-flock -n 9 || {{ log "omitido: otra ejecución en curso"; exit 0; }}
+exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
+flock -n 9 || {{ log "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ==="; exit 0; }}
 
 read -r AVAIL PCT < <(df -Pk "$BKP_DIR" | awk 'NR==2 {{gsub("%","",$5); print $4, $5}}')
 if [ "${{AVAIL:-0}}" -lt 2097152 ] || [ "${{PCT:-0}}" -gt 95 ]; then
-    log "abortado: espacio insuficiente ($AVAIL KB, $PCT%)"
+    log "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($AVAIL KB, $PCT%) ==="
     exit 1
 fi
 if [ "${{PCT:-0}}" -gt 85 ]; then
@@ -282,6 +292,9 @@ if [ "$RSYNC_RC" -ne 0 ] && [ "$RSYNC_RC" -ne 24 ]; then
     exit "$RSYNC_RC"
 fi
 mv "$STAGE" "$FINAL"
+SNAPSHOT_OK=true
+if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
+chattr -R +i "$FINAL" 2>/dev/null || true
 log "snapshot completado: $FINAL"
 
 mapfile -t ALL_SNAPS < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' | LC_ALL=C sort)
@@ -446,6 +459,10 @@ mod tests {
         assert!(runner.contains("--link-dest"));
         assert!(runner.contains("/srv/nas/BACKUPS_HISTORICOS/contabilidad"));
         assert!(runner.contains("mount -t cifs"));
+        assert!(runner.contains("chattr -R +i \"$FINAL\""));
+        assert!(runner.contains("LOCK_DIR:-/var/lock"));
+        assert!(runner.contains("MOUNT_ROOT:-/mnt/backup_sources"));
+        assert!(runner.contains("=== se descarta el snapshot parcial ==="));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
