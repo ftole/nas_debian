@@ -35,8 +35,38 @@ pub struct GroupEntry {
     pub members: Vec<String>,
 }
 
-fn is_system_user(uid: u32, shell: &str) -> bool {
-    uid < 1000 || shell.ends_with("nologin") || shell.ends_with("false")
+const RESERVED_SYSTEM_USERS: &[&str] = &[
+    "root",
+    "daemon",
+    "bin",
+    "sys",
+    "sync",
+    "nobody",
+    "nogroup",
+    "www-data",
+    "nas-web",
+    "sshd",
+    "messagebus",
+];
+
+fn is_system_user(name: &str, uid: u32) -> bool {
+    !(1000..60000).contains(&uid)
+        || RESERVED_SYSTEM_USERS.contains(&name)
+        || name.starts_with("systemd-")
+}
+
+/// Indica si una cuenta pertenece al sistema operativo y no puede modificarse desde el panel.
+pub fn is_protected_system_account(name: &str, uid: Option<u32>) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    if RESERVED_SYSTEM_USERS.contains(&lower.as_str()) || lower.starts_with("systemd-") {
+        return true;
+    }
+    if let Some(uid) = uid {
+        if !(1000..60000).contains(&uid) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Interpreta `/etc/passwd`.
@@ -48,16 +78,18 @@ pub fn parse_passwd(text: &str) -> Vec<UserEntry> {
             if fields.len() < 7 {
                 return None;
             }
+            let name = fields[0].to_string();
             let uid: u32 = fields[2].parse().ok()?;
             let gid: u32 = fields[3].parse().ok()?;
             let shell = fields[6].to_string();
+            let system = is_system_user(&name, uid);
             Some(UserEntry {
-                name: fields[0].to_string(),
+                name,
                 uid,
                 gid,
                 full_name: fields[4].to_string(),
                 home: fields[5].to_string(),
-                system: is_system_user(uid, &shell),
+                system,
                 shell,
             })
         })
@@ -111,7 +143,9 @@ pub fn corporate_groups(groups: &[GroupEntry]) -> Vec<&GroupEntry> {
 
 #[cfg(test)]
 mod tests {
-    use super::{corporate_groups, managed_users, parse_group, parse_passwd};
+    use super::{
+        corporate_groups, is_protected_system_account, managed_users, parse_group, parse_passwd,
+    };
 
     const PASSWD: &str = "\
 root:x:0:0:root:/root:/bin/bash
@@ -137,6 +171,23 @@ users:x:100:empleado1
         assert_eq!(users[2].home, "/home/sistemas");
         assert_eq!(users[2].full_name, "Sistemas");
         assert_eq!(managed_users(&users).len(), 2);
+    }
+
+    #[test]
+    fn incluye_cuentas_samba_con_nologin_y_excluye_nobody() {
+        let extra = "\
+asesor:x:1002:1002:Asesor Comercial:/home/asesor:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+nas-web:x:998:998:Panel Web:/var/lib/nas:/usr/sbin/nologin
+";
+        let users = parse_passwd(extra);
+        let managed = managed_users(&users);
+        assert_eq!(managed.len(), 1);
+        assert_eq!(managed[0].name, "asesor");
+        assert!(is_protected_system_account("root", Some(0)));
+        assert!(is_protected_system_account("nas-web", Some(1005)));
+        assert!(is_protected_system_account("nobody", Some(65534)));
+        assert!(!is_protected_system_account("asesor", Some(1002)));
     }
 
     #[test]
