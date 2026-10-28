@@ -78,12 +78,33 @@ FORCE=false
 CONFIRM=false
 IGNORE_IN_USE=false
 KEEP_DATA=false
+NATIVE=false
 for _arg in "$@"; do
     [ "$_arg" == "--force" ] && FORCE=true
     [ "$_arg" == "--confirm" ] && CONFIRM=true
     [ "$_arg" == "--ignore-in-use" ] && IGNORE_IN_USE=true
     [ "$_arg" == "--keep-data" ] && KEEP_DATA=true
+    [ "$_arg" == "--native" ] && NATIVE=true
 done
+
+if [ "$NATIVE" == "true" ] && [ -x "/usr/local/bin/nas" ]; then
+    echo "  [•] Delegando despliegue a la plataforma nativa Rust (/usr/local/bin/nas deploy apply)..."
+    CMD=(/usr/local/bin/nas deploy apply \
+        --disk "$TARGET_DISK" \
+        --workgroup "$SMB_WORKGROUP" \
+        --netbios "$SMB_NETBIOS" \
+        --admin "$ADMIN_USER" \
+        --role "$SERVER_ROLE")
+    [ "$KEEP_DATA" == "true" ] && CMD+=(--keep-data)
+    [ "$IGNORE_IN_USE" == "true" ] && CMD+=(--ignore-in-use)
+    if [ "$FORCE" == "true" ] || [ "$CONFIRM" == "true" ]; then
+        CMD+=(--yes)
+    fi
+    if [ "$KEEP_DATA" != "true" ]; then
+        CMD+=(--format-token "SI-FORMATEAR")
+    fi
+    exec "${CMD[@]}"
+fi
 
 SERVER_IP=$(obtener_ip_local)
 
