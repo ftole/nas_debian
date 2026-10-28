@@ -23,13 +23,17 @@ pub fn is_valid_unit_name(unit: &str) -> bool {
 pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasResult<String> {
     let name = name.trim();
     if !is_valid_share_name(name) {
-        return Err(NasError::Invalid(format!("nombre de recurso inválido: '{name}'")));
+        return Err(NasError::Invalid(format!(
+            "nombre de recurso inválido: '{name}'"
+        )));
     }
 
     let unit = unit.map(str::trim).unwrap_or("principal");
     let unit = if unit.is_empty() { "principal" } else { unit };
     if !is_valid_unit_name(unit) {
-        return Err(NasError::Invalid(format!("unidad de almacenamiento inválida: '{unit}'")));
+        return Err(NasError::Invalid(format!(
+            "unidad de almacenamiento inválida: '{unit}'"
+        )));
     }
 
     let base = if unit == "principal" {
@@ -44,9 +48,8 @@ pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasR
     }
 
     let dir_path = Path::new(&dir);
-    std::fs::create_dir_all(dir_path).map_err(|e| {
-        NasError::Denied(format!("no se pudo crear el directorio {dir}: {e}"))
-    })?;
+    std::fs::create_dir_all(dir_path)
+        .map_err(|e| NasError::Denied(format!("no se pudo crear el directorio {dir}: {e}")))?;
 
     let _ = runner.run(
         &CommandSpec::new("chown")
@@ -71,12 +74,16 @@ pub fn apply_share_acl(
 ) -> NasResult<String> {
     let path = path.trim();
     if !path.starts_with("/srv/nas/") || path.contains("..") {
-        return Err(NasError::Denied("ruta no permitida (debe estar dentro de /srv/nas/)".into()));
+        return Err(NasError::Denied(
+            "ruta no permitida (debe estar dentro de /srv/nas/)".into(),
+        ));
     }
 
     let dir_path = Path::new(path);
     if !dir_path.is_dir() {
-        return Err(NasError::NotFound(format!("no existe el directorio del recurso: {path}")));
+        return Err(NasError::NotFound(format!(
+            "no existe el directorio del recurso: {path}"
+        )));
     }
 
     let principal = principal.trim().trim_start_matches('@');
@@ -88,7 +95,9 @@ pub fn apply_share_acl(
     } else if user_re.is_match(principal) {
         format!("u:{principal}")
     } else {
-        return Err(NasError::Invalid(format!("principal inválido: '{principal}'")));
+        return Err(NasError::Invalid(format!(
+            "principal inválido: '{principal}'"
+        )));
     };
 
     let level = level.trim().to_ascii_lowercase();
@@ -142,7 +151,9 @@ pub fn apply_share_acl(
                 .ensure_success()?;
             Ok(format!("{path} {entry} write"))
         }
-        _ => Err(NasError::Invalid(format!("nivel inválido: '{level}' (esperado read|write|none)"))),
+        _ => Err(NasError::Invalid(format!(
+            "nivel inválido: '{level}' (esperado read|write|none)"
+        ))),
     }
 }
 
@@ -157,7 +168,9 @@ mod tests {
         assert!(is_valid_share_name("campana_uno"));
         assert!(!is_valid_share_name("../escape"));
         assert!(!is_valid_share_name(""));
-        assert!(!is_valid_share_name("nombre_demasiado_largo_que_excede_los_treinta_y_dos_caracteres_totales"));
+        assert!(!is_valid_share_name(
+            "nombre_demasiado_largo_que_excede_los_treinta_y_dos_caracteres_totales"
+        ));
     }
 
     #[test]
@@ -179,7 +192,10 @@ mod tests {
     #[test]
     fn rechaza_principales_invalidos() {
         let runner = Runner::new();
-        let err = apply_share_acl(&runner, "/srv/nas/SISTEMAS", "usuario;malicioso", "read").unwrap_err();
-        assert!(err.to_string().contains("principal inválido") || err.to_string().contains("no existe"));
+        let err =
+            apply_share_acl(&runner, "/srv/nas/SISTEMAS", "usuario;malicioso", "read").unwrap_err();
+        assert!(
+            err.to_string().contains("principal inválido") || err.to_string().contains("no existe")
+        );
     }
 }
