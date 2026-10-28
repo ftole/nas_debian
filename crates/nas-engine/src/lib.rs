@@ -18,6 +18,8 @@ pub mod deploy;
 pub mod diagnostics;
 /// Integración con Active Directory.
 pub mod domain;
+/// Módulos helpers privilegiados ejecutados con permisos acotados de root.
+pub mod helpers;
 /// Bloqueo exclusivo por tarea.
 pub mod lock;
 /// Inventario agregado de red.
