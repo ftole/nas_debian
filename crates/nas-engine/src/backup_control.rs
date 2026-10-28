@@ -19,11 +19,12 @@ pub fn valid_id(id: &str) -> bool {
 pub const MAX_LOG_LINES: usize = 500;
 
 fn helper(runner: &Runner, args: &[&str]) -> Result<String, String> {
-    let mut argv: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let mut argv: Vec<String> = vec!["helper".to_string(), "backup-manage".to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
     let output = runner
         .run(
-            &CommandSpec::new("/usr/local/sbin/nas-backup-manage")
-                .args(argv.drain(..))
+            &CommandSpec::new("/usr/local/bin/nas")
+                .args(argv)
                 .sudo(SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(60)),
         )
