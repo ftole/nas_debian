@@ -65,7 +65,7 @@ enum Command {
     /// Verificación y planificación de actualizaciones firmadas.
     Update {
         #[command(subcommand)]
-        action: UpdateAction,
+        action: Option<UpdateAction>,
     },
     /// Planificación del despliegue del servidor.
     Deploy {
@@ -363,13 +363,13 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             ),
         },
         Command::Update { action } => match action {
-            UpdateAction::Status => update_status(cli.json),
-            UpdateAction::Verify {
+            None | Some(UpdateAction::Status) => update_status(cli.json),
+            Some(UpdateAction::Verify {
                 manifest,
                 artifact,
                 pubkey,
-            } => update_verify(&manifest, artifact.as_deref(), &pubkey, cli.json),
-            UpdateAction::Apply {
+            }) => update_verify(&manifest, artifact.as_deref(), &pubkey, cli.json),
+            Some(UpdateAction::Apply {
                 manifest,
                 artifact,
                 root,
@@ -377,7 +377,7 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 pubkey,
                 yes,
                 sudo,
-            } => update_apply(
+            }) => update_apply(
                 UpdateApplyOptions {
                     manifest_path: &manifest,
                     artifact: &artifact,
@@ -389,16 +389,16 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 },
                 cli.json,
             ),
-            UpdateAction::Sign { manifest, key, out } => {
+            Some(UpdateAction::Sign { manifest, key, out }) => {
                 update_sign(&manifest, &key, out.as_deref(), cli.json)
             }
-            UpdateAction::Pubkey { key } => update_pubkey(&key, cli.json),
-            UpdateAction::Plan {
+            Some(UpdateAction::Pubkey { key }) => update_pubkey(&key, cli.json),
+            Some(UpdateAction::Plan {
                 manifest,
                 artifact,
                 root,
                 previous,
-            } => update_plan(&manifest, &artifact, &root, previous.as_deref(), cli.json),
+            }) => update_plan(&manifest, &artifact, &root, previous.as_deref(), cli.json),
         },
         Command::Migrate { action } => match action {
             MigrateAction::Status => migrate_status(cli.json),
