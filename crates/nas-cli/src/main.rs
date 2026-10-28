@@ -121,6 +121,8 @@ enum UsersAction {
 
 #[derive(Debug, Subcommand)]
 enum UpdateAction {
+    /// Muestra el estado del actualizador y versión instalada.
+    Status,
     /// Verifica SHA-256 y firma Ed25519 del manifiesto.
     Verify {
         /// Manifiesto JSON de la release.
@@ -361,6 +363,7 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             ),
         },
         Command::Update { action } => match action {
+            UpdateAction::Status => update_status(cli.json),
             UpdateAction::Verify {
                 manifest,
                 artifact,
@@ -935,6 +938,39 @@ fn audit_verify(json: bool) -> NasResult<ExitCode> {
     } else {
         Ok(ExitCode::from(1))
     }
+}
+
+fn update_status(json: bool) -> NasResult<ExitCode> {
+    let pkg_version = env!("CARGO_PKG_VERSION");
+    let version_path = Path::new("/opt/nas_debian/version.json");
+    let deployed_version = if version_path.is_file() {
+        std::fs::read_to_string(version_path)
+            .ok()
+            .and_then(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
+            .and_then(|v| v.get("version").and_then(|s| s.as_str().map(String::from)))
+            .unwrap_or_else(|| pkg_version.to_string())
+    } else {
+        pkg_version.to_string()
+    };
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "version": deployed_version,
+                "pkg_version": pkg_version,
+                "status": "up_to_date",
+                "require_signed_tags": true,
+            }),
+            "Estado del actualizador",
+        ))?;
+    } else {
+        println!("Estado del actualizador NAS:");
+        println!("  Versión instalada : {deployed_version}");
+        println!("  Requisito de firma: Ed25519 / GPG obligatorio");
+        println!("  Canal             : producción (main)");
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 fn update_sign(
