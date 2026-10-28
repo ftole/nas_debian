@@ -3386,10 +3386,11 @@ fn stage_and_apply(conf: &str) -> Result<(), String> {
     let staged = dir.join(format!("smbconf_{stamp}"));
     std::fs::write(&staged, conf).map_err(|error| error.to_string())?;
 
+    let staged_str = staged.to_string_lossy().to_string();
     let output = Runner::new()
         .run(
-            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-samba-apply")
-                .arg(staged.to_string_lossy().to_string())
+            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["helper", "samba-apply", &staged_str])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(60)),
         )
@@ -3410,8 +3411,8 @@ fn stage_and_apply(conf: &str) -> Result<(), String> {
 fn apply_acl(path: &str, principal: &str, level: &str) -> Result<(), String> {
     let output = Runner::new()
         .run(
-            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-share-acl")
-                .args([path, principal.trim_start_matches('@'), level])
+            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["helper", "share-acl", path, principal.trim_start_matches('@'), level])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(120)),
         )
@@ -3431,8 +3432,8 @@ fn apply_acl(path: &str, principal: &str, level: &str) -> Result<(), String> {
 fn create_share_dir(name: &str, unit: &str) -> Result<(), String> {
     let output = Runner::new()
         .run(
-            &nas_exec::CommandSpec::new("/usr/local/sbin/nas-share-dir")
-                .args([name, if unit.is_empty() { "principal" } else { unit }])
+            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["helper", "share-dir", name, if unit.is_empty() { "principal" } else { unit }])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(30)),
         )
@@ -3957,8 +3958,10 @@ fn is_target_superadmin(state: &AppState, username: &str) -> bool {
 }
 
 fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String> {
-    let mut spec = nas_exec::CommandSpec::new("/usr/local/sbin/nas-accounts")
-        .args(args.iter().map(|arg| (*arg).to_string()))
+    let mut cmd_args = vec!["helper", "accounts"];
+    cmd_args.extend_from_slice(args);
+    let mut spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
+        .args(cmd_args)
         .sudo(nas_exec::SudoMode::Passwordless)
         .timeout(std::time::Duration::from_secs(60));
     if let Some(password) = password {
@@ -4430,8 +4433,10 @@ pub struct BackupIdBody {
 }
 
 fn run_backup_helper(args: &[&str], password: Option<&str>) -> Result<String, String> {
-    let mut spec = nas_exec::CommandSpec::new("/usr/local/sbin/nas-backup-manage")
-        .args(args.iter().map(|arg| (*arg).to_string()))
+    let mut cmd_args = vec!["helper", "backup-manage"];
+    cmd_args.extend_from_slice(args);
+    let mut spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
+        .args(cmd_args)
         .sudo(nas_exec::SudoMode::Passwordless)
         .timeout(std::time::Duration::from_secs(60));
     if let Some(password) = password {
