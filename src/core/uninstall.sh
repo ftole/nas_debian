@@ -53,6 +53,10 @@ CMD=("$NAS_BIN" uninstall --scope "$SCOPE")
 
 if command -v "$NAS_BIN" >/dev/null 2>&1; then
     exec "${CMD[@]}"
+else
+    echo "  [•] Binario $NAS_BIN no encontrado: aplicando limpieza directa de artefactos..."
+    _referencia_limpieza_os
+    exit 0
 fi
 
 # ==============================================================================
@@ -68,8 +72,14 @@ _referencia_limpieza_os() {
 
     rm -f /etc/sysctl.d/99-nas-tuning.conf
     rm -f /etc/audit/rules.d/nas.rules
+    rm -f /etc/udev/rules.d/60-nas-readahead.rules
+    rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
+    rm -f /etc/logrotate.d/nas-backups
+    rm -f /etc/cron.d/nas-btrfs-scrub
     if command -v augenrules &>/dev/null; then
         augenrules --load 2>/dev/null || true
     fi
     service auditd restart 2>/dev/null || systemctl restart auditd 2>/dev/null || true
+    sysctl --system 2>/dev/null || true
+    udevadm control --reload-rules 2>/dev/null || true
 }
