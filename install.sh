@@ -99,11 +99,13 @@ fi
 
 if [ "$1" == "--uninstall" ] || [ "$1" == "uninstall" ]; then
     echo -e "${C_YELLOW}[!] Desinstalando la plataforma NAS...${C_RESET}"
-    systemctl disable --now nas-web.service 2>/dev/null || true
-    rm -f "$BIN_DIR/nas" "$BIN_DIR/nas-web" "$BIN_DIR/nas-tui" "$BIN_DIR/nasctl" "$BIN_DIR/nas-dev"
     if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/src/core/uninstall.sh" ]; then
         bash "$INSTALL_DIR/src/core/uninstall.sh" --yes || true
+    elif [ -x "$BIN_DIR/nas" ]; then
+        "$BIN_DIR/nas" uninstall --scope os --yes 2>/dev/null || true
     fi
+    systemctl disable --now nas-web.service 2>/dev/null || true
+    rm -f "$BIN_DIR/nas" "$BIN_DIR/nas-web" "$BIN_DIR/nas-tui" "$BIN_DIR/nasctl" "$BIN_DIR/nas-dev"
     rm -rf "$INSTALL_DIR"
     echo -e "${C_GREEN}✔ Plataforma desinstalada.${C_RESET}"
     exit 0
