@@ -24,7 +24,8 @@ fn prepare_terminal_socket(runner: &Runner, user: &str) -> NasResult<(u32, Strin
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions("/run/nas-terminal", std::fs::Permissions::from_mode(0o755));
+        let _ =
+            std::fs::set_permissions("/run/nas-terminal", std::fs::Permissions::from_mode(0o755));
         let _ = std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700));
     }
     let sock_dir_str = sock_dir.to_string_lossy().to_string();
@@ -64,7 +65,9 @@ pub fn start_terminal(
     let cols = cols.unwrap_or(200);
     let rows = rows.unwrap_or(50);
     if !is_valid_geometry(cols, rows) {
-        return Err(NasError::Invalid("dimensiones de terminal inválidas".into()));
+        return Err(NasError::Invalid(
+            "dimensiones de terminal inválidas".into(),
+        ));
     }
 
     let session = format!("nas-web-{user}");
@@ -83,7 +86,9 @@ pub fn start_terminal(
 
     let has_systemd = Path::new("/run/systemd/private").exists();
     if has_systemd {
-        let _ = runner.run(&CommandSpec::new("systemctl").args(["reset-failed", &format!("{unit_name}.service")]));
+        let _ = runner.run(
+            &CommandSpec::new("systemctl").args(["reset-failed", &format!("{unit_name}.service")]),
+        );
         runner.run(
             &CommandSpec::new("systemd-run")
                 .args([
@@ -121,97 +126,90 @@ pub fn start_terminal(
                 .timeout(Duration::from_secs(15)),
         )?.ensure_success()?;
     } else {
-        runner.run(
-            &CommandSpec::new("runuser")
-                .args([
-                    "-u",
-                    user,
-                    "--",
-                    "env",
-                    &format!("HOME={home}"),
-                    &format!("USER={user}"),
-                    &format!("LOGNAME={user}"),
-                    "SHELL=/bin/bash",
-                    "PAGER=cat",
-                    "SYSTEMD_PAGER=cat",
-                    "TERM=xterm-256color",
-                    "tmux",
-                    "-S",
-                    &sock.to_string_lossy(),
-                    "new-session",
-                    "-d",
-                    "-s",
-                    &session,
-                    "-x",
-                    &cols.to_string(),
-                    "-y",
-                    &rows.to_string(),
-                    "-c",
-                    &home,
-                    "/bin/bash",
-                    "-l",
-                ])
-                .timeout(Duration::from_secs(15)),
-        )?.ensure_success()?;
+        runner
+            .run(
+                &CommandSpec::new("runuser")
+                    .args([
+                        "-u",
+                        user,
+                        "--",
+                        "env",
+                        &format!("HOME={home}"),
+                        &format!("USER={user}"),
+                        &format!("LOGNAME={user}"),
+                        "SHELL=/bin/bash",
+                        "PAGER=cat",
+                        "SYSTEMD_PAGER=cat",
+                        "TERM=xterm-256color",
+                        "tmux",
+                        "-S",
+                        &sock.to_string_lossy(),
+                        "new-session",
+                        "-d",
+                        "-s",
+                        &session,
+                        "-x",
+                        &cols.to_string(),
+                        "-y",
+                        &rows.to_string(),
+                        "-c",
+                        &home,
+                        "/bin/bash",
+                        "-l",
+                    ])
+                    .timeout(Duration::from_secs(15)),
+            )?
+            .ensure_success()?;
     }
 
     Ok(format!("session={session}"))
 }
 
 /// Envía teclas o texto a la sesión tmux del usuario.
-pub fn send_terminal_keys(
-    runner: &Runner,
-    user: &str,
-    keys: &str,
-    enter: bool,
-) -> NasResult<()> {
+pub fn send_terminal_keys(runner: &Runner, user: &str, keys: &str, enter: bool) -> NasResult<()> {
     let (_, _, sock) = prepare_terminal_socket(runner, user)?;
     let session = format!("nas-web-{user}");
 
-    runner.run(
-        &CommandSpec::new("runuser")
-            .args([
-                "-u",
-                user,
-                "--",
-                "tmux",
-                "-S",
-                &sock.to_string_lossy(),
-                "send-keys",
-                "-t",
-                &session,
-                "-l",
-                "--",
-                keys,
-            ])
-            .timeout(Duration::from_secs(10)),
-    )?.ensure_success()?;
+    runner
+        .run(
+            &CommandSpec::new("runuser")
+                .args([
+                    "-u",
+                    user,
+                    "--",
+                    "tmux",
+                    "-S",
+                    &sock.to_string_lossy(),
+                    "send-keys",
+                    "-t",
+                    &session,
+                    "-l",
+                    "--",
+                    keys,
+                ])
+                .timeout(Duration::from_secs(10)),
+        )?
+        .ensure_success()?;
 
     if enter {
-        let _ = runner.run(
-            &CommandSpec::new("runuser").args([
-                "-u",
-                user,
-                "--",
-                "tmux",
-                "-S",
-                &sock.to_string_lossy(),
-                "send-keys",
-                "-t",
-                &session,
-                "Enter",
-            ]),
-        );
+        let _ = runner.run(&CommandSpec::new("runuser").args([
+            "-u",
+            user,
+            "--",
+            "tmux",
+            "-S",
+            &sock.to_string_lossy(),
+            "send-keys",
+            "-t",
+            &session,
+            "Enter",
+        ]));
     }
     Ok(())
 }
 
 /// Envía una tecla especial (Enter, Tab, C-c, etc.) a la sesión tmux.
-pub fn send_terminal_special_key(
-    runner: &Runner,
-    user: &str,
-    key_name: &str,
-) -> NasResult<()> {
+pub fn send_terminal_special_key(runner: &Runner, user: &str, key_name: &str) -> NasResult<()> {
     let (_, _, sock) = prepare_terminal_socket(runner, user)?;
     let session = format!("nas-web-{user}");
 
@@ -230,8 +228,8 @@ pub fn send_terminal_special_key(
         other => return Err(NasError::Invalid(format!("tecla no soportada: '{other}'"))),
     };
 
-    runner.run(
-        &CommandSpec::new("runuser").args([
+    runner
+        .run(&CommandSpec::new("runuser").args([
             "-u",
             user,
             "--",
@@ -242,8 +240,8 @@ pub fn send_terminal_special_key(
             "-t",
             &session,
             tmux_key,
-        ]),
-    )?.ensure_success()?;
+        ]))?
+        .ensure_success()?;
     Ok(())
 }
 
@@ -288,14 +286,20 @@ pub fn capture_terminal(runner: &Runner, user: &str) -> NasResult<String> {
         .map(|o| o.stdout.trim().to_string())
         .unwrap_or_else(|_| "/srv/nas".to_string());
 
-    let cwd = if cwd.is_empty() { "/srv/nas".to_string() } else { cwd };
+    let cwd = if cwd.is_empty() {
+        "/srv/nas".to_string()
+    } else {
+        cwd
+    };
     Ok(format!("{}\n___NAS_CWD___{cwd}", cap_out.stdout))
 }
 
 /// Redimensiona la ventana del terminal.
 pub fn resize_terminal(runner: &Runner, user: &str, cols: u16, rows: u16) -> NasResult<()> {
     if !is_valid_geometry(cols, rows) {
-        return Err(NasError::Invalid("dimensiones de terminal inválidas".into()));
+        return Err(NasError::Invalid(
+            "dimensiones de terminal inválidas".into(),
+        ));
     }
     let (_, _, sock) = prepare_terminal_socket(runner, user)?;
     let session = format!("nas-web-{user}");
@@ -336,8 +340,11 @@ pub fn kill_terminal(runner: &Runner, user: &str) -> NasResult<()> {
         &session,
     ]));
 
-    let _ = runner.run(&CommandSpec::new("systemctl").args(["stop", &format!("{unit_name}.service")]));
-    let _ = runner.run(&CommandSpec::new("systemctl").args(["reset-failed", &format!("{unit_name}.service")]));
+    let _ =
+        runner.run(&CommandSpec::new("systemctl").args(["stop", &format!("{unit_name}.service")]));
+    let _ = runner.run(
+        &CommandSpec::new("systemctl").args(["reset-failed", &format!("{unit_name}.service")]),
+    );
 
     Ok(())
 }
@@ -348,7 +355,17 @@ pub fn terminal_exists(runner: &Runner, user: &str) -> NasResult<bool> {
     let session = format!("nas-web-{user}");
     let out = runner.run(
         &CommandSpec::new("runuser")
-            .args(["-u", user, "--", "tmux", "-S", &sock.to_string_lossy(), "has-session", "-t", &session])
+            .args([
+                "-u",
+                user,
+                "--",
+                "tmux",
+                "-S",
+                &sock.to_string_lossy(),
+                "has-session",
+                "-t",
+                &session,
+            ])
             .timeout(Duration::from_secs(5)),
     )?;
     Ok(out.is_success())
