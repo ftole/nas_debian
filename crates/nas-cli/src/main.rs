@@ -17,6 +17,9 @@ use nas_engine::{collect_network, collect_status};
 use nas_exec::{CommandOutput, CommandSpec, Runner, SudoMode};
 use serde::Serialize;
 
+mod helper;
+use helper::{run_helper, HelperAction};
+
 #[derive(Debug, Parser)]
 #[command(
     name = "nas",
@@ -96,6 +99,11 @@ enum Command {
     Users {
         #[command(subcommand)]
         action: UsersAction,
+    },
+    /// Operaciones privilegiadas de helpers acotados para el panel y sistema.
+    Helper {
+        #[command(subcommand)]
+        action: HelperAction,
     },
 }
 
@@ -424,6 +432,7 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 cli.json,
             ),
         },
+        Command::Helper { action } => run_helper(action, cli.json),
     }
 }
 
