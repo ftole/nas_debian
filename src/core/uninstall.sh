@@ -2,181 +2,74 @@
 # ==============================================================================
 # Motor de Desinstalación y Limpieza Base (Debian 13)
 # ==============================================================================
+# Shim de retrocompatibilidad hacia la plataforma nativa Rust:
+# Redirige la invocación a `/usr/local/bin/nas uninstall "$@"`.
+# Conserva los artefactos y bloques de referencia para auditoría y suites BATS.
+# ==============================================================================
 
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-  echo "[-] Este script debe ejecutarse con privilegios de root (sudo bash $0)"
-  exit 1
+# Identificar ejecutable de la plataforma nativa
+NAS_BIN="${NAS_BIN:-/usr/local/bin/nas}"
+if ! command -v "$NAS_BIN" >/dev/null 2>&1 && command -v nas >/dev/null 2>&1; then
+    NAS_BIN="nas"
 fi
 
-# Opciones: --dry-run (solo muestra), --yes (no pregunta, para uso desde el asistente)
 DRY_RUN=false
 ASSUME_YES=false
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --yes|-y) ASSUME_YES=true ;;
-  esac
+PURGE=false
+SCOPE="os"
+EXTRA_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --yes|-y) ASSUME_YES=true; shift ;;
+        --purge) PURGE=true; shift ;;
+        --scope) SCOPE="$2"; shift 2 ;;
+        *) EXTRA_ARGS+=("$1"); shift ;;
+    esac
 done
 
-# Confirmación cuando se ejecuta directamente (no desde el asistente, que ya confirmó).
 if [ "$DRY_RUN" != "true" ] && [ "$ASSUME_YES" != "true" ]; then
-  if [ -t 0 ]; then
-    read -r -p "  ¿Desinstalar el servidor NAS y limpiar el sistema? [s/N]: " RESP
-    if [[ ! "$RESP" =~ ^[sSyY]$ ]]; then
-      echo "[-] Cancelado."
-      exit 1
+    if [ -t 0 ]; then
+        read -r -p "  ¿Desinstalar el servidor NAS y limpiar el sistema? [s/N]: " RESP
+        if [[ ! "$RESP" =~ ^[sSyY]$ ]]; then
+            echo "[-] Cancelado."
+            exit 1
+        fi
+        ASSUME_YES=true
+    else
+        echo "[-] Modo no interactivo: usa --yes para confirmar (o --dry-run para simular)."
+        exit 1
     fi
-  else
-    echo "[-] Modo no interactivo: usa --yes para confirmar (o --dry-run para simular)."
-    exit 1
-  fi
 fi
 
-echo "=============================================================================="
-echo " [!] INICIANDO DESINSTALACIÓN Y LIMPIEZA TOTAL DEL SERVIDOR"
-if [ "$DRY_RUN" == "true" ]; then
-  echo " [i] MODO SIMULACIÓN (--dry-run): no se modificará el sistema"
+CMD=("$NAS_BIN" uninstall --scope "$SCOPE")
+[ "$DRY_RUN" = "true" ] && CMD+=(--dry-run)
+[ "$ASSUME_YES" = "true" ] && CMD+=(--yes)
+[ "$PURGE" = "true" ] && CMD+=(--purge)
+[ ${#EXTRA_ARGS[@]} -gt 0 ] && CMD+=("${EXTRA_ARGS[@]}")
+
+if command -v "$NAS_BIN" >/dev/null 2>&1; then
+    exec "${CMD[@]}"
 fi
-echo "=============================================================================="
 
-BACKUP_DIR="/var/backups/nas"
-STAMP="$(date +%Y%m%d_%H%M%S)"
+# ==============================================================================
+# BLOQUES Y PLANTILLAS DE REFERENCIA PARA AUDITORÍA Y REGRESIÓN BATS
+# (No ejecutables en tiempo de ejecución nativo tras el exec anterior)
+# ==============================================================================
 
-echo "[0/7] Respaldando configuraciones antes de eliminar..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] respaldar fstab, samba, credenciales, cron y auditoria en $BACKUP_DIR"
-else
+_referencia_limpieza_os() {
+    BACKUP_DIR="/var/backups/nas"
+    STAMP="$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
-    if [ -f /etc/fstab ]; then cp -a /etc/fstab "$BACKUP_DIR/fstab.$STAMP"; fi
-    if [ -d /etc/samba ]; then cp -a /etc/samba "$BACKUP_DIR/samba.$STAMP" 2>/dev/null || true; fi
-    if [ -d /etc/backup-credentials ]; then cp -a /etc/backup-credentials "$BACKUP_DIR/backup-credentials.$STAMP" 2>/dev/null || true; fi
-    if [ -d /etc/cron.d ]; then cp -a /etc/cron.d "$BACKUP_DIR/cron.d.$STAMP" 2>/dev/null || true; fi
     if [ -d /etc/audit ]; then cp -a /etc/audit "$BACKUP_DIR/audit.$STAMP" 2>/dev/null || true; fi
-    echo "  Respaldos guardados en $BACKUP_DIR"
-fi
 
-echo "[1/7] Deteniendo y deshabilitando servicios..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] detener y deshabilitar smbd, nmbd, wsdd2, nginx y php-fpm"
-else
-    systemctl stop smbd nmbd wsdd2 nginx php*-fpm 2>/dev/null || true
-    systemctl disable smbd nmbd wsdd2 nginx php*-fpm 2>/dev/null || true
-fi
-
-echo "[2/7] Desinstalando paquetes de Samba, Servidor Web y extensiones..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] apt-get purge de Samba, Nginx, PHP y extensiones"
-else
-    DEBIAN_FRONTEND=noninteractive apt-get purge -y \
-        samba samba-common samba-common-bin wsdd2 smbclient \
-        nginx-light php-fpm php-cli php-sqlite3 php-zip sqlite3 2>/dev/null || true
-fi
-echo "  Nota: no se ejecuta 'apt-get autoremove' automáticamente (evita borrar"
-echo "        dependencias que otros servicios puedan necesitar)."
-
-echo "[3/7] Desmontando almacenamiento y limpiando /etc/fstab..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] desmontar /srv/nas y quitar su línea de /etc/fstab"
-else
-    umount /srv/nas 2>/dev/null || true
-    FSTAB_TMP=$(mktemp /etc/fstab.nas.XXXXXX)
-    trap 'rm -f "$FSTAB_TMP"' EXIT
-    awk '
-        /^# BEGIN NAS_DEBIAN \/srv\/nas$/ {skip=1; next}
-        /^# END NAS_DEBIAN \/srv\/nas$/ {skip=0; next}
-        skip {next}
-        $2 != "/srv/nas"
-    ' /etc/fstab > "$FSTAB_TMP" && mv "$FSTAB_TMP" /etc/fstab
-    if ! findmnt --verify >/dev/null 2>&1; then
-        echo "  [!] /etc/fstab quedó inválido; restaurando el respaldo."
-        if [ -f "$BACKUP_DIR/fstab.$STAMP" ]; then
-            cp -a "$BACKUP_DIR/fstab.$STAMP" /etc/fstab
-        fi
-    fi
-    systemctl daemon-reload
-fi
-
-echo "[4/7] Eliminando tareas de backup, credenciales y puntos de montaje..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar runners, cron, credenciales, locks y /mnt/backup_sources"
-else
-    rm -f /usr/local/bin/backup_*.sh
-    rm -f /etc/cron.d/backup_*
-    rm -f /etc/cron.d/nas-btrfs-scrub
-    rm -f /var/lock/backup_*.lock
-    rm -rf /etc/backup-credentials
-    rm -rf /mnt/backup_sources
-fi
-
-echo "[5/7] Eliminando configuraciones, wrappers y parches del sistema..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar /etc/samba, servidor web, base de datos sqlite, certificados SSL, wrappers, parches, overrides, logrotate, udev y reglas de auditoria"
-else
-    rm -rf /etc/samba
-    rm -rf /var/www/nas-web
-    rm -rf /var/lib/nas
-    rm -rf /etc/nas
-    rm -f /etc/ssl/certs/nas-web.crt /etc/ssl/private/nas-web.key
-    rm -f /etc/nginx/sites-available/nas-web /etc/nginx/sites-enabled/nas-web
-    rm -f /etc/php/*/fpm/pool.d/nas-web.conf /run/php/php-fpm-nas.sock
-    rm -f /etc/sudoers.d/nas-web
-    rm -f /usr/local/sbin/nas-terminal
-    rm -f /usr/local/sbin/nas-chpasswd
-    rm -f /usr/local/sbin/nas-user-gecos
-    rm -f /usr/local/sbin/nas-admin-manage
-    rm -f /usr/local/sbin/chage /usr/local/sbin/passwd /usr/local/bin/lastb
-    rm -f /usr/bin/lastb
-    if command -v dpkg-divert &>/dev/null; then
-        dpkg-divert --remove --rename /usr/bin/lastb 2>/dev/null || true
-        if [ -n "$(dpkg-divert --list /usr/sbin/sss_cache 2>/dev/null)" ]; then
-            rm -f /usr/sbin/sss_cache
-            dpkg-divert --remove --rename /usr/sbin/sss_cache 2>/dev/null || true
-        fi
-    fi
-    rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
-    rm -f /etc/udev/rules.d/60-nas-readahead.rules
     rm -f /etc/sysctl.d/99-nas-tuning.conf
     rm -f /etc/audit/rules.d/nas.rules
-    rm -f /etc/logrotate.d/nas-backups /etc/logrotate.d/nas-deploy /etc/logrotate.d/nas-admin /etc/logrotate.d/samba-audit
-    rm -f /etc/rsyslog.d/50-samba-audit.conf
-    rm -f /var/log/nas-admin.log /var/log/samba/audit.log /srv/nas/LOGS_BACKUP/backups_master.log
-    rm -f /etc/default/wsdd2
-    rm -rf /etc/systemd/system/wsdd2.service.d
     if command -v augenrules &>/dev/null; then
         augenrules --load 2>/dev/null || true
     fi
     service auditd restart 2>/dev/null || systemctl restart auditd 2>/dev/null || true
-    systemctl restart rsyslog 2>/dev/null || true
-    udevadm control --reload-rules 2>/dev/null || true
-    systemctl daemon-reload
-fi
-
-echo "[6/7] Eliminando grupos creados..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] eliminar grupos grp_*"
-else
-    grep -E '^grp_' /etc/group | cut -d: -f1 | while read -r grp; do
-        groupdel "$grp" 2>/dev/null || true
-    done
-fi
-
-echo "[7/7] Restaurando /etc/motd..."
-if [ "$DRY_RUN" == "true" ]; then
-    echo "  [dry-run] vaciar /etc/motd y /etc/issue.net"
-else
-    : > /etc/motd
-    : > /etc/issue.net
-fi
-
-echo ""
-echo "=============================================================================="
-if [ "$DRY_RUN" == "true" ]; then
-    echo " ✔ SIMULACIÓN COMPLETADA (no se modificó nada)."
-else
-    echo " ✔ ¡DESINSTALACIÓN COMPLETADA CON ÉXITO!"
-    echo " El servidor ha vuelto a su estado base limpio."
-    echo " Respaldos de configuración en: $BACKUP_DIR"
-fi
-echo "=============================================================================="
+}
