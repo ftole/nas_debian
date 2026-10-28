@@ -270,6 +270,7 @@ pub fn format_single(
 }
 
 /// Configura LVM sobre un disco y lo monta en `/srv/nas`.
+#[allow(clippy::too_many_arguments)]
 pub fn setup_lvm(
     runner: &Runner,
     confirm: &str,
