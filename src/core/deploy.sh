@@ -27,29 +27,9 @@ IGNORE_IN_USE=false
 KEEP_DATA=false
 EXTRA_ARGS=()
 
-if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
-    # Invocación posicional tradicional:
-    # deploy.sh <disco> [workgroup] [netbios] [admin] [pass_token] [rol] [flags...]
-    TARGET_DISK="${1:-LOCAL}"
-    SMB_WORKGROUP="${2:-TEAM-JOFRATO}"
-    SMB_NETBIOS="${3:-SRV-NAS}"
-    ADMIN_USER="${4:-admin}"
-    # $5 es el token de contraseña (-)
-    SERVER_ROLE="${6:-ARCHIVOS}"
-    shift 6 2>/dev/null || shift $# 2>/dev/null || true
-    for _arg in "$@"; do
-        case "$_arg" in
-            --force) FORCE=true ;;
-            --confirm) CONFIRM=true ;;
-            --ignore-in-use) IGNORE_IN_USE=true ;;
-            --keep-data) KEEP_DATA=true ;;
-            --native) ;; # No-op en plataforma consolidada
-            *) EXTRA_ARGS+=("$_arg") ;;
-        esac
-    done
-else
-    # Invocación por flags
-    while [ $# -gt 0 ]; do
+POS=0
+while [ $# -gt 0 ]; do
+    if [[ "$1" == -* ]]; then
         case "$1" in
             --disk) TARGET_DISK="$2"; shift 2 ;;
             --workgroup) SMB_WORKGROUP="$2"; shift 2 ;;
@@ -63,12 +43,47 @@ else
             --native) shift ;;
             *) EXTRA_ARGS+=("$1"); shift ;;
         esac
-    done
+    else
+        POS=$((POS + 1))
+        case $POS in
+            1) TARGET_DISK="$1" ;;
+            2) SMB_WORKGROUP="$1" ;;
+            3) SMB_NETBIOS="$1" ;;
+            4) ADMIN_USER="$1" ;;
+            5)
+                # Token de contraseña (-): si viene por stdin mediante '-', consumir la línea
+                if [ "$1" = "-" ]; then
+                    IFS= read -r _ 2>/dev/null || true
+                fi
+                ;;
+            6) SERVER_ROLE="$1" ;;
+            *) EXTRA_ARGS+=("$1") ;;
+        esac
+        shift
+    fi
+done
+
+if [ -z "$SMB_WORKGROUP" ]; then
+    if [ -f /etc/samba/smb.conf ]; then
+        SMB_WORKGROUP=$(grep -i "^\s*workgroup\s*=" /etc/samba/smb.conf | head -n1 | awk -F= '{print $2}' | tr -d ' ' | tr '[:lower:]' '[:upper:]')
+    fi
+    [ -z "$SMB_WORKGROUP" ] && SMB_WORKGROUP="TEAM-JOFRATO"
+fi
+if [ -z "$SMB_NETBIOS" ]; then
+    SMB_NETBIOS=$(hostname -s 2>/dev/null | tr '[:lower:]' '[:upper:]' | tr -cd '[:upper:]0-9_-')
+    if [ -z "$SMB_NETBIOS" ] || [ "$SMB_NETBIOS" = "LOCALHOST" ]; then
+        SMB_NETBIOS="SRV-NAS"
+    fi
+fi
+if [ -z "$ADMIN_USER" ]; then
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        ADMIN_USER="$SUDO_USER"
+    else
+        ADMIN_USER=$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1; exit}' /etc/passwd 2>/dev/null || true)
+        [ -z "$ADMIN_USER" ] && ADMIN_USER="admin"
+    fi
 fi
 
-[ -z "$SMB_WORKGROUP" ] && SMB_WORKGROUP="TEAM-JOFRATO"
-[ -z "$SMB_NETBIOS" ] && SMB_NETBIOS="SRV-NAS"
-[ -z "$ADMIN_USER" ] && ADMIN_USER="admin"
 [ "$SERVER_ROLE" = "HIBRIDO" ] && SERVER_ROLE="ARCHIVOS_BACKUP"
 [ "$SERVER_ROLE" = "ARCHIVOSBACKUP" ] && SERVER_ROLE="ARCHIVOS_BACKUP"
 if [ "$SERVER_ROLE" != "ARCHIVOS" ] && [ "$SERVER_ROLE" != "BACKUP" ] && [ "$SERVER_ROLE" != "ARCHIVOS_BACKUP" ]; then
@@ -94,6 +109,9 @@ fi
 
 if command -v "$NAS_BIN" >/dev/null 2>&1; then
     exec "${CMD[@]}"
+else
+    echo "[-] ERROR: Plataforma nativa ($NAS_BIN) no encontrada. Instálela con install.sh" >&2
+    exit 1
 fi
 
 # ==============================================================================
