@@ -57,7 +57,7 @@ const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
 const AUDIT_RULES: &str = "-w /etc/sudoers -p wa -k sudoers_changes
 -w /etc/sudoers.d/ -p wa -k sudoers_changes
 -w /etc/samba/smb.conf -p wa -k samba_config
--w /etc/backup-credentials/ -p wa -k backup_credentials
+-w /etc/backup-credentials/ -p rwa -k backup_credentials
 -w /usr/local/sbin/nas-terminal -p x -k nas_terminal
 ";
 
@@ -341,6 +341,7 @@ fn tips(steps: &mut Vec<Vec<String>>, admin_user: &str) {
         "control".into(),
         "--reload-rules".into(),
     ]);
+    steps.push(vec!["augenrules".into(), "--load".into()]);
     steps.push(vec!["systemctl".into(), "enable".into(), "auditd".into()]);
     steps.push(vec!["systemctl".into(), "restart".into(), "auditd".into()]);
 }
@@ -653,5 +654,12 @@ mod artifact_tests {
             .expect("audit");
         assert_eq!(audit.mode, 0o640);
         assert_eq!(artifacts.len(), 6);
+        assert!(audit.content.contains("-w /etc/backup-credentials/ -p rwa"));
+    }
+
+    #[test]
+    fn plan_incluye_recarga_de_reglas_de_auditoria() {
+        let plan = params(ServerRole::Arquivos).plan();
+        assert!(plan.iter().any(|step| step == &["augenrules", "--load"]));
     }
 }
