@@ -1,9 +1,11 @@
 //! Desinstalación de la plataforma Rust (panel, CLI y helpers).
 //!
 //! El alcance es deliberadamente acotado: retira los artefactos de la
-//! plataforma y su estado, pero **nunca** borra los datos de `/srv/nas`. El
-//! desaprovisionamiento del sistema operativo (Samba, sysctl, udev, auditd) sigue
-//! a cargo de `src/core/uninstall.sh` hasta completar la ola B.
+//! plataforma y su estado, pero **nunca** borra los datos de `/srv/nas`.
+//! El desaprovisionamiento completo del sistema operativo (sysctl, udev, auditd)
+//! se gestiona de forma unificada mediante el alcance `os`.
+//!
+//! Los scripts legacy de `src/core/` actúan como shims hacia esta lógica.
 
 use serde::Serialize;
 
@@ -144,6 +146,16 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
             &["udevadm", "control", "--reload-rules"],
             true,
         ));
+        steps.push(step(
+            "regenerar reglas de auditoría",
+            &["augenrules", "--load"],
+            true,
+        ));
+        steps.push(step(
+            "reiniciar demonio de auditoría",
+            &["systemctl", "restart", "auditd"],
+            true,
+        ));
     }
 
     if purge_state {
@@ -219,6 +231,8 @@ mod os_tests {
         assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules".to_string()));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules".to_string()));
         assert!(paths.contains(&"sysctl".to_string()));
+        assert!(paths.contains(&"augenrules".to_string()));
+        assert!(paths.contains(&"auditd".to_string()));
     }
 
     #[test]
