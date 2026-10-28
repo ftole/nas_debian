@@ -3412,7 +3412,13 @@ fn apply_acl(path: &str, principal: &str, level: &str) -> Result<(), String> {
     let output = Runner::new()
         .run(
             &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args(["helper", "share-acl", path, principal.trim_start_matches('@'), level])
+                .args([
+                    "helper",
+                    "share-acl",
+                    path,
+                    principal.trim_start_matches('@'),
+                    level,
+                ])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(120)),
         )
@@ -3433,7 +3439,12 @@ fn create_share_dir(name: &str, unit: &str) -> Result<(), String> {
     let output = Runner::new()
         .run(
             &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args(["helper", "share-dir", name, if unit.is_empty() { "principal" } else { unit }])
+                .args([
+                    "helper",
+                    "share-dir",
+                    name,
+                    if unit.is_empty() { "principal" } else { unit },
+                ])
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(30)),
         )
