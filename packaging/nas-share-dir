@@ -1,23 +1,5 @@
 #!/bin/bash
 # ==============================================================================
-# Crea (si falta) el directorio de un recurso compartido con permisos estándar.
-# Uso: nas-share-dir <nombre> [unidad]
+# Wrapper de compatibilidad hacia atrás hacia 'nas helper share-dir'.
 # ==============================================================================
-set -euo pipefail
-
-NAME="${1:-}"
-UNIT="${2:-principal}"
-
-[[ "$NAME" =~ ^[A-Za-z0-9_-]{1,32}\$?$ ]] || { echo "nombre inválido" >&2; exit 2; }
-[[ "$UNIT" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || { echo "unidad inválida" >&2; exit 2; }
-
-BASE="/srv/nas"
-if [ "$UNIT" != "principal" ]; then
-    BASE="/srv/nas/unidades/$UNIT"
-fi
-
-DIR="$BASE/$NAME"
-mkdir -p "$DIR"
-chown -R root:grp_samba "$DIR"
-chmod 2770 "$DIR"
-echo "$DIR"
+exec /usr/local/bin/nas helper share-dir "$@"
