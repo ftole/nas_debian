@@ -239,6 +239,18 @@ fn update_pubkey_deriva_la_clave_publica() {
 }
 
 #[test]
+fn update_status_reporta_version_y_requisito_de_firma() {
+    let output = nas()
+        .args(["--json", "update", "status"])
+        .output()
+        .expect("ejecuta update status");
+    assert!(output.status.success());
+    let payload = json_of(&output);
+    assert_eq!(payload["data"]["require_signed_tags"], true);
+    assert_eq!(payload["data"]["status"], "up_to_date");
+}
+
+#[test]
 fn uninstall_alcance_os_planifica_ajustes_del_sistema() {
     let output = nas()
         .args(["--json", "uninstall", "--scope", "os"])
