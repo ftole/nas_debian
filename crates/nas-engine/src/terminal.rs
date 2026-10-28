@@ -64,11 +64,16 @@ pub fn is_valid_geometry(cols: u16, rows: u16) -> bool {
 }
 
 /// Ruta del helper root con lista blanca de acciones.
-pub const HELPER: &str = "/usr/local/sbin/nas-terminal";
+pub const HELPER: &str = "/usr/local/bin/nas";
 
-/// Construye `sudo -n /usr/local/sbin/nas-terminal -u <usuario> <args>`.
+/// Construye `sudo -n /usr/local/bin/nas helper terminal -u <usuario> <args>`.
 fn helper(user: &str, args: &[&str]) -> CommandSpec {
-    let mut argv: Vec<String> = vec!["-u".to_string(), user.to_string()];
+    let mut argv: Vec<String> = vec![
+        "helper".to_string(),
+        "terminal".to_string(),
+        "-u".to_string(),
+        user.to_string(),
+    ];
     argv.extend(args.iter().map(|arg| (*arg).to_string()));
     CommandSpec::new(HELPER)
         .args(argv)
