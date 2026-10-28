@@ -266,7 +266,10 @@ fn helper_samba_apply_rechaza_rutas_invalidas() {
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
-    assert!(payload["error"].as_str().unwrap().contains("ruta no permitida"));
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("ruta no permitida"));
 }
 
 #[test]
@@ -284,25 +287,49 @@ fn helper_share_dir_rechaza_nombres_invalidos() {
 #[test]
 fn helper_share_acl_rechaza_rutas_invalidas() {
     let output = nas()
-        .args(["--json", "helper", "share-acl", "--path", "/etc/samba", "--principal", "grp_samba", "--level", "read"])
+        .args([
+            "--json",
+            "helper",
+            "share-acl",
+            "--path",
+            "/etc/samba",
+            "--principal",
+            "grp_samba",
+            "--level",
+            "read",
+        ])
         .output()
         .expect("ejecuta");
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
-    assert!(payload["error"].as_str().unwrap().contains("ruta no permitida"));
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("ruta no permitida"));
 }
 
 #[test]
 fn helper_accounts_rechaza_usuarios_reservados() {
     let output = nas()
-        .args(["--json", "helper", "accounts", "create-user", "root", "Super", "123456"])
+        .args([
+            "--json",
+            "helper",
+            "accounts",
+            "create-user",
+            "root",
+            "Super",
+            "123456",
+        ])
         .output()
         .expect("ejecuta");
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
-    assert!(payload["error"].as_str().unwrap().contains("inválido o reservado"));
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("inválido o reservado"));
 }
 
 #[test]
@@ -314,7 +341,10 @@ fn helper_accounts_create_group_valida_prefijo_grp() {
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
-    assert!(payload["error"].as_str().unwrap().contains("grupo inválido"));
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("grupo inválido"));
 }
 
 #[test]
@@ -332,21 +362,32 @@ fn helper_backup_manage_rechaza_id_invalido() {
 #[test]
 fn helper_storage_apply_exige_confirmacion() {
     let output = nas()
-        .args(["--json", "helper", "storage-apply", "format", "no-confirmo", "/dev/sdb"])
+        .args([
+            "--json",
+            "helper",
+            "storage-apply",
+            "format",
+            "no-confirmo",
+            "/dev/sdb",
+        ])
         .output()
         .expect("ejecuta");
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
-    assert!(payload["error"].as_str().unwrap().contains("confirmación requerida"));
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("confirmación requerida"));
 }
 
 #[test]
 fn helper_terminal_rechaza_geometria_invalida() {
     let output = nas()
-        .args(["--json", "helper", "terminal", "-u", "admin", "start", "5", "5"])
+        .args([
+            "--json", "helper", "terminal", "-u", "admin", "start", "5", "5",
+        ])
         .output()
         .expect("ejecuta");
     assert!(!output.status.success());
 }
-
