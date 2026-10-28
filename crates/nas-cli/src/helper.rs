@@ -112,34 +112,19 @@ pub enum AccountsAction {
         enable: String,
     },
     /// Elimina una cuenta de usuario.
-    DeleteUser {
-        username: String,
-    },
+    DeleteUser { username: String },
     /// Crea un grupo corporativo.
-    CreateGroup {
-        group: String,
-    },
+    CreateGroup { group: String },
     /// Renombra un grupo corporativo.
-    RenameGroup {
-        old: String,
-        new: String,
-    },
+    RenameGroup { old: String, new: String },
     /// Elimina un grupo corporativo.
-    DeleteGroup {
-        group: String,
-    },
+    DeleteGroup { group: String },
     /// Añade un usuario a un grupo.
     #[command(alias = "add-member")]
-    AddGroupMember {
-        username: String,
-        group: String,
-    },
+    AddGroupMember { username: String, group: String },
     /// Quita un usuario de un grupo.
     #[command(alias = "remove-member")]
-    RemoveGroupMember {
-        username: String,
-        group: String,
-    },
+    RemoveGroupMember { username: String, group: String },
     /// Reporta el estado TSV de las cuentas gestionables.
     Status,
 }
@@ -148,9 +133,7 @@ pub enum AccountsAction {
 #[derive(Debug, Subcommand)]
 pub enum BackupManageAction {
     /// Instala una tarea preparada desde /var/lib/nas/staging.
-    Install {
-        id: String,
-    },
+    Install { id: String },
     /// Escribe o actualiza el cron de una tarea.
     WriteCron {
         id: String,
@@ -160,9 +143,7 @@ pub enum BackupManageAction {
         content: Option<String>,
     },
     /// Elimina el cron de una tarea.
-    DeleteCron {
-        id: String,
-    },
+    DeleteCron { id: String },
     /// Escribe o actualiza el archivo de credenciales.
     WriteCred {
         id: String,
@@ -172,18 +153,12 @@ pub enum BackupManageAction {
         content: Option<String>,
     },
     /// Elimina el archivo de credenciales.
-    DeleteCred {
-        id: String,
-    },
+    DeleteCred { id: String },
     /// Ejecuta manualmente una tarea de respaldo en segundo plano.
     #[command(alias = "run")]
-    RunManual {
-        id: String,
-    },
+    RunManual { id: String },
     /// Detiene una tarea de respaldo en ejecución.
-    Stop {
-        id: String,
-    },
+    Stop { id: String },
     /// Muestra las últimas líneas de la bitácora.
     Logs {
         id: String,
@@ -191,9 +166,7 @@ pub enum BackupManageAction {
         lines: usize,
     },
     /// Elimina una tarea conservando sus respaldos.
-    Delete {
-        id: String,
-    },
+    Delete { id: String },
     /// Prueba la conectividad de un recurso CIFS.
     TestCifs {
         host: String,
@@ -226,10 +199,7 @@ pub enum BackupManageAction {
 #[derive(Debug, Subcommand)]
 pub enum StorageApplyAction {
     /// Limpia firmas y particiones de un disco.
-    WipeDisk {
-        confirm: String,
-        device: String,
-    },
+    WipeDisk { confirm: String, device: String },
     /// Formatea un disco/partición y lo monta en /srv/nas.
     #[command(alias = "format")]
     FormatSingle {
@@ -255,21 +225,12 @@ pub enum StorageApplyAction {
         unmount: String,
     },
     /// Extiende un grupo de volúmenes LVM existente.
-    ExtendPool {
-        confirm: String,
-        device: String,
-    },
+    ExtendPool { confirm: String, device: String },
     /// Crea un subvolumen Btrfs en /srv/nas.
     #[command(alias = "subvolume")]
-    CreateSubvolume {
-        confirm: String,
-        name: String,
-    },
+    CreateSubvolume { confirm: String, name: String },
     /// Elimina un subvolumen Btrfs en /srv/nas.
-    DeleteSubvolume {
-        confirm: String,
-        name: String,
-    },
+    DeleteSubvolume { confirm: String, name: String },
     /// Formatea y monta una unidad en /srv/nas/unidades/<unidad>.
     #[command(alias = "add-unit")]
     MountUnit {
@@ -280,10 +241,7 @@ pub enum StorageApplyAction {
         fstype: String,
     },
     /// Desmonta una unidad y la retira de /etc/fstab.
-    UmountUnit {
-        confirm: String,
-        unit: String,
-    },
+    UmountUnit { confirm: String, unit: String },
 }
 
 /// Subcomandos de terminal (`nas helper terminal`).
@@ -303,17 +261,11 @@ pub enum TerminalAction {
         enter: bool,
     },
     /// Envía texto sin Enter (compatibilidad con wrapper legado).
-    Raw {
-        input: String,
-    },
+    Raw { input: String },
     /// Envía texto con Enter (compatibilidad con wrapper legado).
-    RawEnter {
-        input: String,
-    },
+    RawEnter { input: String },
     /// Envía una tecla especial (Enter, Tab, C-c, etc.).
-    Key {
-        key_name: String,
-    },
+    Key { key_name: String },
     /// Captura la pantalla del terminal y directorio actual.
     Capture,
     /// Redimensiona la geometría del terminal.
@@ -332,7 +284,9 @@ pub enum TerminalAction {
 fn read_stdin_line() -> String {
     let mut buffer = String::new();
     let _ = std::io::stdin().read_line(&mut buffer);
-    buffer.trim_end_matches(|c| c == '\r' || c == '\n').to_string()
+    buffer
+        .trim_end_matches(|c| c == '\r' || c == '\n')
+        .to_string()
 }
 
 /// Ejecuta una acción de helper.
@@ -369,9 +323,9 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             let final_principal = principal.or(pos_principal).ok_or_else(|| {
                 NasError::Invalid("falta principal (--principal o posicional)".into())
             })?;
-            let final_level = level.or(pos_level).ok_or_else(|| {
-                NasError::Invalid("falta nivel (--level o posicional)".into())
-            })?;
+            let final_level = level
+                .or(pos_level)
+                .ok_or_else(|| NasError::Invalid("falta nivel (--level o posicional)".into()))?;
             share::apply_share_acl(&runner, &final_path, &final_principal, &final_level)?
         }
         HelperAction::Accounts { action } => match action {
@@ -418,7 +372,11 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             } => {
                 let pass = if password == "-" {
                     let s = read_stdin_line();
-                    if s.is_empty() { None } else { Some(s) }
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
                 } else if password == "--keep-password" || password.is_empty() {
                     None
                 } else {
@@ -446,18 +404,12 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 let is_enable = enable != "0";
                 accounts::toggle_user(&runner, &username, is_enable)?
             }
-            AccountsAction::DeleteUser { username } => {
-                accounts::delete_user(&runner, &username)?
-            }
-            AccountsAction::CreateGroup { group } => {
-                accounts::create_group(&runner, &group)?
-            }
+            AccountsAction::DeleteUser { username } => accounts::delete_user(&runner, &username)?,
+            AccountsAction::CreateGroup { group } => accounts::create_group(&runner, &group)?,
             AccountsAction::RenameGroup { old, new } => {
                 accounts::rename_group(&runner, &old, &new)?
             }
-            AccountsAction::DeleteGroup { group } => {
-                accounts::delete_group(&runner, &group)?
-            }
+            AccountsAction::DeleteGroup { group } => accounts::delete_group(&runner, &group)?,
             AccountsAction::AddGroupMember { username, group } => {
                 accounts::add_group_member(&runner, &username, &group)?
             }
@@ -518,7 +470,11 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                         }
                         format!("ruta local verificada: {target}")
                     }
-                    other => return Err(NasError::Invalid(format!("protocolo no soportado: {other}"))),
+                    other => {
+                        return Err(NasError::Invalid(format!(
+                            "protocolo no soportado: {other}"
+                        )))
+                    }
                 }
             }
         },
@@ -531,13 +487,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 device,
                 fstype,
                 unmount,
-            } => storage::format_single(
-                &runner,
-                &confirm,
-                &device,
-                Some(&fstype),
-                unmount == "1",
-            )?,
+            } => storage::format_single(&runner, &confirm, &device, Some(&fstype), unmount == "1")?,
             StorageApplyAction::SetupLvm {
                 confirm,
                 disk,
