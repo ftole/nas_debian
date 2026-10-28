@@ -1,9 +1,8 @@
-//! Planificación tipada del despliegue del servidor.
+//! Planificación y ejecución tipada del despliegue del servidor.
 //!
 //! Valida los parámetros de entrada (rol, disco, NetBIOS, grupo de trabajo y
 //! usuario administrador), deriva el sistema de archivos y las opciones de
-//! montaje, y genera el plan de referencia. La ejecución del despliegue sigue
-//! delegada en `src/core/deploy.sh` hasta completar la paridad de F2.
+//! montaje, y genera el plan y artefactos para el despliegue nativo.
 
 use nas_core::{NasError, NasResult, ServerRole};
 use serde::Serialize;
@@ -20,20 +19,24 @@ pub struct Artifact {
 }
 
 const SYSCTL_TUNING: &str = "# Ajustes NAS (generado por nas deploy)
+fs.inotify.max_user_instances = 2048
 fs.inotify.max_user_watches = 524288
-vm.dirty_bytes = 268435456
-vm.dirty_background_bytes = 67108864
-vm.vfs_cache_pressure = 30
 net.ipv4.tcp_keepalive_time = 120
 net.ipv4.tcp_keepalive_intvl = 15
 net.ipv4.tcp_keepalive_probes = 4
+vm.vfs_cache_pressure = 30
+vm.dirty_background_bytes = 67108864
+vm.dirty_bytes = 268435456
+vm.dirty_expire_centisecs = 300
 net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
 net.ipv4.tcp_syncookies = 1
 kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
 kernel.yama.ptrace_scope = 2
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
 ";
 
 const UDEV_READAHEAD: &str = "# Readahead por tipo de medio (generado por nas deploy)
@@ -272,8 +275,20 @@ impl DeployParams {
                 "/srv/nas".into(),
             ]);
         }
-        for dir in ["SISTEMAS", "BACKUPS_HISTORICOS", "LOGS_BACKUP"] {
-            steps.push(vec!["mkdir".into(), "-p".into(), format!("/srv/nas/{dir}")]);
+        steps.push(vec![
+            "mkdir".into(),
+            "-p".into(),
+            "/srv/nas/SISTEMAS".into(),
+        ]);
+        if self.role != ServerRole::Arquivos {
+            for dir in ["BACKUPS_HISTORICOS", "LOGS_BACKUP"] {
+                steps.push(vec!["mkdir".into(), "-p".into(), format!("/srv/nas/{dir}")]);
+            }
+            steps.push(vec![
+                "mkdir".into(),
+                "-p".into(),
+                "/etc/backup-credentials".into(),
+            ]);
         }
         tips(&mut steps, &self.admin_user);
 
@@ -326,6 +341,8 @@ fn tips(steps: &mut Vec<Vec<String>>, admin_user: &str) {
         "control".into(),
         "--reload-rules".into(),
     ]);
+    steps.push(vec!["systemctl".into(), "enable".into(), "auditd".into()]);
+    steps.push(vec!["systemctl".into(), "restart".into(), "auditd".into()]);
 }
 
 impl DeployParams {
@@ -545,6 +562,23 @@ mod tests {
         let plan = keep.plan();
         assert!(!plan.iter().any(|step| step[0] == "mkfs.ext4"));
         assert!(!plan.iter().any(|step| step[0] == "parted"));
+    }
+
+    #[test]
+    fn rol_archivos_no_crea_rutas_de_backup() {
+        let plan = params(ServerRole::Arquivos).plan();
+        assert!(plan
+            .iter()
+            .any(|step| step.contains(&"/srv/nas/SISTEMAS".to_string())));
+        assert!(!plan
+            .iter()
+            .any(|step| step.contains(&"/srv/nas/BACKUPS_HISTORICOS".to_string())));
+        assert!(!plan
+            .iter()
+            .any(|step| step.contains(&"/srv/nas/LOGS_BACKUP".to_string())));
+        assert!(!plan
+            .iter()
+            .any(|step| step.contains(&"/etc/backup-credentials".to_string())));
     }
 
     #[test]
