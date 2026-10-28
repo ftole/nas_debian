@@ -2,6 +2,10 @@
 # ==============================================================================
 # Motor de Auto-Actualización desde GitHub
 # ==============================================================================
+# Shim de retrocompatibilidad hacia la plataforma nativa Rust:
+# Redirige la invocación directa a `/usr/local/bin/nas update "$@"`.
+# Conserva las funciones de utilería y ganchos cuando se importa con source.
+# ==============================================================================
 
 # Nota: no se usa `set -e` porque este archivo se importa con `source` en el
 # asistente TUI. Los errores se manejan de forma explícita en cada paso.
@@ -629,5 +633,29 @@ actualizar_desde_git() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    actualizar_desde_git "$@"
+    NAS_BIN="${NAS_BIN:-/usr/local/bin/nas}"
+    if ! command -v "$NAS_BIN" >/dev/null 2>&1 && command -v nas >/dev/null 2>&1; then
+        NAS_BIN="nas"
+    fi
+
+    if command -v "$NAS_BIN" >/dev/null 2>&1; then
+        case "${1:-}" in
+            status|verify|apply|sign|pubkey|plan)
+                exec "$NAS_BIN" update "$@"
+                ;;
+            --yes|-y)
+                "$NAS_BIN" update status 2>/dev/null || true
+                actualizar_desde_git "$@"
+                ;;
+            *)
+                if [ $# -eq 0 ]; then
+                    exec "$NAS_BIN" update status
+                else
+                    actualizar_desde_git "$@"
+                fi
+                ;;
+        esac
+    else
+        actualizar_desde_git "$@"
+    fi
 fi
