@@ -139,6 +139,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
     /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
     /usr/bin/fstrim -v /srv/nas, \
+    /usr/local/bin/nas helper *, \
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
     /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \
     /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \
