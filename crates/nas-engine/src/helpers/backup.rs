@@ -38,15 +38,17 @@ fn is_valid_cifs_user(user: &str) -> bool {
     !user.is_empty()
         && user.len() <= 64
         && !user.starts_with('-')
-        && user.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '\\' | '/' | '@' | '-')
-        })
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '\\' | '/' | '@' | '-'))
 }
 
 /// Instala una tarea de respaldo a partir de sus archivos en staging.
 pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     if !valid_id(id) {
-        return Err(NasError::Invalid(format!("identificador de tarea inválido: '{id}'")));
+        return Err(NasError::Invalid(format!(
+            "identificador de tarea inválido: '{id}'"
+        )));
     }
 
     let staging = Path::new("/var/lib/nas/staging");
@@ -55,10 +57,16 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let cred_src = staging.join(format!("nas_backup_{id}.cred"));
 
     if !runner_src.exists() {
-        return Err(NasError::NotFound(format!("falta runner preparado: {}", runner_src.display())));
+        return Err(NasError::NotFound(format!(
+            "falta runner preparado: {}",
+            runner_src.display()
+        )));
     }
     if !cron_src.exists() {
-        return Err(NasError::NotFound(format!("falta cron preparado: {}", cron_src.display())));
+        return Err(NasError::NotFound(format!(
+            "falta cron preparado: {}",
+            cron_src.display()
+        )));
     }
 
     // Validar sintaxis del runner con bash -n
@@ -110,7 +118,10 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&runner_dst, std::fs::Permissions::from_mode(0o755));
         let _ = std::fs::set_permissions(&cron_dst, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::set_permissions("/etc/backup-credentials", std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(
+            "/etc/backup-credentials",
+            std::fs::Permissions::from_mode(0o700),
+        );
     }
 
     if cred_src.exists() && cred_src.metadata().map(|m| m.len() > 0).unwrap_or(false) {
@@ -140,7 +151,9 @@ pub fn write_cron(id: &str, file: Option<&Path>, content: Option<&str>) -> NasRe
     } else if let Some(txt) = content {
         std::fs::write(&cron_dst, txt).map_err(|e| NasError::Denied(e.to_string()))?;
     } else {
-        return Err(NasError::Invalid("se requiere archivo o contenido para el cron".into()));
+        return Err(NasError::Invalid(
+            "se requiere archivo o contenido para el cron".into(),
+        ));
     }
 
     #[cfg(unix)]
@@ -173,7 +186,9 @@ pub fn write_cred(id: &str, file: Option<&Path>, content: Option<&str>) -> NasRe
     } else if let Some(txt) = content {
         std::fs::write(&cred_dst, txt).map_err(|e| NasError::Denied(e.to_string()))?;
     } else {
-        return Err(NasError::Invalid("se requiere archivo o contenido de credencial".into()));
+        return Err(NasError::Invalid(
+            "se requiere archivo o contenido de credencial".into(),
+        ));
     }
 
     #[cfg(unix)]
@@ -197,11 +212,15 @@ pub fn delete_cred(id: &str) -> NasResult<String> {
 /// Ejecuta manualmente una tarea de respaldo en segundo plano.
 pub fn run_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     if !valid_id(id) {
-        return Err(NasError::Invalid(format!("identificador de tarea inválido: '{id}'")));
+        return Err(NasError::Invalid(format!(
+            "identificador de tarea inválido: '{id}'"
+        )));
     }
     let runner_path = format!("/usr/local/bin/backup_{id}.sh");
     if !Path::new(&runner_path).exists() {
-        return Err(NasError::NotFound(format!("no existe el runner {runner_path}")));
+        return Err(NasError::NotFound(format!(
+            "no existe el runner {runner_path}"
+        )));
     }
 
     // Verificar si ya está en ejecución
@@ -252,7 +271,13 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     // Detener unidades de systemd
     if let Ok(out) = runner.run(
         &CommandSpec::new("systemctl")
-            .args(["list-units", "--type=service", "--state=running", "--no-legend", &format!("nas-backup-{id}-*.service")])
+            .args([
+                "list-units",
+                "--type=service",
+                "--state=running",
+                "--no-legend",
+                &format!("nas-backup-{id}-*.service"),
+            ])
             .timeout(Duration::from_secs(15)),
     ) {
         if out.is_success() {
@@ -358,7 +383,10 @@ pub fn test_cifs_conn(
 
     match mount_res {
         Ok(out) if out.is_success() => Ok(format!("conexión CIFS verificada: {target}")),
-        Ok(out) => Err(NasError::Denied(format!("falló conexión CIFS: {}", out.stderr))),
+        Ok(out) => Err(NasError::Denied(format!(
+            "falló conexión CIFS: {}",
+            out.stderr
+        ))),
         Err(e) => Err(NasError::Denied(format!("error al ejecutar mount: {e}"))),
     }
 }
@@ -407,7 +435,10 @@ pub fn test_ssh_conn(
     if res.is_success() {
         Ok(format!("conexión SSH verificada: {user}@{host}:{port}"))
     } else {
-        Err(NasError::Denied(format!("falló conexión SSH: {}", res.stderr)))
+        Err(NasError::Denied(format!(
+            "falló conexión SSH: {}",
+            res.stderr
+        )))
     }
 }
 
