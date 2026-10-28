@@ -251,6 +251,18 @@ fn update_status_reporta_version_y_requisito_de_firma() {
 }
 
 #[test]
+fn update_sin_subcomando_reporta_status_por_defecto() {
+    let output = nas()
+        .args(["--json", "update"])
+        .output()
+        .expect("ejecuta update sin subcomando");
+    assert!(output.status.success());
+    let payload = json_of(&output);
+    assert_eq!(payload["data"]["require_signed_tags"], true);
+    assert_eq!(payload["data"]["status"], "up_to_date");
+}
+
+#[test]
 fn uninstall_alcance_os_planifica_ajustes_del_sistema() {
     let output = nas()
         .args(["--json", "uninstall", "--scope", "os"])
