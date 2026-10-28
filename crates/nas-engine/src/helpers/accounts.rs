@@ -86,7 +86,7 @@ pub fn ensure_manageable_existing_user(runner: &Runner, username: &str) -> NasRe
         .parse()
         .map_err(|_| NasError::Invalid("no se pudo determinar el UID del usuario".into()))?;
 
-    if uid < 1000 || uid >= 60000 {
+    if !(1000..60000).contains(&uid) {
         return Err(NasError::Denied(format!(
             "operación prohibida sobre cuenta del sistema (UID {uid})"
         )));
