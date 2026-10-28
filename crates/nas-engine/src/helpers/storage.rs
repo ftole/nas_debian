@@ -177,17 +177,14 @@ fn prepare_mountpoint(runner: &Runner, path: &str) {
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", path]));
 }
 
-fn format_partition(
-    runner: &Runner,
-    device: &str,
-    fstype: &str,
-    label: &str,
-) -> NasResult<String> {
+fn format_partition(runner: &Runner, device: &str, fstype: &str, label: &str) -> NasResult<String> {
     if !valid_device(device) {
         return Err(NasError::Invalid("dispositivo inválido".into()));
     }
     if fstype != "ext4" && fstype != "btrfs" {
-        return Err(NasError::Invalid("filesystem no soportado (ext4|btrfs)".into()));
+        return Err(NasError::Invalid(
+            "filesystem no soportado (ext4|btrfs)".into(),
+        ));
     }
     os_disk_guard(runner, device)?;
 
@@ -198,19 +195,24 @@ fn format_partition(
         .unwrap_or(false);
 
     if is_disk {
-        runner.run(
-            &CommandSpec::new("parted")
-                .args(["-s", device, "mklabel", "gpt", "mkpart", "primary", fstype, "0%", "100%"]),
-        )?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("parted").args([
+                "-s", device, "mklabel", "gpt", "mkpart", "primary", fstype, "0%", "100%",
+            ]))?
+            .ensure_success()?;
         let _ = runner.run(&CommandSpec::new("partprobe").args([device]));
         let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
         target = partition_for(device);
     }
 
     if fstype == "btrfs" {
-        runner.run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", label, &target]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", label, &target]))?
+            .ensure_success()?;
     } else {
-        runner.run(&CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", label, &target]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", label, &target]))?
+            .ensure_success()?;
     }
     let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
     Ok(target)
@@ -219,7 +221,9 @@ fn format_partition(
 /// Borra las tablas de partición y firmas de un disco.
 pub fn wipe_disk(runner: &Runner, confirm: &str, device: &str) -> NasResult<String> {
     if !confirm_ok(confirm) {
-        return Err(NasError::Denied("confirmación textual requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)".into()));
+        return Err(NasError::Denied(
+            "confirmación textual requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)".into(),
+        ));
     }
     if !valid_device(device) {
         return Err(NasError::Invalid("dispositivo inválido".into()));
@@ -227,7 +231,9 @@ pub fn wipe_disk(runner: &Runner, confirm: &str, device: &str) -> NasResult<Stri
     os_disk_guard(runner, device)?;
     unmount_device(runner, device);
 
-    runner.run(&CommandSpec::new("wipefs").args(["-a", device]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("wipefs").args(["-a", device]))?
+        .ensure_success()?;
     Ok(format!("disco {device} limpiado (firmas eliminadas)"))
 }
 
@@ -240,7 +246,9 @@ pub fn format_single(
     unmount: bool,
 ) -> NasResult<String> {
     if !confirm_ok(confirm) {
-        return Err(NasError::Denied("confirmación requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)".into()));
+        return Err(NasError::Denied(
+            "confirmación requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)".into(),
+        ));
     }
     let fstype = fstype.unwrap_or("ext4");
     if unmount {
@@ -250,11 +258,15 @@ pub fn format_single(
     let options = mount_options_for(runner, fstype, device);
 
     let _ = std::fs::create_dir_all("/srv/nas");
-    runner.run(&CommandSpec::new("mount").args(["-o", &options, &target, "/srv/nas"]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("mount").args(["-o", &options, &target, "/srv/nas"]))?
+        .ensure_success()?;
     prepare_mountpoint(runner, "/srv/nas");
     update_fstab(runner, &target, "/srv/nas", &options)?;
 
-    Ok(format!("{target} formateado en {fstype} y montado en /srv/nas"))
+    Ok(format!(
+        "{target} formateado en {fstype} y montado en /srv/nas"
+    ))
 }
 
 /// Configura LVM sobre un disco y lo monta en `/srv/nas`.
@@ -272,7 +284,9 @@ pub fn setup_lvm(
         return Err(NasError::Denied("confirmación requerida".into()));
     }
     if !valid_device(disk) || !valid_name(vg) || !valid_name(lv) {
-        return Err(NasError::Invalid("argumentos de dispositivo o volumen inválidos".into()));
+        return Err(NasError::Invalid(
+            "argumentos de dispositivo o volumen inválidos".into(),
+        ));
     }
     let size = size.unwrap_or("100%FREE");
     if !valid_size(size) {
@@ -285,25 +299,44 @@ pub fn setup_lvm(
         unmount_device(runner, disk);
     }
 
-    runner.run(&CommandSpec::new("pvcreate").args(["-y", "-ff", disk]))?.ensure_success()?;
-    let vg_exists = runner.run(&CommandSpec::new("vgs").args([vg])).map(|o| o.is_success()).unwrap_or(false);
+    runner
+        .run(&CommandSpec::new("pvcreate").args(["-y", "-ff", disk]))?
+        .ensure_success()?;
+    let vg_exists = runner
+        .run(&CommandSpec::new("vgs").args([vg]))
+        .map(|o| o.is_success())
+        .unwrap_or(false);
     if vg_exists {
-        runner.run(&CommandSpec::new("vgextend").args([vg, disk]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("vgextend").args([vg, disk]))?
+            .ensure_success()?;
     } else {
-        runner.run(&CommandSpec::new("vgcreate").args([vg, disk]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("vgcreate").args([vg, disk]))?
+            .ensure_success()?;
     }
-    runner.run(&CommandSpec::new("lvcreate").args(["-y", "-n", lv, "-l", size, vg]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("lvcreate").args(["-y", "-n", lv, "-l", size, vg]))?
+        .ensure_success()?;
 
     let path_lv = format!("/dev/{vg}/{lv}");
     let options = mount_options_for(runner, fstype, &path_lv);
     if fstype == "btrfs" {
-        runner.run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", "NAS_DATA", &path_lv]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", "NAS_DATA", &path_lv]))?
+            .ensure_success()?;
     } else {
-        runner.run(&CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", "NAS_DATA", &path_lv]))?.ensure_success()?;
+        runner
+            .run(
+                &CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", "NAS_DATA", &path_lv]),
+            )?
+            .ensure_success()?;
     }
 
     let _ = std::fs::create_dir_all("/srv/nas");
-    runner.run(&CommandSpec::new("mount").args(["-o", &options, &path_lv, "/srv/nas"]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("mount").args(["-o", &options, &path_lv, "/srv/nas"]))?
+        .ensure_success()?;
     prepare_mountpoint(runner, "/srv/nas");
     update_fstab(runner, &path_lv, "/srv/nas", &options)?;
 
@@ -337,14 +370,24 @@ pub fn extend_pool(runner: &Runner, confirm: &str, device: &str) -> NasResult<St
         return Err(NasError::Invalid("/srv/nas no está sobre LVM".into()));
     }
 
-    runner.run(&CommandSpec::new("pvcreate").args(["-y", "-ff", device]))?.ensure_success()?;
-    runner.run(&CommandSpec::new("vgextend").args([&vg, device]))?.ensure_success()?;
-    runner.run(&CommandSpec::new("lvextend").args(["-l", "+100%FREE", &source]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("pvcreate").args(["-y", "-ff", device]))?
+        .ensure_success()?;
+    runner
+        .run(&CommandSpec::new("vgextend").args([&vg, device]))?
+        .ensure_success()?;
+    runner
+        .run(&CommandSpec::new("lvextend").args(["-l", "+100%FREE", &source]))?
+        .ensure_success()?;
 
     if fstype == "btrfs" {
-        runner.run(&CommandSpec::new("btrfs").args(["filesystem", "resize", "max", "/srv/nas"]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("btrfs").args(["filesystem", "resize", "max", "/srv/nas"]))?
+            .ensure_success()?;
     } else {
-        runner.run(&CommandSpec::new("resize2fs").args([&source]))?.ensure_success()?;
+        runner
+            .run(&CommandSpec::new("resize2fs").args([&source]))?
+            .ensure_success()?;
     }
 
     Ok(format!("pool {vg} extendido con {device}"))
@@ -359,7 +402,9 @@ pub fn create_subvolume(runner: &Runner, confirm: &str, name: &str) -> NasResult
         return Err(NasError::Invalid("nombre de subvolumen inválido".into()));
     }
     let subvol_path = format!("/srv/nas/{name}");
-    runner.run(&CommandSpec::new("btrfs").args(["subvolume", "create", &subvol_path]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("btrfs").args(["subvolume", "create", &subvol_path]))?
+        .ensure_success()?;
     prepare_mountpoint(runner, &subvol_path);
     Ok(format!("subvolumen {subvol_path} creado"))
 }
@@ -373,7 +418,9 @@ pub fn delete_subvolume(runner: &Runner, confirm: &str, name: &str) -> NasResult
         return Err(NasError::Invalid("nombre de subvolumen inválido".into()));
     }
     let subvol_path = format!("/srv/nas/{name}");
-    runner.run(&CommandSpec::new("btrfs").args(["subvolume", "delete", &subvol_path]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("btrfs").args(["subvolume", "delete", &subvol_path]))?
+        .ensure_success()?;
     Ok(format!("subvolumen {subvol_path} eliminado"))
 }
 
@@ -392,13 +439,21 @@ pub fn mount_unit(
         return Err(NasError::Invalid("nombre de unidad inválido".into()));
     }
     let fstype = fstype.unwrap_or("ext4");
-    let label = format!("NAS_U_{}", unit.to_ascii_uppercase().chars().take(10).collect::<String>());
+    let label = format!(
+        "NAS_U_{}",
+        unit.to_ascii_uppercase()
+            .chars()
+            .take(10)
+            .collect::<String>()
+    );
     let target = format_partition(runner, device, fstype, &label)?;
     let options = mount_options_for(runner, fstype, device);
     let mount_dir = format!("/srv/nas/unidades/{unit}");
 
     let _ = std::fs::create_dir_all(&mount_dir);
-    runner.run(&CommandSpec::new("mount").args(["-o", &options, &target, &mount_dir]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("mount").args(["-o", &options, &target, &mount_dir]))?
+        .ensure_success()?;
     prepare_mountpoint(runner, &mount_dir);
     update_fstab(runner, &target, &mount_dir, &options)?;
 
