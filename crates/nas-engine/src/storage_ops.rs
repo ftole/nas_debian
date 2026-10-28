@@ -10,7 +10,7 @@ use nas_exec::{CommandSpec, Runner, SudoMode};
 pub const ALLOWED_FILESYSTEMS: [&str; 2] = ["ext4", "btrfs"];
 
 /// Helper root con lista blanca de operaciones.
-pub const HELPER: &str = "/usr/local/sbin/nas-storage-apply";
+pub const HELPER: &str = "/usr/local/bin/nas";
 
 /// Valida la confirmación textual del usuario.
 pub fn confirm_ok(confirm: &str) -> bool {
@@ -54,11 +54,12 @@ fn fail(message: impl Into<String>) -> String {
 
 /// Ejecuta una acción del helper root.
 fn helper(runner: &Runner, args: &[&str]) -> Result<String, String> {
-    let mut argv: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    let mut argv: Vec<String> = vec!["helper".to_string(), "storage-apply".to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
     let output = runner
         .run(
             &CommandSpec::new(HELPER)
-                .args(argv.drain(..))
+                .args(argv)
                 .sudo(SudoMode::Passwordless)
                 .timeout(std::time::Duration::from_secs(1800)),
         )
