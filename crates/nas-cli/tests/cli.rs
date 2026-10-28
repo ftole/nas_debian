@@ -391,3 +391,88 @@ fn helper_terminal_rechaza_geometria_invalida() {
         .expect("ejecuta");
     assert!(!output.status.success());
 }
+
+#[test]
+fn helper_terminal_raw_enter_acepta_alias_y_subcomando() {
+    let output = nas()
+        .args([
+            "--json",
+            "helper",
+            "terminal",
+            "-u",
+            "root",
+            "raw_enter",
+            "echo test",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert_ne!(output.status.code(), Some(2));
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("inválido o reservado"));
+}
+
+#[test]
+fn helper_storage_apply_aliases_reconocidos() {
+    let output = nas()
+        .args([
+            "--json",
+            "helper",
+            "storage-apply",
+            "wipe_disk",
+            "no-confirmo",
+            "/dev/sdb",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert_ne!(output.status.code(), Some(2));
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("confirmación textual requerida"));
+}
+
+#[test]
+fn helper_backup_manage_aliases_reconocidos() {
+    let output = nas()
+        .args([
+            "--json",
+            "helper",
+            "backup-manage",
+            "test_cifs",
+            "10.10.1.50",
+            "share",
+            "user",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert_ne!(output.status.code(), Some(2));
+}
+
+#[test]
+fn helper_accounts_aliases_reconocidos() {
+    let output = nas()
+        .args([
+            "--json",
+            "helper",
+            "accounts",
+            "create_user",
+            "root",
+            "Root User",
+            "123456",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert_eq!(payload["success"], false);
+    assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("inválido o reservado"));
+}
