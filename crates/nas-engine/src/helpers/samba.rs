@@ -50,9 +50,8 @@ pub fn apply_staged_samba(runner: &Runner, staged: &Path) -> NasResult<String> {
     }
 
     // 3. Instalación de la configuración validada
-    std::fs::copy(staged, current_conf).map_err(|e| {
-        NasError::Denied(format!("error al instalar /etc/samba/smb.conf: {e}"))
-    })?;
+    std::fs::copy(staged, current_conf)
+        .map_err(|e| NasError::Denied(format!("error al instalar /etc/samba/smb.conf: {e}")))?;
 
     #[cfg(unix)]
     {
