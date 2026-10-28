@@ -284,9 +284,7 @@ pub enum TerminalAction {
 fn read_stdin_line() -> String {
     let mut buffer = String::new();
     let _ = std::io::stdin().read_line(&mut buffer);
-    buffer
-        .trim_end_matches(|c| c == '\r' || c == '\n')
-        .to_string()
+    buffer.trim_end_matches(['\r', '\n']).to_string()
 }
 
 /// Ejecuta una acción de helper.
