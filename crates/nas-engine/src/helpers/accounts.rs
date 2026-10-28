@@ -23,12 +23,7 @@ pub const RESERVED_USERS: &[&str] = &[
 ];
 
 /// Grupos protegidos de la plataforma que no pueden eliminarse ni renombrarse.
-pub const PROTECTED_GROUPS: &[&str] = &[
-    "grp_samba",
-    "grp_web",
-    "grp_superadmin",
-    "grp_backups",
-];
+pub const PROTECTED_GROUPS: &[&str] = &["grp_samba", "grp_web", "grp_superadmin", "grp_backups"];
 
 /// Valida si el nombre de usuario cumple con la sintaxis POSIX y no está reservado.
 pub fn is_valid_user(username: &str) -> bool {
@@ -85,9 +80,11 @@ pub fn ensure_manageable_existing_user(runner: &Runner, username: &str) -> NasRe
         return Err(NasError::NotFound("el usuario no existe".into()));
     }
 
-    let uid: u32 = out.stdout.trim().parse().map_err(|_| {
-        NasError::Invalid("no se pudo determinar el UID del usuario".into())
-    })?;
+    let uid: u32 = out
+        .stdout
+        .trim()
+        .parse()
+        .map_err(|_| NasError::Invalid("no se pudo determinar el UID del usuario".into()))?;
 
     if uid < 1000 || uid >= 60000 {
         return Err(NasError::Denied(format!(
@@ -100,7 +97,9 @@ pub fn ensure_manageable_existing_user(runner: &Runner, username: &str) -> NasRe
 
 /// Sanea el campo GECOS eliminando dos puntos, retornos de carro y bytes nulos.
 pub fn sanitize_gecos(name: &str) -> String {
-    name.chars().filter(|c| !matches!(c, ':' | '\r' | '\n' | '\0')).collect()
+    name.chars()
+        .filter(|c| !matches!(c, ':' | '\r' | '\n' | '\0'))
+        .collect()
 }
 
 /// Argumentos para crear una cuenta.
@@ -141,7 +140,13 @@ pub struct UpdateUserArgs {
     pub groups: Vec<String>,
 }
 
-fn sync_groups(runner: &Runner, user: &str, admin: bool, web: bool, extra_groups: &[String]) -> NasResult<()> {
+fn sync_groups(
+    runner: &Runner,
+    user: &str,
+    admin: bool,
+    web: bool,
+    extra_groups: &[String],
+) -> NasResult<()> {
     let mut keep: HashSet<String> = HashSet::new();
 
     // Obtener grupos actuales para no perder grupos del sistema como sudo o adm
@@ -217,10 +222,14 @@ fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>)
 pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> {
     let u = args.username.trim();
     if !is_valid_user(u) {
-        return Err(NasError::Invalid("usuario inválido o reservado del sistema".into()));
+        return Err(NasError::Invalid(
+            "usuario inválido o reservado del sistema".into(),
+        ));
     }
     if args.password.len() < 6 {
-        return Err(NasError::Invalid("contraseña demasiado corta (mínimo 6 caracteres)".into()));
+        return Err(NasError::Invalid(
+            "contraseña demasiado corta (mínimo 6 caracteres)".into(),
+        ));
     }
 
     // Comprobar si ya existe
@@ -235,13 +244,19 @@ pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> 
     }
 
     let full = sanitize_gecos(&args.full_name);
-    let shell = if args.admin { "/bin/bash" } else { "/usr/sbin/nologin" };
+    let shell = if args.admin {
+        "/bin/bash"
+    } else {
+        "/usr/sbin/nologin"
+    };
 
-    runner.run(
-        &CommandSpec::new("useradd")
-            .args(["-m", "-s", shell, "-c", &full, u])
-            .timeout(Duration::from_secs(30)),
-    )?.ensure_success()?;
+    runner
+        .run(
+            &CommandSpec::new("useradd")
+                .args(["-m", "-s", shell, "-c", &full, u])
+                .timeout(Duration::from_secs(30)),
+        )?
+        .ensure_success()?;
 
     // Fijar contraseña de sistema
     let chpasswd_spec = CommandSpec::new("chpasswd")
@@ -283,7 +298,9 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
     if let Some(pass) = &args.password {
         if !pass.is_empty() && pass != "--keep-password" {
             if pass.len() < 6 {
-                return Err(NasError::Invalid("contraseña demasiado corta (mínimo 6 caracteres)".into()));
+                return Err(NasError::Invalid(
+                    "contraseña demasiado corta (mínimo 6 caracteres)".into(),
+                ));
             }
             let chpasswd_spec = CommandSpec::new("chpasswd")
                 .stdin_secret(SecretInput::new(format!("{u}:{pass}\n")))
@@ -294,7 +311,16 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
     }
 
     sync_groups(runner, u, args.admin, args.web, &args.groups)?;
-    sync_samba(runner, u, args.samba, if has_new_password { args.password.as_deref() } else { None })?;
+    sync_samba(
+        runner,
+        u,
+        args.samba,
+        if has_new_password {
+            args.password.as_deref()
+        } else {
+            None
+        },
+    )?;
 
     Ok(format!("usuario {u} actualizado"))
 }
@@ -305,7 +331,9 @@ pub fn toggle_user(runner: &Runner, username: &str, enable: bool) -> NasResult<S
     let _uid = ensure_manageable_existing_user(runner, u)?;
 
     if !enable && is_superadmin_account(runner, u) {
-        return Err(NasError::Denied("la cuenta superadministradora no puede suspenderse".into()));
+        return Err(NasError::Denied(
+            "la cuenta superadministradora no puede suspenderse".into(),
+        ));
     }
 
     if enable {
@@ -327,7 +355,9 @@ pub fn delete_user(runner: &Runner, username: &str) -> NasResult<String> {
     let _uid = ensure_manageable_existing_user(runner, u)?;
 
     if is_superadmin_account(runner, u) {
-        return Err(NasError::Denied("la cuenta superadministradora está protegida".into()));
+        return Err(NasError::Denied(
+            "la cuenta superadministradora está protegida".into(),
+        ));
     }
 
     let _ = runner.run(&CommandSpec::new("smbpasswd").args(["-x", u]));
@@ -343,9 +373,13 @@ pub fn delete_user(runner: &Runner, username: &str) -> NasResult<String> {
 pub fn create_group(runner: &Runner, group: &str) -> NasResult<String> {
     let g = group.trim();
     if !is_valid_group(g) {
-        return Err(NasError::Invalid(format!("grupo inválido: '{g}' (debe ser grp_<nombre>)")));
+        return Err(NasError::Invalid(format!(
+            "grupo inválido: '{g}' (debe ser grp_<nombre>)"
+        )));
     }
-    runner.run(&CommandSpec::new("groupadd").args([g]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("groupadd").args([g]))?
+        .ensure_success()?;
     Ok(format!("grupo {g} creado"))
 }
 
@@ -359,7 +393,9 @@ pub fn rename_group(runner: &Runner, old_name: &str, new_name: &str) -> NasResul
     if PROTECTED_GROUPS.contains(&old) {
         return Err(NasError::Denied(format!("el grupo '{old}' está protegido")));
     }
-    runner.run(&CommandSpec::new("groupmod").args(["-n", new, old]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("groupmod").args(["-n", new, old]))?
+        .ensure_success()?;
     Ok(format!("grupo {old} renombrado a {new}"))
 }
 
@@ -372,7 +408,9 @@ pub fn delete_group(runner: &Runner, group: &str) -> NasResult<String> {
     if PROTECTED_GROUPS.contains(&g) {
         return Err(NasError::Denied(format!("el grupo '{g}' está protegido")));
     }
-    runner.run(&CommandSpec::new("groupdel").args([g]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("groupdel").args([g]))?
+        .ensure_success()?;
     Ok(format!("grupo {g} eliminado"))
 }
 
@@ -385,9 +423,13 @@ pub fn add_group_member(runner: &Runner, username: &str, group: &str) -> NasResu
         return Err(NasError::Invalid("grupo inválido".into()));
     }
     if g == "grp_superadmin" {
-        return Err(NasError::Denied("el grupo grp_superadmin está protegido".into()));
+        return Err(NasError::Denied(
+            "el grupo grp_superadmin está protegido".into(),
+        ));
     }
-    runner.run(&CommandSpec::new("gpasswd").args(["-a", u, g]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("gpasswd").args(["-a", u, g]))?
+        .ensure_success()?;
     Ok(format!("{u} add-member {g}"))
 }
 
@@ -400,9 +442,13 @@ pub fn remove_group_member(runner: &Runner, username: &str, group: &str) -> NasR
         return Err(NasError::Invalid("grupo inválido".into()));
     }
     if g == "grp_superadmin" {
-        return Err(NasError::Denied("el grupo grp_superadmin está protegido".into()));
+        return Err(NasError::Denied(
+            "el grupo grp_superadmin está protegido".into(),
+        ));
     }
-    runner.run(&CommandSpec::new("gpasswd").args(["-d", u, g]))?.ensure_success()?;
+    runner
+        .run(&CommandSpec::new("gpasswd").args(["-d", u, g]))?
+        .ensure_success()?;
     Ok(format!("{u} remove-member {g}"))
 }
 
@@ -436,7 +482,11 @@ pub fn accounts_status(runner: &Runner) -> NasResult<String> {
                 enabled = "0";
             }
         }
-        let smb = if smb_active.contains(&u.name) { "1" } else { "0" };
+        let smb = if smb_active.contains(&u.name) {
+            "1"
+        } else {
+            "0"
+        };
         tsv.push_str(&format!("{}\t{}\t{}\n", u.name, enabled, smb));
     }
     Ok(tsv)
@@ -463,7 +513,9 @@ mod tests {
         assert!(is_valid_group("grp_contabilidad"));
         assert!(!is_valid_group("sistemas"));
         assert!(!is_valid_group("grp_"));
-        assert!(!is_valid_group("grp_nombre_demasiado_largo_que_excede_treinta_caracteres"));
+        assert!(!is_valid_group(
+            "grp_nombre_demasiado_largo_que_excede_treinta_caracteres"
+        ));
     }
 
     #[test]
