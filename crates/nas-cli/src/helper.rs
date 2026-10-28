@@ -12,11 +12,13 @@ use nas_exec::Runner;
 #[derive(Debug, Subcommand)]
 pub enum HelperAction {
     /// Aplica una configuración validada de Samba desde staging.
+    #[command(alias = "samba_apply")]
     SambaApply {
         /// Archivo de configuración en staging (/var/lib/nas/staging/smbconf_*).
         staged_file: PathBuf,
     },
     /// Crea el directorio de un recurso compartido con permisos 2770.
+    #[command(alias = "share_dir")]
     ShareDir {
         /// Nombre del recurso.
         #[arg(long, short)]
@@ -30,6 +32,7 @@ pub enum HelperAction {
         pos_unit: Option<String>,
     },
     /// Aplica o revoca ACLs POSIX sobre un recurso compartido.
+    #[command(alias = "share_acl")]
     ShareAcl {
         /// Ruta dentro de /srv/nas/.
         #[arg(long)]
@@ -53,11 +56,13 @@ pub enum HelperAction {
         action: AccountsAction,
     },
     /// Gestión y control de tareas de respaldo.
+    #[command(alias = "backup_manage")]
     BackupManage {
         #[command(subcommand)]
         action: BackupManageAction,
     },
     /// Operaciones de almacenamiento físico, LVM y Btrfs.
+    #[command(alias = "storage_apply")]
     StorageApply {
         #[command(subcommand)]
         action: StorageApplyAction,
@@ -76,6 +81,7 @@ pub enum HelperAction {
 #[derive(Debug, Subcommand)]
 pub enum AccountsAction {
     /// Crea un usuario nuevo.
+    #[command(alias = "create_user")]
     CreateUser {
         username: String,
         full_name: String,
@@ -91,6 +97,7 @@ pub enum AccountsAction {
         groups: String,
     },
     /// Actualiza un usuario existente.
+    #[command(alias = "update_user")]
     UpdateUser {
         username: String,
         full_name: String,
@@ -106,24 +113,33 @@ pub enum AccountsAction {
         groups: String,
     },
     /// Activa o suspende una cuenta de usuario.
+    #[command(alias = "toggle_user")]
     ToggleUser {
         username: String,
         #[arg(default_value = "1")]
         enable: String,
     },
     /// Elimina una cuenta de usuario.
+    #[command(alias = "delete_user")]
     DeleteUser { username: String },
     /// Crea un grupo corporativo.
+    #[command(alias = "create_group")]
     CreateGroup { group: String },
     /// Renombra un grupo corporativo.
+    #[command(alias = "rename_group")]
     RenameGroup { old: String, new: String },
     /// Elimina un grupo corporativo.
+    #[command(alias = "delete_group")]
     DeleteGroup { group: String },
     /// Añade un usuario a un grupo.
-    #[command(alias = "add-member")]
+    #[command(alias = "add-member", alias = "add_group_member", alias = "add_member")]
     AddGroupMember { username: String, group: String },
     /// Quita un usuario de un grupo.
-    #[command(alias = "remove-member")]
+    #[command(
+        alias = "remove-member",
+        alias = "remove_group_member",
+        alias = "remove_member"
+    )]
     RemoveGroupMember { username: String, group: String },
     /// Reporta el estado TSV de las cuentas gestionables.
     Status,
@@ -135,27 +151,35 @@ pub enum BackupManageAction {
     /// Instala una tarea preparada desde /var/lib/nas/staging.
     Install { id: String },
     /// Escribe o actualiza el cron de una tarea.
+    #[command(alias = "write_cron")]
     WriteCron {
         id: String,
         #[arg(long)]
         file: Option<PathBuf>,
         #[arg(long)]
         content: Option<String>,
+        /// Archivo o '-' para stdin posicional (compatibilidad).
+        pos_file: Option<PathBuf>,
     },
     /// Elimina el cron de una tarea.
+    #[command(alias = "delete_cron")]
     DeleteCron { id: String },
     /// Escribe o actualiza el archivo de credenciales.
+    #[command(alias = "write_cred")]
     WriteCred {
         id: String,
         #[arg(long)]
         file: Option<PathBuf>,
         #[arg(long)]
         content: Option<String>,
+        /// Archivo o '-' para stdin posicional (compatibilidad).
+        pos_file: Option<PathBuf>,
     },
     /// Elimina el archivo de credenciales.
+    #[command(alias = "delete_cred")]
     DeleteCred { id: String },
     /// Ejecuta manualmente una tarea de respaldo en segundo plano.
-    #[command(alias = "run")]
+    #[command(alias = "run", alias = "run_manual")]
     RunManual { id: String },
     /// Detiene una tarea de respaldo en ejecución.
     Stop { id: String },
@@ -168,6 +192,7 @@ pub enum BackupManageAction {
     /// Elimina una tarea conservando sus respaldos.
     Delete { id: String },
     /// Prueba la conectividad de un recurso CIFS.
+    #[command(alias = "test_cifs")]
     TestCifs {
         host: String,
         share: String,
@@ -176,6 +201,7 @@ pub enum BackupManageAction {
         password: Option<String>,
     },
     /// Prueba la conectividad SSH.
+    #[command(alias = "test_ssh")]
     TestSsh {
         host: String,
         port: u16,
@@ -199,9 +225,10 @@ pub enum BackupManageAction {
 #[derive(Debug, Subcommand)]
 pub enum StorageApplyAction {
     /// Limpia firmas y particiones de un disco.
+    #[command(alias = "wipe_disk")]
     WipeDisk { confirm: String, device: String },
     /// Formatea un disco/partición y lo monta en /srv/nas.
-    #[command(alias = "format")]
+    #[command(alias = "format", alias = "format_single")]
     FormatSingle {
         confirm: String,
         device: String,
@@ -211,7 +238,7 @@ pub enum StorageApplyAction {
         unmount: String,
     },
     /// Configura LVM sobre un disco y lo monta en /srv/nas.
-    #[command(alias = "lvm")]
+    #[command(alias = "lvm", alias = "setup_lvm")]
     SetupLvm {
         confirm: String,
         disk: String,
@@ -225,14 +252,16 @@ pub enum StorageApplyAction {
         unmount: String,
     },
     /// Extiende un grupo de volúmenes LVM existente.
+    #[command(alias = "extend_pool")]
     ExtendPool { confirm: String, device: String },
     /// Crea un subvolumen Btrfs en /srv/nas.
-    #[command(alias = "subvolume")]
+    #[command(alias = "subvolume", alias = "create_subvolume")]
     CreateSubvolume { confirm: String, name: String },
     /// Elimina un subvolumen Btrfs en /srv/nas.
+    #[command(alias = "delete_subvolume")]
     DeleteSubvolume { confirm: String, name: String },
     /// Formatea y monta una unidad en /srv/nas/unidades/<unidad>.
-    #[command(alias = "add-unit")]
+    #[command(alias = "add-unit", alias = "add_unit", alias = "mount_unit")]
     MountUnit {
         confirm: String,
         device: String,
@@ -241,6 +270,7 @@ pub enum StorageApplyAction {
         fstype: String,
     },
     /// Desmonta una unidad y la retira de /etc/fstab.
+    #[command(alias = "umount_unit")]
     UmountUnit { confirm: String, unit: String },
 }
 
@@ -263,6 +293,7 @@ pub enum TerminalAction {
     /// Envía texto sin Enter (compatibilidad con wrapper legado).
     Raw { input: String },
     /// Envía texto con Enter (compatibilidad con wrapper legado).
+    #[command(alias = "raw_enter")]
     RawEnter { input: String },
     /// Envía una tecla especial (Enter, Tab, C-c, etc.).
     Key { key_name: String },
@@ -289,6 +320,42 @@ fn read_stdin_line() -> String {
 
 /// Ejecuta una acción de helper.
 pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
+    #[cfg(unix)]
+    {
+        let needs_escape = match &action {
+            HelperAction::StorageApply { .. } => true,
+            HelperAction::BackupManage { action } => {
+                matches!(
+                    action,
+                    BackupManageAction::Test { proto, .. } if proto == "cifs"
+                ) || matches!(action, BackupManageAction::TestCifs { .. })
+            }
+            _ => false,
+        };
+
+        if needs_escape
+            && std::env::var("NAS_ESCAPED").as_deref() != Ok("1")
+            && Path::new("/run/systemd/system").exists()
+            && Path::new("/run/systemd/private").exists()
+        {
+            let mut cmd = std::process::Command::new("systemd-run");
+            cmd.arg("--quiet")
+                .arg("--pipe")
+                .arg("--wait")
+                .arg("--collect")
+                .arg("--setenv=NAS_ESCAPED=1")
+                .arg("/usr/local/bin/nas");
+            cmd.args(std::env::args().skip(1));
+            if let Ok(mut child) = cmd.spawn() {
+                if let Ok(status) = child.wait() {
+                    if let Some(code) = status.code() {
+                        return Ok(ExitCode::from(code as u8));
+                    }
+                }
+            }
+        }
+    }
+
     let runner = Runner::new();
 
     let output_msg = match action {
@@ -418,12 +485,42 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
         },
         HelperAction::BackupManage { action } => match action {
             BackupManageAction::Install { id } => backup::install_backup_task(&runner, &id)?,
-            BackupManageAction::WriteCron { id, file, content } => {
-                backup::write_cron(&id, file.as_deref(), content.as_deref())?
+            BackupManageAction::WriteCron {
+                id,
+                file,
+                content,
+                pos_file,
+            } => {
+                let (f, c) = if let Some(p) = pos_file {
+                    if p.to_string_lossy() == "-" {
+                        let text = read_stdin_line();
+                        (None, Some(text))
+                    } else {
+                        (Some(p), None)
+                    }
+                } else {
+                    (file, content)
+                };
+                backup::write_cron(&id, f.as_deref(), c.as_deref())?
             }
             BackupManageAction::DeleteCron { id } => backup::delete_cron(&id)?,
-            BackupManageAction::WriteCred { id, file, content } => {
-                backup::write_cred(&id, file.as_deref(), content.as_deref())?
+            BackupManageAction::WriteCred {
+                id,
+                file,
+                content,
+                pos_file,
+            } => {
+                let (f, c) = if let Some(p) = pos_file {
+                    if p.to_string_lossy() == "-" {
+                        let text = read_stdin_line();
+                        (None, Some(text))
+                    } else {
+                        (Some(p), None)
+                    }
+                } else {
+                    (file, content)
+                };
+                backup::write_cred(&id, f.as_deref(), c.as_deref())?
             }
             BackupManageAction::DeleteCred { id } => backup::delete_cred(&id)?,
             BackupManageAction::RunManual { id } => backup::run_backup_task(&runner, &id)?,
