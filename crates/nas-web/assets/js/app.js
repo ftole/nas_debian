@@ -488,13 +488,64 @@ async function refreshDashboardMetrics() {
       const ramBar = document.getElementById('kpi-ram-bar');
       if (ramVal) ramVal.innerHTML = `${d.system.ram_used_gb} GB <small style="font-size:12px; color:var(--text-secondary);">/ ${d.system.ram_total_gb} GB</small>`;
       if (ramBar) ramBar.style.width = `${d.system.ram_usage_pct}%`;
+      const cpuText = document.getElementById('kpi-cpu-text');
+      if (cpuText) {
+        const cpuPct = (d.system.cpu_usage_pct !== undefined && d.system.cpu_usage_pct !== null) ? d.system.cpu_usage_pct : 0;
+        const cpuModel = d.system.cpu_model || 'x86_64';
+        cpuText.textContent = `CPU: ${cpuPct}% • ${cpuModel}`;
+      }
     }
 
     if (d.storage) {
       const sVal = document.getElementById('kpi-storage-val');
       const sBar = document.getElementById('kpi-storage-bar');
+      const sBadge = document.getElementById('kpi-storage-badge');
+      const sAlert = document.getElementById('kpi-storage-alert');
+      const sAlertText = document.getElementById('kpi-storage-alert-text');
+      const sCard = document.getElementById('kpi-card-storage');
+
       if (sVal) sVal.innerHTML = `${d.storage.used_gb} GB <small style="font-size:12px; color:var(--text-secondary);">/ ${d.storage.total_gb} GB</small>`;
-      if (sBar) sBar.style.width = `${d.storage.usage_percent}%`;
+      const pct = Number(d.storage.usage_percent || 0);
+      if (sBar) {
+        sBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      }
+
+      if (pct >= 90) {
+        if (sBar) sBar.style.background = 'var(--accent-danger)';
+        if (sBadge) {
+          sBadge.className = 'badge badge-err';
+          sBadge.style.display = 'inline-block';
+          sBadge.textContent = `Crítico (${pct}%)`;
+        }
+        if (sAlert && sAlertText) {
+          sAlert.className = 'alert-box alert-box-danger';
+          sAlert.style.display = 'flex';
+          sAlertText.textContent = `Capacidad crítica superada (${pct}% en uso). A partir del 95% de uso las tareas de respaldo se cancelarán.`;
+        }
+        if (sCard) sCard.style.borderColor = 'var(--accent-danger)';
+      } else if (pct >= 80) {
+        if (sBar) sBar.style.background = 'var(--accent-warning)';
+        if (sBadge) {
+          sBadge.className = 'badge badge-warn';
+          sBadge.style.display = 'inline-block';
+          sBadge.textContent = `Alerta preventiva (${pct}%)`;
+        }
+        if (sAlert && sAlertText) {
+          sAlert.className = 'alert-box alert-box-warning';
+          sAlert.style.display = 'flex';
+          sAlertText.textContent = `Umbral preventivo superado (${pct}% en /srv/nas). Al superar el 85%, el sistema generará alertas operativas.`;
+        }
+        if (sCard) sCard.style.borderColor = 'var(--accent-warning)';
+      } else {
+        if (sBar) sBar.style.background = 'var(--accent-primary)';
+        if (sBadge) {
+          sBadge.style.display = 'none';
+        }
+        if (sAlert) {
+          sAlert.style.display = 'none';
+        }
+        if (sCard) sCard.style.borderColor = '';
+      }
     }
 
     if (d.counts) {
@@ -1313,6 +1364,7 @@ function renderStorageOverview(overview) {
   const badge = document.getElementById('stg-threshold-badge');
   const alertBox = document.getElementById('stg-threshold-alert');
   const alertText = document.getElementById('stg-threshold-text');
+  const card = document.getElementById('stg-overview-card');
 
   const pct = Number(overview.usage_percent ?? 0);
   if (progress) {
@@ -1330,6 +1382,7 @@ function renderStorageOverview(overview) {
       alertBox.style.display = 'flex';
       alertText.textContent = `Capacidad crítica superada (${pct}% en uso). A partir del 95% de uso las tareas de respaldo se cancelarán para proteger la integridad del sistema.`;
     }
+    if (card) card.style.borderColor = 'var(--accent-danger)';
   } else if (pct >= 80) {
     if (progress) progress.style.backgroundColor = 'var(--accent-warning)';
     if (badge) {
@@ -1341,6 +1394,7 @@ function renderStorageOverview(overview) {
       alertBox.style.display = 'flex';
       alertText.textContent = `Umbral preventivo del 80% superado (${pct}% en uso). Al superar el 85%, el subsistema de respaldos generará alertas operativas.`;
     }
+    if (card) card.style.borderColor = 'var(--accent-warning)';
   } else {
     if (progress) progress.style.backgroundColor = 'var(--accent-primary)';
     if (badge) {
@@ -1348,6 +1402,7 @@ function renderStorageOverview(overview) {
       badge.textContent = `Normal (${pct}%)`;
     }
     if (alertBox) alertBox.style.display = 'none';
+    if (card) card.style.borderColor = '';
   }
 }
 
@@ -3208,9 +3263,31 @@ async function deleteUser(username) {
   });
 }
 
+function updateGroupPreview(input) {
+  const preview = document.getElementById('group-name-preview');
+  if (!preview) return;
+  let val = (input ? input.value : '').trim().toLowerCase();
+  while (val.startsWith('grp_')) {
+    val = val.slice(4);
+  }
+  if (input && input.value !== val) {
+    input.value = val;
+  }
+  preview.textContent = val ? `grp_${val}` : 'grp_...';
+}
+
 async function submitNewGroup(event) {
   event.preventDefault();
-  const groupName = document.getElementById('group-name').value;
+  const input = document.getElementById('group-name');
+  let raw = (input ? input.value : '').trim().toLowerCase();
+  while (raw.startsWith('grp_')) {
+    raw = raw.slice(4);
+  }
+  if (!raw) {
+    showToast('Por favor introduce un nombre para el grupo.', 'warning');
+    return;
+  }
+  const fullName = `grp_${raw}`;
 
   const btn = document.getElementById('btn-submit-new-group') || event.target.querySelector('button[type="submit"]');
   if (btn) {
@@ -3221,12 +3298,15 @@ async function submitNewGroup(event) {
   try {
     await apiFetch('/api/groups', {
       method: 'POST',
-      body: JSON.stringify({ name: groupName }),
+      body: JSON.stringify({ name: fullName }),
     });
 
-    showToast('Grupo creado correctamente.', 'success');
+    showToast(`Grupo [${fullName}] creado correctamente.`, 'success');
     closeModal('modal-new-group');
-    document.getElementById('form-new-group').reset();
+    const form = document.getElementById('form-new-group');
+    if (form) form.reset();
+    const preview = document.getElementById('group-name-preview');
+    if (preview) preview.textContent = 'grp_...';
     loadUsersAndGroups();
   } catch (e) {
     // Ya mostrado
@@ -7352,8 +7432,16 @@ window.filterGroupMembers = filterGroupMembers;
 window.repairAcls = repairAcls;
 window.openNewUser = openNewUser;
 window.openNewUserModal = openNewUser;
-window.openNewGroup = () => openModal('modal-new-group');
-window.openNewGroupModal = () => openModal('modal-new-group');
+window.openNewGroup = () => {
+  const p = document.getElementById('group-name-preview');
+  if (p) p.textContent = 'grp_...';
+  openModal('modal-new-group');
+};
+window.openNewGroupModal = () => {
+  const p = document.getElementById('group-name-preview');
+  if (p) p.textContent = 'grp_...';
+  openModal('modal-new-group');
+};
 window.repairUserAcls = repairAcls;
 window.openEditUser = openEditUser;
 window.toggleUser = toggleUser;
@@ -7369,6 +7457,7 @@ window.applyUsersFilters = applyUsersFilters;
 window.submitNewUser = submitNewUser;
 window.submitUpdateUser = submitUpdateUser;
 window.submitEditUser = submitUpdateUser;
+window.updateGroupPreview = updateGroupPreview;
 window.submitNewGroup = submitNewGroup;
 window.submitRenameGroup = submitRenameGroup;
 window.addGroupMember = addGroupMember;
