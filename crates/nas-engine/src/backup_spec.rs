@@ -207,7 +207,7 @@ impl BackupSpec {
 
         let source_setup = match proto {
             Proto::Cifs => {
-                "mkdir -p \"$MOUNT\"\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl\"\nSRC=\"$MOUNT/\"".to_string()
+                "mkdir -p \"$MOUNT\"\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl\" 2>> \"$LOG\"\nSRC=\"$MOUNT/\"".to_string()
             }
             Proto::Ssh => "SRC=\"$SRC_USER@$SRC_IP:${SRC_PATH:-/}/\"".to_string(),
             Proto::Local => "SRC=\"${SRC_PATH:-/}/\"".to_string(),
@@ -215,10 +215,10 @@ impl BackupSpec {
 
         let rsync = match proto {
             Proto::Ssh => {
-                "SSHPASS=\"\"\nif [ -f \"$CRED\" ]; then\n    IFS= read -r SSHPASS < \"$CRED\" || true\nfi\nexport SSHPASS\nmkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nsshpass -e rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" || RSYNC_RC=$?\nunset SSHPASS".to_string()
+                "SSHPASS=\"\"\nif [ -f \"$CRED\" ]; then\n    IFS= read -r SSHPASS < \"$CRED\" || true\nfi\nexport SSHPASS\nmkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nsshpass -e rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nunset SSHPASS".to_string()
             }
             _ => {
-                "RSYNC_RC=0\nrsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" || RSYNC_RC=$?".to_string()
+                "RSYNC_RC=0\nrsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?".to_string()
             }
         };
 
@@ -251,7 +251,7 @@ cleanup() {{
     local status=$?
     if mountpoint -q "$MOUNT" 2>/dev/null; then umount "$MOUNT" || true; fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
-        log "=== se descarta el snapshot parcial ==="
+        log "ERROR: se descarta el snapshot parcial (codigo de salida $status)"
         rm -rf -- "$STAGE" "$FINAL"
     elif [ -d "$STAGE" ]; then
         rm -rf -- "$STAGE"
@@ -288,7 +288,7 @@ mkdir -p "$STAGE"
 log "inicio ($MODE): $SRC"
 {rsync}
 if [ "$RSYNC_RC" -ne 0 ] && [ "$RSYNC_RC" -ne 24 ]; then
-    log "error en replicación rsync (código $RSYNC_RC)"
+    log "ERROR: en replicación rsync (código $RSYNC_RC)"
     exit "$RSYNC_RC"
 fi
 mv "$STAGE" "$FINAL"
@@ -462,7 +462,8 @@ mod tests {
         assert!(runner.contains("chattr -R +i \"$FINAL\""));
         assert!(runner.contains("LOCK_DIR:-/var/lock"));
         assert!(runner.contains("MOUNT_ROOT:-/mnt/backup_sources"));
-        assert!(runner.contains("=== se descarta el snapshot parcial ==="));
+        assert!(runner.contains("ERROR: se descarta el snapshot parcial"));
+        assert!(runner.contains("2>> \"$LOG\""));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
