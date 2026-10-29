@@ -4326,9 +4326,16 @@ pub async fn group_create(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    let name = body.name.trim().to_string();
-    if !valid_grp(&name) {
-        return bad_request("el grupo debe llamarse grp_<nombre>");
+    let raw = body.name.trim();
+    let clean = raw.trim_start_matches("grp_");
+    let name = format!("grp_{clean}");
+    if clean.is_empty() || !valid_grp(&name) {
+        return bad_request(
+            "el grupo debe tener un nombre válido (letras minúsculas, números, guiones y hasta 32 caracteres)",
+        );
+    }
+    if is_master_grp(&name) {
+        return bad_request("no se puede crear un grupo maestro reservado del sistema");
     }
 
     let created = name.clone();
@@ -4362,12 +4369,15 @@ pub async fn group_rename(
     if !is_admin(&state, &actor) {
         return forbidden("se requieren privilegios de administrador");
     }
-    let new_name = if body.new.is_empty() {
-        body.new_name.clone()
+    let raw_new = if body.new.is_empty() {
+        body.new_name.trim()
     } else {
-        body.new.clone()
+        body.new.trim()
     };
-    if !valid_grp(&body.old)
+    let clean_new = raw_new.trim_start_matches("grp_");
+    let new_name = format!("grp_{clean_new}");
+    if clean_new.is_empty()
+        || !valid_grp(&body.old)
         || !valid_grp(&new_name)
         || is_master_grp(&body.old)
         || is_master_grp(&new_name)
