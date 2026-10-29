@@ -108,59 +108,48 @@ Si por políticas corporativas de auditoría prefieres auditar y ejecutar cada p
 
 ## 🛠️ Comandos Globales del CLI `nas`
 
-Una vez instalado, tienes a tu disposición el comando global `nas` tanto para administración interactiva por menús como para gestión programática por subcomandos con salida enriquecida ANSI o formato estructurado `--json`:
+Una vez instalado, tienes a tu disposición el binario unificado `nas` para administración en consola o scripts programáticos, con salida enriquecida ANSI y formato estructurado `--json`:
 
-### Gestión Interactiva y del Sistema
+### Comandos de Diagnóstico y Estado
 | Comando | Función |
 | :--- | :--- |
-| `sudo nas` | Inicia el asistente visual interactivo de menús (TUI con 13 módulos). |
-| `sudo nas status` | Realiza un diagnóstico completo de salud (servicios, discos, recursos, backups). |
-| `sudo nas update` | Sincroniza con GitHub, valida sintaxis y realiza rollback automático si hay errores. |
-| `sudo nas version` | Muestra la versión y el commit exacto instalado. |
-| `sudo nas uninstall` | Desinstala el software y limpia las configuraciones del servidor. |
+| `sudo nas status` | Métricas generales del sistema (CPU, memoria, carga, uptime e IP). |
+| `sudo nas network` | Inventario de red (interfaces, gateway, DNS, puertos y resolución SMB). |
+| `sudo nas services` | Estado en tiempo real de los demonios clave (`smbd`, `nmbd`, `wsdd2`, `nginx`). |
+| `sudo nas diag` | Diagnóstico integral con código de salida significativo y resolución de incidentes. |
+| `sudo nas version` | Muestra la versión del workspace y commit de compilación. |
 
-### Control Total por Subcomandos Programáticos (CLI / Scripts)
+### Subcomandos de Operación y Administración
 | Módulo / Subcomando | Descripción de Operaciones |
 | :--- | :--- |
-| `sudo nas storage <subcomando>` | `overview`, `disks`, `format`, `lvm-create`, `btrfs-subvolume`, `btrfs-scrub`, `trim`, `unmount`. |
-| `sudo nas share <subcomando>` | `list`, `create`, `delete`, `edit`, `sync-acls`. |
-| `sudo nas backup <subcomando>` | `list`, `create`, `delete`, `run`, `logs`. |
-| `sudo nas trash <subcomando>` | `list`, `count`, `restore`, `delete`, `empty`. |
-| `sudo nas user <subcomando>` | `list`, `create`, `delete`, `status`. |
-| `sudo nas group <subcomando>` | `list`, `create`, `delete`, `rename`. |
-| `sudo nas domain <subcomando>` | `status`, `discover`, `join`, `leave`. |
-| `sudo nas log <subcomando>` | `all`, `samba`, `admin`, `backup`, `system`. Soporta filtros `--limit=N` y `--query=TEXTO`. |
-| `sudo nas service <subcomando>`| `status`, `start`, `stop`, `restart` para demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`, `php`, `ufw`). |
-| `sudo nas system <subcomando>` | `metrics`, `role`, `updates`, `reboot`. |
+| `sudo nas backup <list>` | Lista e inspecciona las tareas de respaldo y runners instalados. |
+| `sudo nas storage list` | Inventario de almacenamiento con jerarquía de particiones y protección de SO. |
+| `sudo nas users list` | Listado estructurado de usuarios y grupos corporativos locales. |
+| `sudo nas audit <verify\|show>` | Verificación criptográfica y visualización de la bitácora inmutable de auditoría. |
+| `sudo nas deploy <plan\|apply>` | Planificación y aplicación nativa del despliegue en disco (con guardas anti-so y fstab). |
+| `sudo nas update <status\|verify\|apply>` | Verificación y aplicación de actualizaciones firmadas con validación SHA-256 / Ed25519. |
+| `sudo nas migrate status` | Verificación del estado de retiro del stack anterior y paridad activa. |
+| `sudo nas uninstall [--scope os]` | Desinstalación granular y limpia del panel o ajustes del sistema operativo. |
+| `sudo nas helper <helper>` | Invocación de helpers root acotados (`storage-apply`, `samba-apply`, `accounts`, etc.). |
 
 > [!TIP]
-> Todos los subcomandos aceptan la bandera opcional `--json` para emitir la respuesta en formato JSON estructurado, ideal para integración con pipelines CI/CD, scripts de monitoreo y automatización.
+> Todos los subcomandos aceptan la bandera opcional `--json` para emitir la respuesta en formato JSON estructurado, ideal para pipelines CI/CD, scripts de monitoreo y automatización.
 
 ---
 
-## 🖥️ Módulos del Asistente Interactivo
+## 🖥️ Asistente de Terminal Interactivo (`nas-tui`)
 
-Al ejecutar `sudo nas` accederás a un menú visual guiado con 13 módulos completos:
+Para administración visual interactiva desde la consola o una sesión SSH, el sistema incluye **`nas-tui`**, desarrollado en Rust con la librería `ratatui`:
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                 PANEL DE GESTIÓN NAS DEBIAN                 │
-├─────────────────────────────────────────────────────────────┤
-│  [1] Desplegar servidor       -> Asistente guiado en 5 pasos│
-│  [2] Gestión de grupos        -> Crear/renombrar/borrar grp_│
-│  [3] Recursos compartidos     -> Crear/editar/reparar ACLs  │
-│  [4] Tareas de backup         -> Copias red, ejecutar y logs│
-│  [5] Usuarios                 -> Cuentas, roles y permisos  │
-│  [6] Diagnóstico de salud     -> Chequeo en vivo del estado │
-│  [7] Gestionar servicios red  -> Control granular demonios  │
-│  [8] Almacenamiento y discos  -> Formato, LVM, Btrfs, TRIM  │
-│  [9] Papelera de reciclaje    -> Listar, restaurar y vaciar │
-│ [10] Dominio Active Directory -> Descubrir, unir y desunir  │
-│ [11] Registros y auditoría    -> Samba audit, admin, journal│
-│ [12] Actualizar software      -> Descarga segura con rollback│
-│ [13] Desinstalar              -> Limpieza total del sistema │
-└─────────────────────────────────────────────────────────────┘
+```bash
+sudo nas-tui
 ```
+
+El TUI ofrece:
+- **Dashboard Principal:** Métricas de CPU, memoria, almacenamiento y estado de la red en tiempo real.
+- **Gestión de Servicios:** Monitoreo y control directo de demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`).
+- **Tareas de Respaldo:** Supervisión de estado, últimas ejecuciones y acceso rápido a logs.
+- **Herramientas de Diagnóstico:** Comprobaciones de salud automáticas con recomendaciones inmediatas.
 
 ---
 
