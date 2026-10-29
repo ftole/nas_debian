@@ -522,28 +522,40 @@ pub fn update_fstab(
     let final_content = format!("{}\n", new_lines.join("\n"));
     if std::fs::write(fstab_path, &final_content).is_err() {
         let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
-        if std::fs::write(&staged, &final_content).is_ok() {
-            let res = runner.run(
-                &nas_exec::CommandSpec::new("install")
-                    .args([
-                        "-m",
-                        "0644",
-                        "-o",
-                        "root",
-                        "-g",
-                        "root",
-                        &staged.to_string_lossy(),
-                        "/etc/fstab",
-                    ])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(30)),
-            );
-            let _ = std::fs::remove_file(&staged);
-            if let Err(e) = res {
+        std::fs::write(&staged, &final_content).map_err(|e| {
+            NasError::Denied(format!(
+                "no se pudo preparar archivo temporal de fstab: {e}"
+            ))
+        })?;
+        let res = runner.run(
+            &nas_exec::CommandSpec::new("install")
+                .args([
+                    "-m",
+                    "0644",
+                    "-o",
+                    "root",
+                    "-g",
+                    "root",
+                    &staged.to_string_lossy(),
+                    "/etc/fstab",
+                ])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        );
+        let _ = std::fs::remove_file(&staged);
+        match res {
+            Ok(out) if !out.is_success() => {
+                return Err(NasError::Denied(format!(
+                    "no se pudo actualizar /etc/fstab: {}",
+                    out.stderr
+                )));
+            }
+            Err(e) => {
                 return Err(NasError::Denied(format!(
                     "no se pudo actualizar /etc/fstab: {e}"
                 )));
             }
+            _ => {}
         }
     }
     Ok(())
