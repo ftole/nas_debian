@@ -52,6 +52,14 @@ def log_substep(status: str, msg: str):
     sys.stdout.flush()
 
 
+def wait_modal_open(page, modal_id: str, timeout: int = 10000):
+    page.wait_for_selector(f"#{modal_id}.active", state="visible", timeout=timeout)
+
+
+def wait_modal_close(page, modal_id: str, timeout: int = 15000):
+    page.wait_for_selector(f"#{modal_id}", state="hidden", timeout=timeout)
+
+
 def run_qa_live():
     if not ADMIN_PASS:
         print("\n[QA RUNNER] ERROR: Defina la variable de entorno NAS_WEB_PANEL_PASSWORD para ejecutar la prueba en vivo.")
@@ -154,14 +162,14 @@ def run_qa_live():
 
             # Abrir modal de nuevo grupo
             page.click("#usr-panel-groups button:has-text('Crear nuevo grupo')")
-            page.wait_for_selector("#modal-new-group.active", timeout=10000)
+            wait_modal_open(page, "modal-new-group")
             log_substep("INFO", "Modal de nuevo grupo abierto")
 
             page.fill("#group-name", TEST_GROUP)
             log_substep("INFO", f"Llenado nombre del grupo: '{TEST_GROUP}'")
 
             page.click("#btn-submit-new-group")
-            page.wait_for_selector("#modal-new-group:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-new-group")
             time.sleep(1.5)
 
             # Verificar grupo en tabla
@@ -176,7 +184,7 @@ def run_qa_live():
 
             # Abrir modal de nuevo usuario
             page.click("#view-users .page-head-actions button:has-text('Crear usuario')")
-            page.wait_for_selector("#modal-new-user.active", timeout=10000)
+            wait_modal_open(page, "modal-new-user")
             log_substep("INFO", "Modal de nuevo usuario abierto")
 
             page.fill("#user-uname", TEST_USER)
@@ -191,15 +199,15 @@ def run_qa_live():
 
             time.sleep(1.0)
             page.click("#btn-submit-new-user")
-            page.wait_for_selector("#modal-new-user:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-new-user")
 
             # Modal de Bienvenida con ruta UNC
-            page.wait_for_selector("#modal-user-welcome.active", timeout=10000)
+            wait_modal_open(page, "modal-user-welcome")
             welcome_unc = page.input_value("#welcome-unc-path")
             log_substep("OK", f"Modal de bienvenida presentado. Ruta UNC Windows: {welcome_unc}")
             time.sleep(1.5)
             page.click("#modal-user-welcome button:has-text('Aceptar')")
-            page.wait_for_selector("#modal-user-welcome:not(.active)", timeout=10000)
+            wait_modal_close(page, "modal-user-welcome")
 
             time.sleep(1.5)
             page.wait_for_selector(f"#users-table-body tr:has-text('{TEST_USER}')", timeout=15000)
@@ -226,7 +234,7 @@ def run_qa_live():
             log_substep("OK", "Vista 'Redes compartidas' cargada")
 
             page.click("#btn-new-share")
-            page.wait_for_selector("#modal-new-share.active", timeout=10000)
+            wait_modal_open(page, "modal-new-share")
             log_substep("INFO", "Modal de nuevo recurso compartido abierto")
 
             page.fill("#share-name", TEST_SHARE)
@@ -241,7 +249,7 @@ def run_qa_live():
 
             time.sleep(1.0)
             page.click("#btn-submit-new-share")
-            page.wait_for_selector("#modal-new-share:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-new-share")
 
             time.sleep(2.0)
             page.wait_for_selector(f"#shares-table-body tr:has-text('{TEST_SHARE}')", timeout=15000)
@@ -271,12 +279,12 @@ def run_qa_live():
 
             # 4.1 Crear carpeta _Prueba_QA
             page.click("#btn-new-folder")
-            page.wait_for_selector("#modal-new-folder.active", timeout=10000)
+            wait_modal_open(page, "modal-new-folder")
             page.fill("#new-folder-name", TEST_FOLDER)
             log_substep("INFO", f"Nombre de carpeta llenado: '{TEST_FOLDER}'")
 
             page.click("#btn-submit-new-folder")
-            page.wait_for_selector("#modal-new-folder:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-new-folder")
             time.sleep(1.5)
 
             # Verificar carpeta en cuadrícula o lista
@@ -296,16 +304,16 @@ def run_qa_live():
 
             # 4.3 Crear archivo de texto prueba_qa.txt
             page.click("#btn-new-file")
-            page.wait_for_selector("#modal-new-file.active", timeout=10000)
+            wait_modal_open(page, "modal-new-file")
             page.fill("#new-file-name", TEST_FILE)
             log_substep("INFO", f"Nombre de archivo llenado: '{TEST_FILE}'")
 
             page.click("#btn-submit-new-file")
-            page.wait_for_selector("#modal-new-file:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-new-file")
 
             # 4.4 Visor de Archivos Integrado
             log_substep("WAIT", "Apertura automática del Visor de Archivos Integrado...")
-            page.wait_for_selector("#modal-file-preview.active", timeout=15000)
+            wait_modal_open(page, "modal-file-preview", 15000)
             log_substep("OK", f"Visor de Archivos desplegado en pantalla para '{TEST_FILE}'")
             time.sleep(1.0)
 
@@ -329,7 +337,7 @@ def run_qa_live():
             # Pausa visible de 2.5s para que el usuario observe la previsualización
             time.sleep(2.5)
             page.click("#modal-file-preview .modal-close")
-            page.wait_for_selector("#modal-file-preview:not(.active)", timeout=10000)
+            wait_modal_close(page, "modal-file-preview")
 
             # Verificar archivo listado en la carpeta
             file_sel = f".file-card[data-name='{TEST_FILE}']"
@@ -343,12 +351,12 @@ def run_qa_live():
             except Exception:
                 page.evaluate(f"openDeleteModal('{TEST_FOLDER}/{TEST_FILE}', '{TEST_FILE}')")
 
-            page.wait_for_selector("#modal-delete-file.active", timeout=10000)
+            wait_modal_open(page, "modal-delete-file")
             page.check("#del-mode-trash")
             time.sleep(1.0)
 
             page.click("#btn-confirm-delete")
-            page.wait_for_selector("#modal-delete-file:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-delete-file")
             time.sleep(1.5)
             log_substep("OK", f"'{TEST_FILE}' trasladado a la papelera")
 
@@ -503,9 +511,9 @@ def run_qa_live():
             except Exception:
                 page.evaluate(f"deleteUser('{TEST_USER}')")
 
-            page.wait_for_selector("#modal-user-action-confirm.active", timeout=10000)
+            wait_modal_open(page, "modal-user-action-confirm")
             page.click("#btn-user-action-confirm-submit")
-            page.wait_for_selector("#modal-user-action-confirm:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-user-action-confirm")
             time.sleep(2.5)
             page.wait_for_selector(f"#users-table-body tr:has-text('{TEST_USER}')", state="detached", timeout=10000)
             log_substep("OK", f"Usuario '{TEST_USER}' eliminado del sistema")
@@ -525,9 +533,9 @@ def run_qa_live():
             except Exception:
                 page.evaluate(f"deleteGroup('{TEST_GROUP}')")
 
-            page.wait_for_selector("#modal-user-action-confirm.active", timeout=10000)
+            wait_modal_open(page, "modal-user-action-confirm")
             page.click("#btn-user-action-confirm-submit")
-            page.wait_for_selector("#modal-user-action-confirm:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-user-action-confirm")
             time.sleep(2.5)
             page.wait_for_selector(f"#groups-table-body tr:has-text('{TEST_GROUP}')", state="detached", timeout=10000)
             log_substep("OK", f"Grupo '{TEST_GROUP}' eliminado del sistema")
@@ -546,10 +554,10 @@ def run_qa_live():
 
             # Modal de eliminación permanente
             page.evaluate(f"openDeleteModal('{TEST_FOLDER}', '{TEST_FOLDER}')")
-            page.wait_for_selector("#modal-delete-file.active", timeout=10000)
+            wait_modal_open(page, "modal-delete-file")
             page.check("#del-mode-permanent")
             page.click("#btn-confirm-delete")
-            page.wait_for_selector("#modal-delete-file:not(.active)", timeout=15000)
+            wait_modal_close(page, "modal-delete-file")
             time.sleep(1.5)
 
             # Vaciar papelera
