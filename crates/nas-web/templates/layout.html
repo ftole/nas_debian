@@ -395,7 +395,7 @@
               <span class="badge badge-ok">smbd OK</span>
               <span class="badge badge-ok">wsdd2 OK</span>
               <span class="badge badge-ok">nginx OK</span>
-              <span class="badge badge-ok">php-fpm ondemand</span>
+              <span class="badge badge-ok">nas-web (Rust) OK</span>
             </div>
             <div class="kpi-sub" id="kpi-network-sub">
               <span>Optimización Office VFS activa</span>
@@ -423,8 +423,8 @@
         <div class="alert-box alert-box-success" style="margin-top:20px;">
           <svg class="icon icon-lg"><use href="#icon-check-circle"></use></svg>
           <div>
-            <strong>Entorno Web Nativo Activo:</strong> Nginx-light con PHP-FPM bajo demanda (<code>pm = ondemand</code>).
-            Consumo en reposo ~0 MB de memoria RAM. Arquitectura MVC desacoplada, tipado estricto y ejecución segura con <code>proc_open</code>.
+            <strong>Plataforma Rust Nativa Activa:</strong> axum / tokio con Nginx.
+            Consumo en reposo ~0 MB de memoria RAM. Arquitectura asíncrona de alto rendimiento, tipado estricto y ejecución segura de comandos.
           </div>
         </div>
 
@@ -861,7 +861,7 @@
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Servicios y Salud del Sistema</h2>
-            <p>Control de demonios en tiempo real (Samba, WSDD2, Nginx, PHP-FPM, Cron) y auditoría integral de salud</p>
+            <p>Control de demonios en tiempo real (Samba, WSDD2, Nginx, nas-web, Cron) y auditoría integral de salud</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-secondary" onclick="loadServices()">
@@ -1547,13 +1547,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </div>
             <div class="panel-card" id="app-card-web">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Nginx-light & PHP-FPM</h3>
+                <h3>Nginx-light & nas-web (Rust)</h3>
                 <span class="badge badge-gray" id="app-badge-web">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
+              <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero Nginx con backend nativo Rust (axum / tokio), consumo ~0 MB RAM en reposo.</div>
               <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar PHP-FPM
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar servicio web
                 </button>
               </div>
             </div>
@@ -2925,9 +2925,9 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <ol style="margin:0; padding-left:20px; font-size:12.5px; color:var(--text-secondary); line-height:1.6;">
             <li>Respaldo preventivo del estado actual en <code>/tmp/backup_nas_*</code></li>
             <li>Avance rápido (Fast-Forward) y verificación de firma GPG del tag de release</li>
-            <li>Validación estricta de sintaxis de scripts Bash y código PHP</li>
-            <li>Sincronización segura de archivos hacia <code>/var/www/nas-web</code> y sudoers</li>
-            <li>Recarga no disruptiva de demonios (Nginx, PHP-FPM, Samba)</li>
+            <li>Validación estricta de sintaxis de scripts Bash y código Rust</li>
+            <li>Sincronización segura de binarios y reglas sudoers</li>
+            <li>Recarga no disruptiva de demonios (Nginx, nas-web, Samba)</li>
           </ol>
         </div>
         <div id="system-update-progress" style="display:none; margin-top:16px;">
