@@ -143,7 +143,12 @@ pub fn classify_backup_status(
             has_error = true;
         }
 
-        for needle in ["CODIGO DE SALIDA ", "CÓDIGO DE SALIDA ", "CODIGO ", "CÓDIGO "] {
+        for needle in [
+            "CODIGO DE SALIDA ",
+            "CÓDIGO DE SALIDA ",
+            "CODIGO ",
+            "CÓDIGO ",
+        ] {
             if let Some(pos) = upper.find(needle) {
                 let rest = &upper[pos + needle.len()..];
                 let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -196,12 +201,8 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         })
         .unwrap_or_default();
 
-    let last_status = classify_backup_status(
-        running,
-        log_content.as_deref(),
-        &task.destination_root,
-        id,
-    );
+    let last_status =
+        classify_backup_status(running, log_content.as_deref(), &task.destination_root, id);
 
     let (protocol, source) = match task.kind {
         nas_engine::tasks::SourceKind::Cifs => (
@@ -493,32 +494,56 @@ mod tests {
     fn clasifica_estados_de_respaldo() {
         use super::classify_backup_status;
         assert_eq!(classify_backup_status(true, None, "/tmp", "t1"), "En curso");
-        assert_eq!(classify_backup_status(false, None, "/tmp", "t1"), "PENDIENTE");
-        assert_eq!(classify_backup_status(false, Some(""), "/tmp", "t1"), "PENDIENTE");
-        assert_eq!(classify_backup_status(false, Some("   \n\n  "), "/tmp", "t1"), "PENDIENTE");
+        assert_eq!(
+            classify_backup_status(false, None, "/tmp", "t1"),
+            "PENDIENTE"
+        );
+        assert_eq!(
+            classify_backup_status(false, Some(""), "/tmp", "t1"),
+            "PENDIENTE"
+        );
+        assert_eq!(
+            classify_backup_status(false, Some("   \n\n  "), "/tmp", "t1"),
+            "PENDIENTE"
+        );
 
         // Error explícito en log
         let err_log = "[2026-10-29 10:00:00] [t1] ERROR: se descarta el snapshot parcial (codigo de salida 1)";
-        assert_eq!(classify_backup_status(false, Some(err_log), "/tmp", "t1"), "Error");
+        assert_eq!(
+            classify_backup_status(false, Some(err_log), "/tmp", "t1"),
+            "Error"
+        );
 
         // Abortado
         let abort_log = "[2026-10-29 10:00:00] [t1] === ABORTADO: espacio libre insuficiente ===";
-        assert_eq!(classify_backup_status(false, Some(abort_log), "/tmp", "t1"), "Error");
+        assert_eq!(
+            classify_backup_status(false, Some(abort_log), "/tmp", "t1"),
+            "Error"
+        );
 
         // Fallo de replicación rsync
         let rsync_err = "[2026-10-29 10:00:00] [t1] ERROR: en replicación rsync (código 12)";
-        assert_eq!(classify_backup_status(false, Some(rsync_err), "/tmp", "t1"), "Error");
+        assert_eq!(
+            classify_backup_status(false, Some(rsync_err), "/tmp", "t1"),
+            "Error"
+        );
 
         // Éxito afirmado pero sin directorio snapshot_* en disco -> Error
         let ok_log = "[2026-10-29 10:00:00] [t1] snapshot completado: /tmp/snapshot_2026";
-        assert_eq!(classify_backup_status(false, Some(ok_log), "/tmp/nonexistent_backup_dir", "t1"), "Error");
+        assert_eq!(
+            classify_backup_status(false, Some(ok_log), "/tmp/nonexistent_backup_dir", "t1"),
+            "Error"
+        );
 
         // Éxito afirmado con snapshot físico en disco -> OK
         let tmp_root = std::env::temp_dir().join(format!("test_bkp_ok_{}", std::process::id()));
         let task_dir = tmp_root.join("t1");
         let snap_dir = task_dir.join("snapshot_2026-10-29_100000");
         std::fs::create_dir_all(&snap_dir).expect("snap_dir");
-        assert_eq!(classify_backup_status(false, Some(ok_log), tmp_root.to_str().unwrap(), "t1"), "OK");
+        assert_eq!(
+            classify_backup_status(false, Some(ok_log), tmp_root.to_str().unwrap(), "t1"),
+            "OK"
+        );
         let _ = std::fs::remove_dir_all(&tmp_root);
     }
 }
