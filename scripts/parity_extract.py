@@ -210,6 +210,7 @@ def check_routes() -> list[str]:
         for line in (PARITY / "endpoints.txt").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
     def normalize(path: str) -> str:
         return re.sub(r"\{[^}]+\}", "{x}", path.replace(":id", "{x}"))
 
