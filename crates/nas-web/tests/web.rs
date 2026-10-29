@@ -890,14 +890,46 @@ async fn usuarios_valida_nombres_y_privilegios() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = app
+        .clone()
         .oneshot(post_json(
             "/api/groups",
             &cookie,
-            r#"{"name":"no-prefijo"}"#,
+            r#"{"name":"grupo invalido con espacios"}"#,
         ))
         .await
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(post_json("/api/groups", &cookie, r#"{"name":"grp_samba"}"#))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(post_json("/api/groups", &cookie, r#"{"name":""}"#))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(post_json("/api/groups", &cookie, r#"{"name":"ventas"}"#))
+        .await
+        .expect("respuesta");
+    assert_ne!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/groups",
+            &cookie,
+            r#"{"name":"grp_ventas"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_ne!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
