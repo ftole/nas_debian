@@ -540,7 +540,9 @@ pub fn update_fstab(
             );
             let _ = std::fs::remove_file(&staged);
             if let Err(e) = res {
-                return Err(NasError::Denied(format!("no se pudo actualizar /etc/fstab: {e}")));
+                return Err(NasError::Denied(format!(
+                    "no se pudo actualizar /etc/fstab: {e}"
+                )));
             }
         }
     }
@@ -748,7 +750,9 @@ mod artifact_tests {
         assert_eq!(audit.mode, 0o640);
         assert_eq!(artifacts.len(), 6);
         assert!(audit.content.contains("-w /etc/backup-credentials/ -p rwa"));
-        assert!(audit.content.contains("-w /usr/local/bin/nas -p x -k nas_cli"));
+        assert!(audit
+            .content
+            .contains("-w /usr/local/bin/nas -p x -k nas_cli"));
     }
 
     #[test]
