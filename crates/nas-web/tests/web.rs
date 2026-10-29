@@ -369,6 +369,13 @@ async fn files_crea_lista_renombra_y_borra() {
         .as_str()
         .unwrap_or_default()
         .contains(".trash"));
+
+    let response = app
+        .clone()
+        .oneshot(post_json("/api/files/trash/empty", &cookie, ""))
+        .await
+        .expect("trash empty");
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
