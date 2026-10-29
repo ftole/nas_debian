@@ -73,6 +73,63 @@ fn data_root_is_btrfs() -> bool {
         .unwrap_or(false)
 }
 
+/// Detecta el sistema de archivos y el tipo de dispositivo para `/srv/nas`.
+fn detect_storage_info() -> (String, String) {
+    if let Ok(mounts) = std::fs::read_to_string("/proc/mounts") {
+        let mut target = None;
+        for line in mounts.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 && parts[1] == "/srv/nas" {
+                target = Some((parts[0].to_string(), parts[2].to_string()));
+                break;
+            }
+        }
+        if target.is_none() {
+            for line in mounts.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[1] == "/" {
+                    target = Some((parts[0].to_string(), parts[2].to_string()));
+                    break;
+                }
+            }
+        }
+
+        if let Some((device_path, fs)) = target {
+            let fstype_upper = fs.to_uppercase();
+            let mut dev_type = "HDD / SSD".to_string();
+
+            let dev_name = device_path.trim_start_matches("/dev/");
+            let parent_disk = if dev_name.starts_with("nvme") {
+                if let Some(pos) = dev_name.find('p') {
+                    &dev_name[..pos]
+                } else {
+                    dev_name
+                }
+            } else {
+                dev_name.trim_end_matches(|c: char| c.is_ascii_digit())
+            };
+
+            let rota_path = format!("/sys/block/{parent_disk}/queue/rotational");
+            if let Ok(rota) = std::fs::read_to_string(&rota_path) {
+                if rota.trim() == "0" {
+                    dev_type = "SSD (Flash)".to_string();
+                } else if rota.trim() == "1" {
+                    dev_type = "HDD (Mecánico)".to_string();
+                }
+            } else if device_path.contains("nvme") {
+                dev_type = "NVMe (Flash)".to_string();
+            }
+
+            return (fstype_upper, dev_type);
+        }
+    }
+
+    (
+        if data_root_is_btrfs() { "BTRFS" } else { "EXT4" }.to_string(),
+        "NVMe / SSD".to_string(),
+    )
+}
+
 /// Renderiza el panel completo con la vista activa.
 pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     let mut flags: HashMap<&str, bool> = HashMap::new();
@@ -191,8 +248,10 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     token(&mut tokens, "disk_pct", "0.0");
     token(&mut tokens, "disk_used", "0");
     token(&mut tokens, "disk_total", "0");
-    token(&mut tokens, "fs_type", "");
-    token(&mut tokens, "device_type", "");
+    let (fstype, device_type) = detect_storage_info();
+    token(&mut tokens, "strtoupper_fstype", fstype.clone());
+    token(&mut tokens, "fs_type", fstype);
+    token(&mut tokens, "device_type", device_type);
     token(&mut tokens, "count_netlistening", "0");
 
     Template::new(LAYOUT).render(&flags, &tokens)
