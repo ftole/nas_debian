@@ -891,11 +891,12 @@ async function loadBackups() {
     let anyRunning = false;
     tbody.innerHTML = tasks.map(t => {
       if (t.running) anyRunning = true;
+      const isErr = t.last_status === 'Error' || t.last_status === 'FAILED';
       const statusBadge = t.last_status === 'OK' ? 'badge-ok'
-        : (t.last_status === 'Error' ? 'badge-err'
+        : (isErr ? 'badge-err'
           : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
       const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
-      const fillColor = t.last_status === 'Error' ? 'var(--accent-danger)' : 'var(--accent-success)';
+      const fillColor = isErr ? 'var(--accent-danger)' : 'var(--accent-success)';
 
       return `
       <tr>
