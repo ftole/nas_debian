@@ -355,22 +355,29 @@
 
         <div class="kpi-grid">
           <!-- Tarjeta 1: Almacenamiento -->
-          <div class="kpi-card">
+          <div class="kpi-card" id="kpi-card-storage" style="%%stg_card_border%%">
             <div class="kpi-header">
               <span>Almacenamiento (/srv/nas)</span>
-              <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-hard-drive"></use></svg></div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span id="kpi-storage-badge" class="%%stg_badge_class%%" style="display:%%stg_badge_display%%; font-size:11px;">%%stg_badge_text%%</span>
+                <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-hard-drive"></use></svg></div>
+              </div>
             </div>
             <div class="kpi-val" id="kpi-storage-val">%%disk_used%% GB <small style="font-size:12px; color:var(--text-secondary);">/ %%disk_total%% GB</small></div>
             <div class="progress-bar-wrap">
-              <div class="progress-bar-fill" id="kpi-storage-bar" style="width: %%disk_pct%%%; background: var(--accent-primary);"></div>
+              <div class="progress-bar-fill" id="kpi-storage-bar" style="width: %%disk_pct%%%; background: %%stg_bar_color%%;"></div>
             </div>
-            <div class="kpi-sub">
+            <div class="kpi-sub" id="kpi-storage-sub">
               <span>Sistema: <strong>%%strtoupper_fstype%%</strong> • %%device_type%%</span>
+            </div>
+            <div id="kpi-storage-alert" style="display:%%stg_alert_display%%; margin-top:8px;" class="%%stg_alert_class%%">
+              <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+              <span id="kpi-storage-alert-text" style="font-size:12px;">%%stg_alert_text%%</span>
             </div>
           </div>
 
           <!-- Tarjeta 2: RAM -->
-          <div class="kpi-card">
+          <div class="kpi-card" id="kpi-card-ram">
             <div class="kpi-header">
               <span>Memoria RAM</span>
               <div class="kpi-icon-wrap"><svg class="icon"><use href="#icon-cpu"></use></svg></div>
@@ -379,8 +386,8 @@
             <div class="progress-bar-wrap">
               <div class="progress-bar-fill" id="kpi-ram-bar" style="width: %%ram_pct%%%; background: var(--accent-primary);"></div>
             </div>
-            <div class="kpi-sub">
-              <span>CPU: %%cpu_pct%%% • %%cpu_model%%</span>
+            <div class="kpi-sub" id="kpi-cpu-sub">
+              <span id="kpi-cpu-text">CPU: %%cpu_pct%%% • %%cpu_model%%</span>
             </div>
           </div>
 
@@ -2227,9 +2234,12 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-body">
         <form id="form-new-group" onsubmit="submitNewGroup(event)">
           <div class="form-group">
-            <label for="group-name">Nombre del grupo (prefijo <code>grp_</code> mandatorio):</label>
-            <input type="text" id="group-name" required placeholder="ej. contabilidad">
-            <small>Se guardará como <code>grp_contabilidad</code>.</small>
+            <label for="group-name">Nombre del grupo:</label>
+            <div style="display:flex; align-items:stretch;">
+              <span style="background:var(--bg-body); border:1px solid var(--border-color); border-right:none; padding:8px 12px; border-radius:6px 0 0 6px; font-family:monospace; font-weight:600; color:var(--accent-primary); display:flex; align-items:center; user-select:none;">grp_</span>
+              <input type="text" id="group-name" required placeholder="ventas" style="border-radius:0 6px 6px 0;" oninput="updateGroupPreview(this)">
+            </div>
+            <small style="margin-top:5px; display:block; color:var(--text-secondary);">Identificador en el sistema: <strong id="group-name-preview">grp_...</strong></small>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
