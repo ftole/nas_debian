@@ -2859,13 +2859,11 @@ async function submitRenameGroup(event) {
 }
 
 async function openNewUser() {
-  if (!_groupsData.length) {
-    try {
-      const res = await apiFetch('/api/groups');
-      _groupsData = res.data || [];
-    } catch (e) {
-      // Sin grupos disponibles
-    }
+  try {
+    const res = await apiFetch('/api/groups');
+    _groupsData = res.data || [];
+  } catch (e) {
+    // Sin grupos disponibles
   }
   const form = document.getElementById('form-new-user');
   if (form) form.reset();
