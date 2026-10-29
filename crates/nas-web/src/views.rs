@@ -125,7 +125,12 @@ fn detect_storage_info() -> (String, String) {
     }
 
     (
-        if data_root_is_btrfs() { "BTRFS" } else { "EXT4" }.to_string(),
+        if data_root_is_btrfs() {
+            "BTRFS"
+        } else {
+            "EXT4"
+        }
+        .to_string(),
         "NVMe / SSD".to_string(),
     )
 }
@@ -239,15 +244,107 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
         format!("\"{}\"", context.server_role),
     );
 
-    // Valores iniciales: app.js los actualiza al cargar la vista.
-    token(&mut tokens, "kernel", "");
-    token(&mut tokens, "uptime", "");
-    token(&mut tokens, "cpu_model", "");
-    token(&mut tokens, "cpu_pct", "0.0");
-    token(&mut tokens, "ram_pct", "0.0");
-    token(&mut tokens, "disk_pct", "0.0");
-    token(&mut tokens, "disk_used", "0");
-    token(&mut tokens, "disk_total", "0");
+    let runner = nas_exec::Runner::new();
+    let metrics = nas_engine::collect_status(&runner);
+    token(&mut tokens, "kernel", escape(&metrics.kernel));
+    token(&mut tokens, "uptime", escape(&metrics.uptime));
+    token(&mut tokens, "cpu_model", escape(&metrics.cpu_model));
+    token(
+        &mut tokens,
+        "cpu_pct",
+        format!("{:.1}", metrics.cpu_usage_pct),
+    );
+    token(
+        &mut tokens,
+        "ram_pct",
+        format!("{:.1}", metrics.ram_usage_pct),
+    );
+    token(
+        &mut tokens,
+        "ramUsed",
+        format!("{:.1}", metrics.ram_used_gb),
+    );
+    token(
+        &mut tokens,
+        "ramTotal",
+        format!("{:.1}", metrics.ram_total_gb),
+    );
+
+    let storage = nas_engine::storage::overview_for(&nas_core::NasPaths::default(), &runner).ok();
+    let (disk_pct, disk_used, disk_total) = if let Some(stg) = &storage {
+        (stg.usage_percent, stg.used_gb, stg.total_gb)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+    token(&mut tokens, "disk_pct", format!("{:.1}", disk_pct));
+    token(&mut tokens, "disk_used", format!("{:.1}", disk_used));
+    token(&mut tokens, "disk_total", format!("{:.1}", disk_total));
+
+    let (
+        stg_color,
+        stg_badge_display,
+        stg_badge_class,
+        stg_badge_text,
+        stg_alert_display,
+        stg_alert_class,
+        stg_alert_text,
+        stg_card_border,
+    ) = if disk_pct >= 90.0 {
+        (
+            "var(--accent-danger)",
+            "inline-block",
+            "badge badge-err",
+            format!("Crítico ({:.1}%)", disk_pct),
+            "flex",
+            "alert-box alert-box-danger",
+            format!(
+                "Capacidad crítica superada ({:.1}% en uso). A partir del 95% de uso las tareas de respaldo se cancelarán.",
+                disk_pct
+            ),
+            "border-color:var(--accent-danger);",
+        )
+    } else if disk_pct >= 80.0 {
+        (
+            "var(--accent-warning)",
+            "inline-block",
+            "badge badge-warn",
+            format!("Alerta preventiva ({:.1}%)", disk_pct),
+            "flex",
+            "alert-box alert-box-warning",
+            format!(
+                "Umbral preventivo superado ({:.1}% en /srv/nas). Al superar el 85%, el sistema generará alertas operativas.",
+                disk_pct
+            ),
+            "border-color:var(--accent-warning);",
+        )
+    } else {
+        (
+            "var(--accent-primary)",
+            "none",
+            "badge",
+            String::new(),
+            "none",
+            "alert-box",
+            String::new(),
+            "",
+        )
+    };
+    token(&mut tokens, "stg_bar_color", stg_color.to_string());
+    token(
+        &mut tokens,
+        "stg_badge_display",
+        stg_badge_display.to_string(),
+    );
+    token(&mut tokens, "stg_badge_class", stg_badge_class.to_string());
+    token(&mut tokens, "stg_badge_text", stg_badge_text);
+    token(
+        &mut tokens,
+        "stg_alert_display",
+        stg_alert_display.to_string(),
+    );
+    token(&mut tokens, "stg_alert_class", stg_alert_class.to_string());
+    token(&mut tokens, "stg_alert_text", stg_alert_text);
+    token(&mut tokens, "stg_card_border", stg_card_border.to_string());
     let (fstype, device_type) = detect_storage_info();
     token(&mut tokens, "strtoupper_fstype", fstype.clone());
     token(&mut tokens, "fs_type", fstype);
