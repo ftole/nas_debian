@@ -2637,7 +2637,7 @@ pub async fn trash_delete(
 pub async fn trash_empty(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Option<axum::Json<TrashBody>>,
+    body: axum::body::Bytes,
 ) -> Response {
     let user = match require_auth(&state, &headers) {
         Ok(user) => user,
@@ -2646,7 +2646,12 @@ pub async fn trash_empty(
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
-    let root_param = body.as_ref().and_then(|b| b.root.as_deref());
+    let trash_body: Option<TrashBody> = if body.is_empty() {
+        None
+    } else {
+        serde_json::from_slice(&body).ok()
+    };
+    let root_param = trash_body.as_ref().and_then(|b| b.root.as_deref());
     let root = match file_root_for(&state, root_param) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -2666,12 +2671,17 @@ pub async fn trash_empty(
 pub async fn trash_restore_all(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Option<axum::Json<TrashBody>>,
+    body: axum::body::Bytes,
 ) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root_param = body.as_ref().and_then(|b| b.root.as_deref());
+    let trash_body: Option<TrashBody> = if body.is_empty() {
+        None
+    } else {
+        serde_json::from_slice(&body).ok()
+    };
+    let root_param = trash_body.as_ref().and_then(|b| b.root.as_deref());
     let root = match file_root_for(&state, root_param) {
         Ok(root) => root,
         Err(response) => return *response,
