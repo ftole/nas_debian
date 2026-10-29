@@ -91,10 +91,11 @@ fn has_physical_snapshot(dest_root: &str, id: &str) -> bool {
         return false;
     };
     entries.flatten().any(|e| {
-        e.file_name()
-            .to_str()
-            .map(|name| name.starts_with("snapshot_"))
-            .unwrap_or(false)
+        e.path().is_dir()
+            && e.file_name()
+                .to_str()
+                .map(|name| name.starts_with("snapshot_"))
+                .unwrap_or(false)
     })
 }
 
@@ -128,11 +129,14 @@ pub fn classify_backup_status(
         &all_lines[..]
     };
 
-    let mut has_error = false;
-    let mut has_success = false;
+    let mut last_error_idx: Option<usize> = None;
+    let mut last_success_idx: Option<usize> = None;
+    let mut last_start_idx: Option<usize> = None;
 
-    for line in recent {
+    for (idx, line) in recent.iter().enumerate() {
         let upper = line.to_uppercase();
+        let mut line_is_error = false;
+
         if upper.contains("ERROR")
             || upper.contains("FALLO")
             || upper.contains("FAILED")
@@ -140,7 +144,7 @@ pub fn classify_backup_status(
             || upper.contains("OMITIDO")
             || upper.contains("DESCARTA EL SNAPSHOT")
         {
-            has_error = true;
+            line_is_error = true;
         }
 
         for needle in [
@@ -154,27 +158,52 @@ pub fn classify_backup_status(
                 let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
                 if let Ok(code) = num_str.parse::<i32>() {
                     if code != 0 {
-                        has_error = true;
+                        line_is_error = true;
                     }
                 }
             }
         }
 
-        if upper.contains("SNAPSHOT COMPLETADO:") || upper.contains("BACKUP_COMPLETED") {
-            has_success = true;
+        if line_is_error {
+            last_error_idx = Some(idx);
+        }
+
+        if upper.contains("INICIO (")
+            || upper.contains("INICIANDO BACKUP")
+            || upper.contains("=== BACKUP OMITIDO")
+            || upper.contains("=== ABORTADO")
+        {
+            last_start_idx = Some(idx);
+        }
+
+        if upper.contains("SNAPSHOT COMPLETADO:")
+            || upper.contains("BACKUP_COMPLETED")
+            || upper.contains("BACKUP FINALIZADO CON ÉXITO")
+            || upper.contains("BACKUP FINALIZADO CON EXITO")
+        {
+            last_success_idx = Some(idx);
         }
     }
 
-    if has_error {
-        "Error"
-    } else if has_success {
-        if has_physical_snapshot(dest_root, id) {
-            "OK"
-        } else {
-            "Error"
+    match last_success_idx {
+        None => "Error",
+        Some(succ_idx) => {
+            if let Some(err_idx) = last_error_idx {
+                if err_idx > succ_idx {
+                    return "Error";
+                }
+            }
+            if let Some(start_idx) = last_start_idx {
+                if start_idx > succ_idx {
+                    return "Error";
+                }
+            }
+            if has_physical_snapshot(dest_root, id) {
+                "OK"
+            } else {
+                "Error"
+            }
         }
-    } else {
-        "Error"
     }
 }
 
@@ -544,6 +573,63 @@ mod tests {
             classify_backup_status(false, Some(ok_log), tmp_root.to_str().unwrap(), "t1"),
             "OK"
         );
+
+        // Corrida previa con error seguida de corrida exitosa -> OK
+        let multi_log = "[2026-10-28 10:00:00] [t1] ERROR: se descarta el snapshot parcial (codigo de salida 1)\n\
+                         [2026-10-29 10:00:00] [t1] inicio (cifs): //server/share\n\
+                         [2026-10-29 10:00:05] [t1] snapshot completado: /tmp/snapshot_2026";
+        assert_eq!(
+            classify_backup_status(false, Some(multi_log), tmp_root.to_str().unwrap(), "t1"),
+            "OK"
+        );
+
+        // Corrida previa exitosa seguida de corrida con fallo -> Error
+        let fail_after_ok = "[2026-10-28 10:00:05] [t1] snapshot completado: /tmp/snapshot_2026\n\
+                             [2026-10-29 10:00:00] [t1] inicio (cifs): //server/share\n\
+                             [2026-10-29 10:00:01] [t1] ERROR: se descarta el snapshot parcial (codigo de salida 32)";
+        assert_eq!(
+            classify_backup_status(false, Some(fail_after_ok), tmp_root.to_str().unwrap(), "t1"),
+            "Error"
+        );
+
+        // Corrida previa exitosa seguida de nueva corrida interrumpida -> Error
+        let interrupted_after_ok =
+            "[2026-10-28 10:00:05] [t1] snapshot completado: /tmp/snapshot_2026\n\
+                                    [2026-10-29 10:00:00] [t1] inicio (cifs): //server/share";
+        assert_eq!(
+            classify_backup_status(
+                false,
+                Some(interrupted_after_ok),
+                tmp_root.to_str().unwrap(),
+                "t1"
+            ),
+            "Error"
+        );
+
+        // Formato legado del servidor con BACKUP_COMPLETED
+        let server_fmt_ok =
+            "[2026-10-28 23:00:11] [t1] [BACKUP_COMPLETED] [notice] Respaldo finalizado con exito";
+        assert_eq!(
+            classify_backup_status(false, Some(server_fmt_ok), tmp_root.to_str().unwrap(), "t1"),
+            "OK"
+        );
+
+        // Formato legado del servidor con MOUNT_FAILED / BACKUP_FAILED posterior
+        let server_fmt_err = "[2026-10-27 23:00:15] [t1] [BACKUP_COMPLETED] [notice] Respaldo finalizado con exito\n\
+                              mount error(115): could not connect to 10.2.0.10\n\
+                              [2026-10-28 23:00:21] [t1] [MOUNT_FAILED] [err] Error al montar recurso CIFS\n\
+                              === se descarta el snapshot parcial ===\n\
+                              [2026-10-28 23:00:21] [t1] [BACKUP_FAILED] [err] Respaldo fallido";
+        assert_eq!(
+            classify_backup_status(
+                false,
+                Some(server_fmt_err),
+                tmp_root.to_str().unwrap(),
+                "t1"
+            ),
+            "Error"
+        );
+
         let _ = std::fs::remove_dir_all(&tmp_root);
     }
 }
