@@ -561,7 +561,7 @@ def run_qa_live():
             time.sleep(1.5)
 
             # Vaciar papelera
-            page.evaluate("apiFetch('/api/files/trash/empty', { method: 'POST' })")
+            page.evaluate("apiFetch('/api/files/trash/empty', { method: 'POST', body: JSON.stringify({}) })")
             time.sleep(1.5)
             log_substep("OK", f"Carpeta '{TEST_FOLDER}' eliminada permanentemente y papelera vaciada")
             cleanup_report["folder"] = "DELETED"
