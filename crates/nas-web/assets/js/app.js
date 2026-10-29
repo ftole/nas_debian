@@ -5995,6 +5995,7 @@ function loadScriptLazy(src) {
 // Previsualizador de Archivos (Previewer 100% Offline con Editor Integrado)
 // ==============================================================================
 async function previewFile(relPath, fileName) {
+  fileName = fileName || (relPath ? relPath.split('/').pop() : 'archivo');
   if (AppState.files.currentPreviewFile?.relPath === relPath && document.getElementById('modal-file-preview')?.classList.contains('active')) {
     return;
   }
