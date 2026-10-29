@@ -131,7 +131,8 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl start nas-web, /usr/bin/systemctl stop nas-web, \
     /usr/bin/systemctl restart nas-web, /usr/bin/systemctl reload nas-web, \
     /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \
-    /usr/bin/systemd-run *, \
+    /usr/bin/systemd-run --no-block --collect systemctl reboot, \
+    /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
     /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
     /usr/sbin/realm list, /usr/sbin/realm discover *, /usr/sbin/realm join *, /usr/sbin/realm leave, \
     /usr/bin/rm -rf /var/lib/nas/dev-sync/*, \
@@ -160,6 +161,17 @@ fi
 if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
     echo "[7/7] Configurando Nginx"
     install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled
+    install -d -m 0755 /etc/ssl/certs
+    install -d -m 0700 /etc/ssl/private
+    if [ ! -f /etc/ssl/certs/nas-web.crt ] || [ ! -f /etc/ssl/private/nas-web.key ]; then
+        echo "    Generando certificado SSL autofirmado para Nginx..."
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout /etc/ssl/private/nas-web.key \
+            -out /etc/ssl/certs/nas-web.crt \
+            -subj "/CN=nas-server/O=NAS/C=CO" 2>/dev/null || true
+        chmod 0600 /etc/ssl/private/nas-web.key 2>/dev/null || true
+        chmod 0644 /etc/ssl/certs/nas-web.crt 2>/dev/null || true
+    fi
     if [ -f "$NGINX_SITE" ]; then
         cp -a "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
     fi
