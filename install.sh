@@ -121,7 +121,8 @@ echo -e "  ╰──────────────────────
 echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando herramientas base..."
 DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl ca-certificates \
-    build-essential pkg-config btrfs-progs samba-vfs-modules cifs-utils rsync >/dev/null 2>&1
+    build-essential pkg-config btrfs-progs samba samba-vfs-modules cifs-utils rsync \
+    nginx-light parted auditd tmux >/dev/null 2>&1
 
 if ! command -v cargo >/dev/null 2>&1; then
     echo -e "  Instalando toolchain de Rust..."
