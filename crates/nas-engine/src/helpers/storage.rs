@@ -135,41 +135,7 @@ fn mount_options_for(_runner: &Runner, fstype: &str, device: &str) -> String {
 }
 
 fn update_fstab(runner: &Runner, source: &str, target: &str, options: &str) -> NasResult<()> {
-    let fstab_path = Path::new("/etc/fstab");
-    if !fstab_path.exists() {
-        return Ok(());
-    }
-
-    let uuid_res = runner.run(
-        &CommandSpec::new("blkid")
-            .args(["-s", "UUID", "-o", "value", source])
-            .timeout(Duration::from_secs(10)),
-    );
-    let fstab_src = match uuid_res {
-        Ok(out) if out.is_success() && !out.stdout.trim().is_empty() => {
-            format!("UUID={}", out.stdout.trim())
-        }
-        _ => source.to_string(),
-    };
-
-    let content = std::fs::read_to_string(fstab_path).unwrap_or_default();
-    let mut new_lines: Vec<String> = content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('#') {
-                return true;
-            }
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            !(parts.len() >= 2 && parts[1] == target)
-        })
-        .map(ToString::to_string)
-        .collect();
-
-    new_lines.push(format!("{fstab_src} {target} auto {options} 0 0"));
-    let final_content = format!("{}\n", new_lines.join("\n"));
-    std::fs::write(fstab_path, final_content).map_err(|e| NasError::Denied(e.to_string()))?;
-    Ok(())
+    crate::deploy::update_fstab(runner, source, target, options)
 }
 
 fn prepare_mountpoint(runner: &Runner, path: &str) {
