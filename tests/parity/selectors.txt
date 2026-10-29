@@ -180,6 +180,7 @@ group-member-search
 group-member-user
 group-members-list
 group-name
+group-name-preview
 group-share-groups
 group-share-write-group
 groups-search
@@ -193,9 +194,14 @@ join-admin-pass
 join-admin-user
 join-domain-name
 join-ou
+kpi-card-storage
+kpi-cpu-text
 kpi-network-badges
 kpi-ram-bar
 kpi-ram-val
+kpi-storage-alert
+kpi-storage-alert-text
+kpi-storage-badge
 kpi-storage-bar
 kpi-storage-val
 logs-limit-select
@@ -291,6 +297,7 @@ stg-lvm-wrap
 stg-main-path
 stg-main-progress
 stg-op
+stg-overview-card
 stg-scrub-badge
 stg-scrub-info
 stg-size
