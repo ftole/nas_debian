@@ -58,6 +58,7 @@ const AUDIT_RULES: &str = "-w /etc/sudoers -p wa -k sudoers_changes
 -w /etc/sudoers.d/ -p wa -k sudoers_changes
 -w /etc/samba/smb.conf -p wa -k samba_config
 -w /etc/backup-credentials/ -p rwa -k backup_credentials
+-w /usr/local/bin/nas -p x -k nas_cli
 -w /usr/local/sbin/nas-terminal -p x -k nas_terminal
 ";
 
@@ -452,6 +453,98 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\
             Err(NasError::Invalid(problems.join("; ")))
         }
     }
+
+    /// Comprueba que el disco no sea el del sistema operativo antes de proceder con el despliegue.
+    pub fn ensure_not_os_disk(&self, runner: &nas_exec::Runner) -> NasResult<()> {
+        if self.disk == "LOCAL" || self.keep_data {
+            return Ok(());
+        }
+        if crate::helpers::storage::is_os_disk(runner, &self.disk)? {
+            return Err(NasError::Denied(format!(
+                "el disco {} contiene el sistema operativo y está protegido contra formateo",
+                self.disk
+            )));
+        }
+        Ok(())
+    }
+
+    /// Persiste el montaje de `/srv/nas` en `/etc/fstab` usando el UUID de la partición.
+    pub fn update_fstab(&self, runner: &nas_exec::Runner) -> NasResult<()> {
+        if self.disk == "LOCAL" {
+            return Ok(());
+        }
+        let Some(partition) = self.partition_path() else {
+            return Ok(());
+        };
+        update_fstab(runner, &partition, "/srv/nas", &self.mount_options())
+    }
+}
+
+/// Persiste una entrada de montaje en `/etc/fstab` usando el UUID si está disponible.
+pub fn update_fstab(
+    runner: &nas_exec::Runner,
+    source: &str,
+    target: &str,
+    options: &str,
+) -> NasResult<()> {
+    let fstab_path = std::path::Path::new("/etc/fstab");
+    if !fstab_path.exists() {
+        return Ok(());
+    }
+
+    let uuid_res = runner.run(
+        &nas_exec::CommandSpec::new("blkid")
+            .args(["-s", "UUID", "-o", "value", source])
+            .timeout(std::time::Duration::from_secs(10)),
+    );
+    let fstab_src = match uuid_res {
+        Ok(out) if out.is_success() && !out.stdout.trim().is_empty() => {
+            format!("UUID={}", out.stdout.trim())
+        }
+        _ => source.to_string(),
+    };
+
+    let content = std::fs::read_to_string(fstab_path).unwrap_or_default();
+    let mut new_lines: Vec<String> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('#') {
+                return true;
+            }
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            !(parts.len() >= 2 && parts[1] == target)
+        })
+        .map(ToString::to_string)
+        .collect();
+
+    new_lines.push(format!("{fstab_src} {target} auto {options} 0 0"));
+    let final_content = format!("{}\n", new_lines.join("\n"));
+    if std::fs::write(fstab_path, &final_content).is_err() {
+        let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
+        if std::fs::write(&staged, &final_content).is_ok() {
+            let res = runner.run(
+                &nas_exec::CommandSpec::new("install")
+                    .args([
+                        "-m",
+                        "0644",
+                        "-o",
+                        "root",
+                        "-g",
+                        "root",
+                        &staged.to_string_lossy(),
+                        "/etc/fstab",
+                    ])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(30)),
+            );
+            let _ = std::fs::remove_file(&staged);
+            if let Err(e) = res {
+                return Err(NasError::Denied(format!("no se pudo actualizar /etc/fstab: {e}")));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -655,11 +748,24 @@ mod artifact_tests {
         assert_eq!(audit.mode, 0o640);
         assert_eq!(artifacts.len(), 6);
         assert!(audit.content.contains("-w /etc/backup-credentials/ -p rwa"));
+        assert!(audit.content.contains("-w /usr/local/bin/nas -p x -k nas_cli"));
     }
 
     #[test]
     fn plan_incluye_recarga_de_reglas_de_auditoria() {
         let plan = params(ServerRole::Arquivos).plan();
         assert!(plan.iter().any(|step| step == &["augenrules", "--load"]));
+    }
+
+    #[test]
+    fn guarda_os_disk_permite_disco_local_o_keep_data() {
+        let runner = nas_exec::Runner::new();
+        let mut local = params(ServerRole::Arquivos);
+        local.disk = "LOCAL".into();
+        assert!(local.ensure_not_os_disk(&runner).is_ok());
+
+        let mut keep = params(ServerRole::Arquivos);
+        keep.keep_data = true;
+        assert!(keep.ensure_not_os_disk(&runner).is_ok());
     }
 }
