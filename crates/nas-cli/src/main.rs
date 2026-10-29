@@ -1403,7 +1403,8 @@ fn deploy_apply(
     let params = build_deploy_params(request)?;
     let runner = Runner::new();
 
-    if !params.keep_data {
+    if !params.keep_data && params.disk != "LOCAL" {
+        params.ensure_not_os_disk(&runner)?;
         let token = options.format_token.as_deref().unwrap_or_default();
         if token != "SI-FORMATEAR" {
             return Err(NasError::Denied(
@@ -1442,16 +1443,23 @@ fn deploy_apply(
 
     let plan = params.plan();
     let mut failure = None;
-    for step in &plan {
-        if let Err(error) = run_step(&runner, step, options.sudo, 900) {
-            failure = Some(error);
-            break;
+
+    if let Err(error) = write_artifacts(&runner, &params.all_artifacts(), options.sudo) {
+        failure = Some(NasError::Denied(error));
+    }
+
+    if failure.is_none() {
+        for step in &plan {
+            if let Err(error) = run_step(&runner, step, options.sudo, 900) {
+                failure = Some(error);
+                break;
+            }
         }
     }
 
     if failure.is_none() {
-        if let Err(error) = write_artifacts(&runner, &params.all_artifacts(), options.sudo) {
-            failure = Some(NasError::Denied(error));
+        if let Err(error) = params.update_fstab(&runner) {
+            failure = Some(error);
         }
     }
 
