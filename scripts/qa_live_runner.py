@@ -53,11 +53,14 @@ def log_substep(status: str, msg: str):
 
 
 def wait_modal_open(page, modal_id: str, timeout: int = 10000):
-    page.wait_for_selector(f"#{modal_id}.active", state="visible", timeout=timeout)
+    page.wait_for_selector(f"#{modal_id}.active, #{modal_id}.open", state="visible", timeout=timeout)
 
 
 def wait_modal_close(page, modal_id: str, timeout: int = 15000):
-    page.wait_for_selector(f"#{modal_id}", state="hidden", timeout=timeout)
+    try:
+        page.wait_for_selector(f"#{modal_id}:not(.active)", timeout=timeout)
+    except Exception:
+        page.wait_for_selector(f"#{modal_id}", state="hidden", timeout=timeout)
 
 
 def run_qa_live():
@@ -571,9 +574,9 @@ def run_qa_live():
 
         results["cleanup"] = cleanup_report
 
-        # Pausa final de 3 segundos para que el usuario observe el cierre ordenado
-        log_step("Finalización de la sesión de pruebas en vivo", "Cerrando ventana de Chromium...")
-        time.sleep(3.0)
+        # Pausa final de 8 segundos para que el usuario observe el cierre ordenado
+        log_step("Finalización de la sesión de pruebas en vivo", "Manteniendo ventana visible 8 segundos antes del cierre ordenado...")
+        time.sleep(8.0)
         browser.close()
 
     print("\n======================================================================")
