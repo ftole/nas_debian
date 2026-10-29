@@ -81,15 +81,23 @@ fn collect_linux(runner: &Runner) -> SystemMetrics {
             .unwrap_or_else(|_| "N/D".to_string())
     });
 
-    let cpu_model = std::fs::read_to_string("/proc/cpuinfo")
+    let (cpu_model, cores) = std::fs::read_to_string("/proc/cpuinfo")
         .ok()
-        .and_then(|raw| {
-            raw.lines()
+        .map(|raw| {
+            let model = raw
+                .lines()
                 .find(|line| line.starts_with("model name"))
                 .and_then(|line| line.split_once(':'))
                 .map(|(_, value)| value.trim().to_string())
+                .unwrap_or_else(|| "x86_64".to_string());
+            let count = raw
+                .lines()
+                .filter(|line| line.starts_with("processor"))
+                .count()
+                .max(1);
+            (model, count)
         })
-        .unwrap_or_else(|| "x86_64".to_string());
+        .unwrap_or_else(|| ("x86_64".to_string(), 1));
 
     let (ram_total_gb, ram_used_gb) = read_memory();
     let ram_usage_pct = if ram_total_gb > 0.0 {
@@ -102,7 +110,9 @@ fn collect_linux(runner: &Runner) -> SystemMetrics {
         .ok()
         .and_then(|raw| raw.split_whitespace().next().map(str::to_string))
         .and_then(|raw| raw.parse::<f64>().ok())
-        .map_or(0.0, |load| round2((load * 10.0).min(100.0)));
+        .map_or(0.0, |load| {
+            round2(((load / cores as f64) * 100.0).min(100.0))
+        });
 
     let timezone = read_trimmed("/etc/timezone").unwrap_or_else(|| "UTC".to_string());
 
