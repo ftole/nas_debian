@@ -58,9 +58,14 @@ def wait_modal_open(page, modal_id: str, timeout: int = 10000):
 
 def wait_modal_close(page, modal_id: str, timeout: int = 15000):
     try:
-        page.wait_for_selector(f"#{modal_id}:not(.active)", timeout=timeout)
-    except Exception:
-        page.wait_for_selector(f"#{modal_id}", state="hidden", timeout=timeout)
+        page.wait_for_selector(f"#{modal_id}:not(.active)", state="attached", timeout=timeout)
+    except Exception as e:
+        try:
+            page.evaluate(f"closeModal('{modal_id}')")
+            time.sleep(0.5)
+        except Exception:
+            pass
+        raise e
 
 
 def run_qa_live():
@@ -142,6 +147,21 @@ def run_qa_live():
             hostname = page.inner_text("#masthead-hostname").strip()
             log_substep("OK", f"Sesión activa con usuario '{user_pill}' en host '{hostname}'")
             results["login"] = {"status": "SUCCESS", "user": user_pill, "hostname": hostname}
+
+            # Pre-limpieza defensiva para garantizar entorno limpio
+            log_substep("INFO", "Asegurando estado limpio de prueba previo...")
+            try:
+                page.evaluate(f"""
+                    async () => {{
+                        try {{ await apiFetch('/api/shares/delete', {{ method: 'POST', body: JSON.stringify({{ name: '{TEST_SHARE}' }}) }}); }} catch(e){{}}
+                        try {{ await apiFetch('/api/users/update', {{ method: 'POST', body: JSON.stringify({{ action: 'delete', username: '{TEST_USER}' }}) }}); }} catch(e){{}}
+                        try {{ await apiFetch('/api/groups/delete', {{ method: 'POST', body: JSON.stringify({{ name: '{TEST_GROUP}' }}) }}); }} catch(e){{}}
+                        try {{ await apiFetch('/api/files/delete', {{ method: 'POST', body: JSON.stringify({{ path: '{TEST_FOLDER}', permanent: true }}) }}); }} catch(e){{}}
+                    }}
+                """)
+                time.sleep(1.0)
+            except Exception:
+                pass
         except Exception as e:
             log_substep("FAIL", f"Fallo en inicio de sesión: {e}")
             results["login"] = {"status": "FAILED", "error": str(e)}
