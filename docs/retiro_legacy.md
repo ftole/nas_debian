@@ -161,14 +161,17 @@ Implementado y probado en Rust:
 
 | Capacidad | Estado |
 | :--- | :--- |
-| Plan y ejecución de `nas deploy` (particionado, mkfs, montaje, grupos, `fstab`) | ✅ |
-| Artefactos del sistema: `/etc/nas/role`, sysctl, udev readahead, logrotate, cron de scrub, reglas auditd | ✅ (escritura con permisos) |
+| Plan y ejecución de `nas deploy` (particionado, mkfs, montaje, grupos, `fstab` con UUID) | ✅ (secuenciación de artefactos previa a recargas del kernel) |
+| Guarda estricta de protección del disco del SO (`is_os_disk`) | ✅ (bloquea formateo aun con flags forzados) |
+| Artefactos del sistema: `/etc/nas/role`, sysctl, udev readahead, logrotate, cron de scrub, reglas auditd | ✅ (incluye regla auditd para `/usr/local/bin/nas`) |
+| Bootstrap de instalación y certificados TLS para Nginx | ✅ (paquetes base Debian 13 y generación automática de certificado) |
+| Hardening de privilegios en `/etc/sudoers.d/nas-web-rust` | ✅ (`systemd-run` restringido sin comodín libre) |
 | `nas uninstall` del panel | ✅ |
 | `nas uninstall --scope os` (ajustes de kernel/udev/rotación/auditoría) | ✅ plan y ejecución |
 | `nas update` verify/apply/sign | ✅ |
-| Samba (`smb.conf`, usuarios, dominio AD), nginx+TLS, AIDE y UFW dentro de `nas deploy` | ⏳ Pendiente |
+| Samba (`smb.conf`, usuarios, dominio AD), nginx+TLS, AIDE y UFW integrados en un único flujo de primer arranque | ⏳ En consolidación |
 | Validación en VM limpia extremo a extremo | ⏳ Pendiente (bloquea retirar `src/core`) |
 
 Mientras esos dos últimos puntos no estén verdes, `src/core/{deploy,uninstall,updater}.sh`,
-`src/lib/` y los BATS siguen vigentes: `nas deploy` aún no aprovisiona Samba, panel,
-TLS ni seguridad del SO con paridad completa.
+`src/lib/` y los BATS siguen vigentes: `nas deploy` complementa y aprovisiona con paridad
+gradual hacia el reemplazo total del motor Bash.
