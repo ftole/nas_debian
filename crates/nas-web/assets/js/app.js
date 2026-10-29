@@ -510,9 +510,9 @@ async function refreshDashboardMetrics() {
       const netBadges = document.getElementById('kpi-network-badges');
       if (netBadges) {
         netBadges.innerHTML = d.services
-          .filter(s => ['smbd', 'wsdd2', 'nginx'].includes(s.service) || (s.service && s.service.includes('fpm')))
+          .filter(s => ['smbd', 'wsdd2', 'nginx', 'nas-web'].includes(s.service) || (s.service && s.service.includes('fpm')))
           .map(s => {
-            const label = (s.service && s.service.includes('fpm')) ? 'php-fpm' : s.service;
+            const label = s.service === 'nas-web' ? 'nas-web (Rust)' : ((s.service && s.service.includes('fpm')) ? 'php-fpm' : s.service);
             const cls = s.active ? 'badge-ok' : 'badge-danger';
             const statusTxt = s.active ? ((s.service && s.service.includes('fpm')) ? 'ondemand' : 'OK') : 'OFF';
             return `<span class="badge ${cls}">${escapeHtml(label)} ${statusTxt}</span>`;
@@ -3935,9 +3935,9 @@ async function startSystemUpdate() {
   const phases = [
     { pct: '15%', text: 'Fase 1/5: Respaldo preventivo del estado actual en /tmp/backup_nas_*' },
     { pct: '35%', text: 'Fase 2/5: Avance rápido y verificación de firmas criptográficas GPG' },
-    { pct: '55%', text: 'Fase 3/5: Validación de sintaxis de scripts Bash y código PHP' },
-    { pct: '75%', text: 'Fase 4/5: Sincronización de /var/www/nas-web y sudoers' },
-    { pct: '90%', text: 'Fase 5/5: Recarga de servicios (Nginx, PHP-FPM, Samba)' },
+    { pct: '55%', text: 'Fase 3/5: Validación de sintaxis de scripts Bash y código Rust' },
+    { pct: '75%', text: 'Fase 4/5: Sincronización segura de binarios y reglas sudoers' },
+    { pct: '90%', text: 'Fase 5/5: Recarga de servicios (Nginx, nas-web, Samba)' },
   ];
 
   let phaseIndex = 0;
@@ -4056,8 +4056,8 @@ async function loadApplications() {
     if (bodyWeb) {
       bodyWeb.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Intérprete:</strong> PHP <code>v${escapeHtml(a.web.php_version)}</code> | <strong>Servidor:</strong> <code>Nginx-light</code></div>
-          <div><strong>Pool de procesos:</strong> <code>pm = ${escapeHtml(a.web.pool_mode)}</code> (gestión bajo demanda)</div>
+          <div><strong>Plataforma:</strong> <code>${escapeHtml(a.web.php_version)}</code> | <strong>Servidor:</strong> <code>Nginx-light</code></div>
+          <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.pool_mode)}</code> (alto rendimiento)</div>
           <div><strong>Consumo de memoria:</strong> <span class="badge badge-teal">${a.web.memory_mb} MB RAM</span> (~0 MB en reposo)</div>
         </div>
       `;
@@ -4239,7 +4239,7 @@ async function reloadSambaService(btn) {
 }
 
 /**
- * Recarga el servicio PHP-FPM bajo demanda para aplicar cambios de configuración.
+ * Recarga el servicio web nativo nas-web para aplicar cambios de configuración.
  */
 async function reloadPhpService(btn) {
   const targetBtn = btn || document.getElementById('btn-reload-php');
@@ -4248,7 +4248,7 @@ async function reloadPhpService(btn) {
     targetBtn.classList.add('is-loading');
   }
   try {
-    await manageServiceAction('php8.4-fpm', 'reload');
+    await manageServiceAction('nas-web', 'restart');
     await loadApplications();
   } finally {
     if (targetBtn) {
