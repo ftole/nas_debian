@@ -84,37 +84,124 @@ pub fn task_cron(id: &str) -> String {
         .unwrap_or_else(|| "0 2 * * *".to_string())
 }
 
+/// Comprueba si existe físicamente al menos un snapshot en el disco de destino.
+fn has_physical_snapshot(dest_root: &str, id: &str) -> bool {
+    let dest_dir = std::path::Path::new(dest_root).join(id);
+    let Ok(entries) = std::fs::read_dir(&dest_dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .map(|name| name.starts_with("snapshot_"))
+            .unwrap_or(false)
+    })
+}
+
+/// Clasifica el estado de una tarea de respaldo evaluando hasta 50 líneas del log.
+pub fn classify_backup_status(
+    running: bool,
+    log_content: Option<&str>,
+    dest_root: &str,
+    id: &str,
+) -> &'static str {
+    if running {
+        return "En curso";
+    }
+
+    let Some(text) = log_content else {
+        return "PENDIENTE";
+    };
+
+    let all_lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if all_lines.is_empty() {
+        return "PENDIENTE";
+    }
+
+    let recent = if all_lines.len() > 50 {
+        &all_lines[all_lines.len() - 50..]
+    } else {
+        &all_lines[..]
+    };
+
+    let mut has_error = false;
+    let mut has_success = false;
+
+    for line in recent {
+        let upper = line.to_uppercase();
+        if upper.contains("ERROR")
+            || upper.contains("FALLO")
+            || upper.contains("FAILED")
+            || upper.contains("ABORTADO")
+            || upper.contains("OMITIDO")
+            || upper.contains("DESCARTA EL SNAPSHOT")
+        {
+            has_error = true;
+        }
+
+        for needle in ["CODIGO DE SALIDA ", "CÓDIGO DE SALIDA ", "CODIGO ", "CÓDIGO "] {
+            if let Some(pos) = upper.find(needle) {
+                let rest = &upper[pos + needle.len()..];
+                let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(code) = num_str.parse::<i32>() {
+                    if code != 0 {
+                        has_error = true;
+                    }
+                }
+            }
+        }
+
+        if upper.contains("SNAPSHOT COMPLETADO:") || upper.contains("BACKUP_COMPLETED") {
+            has_success = true;
+        }
+    }
+
+    if has_error {
+        "Error"
+    } else if has_success {
+        if has_physical_snapshot(dest_root, id) {
+            "OK"
+        } else {
+            "Error"
+        }
+    } else {
+        "Error"
+    }
+}
+
 /// Proyección plana de una tarea de respaldo.
 pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
     let id = &task.id;
     let cron = task_cron(id);
     let log_path = format!("{}/backup_{}.log", task.log_dir, id);
-    let last_line = std::fs::read_to_string(&log_path)
-        .ok()
+    let running = is_backup_task_running(id);
+    let log_content = std::fs::read_to_string(&log_path).ok();
+
+    let last_run = log_content
+        .as_deref()
         .and_then(|text| {
             text.lines()
                 .rev()
-                .find(|line| !line.trim().is_empty())
-                .map(str::to_string)
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .find_map(|line| {
+                    line.strip_prefix('[')
+                        .and_then(|rest| rest.split(']').next())
+                        .map(str::to_string)
+                })
         })
         .unwrap_or_default();
 
-    let last_run = last_line
-        .strip_prefix('[')
-        .and_then(|rest| rest.split(']').next())
-        .map(str::to_string)
-        .unwrap_or_default();
-    let last_status = if last_line.is_empty() {
-        "PENDIENTE"
-    } else if last_line.contains("abortado")
-        || last_line.contains("omitido")
-        || last_line.contains("ERROR")
-        || last_line.contains("FALLO")
-    {
-        "FAILED"
-    } else {
-        "OK"
-    };
+    let last_status = classify_backup_status(
+        running,
+        log_content.as_deref(),
+        &task.destination_root,
+        id,
+    );
 
     let (protocol, source) = match task.kind {
         nas_engine::tasks::SourceKind::Cifs => (
@@ -143,7 +230,6 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         .and_then(|rest| rest.split('/').next())
         .filter(|unit| !unit.is_empty())
         .unwrap_or("principal");
-    let running = is_backup_task_running(id);
 
     json!({
         "id": id,
@@ -401,5 +487,38 @@ mod tests {
         assert_eq!(row["source"], "//10.0.0.5/DATOS");
         assert_eq!(row["retention"], 7);
         assert!(row["cron_desc"].is_string());
+    }
+
+    #[test]
+    fn clasifica_estados_de_respaldo() {
+        use super::classify_backup_status;
+        assert_eq!(classify_backup_status(true, None, "/tmp", "t1"), "En curso");
+        assert_eq!(classify_backup_status(false, None, "/tmp", "t1"), "PENDIENTE");
+        assert_eq!(classify_backup_status(false, Some(""), "/tmp", "t1"), "PENDIENTE");
+        assert_eq!(classify_backup_status(false, Some("   \n\n  "), "/tmp", "t1"), "PENDIENTE");
+
+        // Error explícito en log
+        let err_log = "[2026-10-29 10:00:00] [t1] ERROR: se descarta el snapshot parcial (codigo de salida 1)";
+        assert_eq!(classify_backup_status(false, Some(err_log), "/tmp", "t1"), "Error");
+
+        // Abortado
+        let abort_log = "[2026-10-29 10:00:00] [t1] === ABORTADO: espacio libre insuficiente ===";
+        assert_eq!(classify_backup_status(false, Some(abort_log), "/tmp", "t1"), "Error");
+
+        // Fallo de replicación rsync
+        let rsync_err = "[2026-10-29 10:00:00] [t1] ERROR: en replicación rsync (código 12)";
+        assert_eq!(classify_backup_status(false, Some(rsync_err), "/tmp", "t1"), "Error");
+
+        // Éxito afirmado pero sin directorio snapshot_* en disco -> Error
+        let ok_log = "[2026-10-29 10:00:00] [t1] snapshot completado: /tmp/snapshot_2026";
+        assert_eq!(classify_backup_status(false, Some(ok_log), "/tmp/nonexistent_backup_dir", "t1"), "Error");
+
+        // Éxito afirmado con snapshot físico en disco -> OK
+        let tmp_root = std::env::temp_dir().join(format!("test_bkp_ok_{}", std::process::id()));
+        let task_dir = tmp_root.join("t1");
+        let snap_dir = task_dir.join("snapshot_2026-10-29_100000");
+        std::fs::create_dir_all(&snap_dir).expect("snap_dir");
+        assert_eq!(classify_backup_status(false, Some(ok_log), tmp_root.to_str().unwrap(), "t1"), "OK");
+        let _ = std::fs::remove_dir_all(&tmp_root);
     }
 }
