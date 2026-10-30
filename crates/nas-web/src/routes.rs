@@ -1146,7 +1146,20 @@ pub struct DomainJoinBody {
 
 fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Value, NasError> {
     let runner = Runner::new();
-    let overview = nas_engine::storage::overview_for(paths, &runner)?;
+    let overview = nas_engine::storage::overview_for(paths, &runner).unwrap_or_else(|_| {
+        nas_engine::storage::StorageOverview {
+            path: paths.data_root.to_string_lossy().to_string(),
+            filesystem: "no montado".to_string(),
+            device: None,
+            total_gb: 0.0,
+            used_gb: 0.0,
+            free_gb: 0.0,
+            usage_percent: 0.0,
+            is_btrfs: false,
+            supports_trim: false,
+            device_type: "Desconocido".to_string(),
+        }
+    });
     let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
     let disks: Vec<serde_json::Value> = disks
         .iter()
