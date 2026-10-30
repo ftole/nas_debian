@@ -34,7 +34,7 @@
 > [!IMPORTANT]
 > **Estado de la migración (fase F7 completada):** la plataforma activa es **Rust**
 > (`crates/*`). El panel PHP, el asistente `whiptail`, el CLI PHP y las utilidades
-> Python se movieron a `legacy/` y se retiraron del servidor (pool PHP, sudoers y
+> Python fueron retirados en su totalidad del proyecto y del servidor (pool PHP, sudoers y
 > `/var/www/nas-web`). Los assets del panel (`app.js`, CSS, vendor) viven ahora en
 > `crates/nas-web/assets/` y se sirven byte a byte desde el binario.
 
@@ -54,14 +54,8 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
-| `legacy/modules/*.sh` | Bash (TUI `whiptail`) | Módulos del asistente retirado en F7 (solo referencia histórica). |
-| `legacy/web/` | Web (PHP 8, retirado) | Panel PHP original conservado para comparación y rollback. El panel activo es `crates/nas-web`, que sirve las mismas vistas y assets desde el binario. |
-| `tests/test_cli.bats` | BATS | Pruebas unitarias de comandos y subcomandos de `nas-cli` (ANSI y `--json`). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `legacy/` | Material retirado | Panel PHP original, asistente `whiptail`, CLI PHP, utilidades Python y sus pruebas (conservados solo para rollback/consulta). |
-| `tests/test_remote_runner.py` | pytest | Pruebas unitarias de parsing .env, política accept-new de claves de host y ejecución remota. |
-| `tests/test_web.php` | PHP CLI | Pruebas unitarias de servicios web MVC PHP 8, SQLite, Terminal, Archivos y Dominio. |
 | `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas GPG, problemas/soluciones y diagramas SVG. |
 | `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
 | `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP (con `php-sqlite3 php-zip`). |
