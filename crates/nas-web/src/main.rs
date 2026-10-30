@@ -9,6 +9,19 @@ use sha2::{Digest, Sha256};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("nas-web {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "nas-web {}\nServidor web del panel NAS Debian 13\n\nUSO:\n    nas-web\n\nOPCIONES:\n    -h, --help       Imprime esta ayuda\n    -V, --version    Imprime la versión",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
+
     let bind = std::env::var("NAS_WEB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let user = std::env::var("NAS_WEB_USER").unwrap_or_else(|_| "admin".to_string());
 
