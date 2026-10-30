@@ -55,6 +55,8 @@ while [ $# -gt 0 ]; do
                 "$BIN_DIR/nas" uninstall --scope os --yes 2>/dev/null || true
             fi
             systemctl disable --now nas-web.service 2>/dev/null || true
+            rm -f /etc/systemd/system/nas-web.service /etc/sudoers.d/nas-web-rust /etc/nginx/sites-enabled/nas-web /etc/nginx/sites-available/nas-web 2>/dev/null || true
+            systemctl daemon-reload 2>/dev/null || true
             rm -f "$BIN_DIR/nas" "$BIN_DIR/nas-web" "$BIN_DIR/nas-tui" "$BIN_DIR/nasctl" "$BIN_DIR/nas-dev" "$BIN_DIR/nas-cli"
             rm -rf "$INSTALL_DIR"
             echo -e "${C_GREEN}✔ Plataforma desinstalada.${C_RESET}"
@@ -104,7 +106,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando herramientas base y de compilación..."
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl ca-certificates \
-        build-essential pkg-config btrfs-progs samba samba-vfs-modules cifs-utils rsync \
+        build-essential pkg-config acl openssl btrfs-progs samba samba-vfs-modules cifs-utils rsync \
         nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
 
     if ! command -v cargo >/dev/null 2>&1; then
@@ -164,7 +166,7 @@ else
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando dependencias del sistema operativo..."
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl ca-certificates tar gzip \
-        btrfs-progs samba samba-vfs-modules cifs-utils rsync \
+        acl openssl btrfs-progs samba samba-vfs-modules cifs-utils rsync \
         nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
 
     echo -e " ${C_BOLD}[2/5]${C_RESET} Consultando release oficial de GitHub..."
@@ -236,7 +238,8 @@ else
 
     echo -e " ${C_BOLD}[3/5]${C_RESET} Desempaquetando archivos en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
     mkdir -p "$INSTALL_DIR"
-    tar -xzf "$TMP_DIR/$PKG_FILE" -C "$INSTALL_DIR" --strip-components=1
+    tar --no-same-owner -xzf "$TMP_DIR/$PKG_FILE" -C "$INSTALL_DIR" --strip-components=1
+    chown -R root:root "$INSTALL_DIR" 2>/dev/null || true
 
     echo -e " ${C_BOLD}[4/5]${C_RESET} Instalando binarios y configurando servicios..."
     install -d -m 0755 "$BIN_DIR"
