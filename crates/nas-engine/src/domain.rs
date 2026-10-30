@@ -6,6 +6,8 @@ use serde::Serialize;
 /// Estado de la unión al dominio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DomainStatus {
+    /// Indica si las herramientas de dominio (`realmd`) están disponibles.
+    pub available: bool,
     /// Indica si el equipo está unido.
     pub joined: bool,
     /// Realm detectado.
@@ -70,6 +72,7 @@ pub fn parse_realm_list(output: &str) -> DomainStatus {
     }
 
     DomainStatus {
+        available: true,
         joined,
         realm,
         domain,
@@ -80,18 +83,26 @@ pub fn parse_realm_list(output: &str) -> DomainStatus {
 
 /// Consulta el estado del dominio en el servidor.
 pub fn status(runner: &Runner) -> DomainStatus {
-    let mut parsed = runner
-        .run(&CommandSpec::new("realm").arg("list"))
-        .ok()
-        .filter(|output| output.is_success())
-        .map(|output| parse_realm_list(&output.stdout))
-        .unwrap_or(DomainStatus {
+    let realm_res = runner.run(&CommandSpec::new("realm").arg("list"));
+    let mut parsed = match realm_res {
+        Ok(output) if output.is_success() => parse_realm_list(&output.stdout),
+        Ok(output) => {
+            let mut s = parse_realm_list(&output.stdout);
+            s.available = true;
+            s
+        }
+        Err(_) => DomainStatus {
+            available: false,
             joined: false,
             realm: None,
             domain: None,
-            details: Vec::new(),
+            details: vec![
+                "Herramientas de Active Directory (realmd/adcli/sssd) no disponibles."
+                    .to_string(),
+            ],
             sssd_active: false,
-        });
+        },
+    };
 
     parsed.sssd_active = runner
         .run(&CommandSpec::new("systemctl").args(["is-active", "sssd"]))
