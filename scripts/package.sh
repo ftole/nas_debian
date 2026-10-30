@@ -58,7 +58,7 @@ done
 # 5. Generar archivo comprimido .tar.gz
 TAR_FILE="nas_debian-${VERSION}.tar.gz"
 TAR_PATH="$OUT_DIR/$TAR_FILE"
-tar -czf "$TAR_PATH" -C "$TMP_ROOT" "$PKG_NAME"
+tar --owner=0 --group=0 --numeric-owner -czf "$TAR_PATH" -C "$TMP_ROOT" "$PKG_NAME"
 
 # 6. Calcular suma criptográfica SHA-256
 SHA_FILE="${TAR_FILE}.sha256"
