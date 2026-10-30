@@ -149,6 +149,34 @@ RETENTION=2
 }
 
 #[test]
+fn deploy_plan_con_password_genera_plan_valido() {
+    let output = nas()
+        .args([
+            "deploy",
+            "plan",
+            "--disk",
+            "LOCAL",
+            "--workgroup",
+            "WORKGROUP",
+            "--netbios",
+            "SRV-NAS",
+            "--admin",
+            "administrador",
+            "--password",
+            "ClaveSegura123!",
+            "--role",
+            "ARCHIVOS",
+        ])
+        .output()
+        .expect("ejecuta");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SRV-NAS"));
+    assert!(stdout.contains("ClaveSegura123!"));
+}
+
+#[test]
 fn users_list_json_es_estable() {
     let output = nas()
         .args(["--json", "users", "list"])
