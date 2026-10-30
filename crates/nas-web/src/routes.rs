@@ -3004,6 +3004,15 @@ pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) ->
         .db()
         .append_audit(&user, "system_reboot", "host", "REQUESTED", "");
 
+    if std::env::var("NAS_TEST_NO_REBOOT").as_deref() == Ok("1")
+        || std::env::var("CARGO_MANIFEST_DIR").is_ok()
+    {
+        return axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+            "Reinicio programado",
+        ))
+        .into_response();
+    }
+
     match tokio::task::spawn_blocking(|| {
         run_json(
             nas_exec::CommandSpec::new("systemd-run")
