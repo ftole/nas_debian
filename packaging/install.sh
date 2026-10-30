@@ -80,6 +80,10 @@ fi
 
 install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" 2>/dev/null || true
 install -d -m 0755 /etc/nas
+if [ -f /etc/nas/role ]; then
+    chmod 0644 /etc/nas/role 2>/dev/null || true
+    chown root:root /etc/nas/role 2>/dev/null || true
+fi
 
 echo "[3/7] Configurando variables de entorno"
 if [ ! -f "$ENV_FILE" ]; then
@@ -146,6 +150,7 @@ echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
 systemctl daemon-reload
 systemctl enable --now nas-web.service
+systemctl restart nas-web.service
 systemctl --no-pager --lines=0 status nas-web.service || true
 
 echo "[6/7] Instalando reglas sudo acotadas para el panel"
