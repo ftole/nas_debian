@@ -3,7 +3,9 @@
 use std::process::Command;
 
 fn nas() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_nas"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_nas"));
+    cmd.env("NAS_ESCAPED", "1");
+    cmd
 }
 
 fn json_of(output: &std::process::Output) -> serde_json::Value {
@@ -29,13 +31,23 @@ fn status_json_respeta_el_contrato() {
 
 #[test]
 fn network_json_expone_puertos_e_interfaces() {
-    let output = nas().args(["--json", "network"]).output().expect("ejecuta");
+    let dir = fixture_dir("network");
+    let smb_conf = dir.join("smb.conf");
+    std::fs::write(&smb_conf, "[global]\n   server min protocol = SMB2_02\n").expect("smb.conf");
+
+    let output = nas()
+        .env("NAS_SAMBA_CONF", &smb_conf)
+        .args(["--json", "network"])
+        .output()
+        .expect("ejecuta");
     let payload = json_of(&output);
 
     assert_eq!(payload["success"], true);
     assert!(payload["data"]["interfaces"].is_array());
     assert!(payload["data"]["listening"].is_array());
     assert!(payload["data"]["samba"]["min_protocol"].is_string());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
