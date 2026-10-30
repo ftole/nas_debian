@@ -97,8 +97,7 @@ pub fn status(runner: &Runner) -> DomainStatus {
             realm: None,
             domain: None,
             details: vec![
-                "Herramientas de Active Directory (realmd/adcli/sssd) no disponibles."
-                    .to_string(),
+                "Herramientas de Active Directory (realmd/adcli/sssd) no disponibles.".to_string(),
             ],
             sssd_active: false,
         },
