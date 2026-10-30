@@ -318,6 +318,22 @@ fn read_stdin_line() -> String {
     buffer.trim_end_matches(['\r', '\n']).to_string()
 }
 
+#[cfg(unix)]
+fn is_root() -> bool {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("Uid:") {
+                let mut parts = rest.split_whitespace();
+                let _real = parts.next();
+                if let Some(euid) = parts.next() {
+                    return euid == "0";
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Ejecuta una acción de helper.
 pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
     #[cfg(unix)]
@@ -335,16 +351,19 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
 
         if needs_escape
             && std::env::var("NAS_ESCAPED").as_deref() != Ok("1")
+            && is_root()
             && Path::new("/run/systemd/system").exists()
             && Path::new("/run/systemd/private").exists()
         {
+            let exe =
+                std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/nas"));
             let mut cmd = std::process::Command::new("systemd-run");
             cmd.arg("--quiet")
                 .arg("--pipe")
                 .arg("--wait")
                 .arg("--collect")
                 .arg("--setenv=NAS_ESCAPED=1")
-                .arg("/usr/local/bin/nas");
+                .arg(exe);
             cmd.args(std::env::args().skip(1));
             if let Ok(mut child) = cmd.spawn() {
                 if let Ok(status) = child.wait() {
