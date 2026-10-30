@@ -288,10 +288,7 @@ impl RemoteReleaseInfo {
 }
 
 /// Consulta la release más reciente desde la API de GitHub usando `curl`.
-pub fn fetch_latest_release(
-    runner: &nas_exec::Runner,
-    repo: &str,
-) -> NasResult<RemoteReleaseInfo> {
+pub fn fetch_latest_release(runner: &nas_exec::Runner, repo: &str) -> NasResult<RemoteReleaseInfo> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let output = runner.run(
         &nas_exec::CommandSpec::new("curl")
@@ -371,7 +368,9 @@ pub fn download_and_verify_release(
         NasError::Invalid("la release de GitHub no incluye un manifiesto .json firmado".into())
     })?;
     let artifact_url = release.artifact_url.as_deref().ok_or_else(|| {
-        NasError::Invalid("la release de GitHub no incluye un paquete .tar.gz de distribución".into())
+        NasError::Invalid(
+            "la release de GitHub no incluye un paquete .tar.gz de distribución".into(),
+        )
     })?;
 
     let tag_clean = release.tag_name.trim_start_matches('v');
