@@ -52,6 +52,7 @@ fn paths_for(dir: &Path) -> NasPaths {
     paths.samba_conf = dir.join("smb.conf");
     paths.role_file = dir.join("role");
     paths.data_root = dir.join("data");
+    let _ = std::fs::create_dir_all(&paths.data_root);
     std::fs::write(&paths.samba_conf, SMB_CONF).expect("smb.conf");
     std::fs::write(&paths.role_file, "ARCHIVOS\n").expect("role");
     paths
