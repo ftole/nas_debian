@@ -43,6 +43,8 @@ install -d -m 0755 "$PREFIX"
 for bin in nas nas-web nas-tui nasctl nas-dev; do
     install -m 0755 "$BUILD_DIR/$bin" "$PREFIX/$bin"
 done
+rm -f "$PREFIX/nas-cli"
+ln -sf "$PREFIX/nas" "$PREFIX/nas-cli"
 
 echo "[2/7] Creando usuario de servicio y directorios de estado"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
