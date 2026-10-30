@@ -123,6 +123,12 @@ enum UsersAction {
 enum UpdateAction {
     /// Muestra el estado del actualizador y versión instalada.
     Status,
+    /// Comprueba si existe una versión más reciente en GitHub Releases.
+    Check {
+        /// Repositorio en GitHub (`propietario/repo`).
+        #[arg(long, default_value = "ftole/nas_debian")]
+        repo: String,
+    },
     /// Verifica SHA-256 y firma Ed25519 del manifiesto.
     Verify {
         /// Manifiesto JSON de la release.
@@ -136,20 +142,23 @@ enum UpdateAction {
     },
     /// Aplica la actualización verificada (requiere --yes).
     Apply {
-        /// Manifiesto JSON de la release.
-        manifest: PathBuf,
-        /// Artefacto descargado.
+        /// Manifiesto JSON de la release (opcional si se descarga de GitHub).
+        manifest: Option<PathBuf>,
+        /// Artefacto descargado (opcional si se descarga de GitHub).
         #[arg(long)]
-        artifact: PathBuf,
+        artifact: Option<PathBuf>,
+        /// Repositorio en GitHub (`propietario/repo`) si se descarga por red.
+        #[arg(long, default_value = "ftole/nas_debian")]
+        repo: String,
         /// Raíz del despliegue.
         #[arg(long, default_value = "/opt/nas_debian")]
         root: String,
         /// Versión instalada actualmente (para el rollback).
         #[arg(long)]
         previous: Option<String>,
-        /// Clave pública Ed25519 en hexadecimal.
+        /// Clave pública Ed25519 en hexadecimal o ruta al archivo pubkey.
         #[arg(long)]
-        pubkey: String,
+        pubkey: Option<String>,
         /// Confirma la ejecución real.
         #[arg(long)]
         yes: bool,
@@ -370,6 +379,7 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         },
         Command::Update { action } => match action {
             None | Some(UpdateAction::Status) => update_status(cli.json),
+            Some(UpdateAction::Check { repo }) => update_check(&repo, cli.json),
             Some(UpdateAction::Verify {
                 manifest,
                 artifact,
@@ -378,19 +388,21 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             Some(UpdateAction::Apply {
                 manifest,
                 artifact,
+                repo,
                 root,
                 previous,
                 pubkey,
                 yes,
                 sudo,
-            }) => update_apply(
-                UpdateApplyOptions {
-                    manifest_path: &manifest,
-                    artifact: &artifact,
-                    root: &root,
-                    previous: previous.as_deref(),
-                    public_key: &pubkey,
-                    confirmed: yes,
+            }) => update_apply_dispatch(
+                UpdateDispatchArgs {
+                    manifest,
+                    artifact,
+                    repo,
+                    root,
+                    previous,
+                    pubkey,
+                    yes,
                     sudo,
                 },
                 cli.json,
@@ -979,6 +991,44 @@ fn update_status(json: bool) -> NasResult<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn update_check(repo: &str, json: bool) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let current_version = env!("CARGO_PKG_VERSION");
+    let release = nas_engine::fetch_latest_release(&runner, repo)?;
+
+    let clean_tag = release.tag_name.trim_start_matches('v');
+    let has_update = clean_tag != current_version;
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({
+                "installed_version": current_version,
+                "latest_release": release.tag_name,
+                "release_name": release.name,
+                "has_update": has_update,
+                "manifest_url": release.manifest_url,
+                "artifact_url": release.artifact_url,
+            }),
+            "Consulta de releases de GitHub",
+        ))?;
+    } else {
+        println!("Consulta de releases oficiales (GitHub: {repo}):");
+        println!("  Versión instalada : v{current_version}");
+        println!("  Última release    : {}", release.tag_name);
+        if let Some(name) = &release.name {
+            println!("  Título            : {name}");
+        }
+        if has_update {
+            println!("  Estado            : ¡Nueva versión disponible!");
+            println!("  Para actualizar   : sudo nas update apply --repo {repo} --yes");
+        } else {
+            println!("  Estado            : El sistema se encuentra en la versión más reciente.");
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
 fn update_sign(
     manifest_path: &Path,
     key_path: &Path,
@@ -1560,6 +1610,100 @@ fn deploy_apply(
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+struct UpdateDispatchArgs {
+    manifest: Option<PathBuf>,
+    artifact: Option<PathBuf>,
+    repo: String,
+    root: String,
+    previous: Option<String>,
+    pubkey: Option<String>,
+    yes: bool,
+    sudo: bool,
+}
+
+fn resolve_pubkey(specified: Option<&str>) -> NasResult<String> {
+    if let Some(key) = specified {
+        let trimmed = key.trim();
+        let path = Path::new(trimmed);
+        if path.is_file() {
+            let content = std::fs::read_to_string(path).map_err(|e| NasError::io(path, e))?;
+            return Ok(content.trim().to_string());
+        }
+        return Ok(trimmed.to_string());
+    }
+    if let Ok(env_key) = std::env::var("NAS_RELEASE_PUBKEY") {
+        let trimmed = env_key.trim();
+        let path = Path::new(trimmed);
+        if path.is_file() {
+            let content = std::fs::read_to_string(path).map_err(|e| NasError::io(path, e))?;
+            return Ok(content.trim().to_string());
+        }
+        return Ok(trimmed.to_string());
+    }
+    for candidate in [
+        "/etc/nas/release.pub",
+        "/opt/nas_debian/packaging/release.pub",
+    ] {
+        let p = Path::new(candidate);
+        if p.is_file() {
+            if let Ok(c) = std::fs::read_to_string(p) {
+                let trimmed = c.trim();
+                if !trimmed.is_empty() {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+    }
+    Err(NasError::Denied(
+        "clave pública Ed25519 obligatoria para verificar la actualización (--pubkey)".into(),
+    ))
+}
+
+fn update_apply_dispatch(args: UpdateDispatchArgs, json: bool) -> NasResult<ExitCode> {
+    let resolved_key = resolve_pubkey(args.pubkey.as_deref())?;
+
+    let (manifest_path, artifact_path) = match (args.manifest, args.artifact) {
+        (Some(m), Some(a)) => (m, a),
+        _ => {
+            let runner = Runner::new();
+            let cache_dir = Path::new("/var/cache/nas/updates");
+            if !json {
+                println!(
+                    "Consultando último release desde GitHub ({}) ...",
+                    args.repo
+                );
+            }
+            let release_info = nas_engine::fetch_latest_release(&runner, &args.repo)?;
+            if !json {
+                println!(
+                    "Descargando y verificando release {} ...",
+                    release_info.tag_name
+                );
+            }
+            let (_manifest, m_path, a_path) = nas_engine::download_and_verify_release(
+                &runner,
+                &release_info,
+                cache_dir,
+                &resolved_key,
+            )?;
+            (m_path, a_path)
+        }
+    };
+
+    update_apply(
+        UpdateApplyOptions {
+            manifest_path: &manifest_path,
+            artifact: &artifact_path,
+            root: &args.root,
+            previous: args.previous.as_deref(),
+            public_key: &resolved_key,
+            confirmed: args.yes,
+            sudo: args.sudo,
+        },
+        json,
+    )
 }
 
 struct UpdateApplyOptions<'a> {
