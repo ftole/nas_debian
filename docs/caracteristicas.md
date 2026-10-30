@@ -87,26 +87,25 @@ El servidor incluye el panel web portado a Rust (`nas-web`, axum) conservando la
 
 ---
 
-## 5. Asistente Visual de Consola y Comandos CLI `nas`
+## 5. Panel Visual de Consola (`nas-tui`) y CLI Unificado (`nas`)
 
 Para administradores que prefieren la terminal o gestionan el servidor por SSH:
 
-- **Comando global `nas`:**
-  - `sudo nas`: Inicia el asistente interactivo de 9 módulos.
-  - `sudo nas status`: Muestra el estado integral de servicios, discos, recursos Samba y tareas de backup.
-  - `sudo nas update`: Actualiza el código del servidor desde GitHub con verificación de integridad y rollback automático.
-  - `sudo nas version`: Imprime la versión y el commit de Git instalado.
-  - `sudo nas uninstall`: Limpia y desinstala por completo el software.
-- **Asistente Whiptail con 9 módulos guiados:**
-  - Despliegue en 5 pasos con detección automática de discos, IP y usuario.
-  - Gestión de grupos departamentales (`grp_*`).
-  - Creación y edición de carpetas compartidas Samba.
-  - Programación y monitoreo de tareas de respaldo.
-  - Gestión de usuarios y contraseñas de red (`smbpasswd`).
-  - Diagnóstico de salud en vivo con informe de estado.
-  - Reinicio seguro de servicios.
-  - Búsqueda de actualizaciones.
-  - Desinstalación total del servidor.
+- **CLI Unificado `nas`:**
+  - `sudo nas status`: Muestra métricas del sistema (CPU, RAM, kernel, uptime, IP y almacenamiento).
+  - `sudo nas --json status`: Salida estructurada en JSON para agentes y monitoreo externo.
+  - `sudo nas storage list`: Inventario de dispositivos de bloque con protección estricta del disco del sistema operativo.
+  - `sudo nas users list`: Listado de cuentas de usuario y grupos locales.
+  - `sudo nas backup list / run <id>`: Consulta y ejecución de tareas de respaldo.
+  - `sudo nas update`: Verificación y aplicación de releases firmados criptográficamente (Ed25519/SHA-256) con rollback A/B.
+  - `sudo nas deploy plan / apply`: Aprovisionamiento automatizado de discos, roles y tuning de kernel.
+  - `sudo nas audit verify`: Verificación de la integridad de la cadena de auditoría criptográfica.
+  - `sudo nas uninstall`: Desinstalación limpia de la plataforma con preservación de `/srv/nas`.
+- **Panel Visual de Monitoreo `nas-tui` (Ratatui):**
+  - **Dashboard:** Estado del procesador, memoria RAM, reloj del servidor y métricas de red.
+  - **Servicios:** Monitoreo en vivo de demonios esenciales (`smbd`, `nmbd`, `nginx`, `nas-web`, `auditd`, `sssd`).
+  - **Respaldos:** Historial y estado de las tareas de copias de seguridad.
+  - **Diagnóstico:** Inspección de bitácoras del sistema y eventos de auditoría en consola interactiva.
 
 ---
 
