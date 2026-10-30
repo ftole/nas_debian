@@ -10,15 +10,19 @@ El servidor cuenta con el comando global `nas` disponible en cualquier terminal:
 
 | Comando | Acción | Cuándo utilizarlo |
 | :--- | :--- | :--- |
-| `sudo nas-tui` | Abre el asistente visual (ratatui) | Para revisar el dashboard, servicios y respaldos desde consola. |
-| `sudo nas status` | Diagnóstico de salud en vivo | Para revisar de un vistazo discos, servicios de red y copias. |
-| `sudo nas --json status` | Estado en JSON | Para integrarlo en scripts o monitorización. |
-| `sudo nas storage ...` | Almacenamiento, LVM y Btrfs | Para operaciones de disco sin interfaz web. |
-| `sudo nas shares|users|backups ...` | Gestión de recursos, cuentas y tareas | Para administración programática desde SSH. |
-| `sudo nas update` | Actualiza el software y recompila Rust | Para aplicar nuevas versiones con validación y rollback. |
-| `sudo nas audit verify` | Verifica la cadena de auditoría | En revisiones de seguridad periódicas. |
-| `sudo nas uninstall --yes [--scope os]` | Desinstala la plataforma (panel, CLI y helpers) | Conserva `/srv/nas`; `--scope os` retira además sysctl, udev, logrotate y reglas auditd; `--purge` borra `/var/lib/nas` y `/etc/nas`. |
-| `sudo nas uninstall` | Muestra el plan sin ejecutar | Revisión previa antes de desinstalar. |
+| `sudo nas-tui` | Panel visual de monitoreo (ratatui) | Para consultar el dashboard, métricas de hardware, estado de servicios y bitácora desde la consola sin interfaz gráfica. |
+| `sudo nas status` | Diagnóstico de salud en vivo | Para revisar de un vistazo métricas de hardware, IP, servicios de red y almacenamiento. |
+| `sudo nas --json status` | Métricas y salud en formato JSON | Para integrarlo en scripts de monitoreo externos o agentes. |
+| `sudo nas storage list` | Inventario de almacenamiento | Para listar los dispositivos de bloque y su estado (`SO · protegido`, `En uso` o `Disponible`). |
+| `sudo nas users list` | Inventario de usuarios locales | Para consultar las cuentas de sistema y grupos departamentales. |
+| `sudo nas backup list` | Listado de tareas de respaldo | Para consultar las tareas programadas y su configuración. |
+| `sudo nas backup run <id>` | Ejecución manual de respaldo | Para disparar una copia de seguridad específica desde consola. |
+| `sudo nas deploy plan [args]` | Planificación de despliegue | Simula el particionado, formateo y aprovisionamiento del servidor. |
+| `sudo nas deploy apply [args]` | Despliegue del servidor | Aplica el aprovisionamiento de discos (`ext4`/`Btrfs`), roles y ajustes de kernel. |
+| `sudo nas update` | Verificación y actualización de versiones | Valida y aplica releases firmados criptográficamente (Ed25519/SHA-256) con rollback A/B. |
+| `sudo nas audit verify` | Verifica la cadena de auditoría | Audita criptográficamente la bitácora de eventos del sistema. |
+| `sudo nas uninstall --yes [--scope os]` | Desinstala la plataforma | Conserva `/srv/nas`; `--scope os` retira además sysctl, udev, logrotate y auditd; `--purge` borra `/var/lib/nas` y `/etc/nas`. |
+| `sudo nas uninstall` | Muestra el plan de desinstalación | Revisión previa de los pasos sin ejecutar cambios. |
 | `sudo nas update sign --manifest <json> --key <clave>` | Firma un manifiesto de release (Ed25519) | Publicación de versiones verificables. |
 | `sudo nas update pubkey --key <clave>` | Deriva la clave pública de la privada | Configurar `--pubkey` en verify/apply. |
 
@@ -37,8 +41,8 @@ Todo el almacenamiento administrado por el sistema reside en `/srv/nas`:
 - `/srv/nas/.trash/`: Papelera de reciclaje web con metadatos de restauración.
 
 ### 2.2 Despliegue con Formateo vs Conservar Datos (`--keep-data`)
-- **Si el disco es nuevo o puede sobrescribirse:** Utiliza el asistente interactivo (Opción [1]) y selecciona formatear. El sistema detecta automáticamente si es HDD o SSD y aplica el sistema de archivos óptimo (`ext4` para NAS o `Btrfs` para copias de seguridad).
-- **Si el disco ya tiene datos previos (Reutilización segura):** Selecciona la opción `Conservar datos existentes (--keep-data)` en el asistente o agrega `--keep-data` en la consola. El sistema detectará la partición válida, montará el volumen en `/srv/nas` y optimizará los parámetros de lectura y escritura sin alterar ningún archivo previo.
+- **Si el disco es nuevo o puede sobrescribirse:** Utiliza el aprovisionamiento desde el Panel Web (pestaña **Almacenamiento** → **Gestión de disco**) o el comando `sudo nas deploy apply ...`. El sistema detecta automáticamente si es HDD o SSD y aplica el sistema de archivos óptimo (`ext4` para NAS o `Btrfs` para copias de seguridad).
+- **Si el disco ya tiene datos previos (Reutilización segura):** Selecciona la opción de reutilización o agrega `--keep-data` en la consola. El sistema detectará la partición válida, montará el volumen en `/srv/nas` y optimizará los parámetros de lectura y escritura sin alterar ningún archivo previo.
 
 ### 2.3 Gestión de Discos desde el Panel Web
 La pestaña **Almacenamiento** lista los dispositivos de bloque con su estado (`SO · protegido`, `En uso` o `Disponible`) y ofrece el botón **Gestión de disco** para:
@@ -62,7 +66,7 @@ El motor de copias de seguridad supervisa el espacio automáticamente:
 ## 3. Gestión de Recursos Compartidos y Clientes Samba
 
 ### 3.1 Crear un Recurso Compartido
-Se puede crear desde el Panel Web (pestaña **Redes compartidas**) o desde el Asistente CLI (Opción [3]):
+Se administra desde el Panel Web (pestaña **Redes compartidas**) o mediante los helpers dedicados `/usr/local/sbin/nas-samba-apply` y `/usr/local/sbin/nas-share-acl`:
 1. Asigna un nombre al recurso (ej. `CONTABILIDAD` o `BACKUPS_SISTEMAS$`). Si termina con el signo `$`, quedará oculto en la red.
 2. Selecciona el esquema de permisos:
    - **Esquema 1 (Lectura y Escritura por Grupo):** Todos los grupos asignados pueden leer y escribir.
@@ -83,7 +87,7 @@ Se puede crear desde el Panel Web (pestaña **Redes compartidas**) o desde el As
 ![Flujo de Respaldos y Deduplicación](assets/flujo_backups.svg)
 
 ### 4.1 Programar una Tarea de Respaldo
-Desde el Panel Web (**Respaldos**) o el Asistente CLI (Opción [4]):
+Desde el Panel Web (**Respaldos**) o mediante `sudo nas backup run <id>` para ejecución puntual:
 - **Origen Windows:** Introduce la IP, el recurso remoto y las credenciales. Si el host pertenece a un dominio corporativo, usa el formato `DOMINIO\usuario`. Las credenciales quedan protegidas en `/etc/backup-credentials/<tarea>.cred` con permisos `0600`.
 - **Origen Linux:** Introduce la IP del servidor remoto, el puerto SSH (22 por defecto), la ruta absoluta a respaldar y las credenciales. La huella digital del servidor se registra de forma aislada en `/root/.ssh/known_hosts_backup`.
 - **Origen Local:** Selecciona una carpeta dentro del propio servidor.
@@ -108,7 +112,7 @@ Dado que los backups se basan en enlaces duros (*hardlinks*), cada snapshot es u
 ### 4.3 Cancelar una Tarea en Ejecución (Aborto Seguro)
 Si una copia de seguridad está tardando demasiado o satura la red:
 - **Desde la interfaz web:** En la sección **Respaldos**, pulsa el botón **"Abortar"** en la tarea activa.
-- **Desde la terminal:** En el Asistente CLI (Opción [4]), selecciona la opción de abortar tarea.
+- **Desde la terminal:** Cancela el proceso activo o libera el cerrojo en `/var/lock/backup_<tarea>.lock`.
 El sistema detendrá el proceso de `rsync`, liberará el cerrojo de `flock`, desmontará el recurso remoto de forma limpia y eliminará el directorio provisional `.inprogress_*`, garantizando que el histórico no guarde copias corruptas.
 
 ---
