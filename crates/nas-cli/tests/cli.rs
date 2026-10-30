@@ -190,6 +190,19 @@ fn users_list_json_es_estable() {
 }
 
 #[test]
+fn update_apply_sin_pubkey_falla_con_error_claro() {
+    let output = nas()
+        .args(["update", "apply"])
+        .env_remove("NAS_RELEASE_PUBKEY")
+        .output()
+        .expect("ejecuta");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("clave pública Ed25519 obligatoria"));
+}
+
+#[test]
 fn update_apply_rechaza_manifiesto_sin_firma() {
     let dir = fixture_dir("update-unsigned");
     let manifest = dir.join("manifest.json");
