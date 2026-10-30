@@ -60,5 +60,8 @@ pub use status::{collect as collect_status, SystemMetrics};
 pub use storage::{Disk, StorageOverview};
 pub use tasks::{last_snapshot, run as run_backup, BackupTask, RunOptions, RunReport, SourceKind};
 pub use terminal::TerminalSession;
-pub use update::{build_plan as build_update_plan, ReleaseManifest, UpdatePlan};
+pub use update::{
+    build_plan as build_update_plan, download_and_verify_release, download_file,
+    fetch_latest_release, ReleaseManifest, RemoteReleaseInfo, UpdatePlan,
+};
 pub use users::{GroupEntry, UserEntry};
