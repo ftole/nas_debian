@@ -231,6 +231,12 @@ struct DeployArgs {
     /// Usuario administrador.
     #[arg(long)]
     admin: String,
+    /// Contraseña del usuario administrador.
+    #[arg(long)]
+    password: Option<String>,
+    /// Lee la contraseña del administrador desde STDIN.
+    #[arg(long)]
+    password_stdin: bool,
     /// Rol del servidor.
     #[arg(long, default_value = "ARCHIVOS")]
     role: String,
@@ -1164,6 +1170,24 @@ fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
         params.filesystem = FileSystem::Btrfs;
     }
 
+    let password = if let Some(p) = &request.password {
+        Some(p.clone())
+    } else if request.password_stdin {
+        let mut buffer = String::new();
+        std::io::stdin()
+            .read_line(&mut buffer)
+            .map_err(|e| NasError::io("stdin", e))?;
+        let trimmed = buffer.trim_end_matches(['\r', '\n']).to_string();
+        if !trimmed.is_empty() {
+            Some(trimmed)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    params.admin_password = password;
+
     let problems = params.validate();
     if !problems.is_empty() {
         return Err(NasError::Invalid(problems.join("; ")));
@@ -1449,6 +1473,18 @@ fn deploy_apply(
     }
 
     if failure.is_none() {
+        let user_check = runner.run(&CommandSpec::new("id").args(["-u", &params.admin_user]));
+        if !user_check.is_ok_and(|out| out.is_success()) {
+            let useradd_cmd = vec![
+                "useradd".to_string(),
+                "-m".to_string(),
+                "-s".to_string(),
+                "/bin/bash".to_string(),
+                params.admin_user.clone(),
+            ];
+            let _ = run_step(&runner, &useradd_cmd, options.sudo, 60);
+        }
+
         for step in &plan {
             if let Err(error) = run_step(&runner, step, options.sudo, 900) {
                 failure = Some(error);
@@ -1460,6 +1496,29 @@ fn deploy_apply(
     if failure.is_none() {
         if let Err(error) = params.update_fstab(&runner) {
             failure = Some(error);
+        }
+    }
+
+    if failure.is_none() {
+        if let Some(pass) = &params.admin_password {
+            let chpasswd_spec = CommandSpec::new("chpasswd")
+                .stdin_secret(nas_exec::SecretInput::new(format!(
+                    "{}:{}\n",
+                    params.admin_user, pass
+                )))
+                .timeout(Duration::from_secs(30));
+            let _ = runner.run(&chpasswd_spec);
+
+            let smb_spec = CommandSpec::new("smbpasswd")
+                .args(["-a", "-s", &params.admin_user])
+                .stdin_secret(nas_exec::SecretInput::new(format!("{pass}\n{pass}\n")))
+                .timeout(Duration::from_secs(30));
+            let _ = runner.run(&smb_spec);
+
+            let enable_spec = CommandSpec::new("smbpasswd")
+                .args(["-e", &params.admin_user])
+                .timeout(Duration::from_secs(20));
+            let _ = runner.run(&enable_spec);
         }
     }
 
