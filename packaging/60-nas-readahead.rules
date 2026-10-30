@@ -1,0 +1,4 @@
+# Readahead dinámico udev por tipo de medio (Debian 13)
+# 4096 KB para discos mecánicos (HDD) y 1024 KB para estado sólido (SSD/NVMe).
+ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/rotational}=="1", ATTR{queue/read_ahead_kb}="4096"
+ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/rotational}=="0", ATTR{queue/read_ahead_kb}="1024"
