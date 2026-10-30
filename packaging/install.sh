@@ -31,6 +31,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$REPO_DIR/target/release}"
 
+if [ ! -d "$BUILD_DIR" ] || [ ! -x "$BUILD_DIR/nas" ]; then
+    if [ -d "$REPO_DIR/bin" ] && [ -x "$REPO_DIR/bin/nas" ]; then
+        BUILD_DIR="$REPO_DIR/bin"
+    elif [ -x "$PREFIX/nas" ]; then
+        BUILD_DIR="$PREFIX"
+    fi
+fi
+
 for bin in nas nas-web nas-tui nasctl nas-dev; do
     if [ ! -x "$BUILD_DIR/$bin" ]; then
         echo "[-] falta el binario $BUILD_DIR/$bin (ejecute: cargo build --release --workspace)" >&2
@@ -79,9 +87,18 @@ if [ ! -f "$ENV_FILE" ]; then
     if [ -n "${NAS_WEB_PASSWORD:-}" ]; then
         password="$NAS_WEB_PASSWORD"
         echo "    Contraseña tomada de NAS_WEB_PASSWORD"
+    elif [ ! -t 0 ]; then
+        password="$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'A-Za-z0-9!#%&*' | head -c 16)"
+        echo "    [i] Instalación desatendida: contraseña generada automáticamente."
+        echo "    >>> $password <<<"
     else
         echo "    Defina la contraseña del panel (se actualizará a PBKDF2-HMAC-SHA512 en el primer acceso):"
         read -r -s -p "    Contraseña: " password; echo
+        if [ -z "$password" ]; then
+            password="$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'A-Za-z0-9!#%&*' | head -c 16)"
+            echo "    Contraseña en blanco; se generó automáticamente:"
+            echo "    >>> $password <<<"
+        fi
     fi
     hash="$(printf '%s' "$password" | sha256sum | cut -d' ' -f1)"
     install -m 0600 -o root -g root /dev/null "$ENV_FILE"
@@ -103,7 +120,7 @@ else
     echo "    $ENV_FILE ya existe: se conserva"
 fi
 
-echo "[4/7] Instalando helpers privilegiados de Samba"
+echo "[4/7] Instalando helpers privilegiados de Samba y reglas del sistema"
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-samba-apply" /usr/local/sbin/nas-samba-apply
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-share-dir" /usr/local/sbin/nas-share-dir
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-share-acl" /usr/local/sbin/nas-share-acl
@@ -112,6 +129,18 @@ install -m 0755 -o root -g root "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-terminal" /usr/local/sbin/nas-terminal
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-storage-apply" /usr/local/sbin/nas-storage-apply
 install -d -m 2770 -o root -g "$SERVICE_USER" /var/lib/nas/staging 2>/dev/null || true
+
+if [ -f "$SCRIPT_DIR/99-nas-tuning.conf" ]; then
+    install -d -m 0755 /etc/sysctl.d
+    install -m 0644 "$SCRIPT_DIR/99-nas-tuning.conf" /etc/sysctl.d/99-nas-tuning.conf
+    sysctl -p /etc/sysctl.d/99-nas-tuning.conf >/dev/null 2>&1 || true
+fi
+
+if [ -f "$SCRIPT_DIR/60-nas-readahead.rules" ]; then
+    install -d -m 0755 /etc/udev/rules.d
+    install -m 0644 "$SCRIPT_DIR/60-nas-readahead.rules" /etc/udev/rules.d/60-nas-readahead.rules
+    udevadm control --reload-rules >/dev/null 2>&1 || true
+fi
 
 echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
