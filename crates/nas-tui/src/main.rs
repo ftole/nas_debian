@@ -1,6 +1,6 @@
 //! Arranque del asistente TUI.
 
-use std::io;
+use std::io::{self, IsTerminal};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -16,6 +16,24 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 fn main() -> io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("nas-tui {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "nas-tui {}\nAsistente visual de terminal (TUI) para el servidor NAS Debian 13\n\nUSO:\n    nas-tui\n\nOPCIONES:\n    -h, --help       Imprime esta ayuda\n    -V, --version    Imprime la versión",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
+
+    if !io::stdout().is_terminal() {
+        eprintln!("Error: nas-tui requiere una terminal interactiva (TTY)");
+        std::process::exit(1);
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
