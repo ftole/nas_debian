@@ -101,6 +101,8 @@ pub struct DeployParams {
     pub netbios: String,
     /// Usuario administrador.
     pub admin_user: String,
+    /// Contraseña opcional para crear o configurar el usuario administrador.
+    pub admin_password: Option<String>,
     /// Rol del servidor.
     pub role: ServerRole,
     /// Reutiliza datos existentes sin formatear.
@@ -130,6 +132,7 @@ impl DeployParams {
             workgroup: workgroup.into(),
             netbios: netbios.into(),
             admin_user: admin_user.into(),
+            admin_password: None,
             role,
             keep_data: false,
             filesystem,
@@ -190,6 +193,14 @@ impl DeployParams {
                 "usuario administrador inválido: '{}'",
                 self.admin_user
             ));
+        }
+
+        if let Some(pass) = &self.admin_password {
+            if pass.len() < 6 {
+                problems.push(
+                    "la contraseña del administrador debe tener al menos 6 caracteres".to_string(),
+                );
+            }
         }
 
         problems
@@ -298,6 +309,7 @@ impl DeployParams {
 
     /// Invocación equivalente a `deploy.sh` (ejecución transitoria auditada).
     pub fn deploy_sh_invocation(&self, repo_dir: &str, password_token: &str) -> Vec<String> {
+        let pass = self.admin_password.as_deref().unwrap_or(password_token);
         let mut argv = vec![
             "bash".to_string(),
             format!("{}/src/core/deploy.sh", repo_dir.trim_end_matches('/')),
@@ -305,7 +317,7 @@ impl DeployParams {
             self.workgroup.clone(),
             self.netbios.clone(),
             self.admin_user.clone(),
-            password_token.to_string(),
+            pass.to_string(),
             self.role.as_str().to_string(),
             "--force".to_string(),
             "--confirm".to_string(),
@@ -714,6 +726,7 @@ mod artifact_tests {
             workgroup: "TEAM-JOFRATO".into(),
             netbios: "SRV-NAS".into(),
             admin_user: "admin".into(),
+            admin_password: None,
             role,
             keep_data: false,
             filesystem: FileSystem::Ext4,
@@ -783,5 +796,18 @@ mod artifact_tests {
         let mut keep = params(ServerRole::Arquivos);
         keep.keep_data = true;
         assert!(keep.ensure_not_os_disk(&runner).is_ok());
+    }
+
+    #[test]
+    fn valida_longitud_minima_de_password() {
+        let mut p = params(ServerRole::Arquivos);
+        p.admin_password = Some("123".into());
+        let problems = p.validate();
+        assert!(problems
+            .iter()
+            .any(|s| s.contains("contraseña del administrador debe tener al menos 6 caracteres")));
+
+        p.admin_password = Some("clave-segura-123".into());
+        assert!(!p.validate().iter().any(|s| s.contains("contraseña")));
     }
 }
