@@ -16,6 +16,8 @@ pub const LOGIN_CSS: &str = include_str!("../assets/login.css");
 pub const ICONS_SVG: &str = include_str!("../assets/icons.svg");
 /// Favicon.
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.svg");
+/// Favicon binario ICO multi-resolución (16x16, 32x32, 48x48).
+pub const FAVICON_ICO: &[u8] = include_bytes!("../assets/favicon.ico");
 
 /// Contexto de sesión para renderizar el panel.
 #[derive(Debug)]
