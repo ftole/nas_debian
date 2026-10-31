@@ -542,7 +542,13 @@ _referencia_configuracion_samba() {
    smb3 directory leases = no
    kernel change notify = yes
    change notify = yes
-   vfs objects = acl_xattr streams_xattr
+   vfs objects = acl_xattr streams_xattr recycle
+   recycle:repository = .recycle
+   recycle:keeptree = yes
+   recycle:versions = yes
+   recycle:touch = yes
+   recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*
+   recycle:excludedir = /.recycle/
    map acl inherit = yes
    store dos attributes = yes
    inherit permissions = yes
@@ -561,10 +567,10 @@ SMB_EOF
 # 6. Rutas de respaldo condicionales según el rol
 _referencia_rutas_backup() {
     if [ "$SERVER_ROLE" != "ARCHIVOS" ]; then
-        mkdir -p /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP /etc/backup-credentials
+        mkdir -p /srv/nas/BACKUPS_HISTORICOS /srv/nas/BACKUPS_PERMANENTES /srv/nas/LOGS_BACKUP /etc/backup-credentials
         chmod 0750 /etc/backup-credentials 2>/dev/null || true
-        chown root:grp_samba /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
-        chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/LOGS_BACKUP
+        chown root:grp_samba /srv/nas/BACKUPS_HISTORICOS /srv/nas/BACKUPS_PERMANENTES /srv/nas/LOGS_BACKUP
+        chmod 2770 /srv/nas/BACKUPS_HISTORICOS /srv/nas/BACKUPS_PERMANENTES /srv/nas/LOGS_BACKUP
     fi
 }
 
