@@ -167,6 +167,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/backups/test", post(routes::backup_test))
         .route("/api/backups/update", post(routes::backup_update))
         .route("/api/backups/delete", post(routes::backup_delete))
+        .route("/api/backups/permanent", get(routes::backups_permanent))
+        .route("/api/backups/{id}/freeze", post(routes::backup_freeze_id))
+        .route("/api/backups/freeze", post(routes::backup_freeze))
+        .route("/api/backups/restore", post(routes::backup_restore))
+        .route(
+            "/api/backups/permanent/delete",
+            post(routes::backup_permanent_delete),
+        )
         .route("/api/backups/", post(routes::backup_create))
         .route("/api/storage/units", get(routes::storage_units))
         .route("/api/storage/subvolumes", get(routes::storage_subvolumes))
