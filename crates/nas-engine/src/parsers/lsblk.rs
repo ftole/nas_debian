@@ -13,7 +13,7 @@ struct RawDevice {
     #[serde(default)]
     name: String,
     #[serde(default)]
-    size: Option<String>,
+    size: Option<SizeValue>,
     #[serde(rename = "type", default)]
     kind: Option<String>,
     #[serde(default)]
@@ -26,6 +26,42 @@ struct RawDevice {
     rota: Option<RotaValue>,
     #[serde(default)]
     children: Vec<RawDevice>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SizeValue {
+    Text(String),
+    Num(u64),
+}
+
+impl SizeValue {
+    fn to_human_string(&self) -> String {
+        match self {
+            Self::Text(text) => text.trim().to_string(),
+            Self::Num(bytes) => format_bytes(*bytes),
+        }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * KIB;
+    const GIB: f64 = 1024.0 * MIB;
+    const TIB: f64 = 1024.0 * GIB;
+
+    let b = bytes as f64;
+    if b >= TIB {
+        format!("{:.1}T", b / TIB)
+    } else if b >= GIB {
+        format!("{:.1}G", b / GIB)
+    } else if b >= MIB {
+        format!("{:.1}M", b / MIB)
+    } else if b >= KIB {
+        format!("{:.1}K", b / KIB)
+    } else {
+        format!("{bytes}B")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,7 +132,10 @@ pub fn parse(raw: &str) -> Result<Vec<BlockDevice>, serde_json::Error> {
 fn convert(raw: RawDevice) -> BlockDevice {
     BlockDevice {
         name: raw.name,
-        size: raw.size.unwrap_or_else(|| "N/D".to_string()),
+        size: raw
+            .size
+            .map(|s| s.to_human_string())
+            .unwrap_or_else(|| "N/D".to_string()),
         kind: raw.kind.unwrap_or_else(|| "desconocido".to_string()),
         mountpoint: raw.mountpoint.filter(|m| !m.is_empty()),
         model: raw
@@ -168,6 +207,13 @@ mod tests {
         let json = r#"{"blockdevices":[{"name":"sdb","size":"2T","type":"disk","rota":"1","children":[]}]}"#;
         let devices = parse(json).expect("json válido");
         assert_eq!(devices[0].rotational, Some(true));
+    }
+
+    #[test]
+    fn tolera_size_como_entero_en_bytes() {
+        let json = r#"{"blockdevices":[{"name":"sda","size":250059350016,"type":"disk","children":[]}]}"#;
+        let devices = parse(json).expect("json con bytes numéricos");
+        assert_eq!(devices[0].size, "232.9G");
     }
 
     #[test]
