@@ -211,7 +211,8 @@ mod tests {
 
     #[test]
     fn tolera_size_como_entero_en_bytes() {
-        let json = r#"{"blockdevices":[{"name":"sda","size":250059350016,"type":"disk","children":[]}]}"#;
+        let json =
+            r#"{"blockdevices":[{"name":"sda","size":250059350016,"type":"disk","children":[]}]}"#;
         let devices = parse(json).expect("json con bytes numéricos");
         assert_eq!(devices[0].size, "232.9G");
     }
