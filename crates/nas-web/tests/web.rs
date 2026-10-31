@@ -988,6 +988,7 @@ async fn almacenamiento_valida_confirmacion_y_dispositivo() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = app
+        .clone()
         .oneshot(post_json(
             "/api/storage/lvm",
             &cookie,
@@ -996,6 +997,16 @@ async fn almacenamiento_valida_confirmacion_y_dispositivo() {
         .await
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .oneshot(post_json(
+            "/api/storage/inspect",
+            &cookie,
+            r#"{"device":"/dev/../etc/passwd"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
