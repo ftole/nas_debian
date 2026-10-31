@@ -602,6 +602,7 @@ pub fn freeze_backup_task(
         &perm_task_dir.to_string_lossy(),
     ]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &perm_task_dir.to_string_lossy()]));
 
     let now = chrono::Local::now();
     let date_str = now.format("%Y-%m-%d_%H%M%S").to_string();
@@ -841,12 +842,21 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
             runner.run(&CommandSpec::new("chattr").args(["-R", "+i", &task_dir.to_string_lossy()]));
     }
     if let Some(perm_parent) = path.parent() {
-        if perm_parent.is_dir() {
-            let _ = runner.run(&CommandSpec::new("chattr").args([
-                "-R",
-                "+i",
-                &perm_parent.to_string_lossy(),
-            ]));
+        if let Ok(entries) = std::fs::read_dir(perm_parent) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("FULL_"))
+                {
+                    let _ = runner.run(&CommandSpec::new("chattr").args([
+                        "-R",
+                        "+i",
+                        &p.to_string_lossy(),
+                    ]));
+                }
+            }
         }
     }
 
