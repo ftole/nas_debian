@@ -113,6 +113,9 @@
       <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></symbol>
       <symbol id="icon-presentation" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="6" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="14" y2="12"/></symbol>
       <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+      <symbol id="icon-home" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+      <symbol id="icon-chevron-right" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></symbol>
+      <symbol id="icon-arrow-up" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></symbol>
     </defs>
   </svg>
 
@@ -1001,10 +1004,10 @@
         <div class="panel-card">
           <!-- Vista Normal de Archivos -->
           <div id="files-normal-view">
-            <!-- Barra de navegación y herramientas -->
+            <!-- Barra superior de herramientas y filtros -->
             <div class="explorer-toolbar">
-              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary);">Raíz:</label>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <label for="files-root-select" style="font-weight:600; font-size:13px; color:var(--text-secondary); white-space:nowrap;">Ubicación:</label>
                 <select id="files-root-select" onchange="changeFilesRoot(this.value)" style="width:auto; padding:5px 10px;">
                   <option value="nas">Recursos Compartidos (/srv/nas)</option>
                   <!--IF:role_has_backups-->
@@ -1012,9 +1015,6 @@
                   <!--ENDIF-->
                   <optgroup label="Unidades Adicionales" id="files-units-optgroup" style="display:none;"></optgroup>
                 </select>
-              </div>
-              <div class="file-breadcrumbs" id="files-breadcrumbs">
-                <span class="file-breadcrumb-current">/srv/nas</span>
               </div>
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto;">
                 <!-- Buscador en tiempo real en la carpeta actual -->
@@ -1052,6 +1052,16 @@
                 <button class="btn btn-secondary btn-sm" id="btn-download-zip" onclick="downloadCurrentFolderZip()" title="Descargar la carpeta actual completa comprimida en archivo .zip">
                   <svg class="icon"><use href="#icon-download"></use></svg> Descargar ZIP
                 </button>
+              </div>
+            </div>
+
+            <!-- Barra de dirección dedicada (Address Bar de ancho completo estilo Explorador) -->
+            <div class="explorer-addressbar">
+              <button type="button" class="btn-addressbar-up disabled" id="btn-folder-up" onclick="navigateFolderUp()" title="Subir un nivel (carpeta anterior)" disabled>
+                <svg class="icon"><use href="#icon-arrow-up"></use></svg>
+              </button>
+              <div class="file-breadcrumbs" id="files-breadcrumbs">
+                <span class="file-breadcrumb-current"><svg class="icon" style="width:13px; height:13px; margin-right:3px;"><use href="#icon-home"></use></svg> Inicio</span>
               </div>
             </div>
 
