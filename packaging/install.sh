@@ -146,6 +146,20 @@ if [ -f "$SCRIPT_DIR/60-nas-readahead.rules" ]; then
     udevadm control --reload-rules >/dev/null 2>&1 || true
 fi
 
+echo "    Instalando tarea diaria de auto-purga de papelera Samba..."
+install -d -m 0755 /etc/cron.daily
+cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'
+#!/bin/bash
+# nas-recycle-purge: Purga automática de archivos en papeleras Samba con más de 15 días
+if [ -x /usr/local/bin/nas ]; then
+    /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true
+else
+    find /srv/nas -type f -path '*/.recycle/*' -mtime +15 -delete 2>/dev/null || true
+    find /srv/nas -type d -path '*/.recycle/*' -empty -delete 2>/dev/null || true
+fi
+PURGE_EOF
+chmod 0755 /etc/cron.daily/nas-recycle-purge
+
 echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
 systemctl daemon-reload
