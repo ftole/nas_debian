@@ -157,6 +157,55 @@ pub fn apply_share_acl(
     }
 }
 
+/// Purga archivos en las papeleras de reciclaje Samba (.recycle) con más de `days` días.
+pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
+    let days = days.max(1);
+    let mtime_arg = format!("+{days}");
+
+    // 1. Eliminar archivos mayores a `days` días en cualquier directorio .recycle dentro de /srv/nas
+    let purge_files = runner.run(
+        &CommandSpec::new("find")
+            .args([
+                "/srv/nas",
+                "-type",
+                "f",
+                "-path",
+                "*/.recycle/*",
+                "-mtime",
+                &mtime_arg,
+                "-delete",
+            ])
+            .timeout(Duration::from_secs(120)),
+    );
+
+    // 2. Eliminar directorios vacíos remanentes en .recycle
+    let _ = runner.run(
+        &CommandSpec::new("find")
+            .args([
+                "/srv/nas",
+                "-type",
+                "d",
+                "-path",
+                "*/.recycle/*",
+                "-empty",
+                "-delete",
+            ])
+            .timeout(Duration::from_secs(60)),
+    );
+
+    match purge_files {
+        Ok(res) if res.is_success() => Ok(format!(
+            "Purga de papeleras Samba (.recycle) completada con éxito (antigüedad > {days} días)"
+        )),
+        Ok(res) => Err(NasError::Command {
+            command: res.command,
+            code: res.code,
+            stderr: res.stderr,
+        }),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
