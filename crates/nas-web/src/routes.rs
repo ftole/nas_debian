@@ -5014,6 +5014,246 @@ pub async fn backup_logs_id(
     }
 }
 
+/// Consulta para filtrar respaldos permanentes.
+#[derive(Debug, Deserialize, Default)]
+pub struct BackupPermanentQuery {
+    pub task: Option<String>,
+}
+
+/// Cuerpo para congelar un respaldo como permanente.
+#[derive(Debug, Deserialize, Default)]
+pub struct FreezeBody {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+/// Cuerpo para restaurar un respaldo.
+#[derive(Debug, Deserialize, Default)]
+pub struct RestoreBackupBody {
+    pub id: String,
+    pub snapshot: String,
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+/// Cuerpo para eliminar un respaldo permanente.
+#[derive(Debug, Deserialize, Default)]
+pub struct DeletePermanentBody {
+    pub id: String,
+    pub name: String,
+}
+
+/// Lista los respaldos permanentes inmutables (Golden Snapshots).
+pub async fn backups_permanent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<BackupPermanentQuery>,
+) -> Response {
+    if let Err(response) = require_auth(&state, &headers) {
+        return *response;
+    }
+    let task = query.task;
+    match tokio::task::spawn_blocking(move || {
+        nas_engine::helpers::backup::list_permanent_backups(task.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(list)) => axum::Json(ApiResponse::ok(list, "Respaldos permanentes")).into_response(),
+        Ok(Err(error)) => error_response(error),
+        Err(_) => server_error("consulta interrumpida"),
+    }
+}
+
+/// Congela el último snapshot de una tarea como respaldo permanente (por ID en URL).
+pub async fn backup_freeze_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::Json(body): axum::Json<FreezeBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
+    let Some(id) = backup_action_id(&id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let tag = body.tag;
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
+
+    match outcome {
+        Ok(msg) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_freeze", &id, "SUCCESS", &msg);
+            axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
+        }
+        Err(err) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_freeze", &id, "FAILED", &err);
+            error_response(NasError::Invalid(err))
+        }
+    }
+}
+
+/// Congela el último snapshot de una tarea como respaldo permanente (por cuerpo JSON).
+pub async fn backup_freeze(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<FreezeBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
+    let Some(id) = backup_action_id(&body.id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let tag = body.tag;
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
+
+    match outcome {
+        Ok(msg) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_freeze", &id, "SUCCESS", &msg);
+            axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
+        }
+        Err(err) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_freeze", &id, "FAILED", &err);
+            error_response(NasError::Invalid(err))
+        }
+    }
+}
+
+/// Restaura un snapshot o respaldo permanente hacia el origen de red o destino local.
+pub async fn backup_restore(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<RestoreBackupBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
+    let Some(id) = backup_action_id(&body.id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let snap = body.snapshot;
+    let tgt = body.target;
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::backup_control::restore(&Runner::new(), &task, &snap, tgt.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Err("restauración interrumpida".to_string()));
+
+    match outcome {
+        Ok(msg) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_restore", &id, "SUCCESS", &msg);
+            axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
+        }
+        Err(err) => {
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&actor, "backup_restore", &id, "FAILED", &err);
+            error_response(NasError::Invalid(err))
+        }
+    }
+}
+
+/// Elimina un respaldo permanente inmutable.
+pub async fn backup_permanent_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<DeletePermanentBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
+    }
+    let Some(id) = backup_action_id(&body.id) else {
+        return bad_request("identificador de tarea inválido");
+    };
+    let name = body.name;
+    let task = id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        nas_engine::helpers::backup::delete_permanent_backup(&Runner::new(), &task, &name)
+    })
+    .await
+    .unwrap_or_else(|_| Err(NasError::Invalid("eliminación interrumpida".to_string())));
+
+    match outcome {
+        Ok(msg) => {
+            let _ = state.auth.db().append_audit(
+                &actor,
+                "backup_permanent_delete",
+                &id,
+                "SUCCESS",
+                &msg,
+            );
+            axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
+        }
+        Err(err) => {
+            let _ = state.auth.db().append_audit(
+                &actor,
+                "backup_permanent_delete",
+                &id,
+                "FAILED",
+                &err.to_string(),
+            );
+            error_response(err)
+        }
+    }
+}
+
 /// Raíz confinada según el parámetro `root` del explorador.
 fn file_root_for(state: &AppState, root: Option<&str>) -> Result<FileRoot, Box<Response>> {
     let requested = root.unwrap_or("").trim();
