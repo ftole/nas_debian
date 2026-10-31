@@ -106,7 +106,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando herramientas base y de compilación..."
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl ca-certificates \
-        build-essential pkg-config acl openssl btrfs-progs samba samba-vfs-modules cifs-utils rsync \
+        build-essential pkg-config acl openssl btrfs-progs lvm2 samba samba-vfs-modules cifs-utils rsync \
         nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
 
     if ! command -v cargo >/dev/null 2>&1; then
@@ -169,7 +169,7 @@ else
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando dependencias del sistema operativo..."
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl ca-certificates tar gzip \
-        acl openssl btrfs-progs samba samba-vfs-modules cifs-utils rsync \
+        acl openssl btrfs-progs lvm2 samba samba-vfs-modules cifs-utils rsync \
         nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
 
     echo -e " ${C_BOLD}[2/5]${C_RESET} Consultando release oficial de GitHub..."
