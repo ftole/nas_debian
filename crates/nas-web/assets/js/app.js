@@ -5468,27 +5468,66 @@ function refreshCurrentFileView() {
   }
 }
 
+function navigateFolderUp() {
+  const current = (AppState.files.currentPath || '').replace(/^\/+|\/+$/g, '');
+  if (!current) return;
+  const parts = current.split('/');
+  parts.pop();
+  const parentPath = parts.join('/');
+  loadFiles(parentPath);
+}
+
 function renderFileBreadcrumbs(breadcrumbs, currentPath) {
   const container = document.getElementById('files-breadcrumbs');
+  const upBtn = document.getElementById('btn-folder-up');
+  const cleanPath = (currentPath || '').replace(/^\/+|\/+$/g, '');
+
+  if (upBtn) {
+    if (!cleanPath) {
+      upBtn.disabled = true;
+      upBtn.classList.add('disabled');
+      upBtn.title = 'Ya te encuentras en el nivel principal';
+    } else {
+      upBtn.disabled = false;
+      upBtn.classList.remove('disabled');
+      upBtn.title = 'Subir un nivel (carpeta anterior)';
+    }
+  }
+
   if (!container) return;
 
-  const rootLabel = AppState.files.root === 'backups' ? '/srv/nas/BACKUPS_HISTORICOS' : '/srv/nas';
+  let humanRoot = 'Inicio';
+  if (AppState.files.root === 'backups') {
+    humanRoot = 'Respaldos Históricos';
+  } else if (AppState.files.root && AppState.files.root !== 'nas' && AppState.files.root !== 'principal') {
+    humanRoot = `Unidad: ${AppState.files.root}`;
+  }
 
-  if (!breadcrumbs || breadcrumbs.length === 0) {
-    container.innerHTML = `<span class="file-breadcrumb-current">${escapeHtml(rootLabel)}</span>`;
+  const chevronSep = '<span class="file-breadcrumb-separator"><svg class="icon"><use href="#icon-chevron-right"></use></svg></span>';
+  const homeIcon = '<svg class="icon" style="width:13px; height:13px; margin-right:4px;"><use href="#icon-home"></use></svg>';
+
+  if (!breadcrumbs || breadcrumbs.length === 0 || !cleanPath) {
+    container.innerHTML = `<span class="file-breadcrumb-current" title="${escapeHtml(humanRoot)}">${homeIcon} ${escapeHtml(humanRoot)}</span>`;
     return;
   }
 
-  container.innerHTML = breadcrumbs.map((bc, idx) => {
+  const rendered = breadcrumbs.map((bc, idx) => {
+    const isFirst = idx === 0;
     const isLast = idx === breadcrumbs.length - 1;
+    const displayName = isFirst ? humanRoot : bc.name;
+    const titleAttr = escapeHtml(displayName);
+    const prefix = isFirst ? homeIcon : '';
+
     if (isLast) {
-      return `<span class="file-breadcrumb-current">${escapeHtml(bc.name)}</span>`;
+      return `<span class="file-breadcrumb-current" title="${titleAttr}">${prefix}${escapeHtml(displayName)}</span>`;
     }
-    return `
-      <span class="file-breadcrumb-item" data-path="${escapeHtml(bc.path)}" onclick="navigateToSubpath(this.getAttribute('data-path'))">${escapeHtml(bc.name)}</span>
-      <span class="file-breadcrumb-separator">/</span>
-    `;
+    return `<span class="file-breadcrumb-item" data-path="${escapeHtml(bc.path)}" onclick="navigateToSubpath(this.getAttribute('data-path'))" title="${titleAttr}">${prefix}${escapeHtml(displayName)}</span>${chevronSep}`;
   }).join('');
+
+  container.innerHTML = rendered;
+  try {
+    container.scrollLeft = container.scrollWidth;
+  } catch (e) {}
 }
 
 function changeFilesRoot(rootKey) {
