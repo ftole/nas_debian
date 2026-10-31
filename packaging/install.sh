@@ -80,13 +80,26 @@ fi
 
 install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" "$DATA_ROOT/BACKUPS_HISTORICOS" "$DATA_ROOT/BACKUPS_PERMANENTES" "$DATA_ROOT/LOGS_BACKUP" 2>/dev/null || true
 install -d -m 0755 /etc/nas
+install -d -m 0700 -o root -g root /etc/backup-credentials
+install -d -m 0755 /etc/cron.d
+ln -sf "$ENV_FILE" /etc/nas/nas-web.env
 if [ -f /etc/nas/role ]; then
     chmod 0644 /etc/nas/role 2>/dev/null || true
     chown root:root /etc/nas/role 2>/dev/null || true
 fi
 
 echo "[3/7] Configurando variables de entorno"
+GENERATE_NEW_PASS=0
 if [ ! -f "$ENV_FILE" ]; then
+    GENERATE_NEW_PASS=1
+elif [ -n "${NAS_WEB_PASSWORD:-}" ]; then
+    GENERATE_NEW_PASS=1
+elif [ ! -f "$STATE_DIR/nas.sqlite" ]; then
+    # La base de datos nunca fue inicializada (instalación previa interrumpida)
+    GENERATE_NEW_PASS=1
+fi
+
+if [ "$GENERATE_NEW_PASS" -eq 1 ]; then
     secret="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     if [ -n "${NAS_WEB_PASSWORD:-}" ]; then
         password="$NAS_WEB_PASSWORD"
@@ -94,14 +107,12 @@ if [ ! -f "$ENV_FILE" ]; then
     elif [ ! -t 0 ]; then
         password="$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'A-Za-z0-9!#%&*' | head -c 16)"
         echo "    [i] Instalación desatendida: contraseña generada automáticamente."
-        echo "    >>> $password <<<"
     else
         echo "    Defina la contraseña del panel (se actualizará a PBKDF2-HMAC-SHA512 en el primer acceso):"
         read -r -s -p "    Contraseña: " password; echo
         if [ -z "$password" ]; then
             password="$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'A-Za-z0-9!#%&*' | head -c 16)"
-            echo "    Contraseña en blanco; se generó automáticamente:"
-            echo "    >>> $password <<<"
+            echo "    Contraseña en blanco; se generó automáticamente."
         fi
     fi
     hash="$(printf '%s' "$password" | sha256sum | cut -d' ' -f1)"
@@ -120,6 +131,15 @@ if [ ! -f "$ENV_FILE" ]; then
         echo "NAS_BACKUP_DIR=/usr/local/bin"
         echo "NAS_INVENTORY=/etc/nas/inventory.yaml"
     } > "$ENV_FILE"
+
+    # Si la base de datos ya existía y se proporcionó una nueva contraseña explícita, actualizar hash
+    if [ -f "$STATE_DIR/nas.sqlite" ] && [ -n "${NAS_WEB_PASSWORD:-}" ]; then
+        sqlite3 "$STATE_DIR/nas.sqlite" "UPDATE users SET password_hash='$hash' WHERE username='admin';" 2>/dev/null || true
+    fi
+
+    # Guardar contraseña temporalmente para presentarse una sola vez al usuario
+    printf '%s' "$password" > /etc/nas/.initial_admin_password
+    chmod 0600 /etc/nas/.initial_admin_password
 else
     echo "    $ENV_FILE ya existe: se conserva"
 fi
@@ -250,3 +270,22 @@ echo "  Panel:      https://<servidor>/  (usuario admin)"
 echo "  Variables:  $ENV_FILE"
 echo "  Servicio:   systemctl status nas-web"
 echo "  Reinicio:   systemctl restart nas-web"
+
+if [ -f /etc/nas/.initial_admin_password ] && [ "${NAS_INSTALL_CALLER:-}" != "install.sh" ]; then
+    INIT_PASS="$(cat /etc/nas/.initial_admin_password 2>/dev/null || true)"
+    rm -f /etc/nas/.initial_admin_password
+    if [ -n "$INIT_PASS" ]; then
+        SERVER_HOST="$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")"
+        echo
+        echo "  ╭──────────────────────────────────────────────────────────────────╮"
+        echo "  │               CREDENCIALES DE ACCESO AL PANEL WEB                │"
+        echo "  ├──────────────────────────────────────────────────────────────────┤"
+        echo "  │  Panel Web:   https://${SERVER_HOST}/"
+        echo "  │  Usuario:     admin"
+        echo "  │  Contraseña:  ${INIT_PASS}"
+        echo "  ├──────────────────────────────────────────────────────────────────┤"
+        echo "  │  [!] GUARDE ESTA CONTRASEÑA AHORA: solo se muestra una única vez.│"
+        echo "  ╰──────────────────────────────────────────────────────────────────╯"
+        echo
+    fi
+fi
