@@ -60,11 +60,11 @@ if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
 fi
 
 # Grupos necesarios: grp_samba para operar sobre /srv/nas y systemd-journal para bitácoras.
-groupadd -f grp_samba 2>/dev/null || true
-groupadd -f grp_web 2>/dev/null || true
-groupadd -f grp_superadmin 2>/dev/null || true
-usermod -aG grp_samba "$SERVICE_USER" 2>/dev/null || true
-usermod -aG systemd-journal "$SERVICE_USER" 2>/dev/null || true
+groupadd -f grp_samba >/dev/null 2>&1 || true
+groupadd -f grp_web >/dev/null 2>&1 || true
+groupadd -f grp_superadmin >/dev/null 2>&1 || true
+usermod -aG grp_samba "$SERVICE_USER" >/dev/null 2>&1 || true
+usermod -aG systemd-journal "$SERVICE_USER" >/dev/null 2>&1 || true
 
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR" 2>/dev/null || true
@@ -226,6 +226,7 @@ if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
         cp -a "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
     fi
     install -m 0644 "$SCRIPT_DIR/nginx-nas-web.conf" "$NGINX_SITE"
+    rm -f /etc/nginx/sites-enabled/default
     ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/nas-web
     if nginx -t; then
         systemctl reload nginx
