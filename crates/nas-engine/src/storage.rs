@@ -106,11 +106,7 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
     let mut device_type = "Desconocido".to_string();
 
     if let Some(device) = &device {
-        let target_path = if device.starts_with("/dev/mapper/") {
-            Some(device.clone())
-        } else {
-            parent_disk(device).map(|disk| format!("/dev/{disk}"))
-        };
+        let target_path = resolve_target_device(device);
 
         if let Some(target_path) = target_path {
             let rotational = runner
@@ -332,9 +328,20 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
+fn resolve_target_device(device: &str) -> Option<String> {
+    if device.starts_with("/dev/mapper/")
+        || device.starts_with("/dev/dm-")
+        || device.trim_start_matches("/dev/").contains('/')
+    {
+        Some(device.to_string())
+    } else {
+        parent_disk(device).map(|disk| format!("/dev/{disk}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_device, parent_disk, parse_df_full};
+    use super::{is_valid_device, parent_disk, parse_df_full, resolve_target_device};
 
     #[test]
     fn interpreta_df_completo() {
@@ -371,6 +378,30 @@ mod tests {
         assert_eq!(parent_disk("/dev/mmcblk0p1").as_deref(), Some("mmcblk0"));
         assert_eq!(parent_disk("/dev/mmcblk0").as_deref(), Some("mmcblk0"));
         assert_eq!(parent_disk(""), None);
+    }
+
+    #[test]
+    fn resuelve_dispositivo_destino() {
+        assert_eq!(
+            resolve_target_device("/dev/mapper/nas_vg-nas_lv").as_deref(),
+            Some("/dev/mapper/nas_vg-nas_lv")
+        );
+        assert_eq!(
+            resolve_target_device("/dev/dm-0").as_deref(),
+            Some("/dev/dm-0")
+        );
+        assert_eq!(
+            resolve_target_device("/dev/nas_vg/nas_lv").as_deref(),
+            Some("/dev/nas_vg/nas_lv")
+        );
+        assert_eq!(
+            resolve_target_device("/dev/sdb1").as_deref(),
+            Some("/dev/sdb")
+        );
+        assert_eq!(
+            resolve_target_device("/dev/nvme0n1p2").as_deref(),
+            Some("/dev/nvme0n1")
+        );
     }
 
     #[test]
