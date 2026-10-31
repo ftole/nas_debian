@@ -75,6 +75,13 @@ pub enum HelperAction {
         #[command(subcommand)]
         action: TerminalAction,
     },
+    /// Purga archivos en las papeleras de reciclaje Samba (.recycle).
+    #[command(alias = "purge_recycle")]
+    PurgeRecycle {
+        /// Días de antigüedad para purgar (por defecto: 15).
+        #[arg(long, default_value_t = 15)]
+        days: u32,
+    },
 }
 
 /// Subcomandos de gestión de cuentas (`nas helper accounts`).
@@ -218,6 +225,37 @@ pub enum BackupManageAction {
         port: u16,
         #[arg(default_value = "")]
         user: String,
+    },
+    /// Congela el último snapshot como respaldo permanente inmutable.
+    Freeze {
+        /// Identificador de la tarea.
+        id: String,
+        /// Etiqueta descriptiva opcional.
+        tag: Option<String>,
+    },
+    /// Lista los respaldos permanentes inmutables (Golden Snapshots).
+    #[command(alias = "list_permanent")]
+    ListPermanent {
+        /// Identificador de la tarea para filtrar.
+        id: Option<String>,
+    },
+    /// Restaura un snapshot hacia el origen de red o destino local.
+    Restore {
+        /// Identificador de la tarea.
+        id: String,
+        /// Nombre o ruta del snapshot a restaurar.
+        snapshot: String,
+        /// Destino local personalizado opcional.
+        #[arg(long)]
+        target: Option<String>,
+    },
+    /// Elimina un respaldo permanente inmutable.
+    #[command(alias = "delete_permanent")]
+    DeletePermanent {
+        /// Identificador de la tarea.
+        id: String,
+        /// Nombre de la carpeta del respaldo (ej. FULL_2026-10-30_190000).
+        name: String,
     },
 }
 
@@ -591,6 +629,23 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                     }
                 }
             }
+            BackupManageAction::Freeze { id, tag } => {
+                let info = backup::freeze_backup_task(&runner, &id, tag.as_deref())?;
+                serde_json::to_string(&info)
+                    .unwrap_or_else(|_| "Respaldo permanente creado".to_string())
+            }
+            BackupManageAction::ListPermanent { id } => {
+                let list = backup::list_permanent_backups(id.as_deref())?;
+                serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+            }
+            BackupManageAction::Restore {
+                id,
+                snapshot,
+                target,
+            } => backup::restore_backup(&runner, &id, &snapshot, target.as_deref())?,
+            BackupManageAction::DeletePermanent { id, name } => {
+                backup::delete_permanent_backup(&runner, &id, &name)?
+            }
         },
         HelperAction::StorageApply { action } => match action {
             StorageApplyAction::WipeDisk { confirm, device } => {
@@ -676,6 +731,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 String::new()
             }
         },
+        HelperAction::PurgeRecycle { days } => share::purge_recycle(&runner, days)?,
     };
 
     if json {
