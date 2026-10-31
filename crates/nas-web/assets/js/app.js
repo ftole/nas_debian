@@ -975,6 +975,9 @@ async function loadBackups() {
               <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
             </button>
           `}
+          <button class="btn btn-secondary btn-sm" title="Congelar como permanente (Golden Snapshot)" style="color:var(--accent-warning);" onclick="openFreezeModal('${escapeHtml(t.id)}')">
+            <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg>
+          </button>
           <button class="btn btn-secondary btn-sm" title="Editar tarea" onclick="openEditBackup('${escapeHtml(t.id)}')">
             <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
           </button>
@@ -1322,6 +1325,219 @@ async function deleteBackupTask(taskId) {
     loadBackups();
   } catch (e) {
     // Ya mostrado
+  }
+}
+
+// ==============================================================================
+// Respaldos Permanentes (Golden Snapshots) y Restauración
+// ==============================================================================
+let _activeBackupTab = 'rotative';
+
+function switchBackupTab(tab) {
+  _activeBackupTab = tab;
+  const btnRot = document.getElementById('tab-btn-rotative');
+  const btnPerm = document.getElementById('tab-btn-permanent');
+  const rotContainer = document.getElementById('backups-rotative-container');
+  const permContainer = document.getElementById('backups-permanent-container');
+
+  if (tab === 'permanent') {
+    if (btnRot) btnRot.classList.remove('active');
+    if (btnPerm) btnPerm.classList.add('active');
+    if (rotContainer) rotContainer.style.display = 'none';
+    if (permContainer) permContainer.style.display = '';
+    loadPermanentBackups();
+  } else {
+    if (btnRot) btnRot.classList.add('active');
+    if (btnPerm) btnPerm.classList.remove('active');
+    if (rotContainer) rotContainer.style.display = '';
+    if (permContainer) permContainer.style.display = 'none';
+    loadBackups();
+  }
+}
+
+async function loadPermanentBackups() {
+  const tbody = document.getElementById('backups-permanent-table-body');
+  if (!tbody) return;
+
+  try {
+    const res = await apiFetch('/api/backups/permanent');
+    const items = res.data || [];
+
+    if (items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay respaldos permanentes consolidados actualmente.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = items.map(p => {
+      const tagHtml = p.tag ? `<span class="tag-pill">${escapeHtml(p.tag)}</span>` : '<span class="text-muted">-</span>';
+      const sizeStr = formatBytesLocal(p.size_bytes || 0);
+      const filesStr = p.files_count !== undefined ? `${p.files_count} archivos` : '-';
+
+      return `
+      <tr>
+        <td><strong>${escapeHtml(p.task_id)}</strong></td>
+        <td>
+          <div style="font-weight:600;">${escapeHtml(p.name)}</div>
+          <small style="color:var(--text-muted); font-size:11px;">${escapeHtml(p.created_at || '')}</small>
+        </td>
+        <td>${tagHtml}</td>
+        <td><code style="font-size:11px;">${escapeHtml(p.path)}</code></td>
+        <td>${filesStr} <small class="text-muted">(${sizeStr})</small></td>
+        <td style="text-align:right; white-space:nowrap;">
+          <button class="btn btn-secondary btn-sm" title="Restaurar este respaldo" style="color:var(--accent-primary);" onclick="openRestoreBackup('${escapeHtml(p.task_id)}', '${escapeHtml(p.path)}')">
+            <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar
+          </button>
+          <button class="btn btn-secondary btn-sm" title="Eliminar respaldo permanente" style="color:var(--accent-danger);" onclick="deletePermanentBackup('${escapeHtml(p.task_id)}', '${escapeHtml(p.name)}')">
+            <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg>
+          </button>
+        </td>
+      </tr>
+    `;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--accent-danger);">Error al cargar respaldos permanentes: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function openFreezeModal(taskId) {
+  const select = document.getElementById('freeze-bkp-id');
+  const tagInput = document.getElementById('freeze-bkp-tag');
+  if (tagInput) tagInput.value = '';
+
+  if (select) {
+    select.innerHTML = '<option value="">Cargando tareas...</option>';
+    try {
+      if (!_backupsData || _backupsData.length === 0) {
+        const res = await apiFetch('/api/backups');
+        _backupsData = res.data || [];
+      }
+      select.innerHTML = _backupsData.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} (${escapeHtml(t.protocol || 'local')})</option>`).join('');
+      if (taskId) {
+        select.value = taskId;
+      }
+    } catch (e) {
+      select.innerHTML = '<option value="">Error al cargar tareas</option>';
+    }
+  }
+
+  openModal('modal-freeze-backup');
+}
+
+async function submitFreezeBackup(event) {
+  if (event) event.preventDefault();
+  const select = document.getElementById('freeze-bkp-id');
+  const tagInput = document.getElementById('freeze-bkp-tag');
+  const btn = document.getElementById('btn-submit-freeze-backup');
+
+  const taskId = select ? select.value : '';
+  const tag = tagInput ? tagInput.value.trim() : '';
+
+  if (!taskId) {
+    showToast('Selecciona una tarea de respaldo.', 'error');
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/backups/freeze', {
+      method: 'POST',
+      body: JSON.stringify({ id: taskId, tag: tag || null }),
+    });
+
+    closeModal('modal-freeze-backup');
+    showToast(res.message || 'Respaldo congelado como permanente exitosamente.', 'success');
+    switchBackupTab('permanent');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function openRestoreBackup(taskId, snapshotPath) {
+  const taskIdEl = document.getElementById('restore-bkp-task-id');
+  const snapPathEl = document.getElementById('restore-bkp-snapshot-path');
+  const nameDisplay = document.getElementById('restore-bkp-task-name');
+  const snapDisplay = document.getElementById('restore-bkp-snap-display');
+  const destType = document.getElementById('restore-bkp-dest-type');
+  const customField = document.getElementById('field-restore-custom-dest');
+  const customInput = document.getElementById('restore-bkp-custom-path');
+
+  if (taskIdEl) taskIdEl.value = taskId || '';
+  if (snapPathEl) snapPathEl.value = snapshotPath || '';
+  if (nameDisplay) nameDisplay.textContent = taskId || '';
+  if (snapDisplay) snapDisplay.textContent = snapshotPath || '';
+  if (destType) destType.value = 'origin';
+  if (customField) customField.style.display = 'none';
+  if (customInput) customInput.value = '';
+
+  openModal('modal-restore-backup');
+}
+
+function toggleRestoreTargetField() {
+  const destType = document.getElementById('restore-bkp-dest-type');
+  const customField = document.getElementById('field-restore-custom-dest');
+  if (destType && customField) {
+    customField.style.display = destType.value === 'custom' ? '' : 'none';
+  }
+}
+
+async function submitRestoreBackup(event) {
+  if (event) event.preventDefault();
+  const taskIdEl = document.getElementById('restore-bkp-task-id');
+  const snapPathEl = document.getElementById('restore-bkp-snapshot-path');
+  const destTypeEl = document.getElementById('restore-bkp-dest-type');
+  const customPathEl = document.getElementById('restore-bkp-custom-path');
+  const btn = document.getElementById('btn-submit-restore-backup');
+
+  const taskId = taskIdEl ? taskIdEl.value : '';
+  const snapshot = snapPathEl ? snapPathEl.value : '';
+  const destType = destTypeEl ? destTypeEl.value : 'origin';
+  let target = null;
+
+  if (destType === 'custom') {
+    target = customPathEl ? customPathEl.value.trim() : '';
+    if (!target) {
+      showToast('Ingresa la ruta local de destino para la restauración.', 'error');
+      return;
+    }
+  }
+
+  if (!window.confirm(`¿Confirmas la restauración del snapshot [${snapshot}]?\nDestino: ${target ? target : 'Origen de red original (sobrescribe archivos)'}`)) {
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/backups/restore', {
+      method: 'POST',
+      body: JSON.stringify({ id: taskId, snapshot: snapshot, target: target }),
+    });
+
+    closeModal('modal-restore-backup');
+    showToast(res.message || 'Restauración completada exitosamente.', 'success');
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deletePermanentBackup(taskId, name) {
+  if (!window.confirm(`¿Deseas eliminar permanentemente el respaldo [${name}] de la tarea [${taskId}]? Esta acción no se puede deshacer.`)) {
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/backups/permanent/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id: taskId, name: name }),
+    });
+
+    showToast(res.message || `Respaldo permanente [${name}] eliminado.`, 'success');
+    loadPermanentBackups();
+  } catch (e) {
+    // Ya mostrado por apiFetch
   }
 }
 
@@ -7369,6 +7585,14 @@ window.submitNewBackup = submitNewBackup;
 window.submitEditBackup = submitEditBackup;
 window.toggleBackupFields = toggleBackupFields;
 window.toggleEditBackupFields = toggleEditBackupFields;
+window.switchBackupTab = switchBackupTab;
+window.loadPermanentBackups = loadPermanentBackups;
+window.openFreezeModal = openFreezeModal;
+window.submitFreezeBackup = submitFreezeBackup;
+window.openRestoreBackup = openRestoreBackup;
+window.toggleRestoreTargetField = toggleRestoreTargetField;
+window.submitRestoreBackup = submitRestoreBackup;
+window.deletePermanentBackup = deletePermanentBackup;
 
 // Explorador de Archivos y Papelera
 window.filterCurrentFiles = filterCurrentFiles;
