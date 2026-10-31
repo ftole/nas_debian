@@ -63,6 +63,35 @@ pub fn logs(runner: &Runner, id: &str, lines: usize) -> Result<String, String> {
     helper(runner, &["logs", id, &lines])
 }
 
+/// Congela el último snapshot de una tarea como respaldo permanente inmutable (Golden Snapshot).
+pub fn freeze(runner: &Runner, id: &str, tag: Option<&str>) -> Result<String, String> {
+    if !valid_id(id) {
+        return Err("identificador de tarea inválido".to_string());
+    }
+    match tag {
+        Some(t) if !t.trim().is_empty() => helper(runner, &["freeze", id, t.trim()]),
+        _ => helper(runner, &["freeze", id]),
+    }
+}
+
+/// Restaura un snapshot hacia el origen configurado o un destino local alternativo.
+pub fn restore(
+    runner: &Runner,
+    id: &str,
+    snapshot: &str,
+    target: Option<&str>,
+) -> Result<String, String> {
+    if !valid_id(id) {
+        return Err("identificador de tarea inválido".to_string());
+    }
+    match target {
+        Some(tgt) if !tgt.trim().is_empty() => {
+            helper(runner, &["restore", id, snapshot, tgt.trim()])
+        }
+        _ => helper(runner, &["restore", id, snapshot]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{logs, run, stop, valid_id, MAX_LOG_LINES};
