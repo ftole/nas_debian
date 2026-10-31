@@ -5225,10 +5225,10 @@ pub async fn backup_permanent_delete(
     let name = body.name;
     let task = id.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::helpers::backup::delete_permanent_backup(&Runner::new(), &task, &name)
+        nas_engine::backup_control::delete_permanent(&Runner::new(), &task, &name)
     })
     .await
-    .unwrap_or_else(|_| Err(NasError::Invalid("eliminación interrumpida".to_string())));
+    .unwrap_or_else(|_| Err("eliminación interrumpida".to_string()));
 
     match outcome {
         Ok(msg) => {
@@ -5247,9 +5247,9 @@ pub async fn backup_permanent_delete(
                 "backup_permanent_delete",
                 &id,
                 "FAILED",
-                &err.to_string(),
+                &err,
             );
-            error_response(err)
+            error_response(NasError::Invalid(err))
         }
     }
 }
