@@ -868,6 +868,7 @@
       "btn-confirm-zip-download",
       "btn-discover-domain",
       "btn-download-zip",
+      "btn-folder-up",
       "btn-join-domain",
       "btn-logout",
       "btn-new-folder",
@@ -1345,7 +1346,7 @@
   "counts": {
     "layout_ids": 547,
     "layout_classes": 159,
-    "app_ids": 363,
+    "app_ids": 364,
     "app_selectors": 30,
     "app_endpoints": 76,
     "inline_handlers": 41
