@@ -85,7 +85,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Detección de contraseña desatendida en pipelines (curl ... | sudo bash)
-if [ -z "${NAS_WEB_PASSWORD:-}" ] && [ ! -f /etc/nas-web.env ]; then
+if [ -z "${NAS_WEB_PASSWORD:-}" ] && { [ ! -f /etc/nas-web.env ] || [ ! -f /var/lib/nas/nas.sqlite ]; }; then
     if [ ! -t 0 ]; then
         NAS_WEB_PASSWORD="$(openssl rand -base64 12 2>/dev/null || head -c 16 /dev/urandom | tr -dc 'A-Za-z0-9!#%&*' | head -c 16)"
         export NAS_WEB_PASSWORD
@@ -157,8 +157,10 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
             install -m 0755 "target/release/$bin" "$BIN_DIR/$bin"
         fi
     done
+    install -d -m 0700 -o root -g root /etc/backup-credentials 2>/dev/null || true
+    install -d -m 0755 /etc/cron.d 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-    BUILD_DIR="$INSTALL_DIR/target/release" bash packaging/install.sh
+    BUILD_DIR="$INSTALL_DIR/target/release" NAS_INSTALL_CALLER="install.sh" bash packaging/install.sh
 
 else
     # ==========================================================================
@@ -251,8 +253,10 @@ else
     done
 
     cd "$INSTALL_DIR"
+    install -d -m 0700 -o root -g root /etc/backup-credentials 2>/dev/null || true
+    install -d -m 0755 /etc/cron.d 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-    BUILD_DIR="$INSTALL_DIR/bin" bash packaging/install.sh
+    BUILD_DIR="$INSTALL_DIR/bin" NAS_INSTALL_CALLER="install.sh" bash packaging/install.sh
 fi
 
 echo -e " ${C_BOLD}[5/5]${C_RESET} Estado final del sistema..."
@@ -264,13 +268,24 @@ printf '  %s\n' "CLI NAS:   sudo nas --help"
 printf '  %s\n' "TUI NAS:   sudo nas-tui"
 echo
 
-if [ "$PASSWORD_AUTO_GENERATED" -eq 1 ]; then
-    echo -e "${C_YELLOW}  ╭──────────────────────────────────────────────────────────────────╮${C_RESET}"
-    echo -e "${C_YELLOW}  │  CREDENCIALES DE ACCESO WEB (GENERADAS AUTOMÁTICAMENTE):          │${C_RESET}"
-    echo -e "${C_YELLOW}  │  Usuario:     ${C_BOLD}admin${C_RESET}${C_YELLOW}                                              │${C_RESET}"
-    echo -e "${C_YELLOW}  │  Contraseña:  ${C_BOLD}${NAS_WEB_PASSWORD}${C_RESET}${C_YELLOW}                       │${C_RESET}"
-    echo -e "${C_YELLOW}  │  (Guarde esta clave; se actualizará con PBKDF2 en el primer login)│${C_RESET}"
-    echo -e "${C_YELLOW}  ╰──────────────────────────────────────────────────────────────────╯${C_RESET}\n"
+INITIAL_PASS=""
+if [ -f /etc/nas/.initial_admin_password ]; then
+    INITIAL_PASS="$(cat /etc/nas/.initial_admin_password 2>/dev/null || true)"
+    rm -f /etc/nas/.initial_admin_password
+elif [ -n "${NAS_WEB_PASSWORD:-}" ] && [ "$PASSWORD_AUTO_GENERATED" -eq 1 ]; then
+    INITIAL_PASS="$NAS_WEB_PASSWORD"
+fi
+
+if [ -n "$INITIAL_PASS" ]; then
+    echo -e "${C_CYAN}  ╭──────────────────────────────────────────────────────────────────╮${C_RESET}"
+    echo -e "${C_CYAN}  │               CREDENCIALES DE ACCESO AL PANEL WEB                │${C_RESET}"
+    echo -e "${C_CYAN}  ├──────────────────────────────────────────────────────────────────┤${C_RESET}"
+    echo -e "${C_CYAN}  │  ${C_RESET}Panel Web:   ${C_BOLD}https://${SERVER_IP}/${C_RESET}"
+    echo -e "${C_CYAN}  │  ${C_RESET}Usuario:     ${C_BOLD}admin${C_RESET}"
+    echo -e "${C_CYAN}  │  ${C_RESET}Contraseña:  ${C_YELLOW}${C_BOLD}${INITIAL_PASS}${C_RESET}"
+    echo -e "${C_CYAN}  ├──────────────────────────────────────────────────────────────────┤${C_RESET}"
+    echo -e "${C_CYAN}  │  ${C_YELLOW}[!] GUARDE ESTA CONTRASEÑA AHORA: solo se muestra una única vez.${C_RESET}"
+    echo -e "${C_CYAN}  ╰──────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 fi
 
 echo -e "${C_GREEN}✔ Instalación completada correctamente.${C_RESET}"
