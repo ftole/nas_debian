@@ -72,6 +72,7 @@ btn-confirm-unmount-storage
 btn-confirm-zip-download
 btn-discover-domain
 btn-download-zip
+btn-folder-up
 btn-join-domain
 btn-logout
 btn-new-folder
