@@ -293,7 +293,7 @@ impl DeployParams {
             "/srv/nas/SISTEMAS".into(),
         ]);
         if self.role != ServerRole::Arquivos {
-            for dir in ["BACKUPS_HISTORICOS", "LOGS_BACKUP"] {
+            for dir in ["BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES", "LOGS_BACKUP"] {
                 steps.push(vec!["mkdir".into(), "-p".into(), format!("/srv/nas/{dir}")]);
             }
             steps.push(vec![
@@ -377,7 +377,13 @@ impl DeployParams {
    smb3 directory leases = no\n\
    kernel change notify = yes\n\
    change notify = yes\n\
-   vfs objects = acl_xattr streams_xattr\n\
+   vfs objects = acl_xattr streams_xattr recycle\n\
+   recycle:repository = .recycle\n\
+   recycle:keeptree = yes\n\
+   recycle:versions = yes\n\
+   recycle:touch = yes\n\
+   recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*\n\
+   recycle:excludedir = /.recycle/\n\
    map acl inherit = yes\n\
    store dos attributes = yes\n\
    inherit permissions = yes\n\
@@ -421,6 +427,19 @@ impl DeployParams {
                 path: "/etc/audit/rules.d/nas.rules".into(),
                 mode: 0o640,
                 content: AUDIT_RULES.to_string(),
+            },
+            Artifact {
+                path: "/etc/cron.daily/nas-recycle-purge".into(),
+                mode: 0o755,
+                content: "#!/bin/bash\n\
+# nas-recycle-purge: Purga automática de archivos en papeleras Samba con más de 15 días\n\
+if [ -x /usr/local/bin/nas ]; then\n\
+    /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true\n\
+else\n\
+    find /srv/nas -type f -path '*/.recycle/*' -mtime +15 -delete 2>/dev/null || true\n\
+    find /srv/nas -type d -path '*/.recycle/*' -empty -delete 2>/dev/null || true\n\
+fi\n"
+                    .to_string(),
             },
         ];
 
@@ -743,6 +762,7 @@ mod artifact_tests {
         assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules"));
         assert!(paths.contains(&"/etc/logrotate.d/nas-backups"));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules"));
+        assert!(paths.contains(&"/etc/cron.daily/nas-recycle-purge"));
 
         let role = artifacts
             .iter()
@@ -773,7 +793,7 @@ mod artifact_tests {
             .find(|a| a.path == "/etc/audit/rules.d/nas.rules")
             .expect("audit");
         assert_eq!(audit.mode, 0o640);
-        assert_eq!(artifacts.len(), 6);
+        assert_eq!(artifacts.len(), 7);
         assert!(audit.content.contains("-w /etc/backup-credentials/ -p rwa"));
         assert!(audit
             .content
