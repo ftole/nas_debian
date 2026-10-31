@@ -4,6 +4,10 @@
 /api/backups/:id/run
 /api/backups/:id/stop
 /api/backups/delete
+/api/backups/freeze
+/api/backups/permanent
+/api/backups/permanent/delete
+/api/backups/restore
 /api/backups/running
 /api/backups/test
 /api/backups/update
