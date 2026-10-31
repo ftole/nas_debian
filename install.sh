@@ -157,6 +157,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
             install -m 0755 "target/release/$bin" "$BIN_DIR/$bin"
         fi
     done
+    rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
     BUILD_DIR="$INSTALL_DIR/target/release" bash packaging/install.sh
 
 else
@@ -250,6 +251,7 @@ else
     done
 
     cd "$INSTALL_DIR"
+    rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
     BUILD_DIR="$INSTALL_DIR/bin" bash packaging/install.sh
 fi
 
