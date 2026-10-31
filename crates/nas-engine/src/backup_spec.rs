@@ -239,6 +239,7 @@ CRED_FILE={q_cred}
 MODE="$SOURCE_TYPE"
 CRED="$CRED_FILE"
 BKP_DIR="${{BKP_DIR:-{q_dest}}}"
+PERM_DIR="${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK"
 LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
 MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
@@ -262,7 +263,7 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-mkdir -p "$BKP_DIR" "$LOG_DIR"
+mkdir -p "$BKP_DIR" "$LOG_DIR" "$PERM_DIR"
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
 flock -n 9 || {{ log "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ==="; exit 0; }}
 
@@ -296,6 +297,18 @@ SNAPSHOT_OK=true
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
 chattr -R +i "$FINAL" 2>/dev/null || true
 log "snapshot completado: $FINAL"
+
+DAY_OF_MONTH=$(date +%d)
+if [ "$DAY_OF_MONTH" = "01" ]; then
+    MONTH_TAG=$(date +%Y-%m)
+    if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
+        PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
+        if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
+            chmod -R a-w "$PERM_DEST" 2>/dev/null || true
+            log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
+        fi
+    fi
+fi
 
 mapfile -t ALL_SNAPS < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' | LC_ALL=C sort)
 TOTAL_SNAPS="${{#ALL_SNAPS[@]}}"
