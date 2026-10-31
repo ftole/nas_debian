@@ -292,7 +292,10 @@ pub fn lvm_create(
     check_mounted(runner, disk, unmount)?;
 
     let flag = if unmount { "1" } else { "0" };
-    helper(runner, &["lvm", confirm, disk, vg, lv, &size, &fstype, flag])?;
+    helper(
+        runner,
+        &["lvm", confirm, disk, vg, lv, &size, &fstype, flag],
+    )?;
     Ok(format!(
         "volumen /dev/{vg}/{lv} creado y montado en /srv/nas"
     ))
