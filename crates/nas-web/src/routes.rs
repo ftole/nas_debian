@@ -1835,6 +1835,18 @@ pub async fn favicon() -> Response {
         .into_response()
 }
 
+/// Favicon binario ICO multi-resolución.
+pub async fn favicon_ico() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/x-icon"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        views::FAVICON_ICO,
+    )
+        .into_response()
+}
+
 /// Comportamiento original del panel.
 pub async fn app_js() -> Response {
     js_response(crate::assets::APP_JS)
