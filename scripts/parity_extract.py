@@ -37,6 +37,7 @@ ASSET_FILES = [
     "login.css",
     "icons.svg",
     "favicon.svg",
+    "favicon.ico",
     "js/app.js",
     "js/vendor/xlsx.full.min.js",
     "js/vendor/jszip.min.js",
