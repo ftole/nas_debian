@@ -92,9 +92,25 @@ pub fn restore(
     }
 }
 
+/// Elimina un respaldo permanente inmutable a través del helper privilegiado.
+pub fn delete_permanent(runner: &Runner, id: &str, name: &str) -> Result<String, String> {
+    if !valid_id(id) {
+        return Err("identificador de tarea inválido".to_string());
+    }
+    let name = name.trim();
+    if !name.starts_with("FULL_")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+    {
+        return Err("nombre de respaldo permanente inválido".to_string());
+    }
+    helper(runner, &["delete-permanent", id, name])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{logs, run, stop, valid_id, MAX_LOG_LINES};
+    use super::{delete_permanent, freeze, logs, restore, run, stop, valid_id, MAX_LOG_LINES};
 
     #[test]
     fn valida_identificadores() {
@@ -112,6 +128,10 @@ mod tests {
         assert!(run(&runner, "../x").is_err());
         assert!(stop(&runner, "a/b").is_err());
         assert!(logs(&runner, "", 10).is_err());
+        assert!(freeze(&runner, "id con espacios", None).is_err());
+        assert!(restore(&runner, "../escape", "snap", None).is_err());
+        assert!(delete_permanent(&runner, "id invalido", "FULL_1").is_err());
+        assert!(delete_permanent(&runner, "tarea", "not_full").is_err());
     }
 
     #[test]
