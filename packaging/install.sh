@@ -78,7 +78,7 @@ if [ -f "$STATE_DIR/nas.sqlite" ]; then
     chmod 0640 "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
 fi
 
-install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" 2>/dev/null || true
+install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" "$DATA_ROOT/BACKUPS_HISTORICOS" "$DATA_ROOT/BACKUPS_PERMANENTES" "$DATA_ROOT/LOGS_BACKUP" 2>/dev/null || true
 install -d -m 0755 /etc/nas
 if [ -f /etc/nas/role ]; then
     chmod 0644 /etc/nas/role 2>/dev/null || true
