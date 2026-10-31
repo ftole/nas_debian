@@ -823,14 +823,37 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
     // Restaurar permisos de escritura e inmutabilidad para permitir eliminación
     let _ = runner.run(&CommandSpec::new("chattr").args(["-R", "-i", &path.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["-R", "u+w", &path.to_string_lossy()]));
-    let _ = runner.run(&CommandSpec::new("rm").args(["-rf", &path.to_string_lossy()]));
+    let mut rm_success = false;
+    if let Ok(res) = runner.run(&CommandSpec::new("rm").args(["-rf", &path.to_string_lossy()])) {
+        if res.is_success() {
+            rm_success = true;
+        }
+    }
+    if !rm_success {
+        let _ = std::fs::remove_dir_all(&path);
+    }
 
-    // Re-asegurar inmutabilidad en los snapshots históricos de la tarea
+    // Re-asegurar inmutabilidad en los snapshots históricos y permanentes de la tarea
     let task_info = read_task_info(id);
     let task_dir = Path::new(&task_info.dest_root).join(id);
     if task_dir.is_dir() {
         let _ =
             runner.run(&CommandSpec::new("chattr").args(["-R", "+i", &task_dir.to_string_lossy()]));
+    }
+    if let Some(perm_parent) = path.parent() {
+        if perm_parent.is_dir() {
+            let _ = runner.run(&CommandSpec::new("chattr").args([
+                "-R",
+                "+i",
+                &perm_parent.to_string_lossy(),
+            ]));
+        }
+    }
+
+    if path.exists() {
+        return Err(NasError::Invalid(format!(
+            "fallo al eliminar el respaldo permanente '{name}'"
+        )));
     }
 
     Ok(format!(
