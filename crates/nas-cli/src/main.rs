@@ -276,6 +276,9 @@ enum BackupAction {
         /// Directorio de runners.
         #[arg(long, default_value = "/usr/local/bin")]
         dir: PathBuf,
+        /// Muestra respaldos permanentes inmutables (Golden Snapshots).
+        #[arg(long)]
+        permanent: bool,
     },
     /// Muestra el plan de ejecución de una tarea.
     Plan {
@@ -304,6 +307,34 @@ enum BackupAction {
         /// Directorio de bloqueos.
         #[arg(long, default_value = "/var/lock")]
         lock_dir: PathBuf,
+    },
+    /// Congela el último snapshot de una tarea como respaldo permanente inmutable (Golden Snapshot a costo 0).
+    Freeze {
+        /// Identificador de la tarea.
+        id: String,
+        /// Etiqueta descriptiva opcional.
+        tag: Option<String>,
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        dir: PathBuf,
+    },
+    /// Lista los respaldos permanentes inmutables (Golden Snapshots).
+    Permanent {
+        /// Identificador opcional de la tarea para filtrar.
+        id: Option<String>,
+    },
+    /// Restaura un snapshot hacia el origen de red o destino local alternativo.
+    Restore {
+        /// Identificador de la tarea.
+        id: String,
+        /// Nombre o ruta del snapshot a restaurar.
+        snapshot: String,
+        /// Destino local alternativo opcional.
+        #[arg(long)]
+        dest: Option<String>,
+        /// Confirmación obligatoria de restauración.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -356,7 +387,13 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             AuditAction::Verify => audit_verify(cli.json),
         },
         Command::Backup { action } => match action {
-            BackupAction::List { dir } => backup_list(&dir, cli.json),
+            BackupAction::List { dir, permanent } => {
+                if permanent {
+                    backup_permanent_list(None, cli.json)
+                } else {
+                    backup_list(&dir, cli.json)
+                }
+            }
             BackupAction::Plan { id, dir } => backup_plan(&dir, &id, cli.json),
             BackupAction::Run {
                 id,
@@ -376,6 +413,16 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 },
                 cli.json,
             ),
+            BackupAction::Freeze { id, tag, dir: _ } => {
+                backup_freeze(&id, tag.as_deref(), cli.json)
+            }
+            BackupAction::Permanent { id } => backup_permanent_list(id.as_deref(), cli.json),
+            BackupAction::Restore {
+                id,
+                snapshot,
+                dest,
+                yes,
+            } => backup_restore(&id, &snapshot, dest.as_deref(), yes, cli.json),
         },
         Command::Update { action } => match action {
             None | Some(UpdateAction::Status) => update_status(cli.json),
@@ -719,6 +766,92 @@ fn backup_plan(dir: &Path, id: &str, json: bool) -> NasResult<ExitCode> {
         println!("{:>2}. {step}", index + 1);
     }
 
+    Ok(ExitCode::SUCCESS)
+}
+
+fn backup_freeze(id: &str, tag: Option<&str>, json: bool) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let info = nas_engine::helpers::backup::freeze_backup_task(&runner, id, tag)?;
+
+    if json {
+        print_json(&ApiResponse::ok(
+            &info,
+            "Respaldo permanente creado exitosamente",
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("RESPALDO PERMANENTE CREADO (GOLDEN SNAPSHOT)");
+    println!("Tarea    : {}", info.task);
+    println!("Nombre   : {}", info.name);
+    println!("Ruta     : {}", info.path);
+    println!("Fecha    : {}", info.date);
+    if let Some(t) = &info.tag {
+        println!("Etiqueta : {t}");
+    }
+    println!("Archivos : {}", info.files_count);
+    println!(
+        "Tamaño   : {} bytes (0 bytes extras en disco por Hardlinks)",
+        info.size_bytes
+    );
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn backup_permanent_list(id: Option<&str>, json: bool) -> NasResult<ExitCode> {
+    let list = nas_engine::helpers::backup::list_permanent_backups(id)?;
+
+    if json {
+        print_json(&ApiResponse::ok(&list, "Respaldos permanentes"))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("RESPALDOS PERMANENTES (GOLDEN SNAPSHOTS) ({})", list.len());
+    if list.is_empty() {
+        println!("No se encontraron respaldos permanentes.");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!(
+        "{:<15} {:<30} {:<15} {:<10} {:<35}",
+        "TAREA", "NOMBRE", "FECHA", "ARCHIVOS", "RUTA"
+    );
+    println!("{}", "-".repeat(110));
+    for item in &list {
+        println!(
+            "{:<15} {:<30} {:<15} {:<10} {:<35}",
+            item.task, item.name, item.date, item.files_count, item.path
+        );
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn backup_restore(
+    id: &str,
+    snapshot: &str,
+    dest: Option<&str>,
+    yes: bool,
+    json: bool,
+) -> NasResult<ExitCode> {
+    if !yes {
+        return Err(NasError::Invalid(
+            "la restauración sobrescribirá archivos en el destino; confirma con --yes".into(),
+        ));
+    }
+
+    let runner = Runner::new();
+    let msg = nas_engine::helpers::backup::restore_backup(&runner, id, snapshot, dest)?;
+
+    if json {
+        print_json(&ApiResponse::ok(
+            &serde_json::json!({ "message": msg }),
+            &msg,
+        ))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("{msg}");
     Ok(ExitCode::SUCCESS)
 }
 
