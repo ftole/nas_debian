@@ -38,13 +38,17 @@ pub fn valid_name(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
-/// Valida el tamaño de un LV (`100%FREE`, `20G`, `512M`).
+/// Valida el tamaño de un LV (`100%FREE`, `20G`, `512M`, `100%free`, `50g`).
 pub fn valid_size(size: &str) -> bool {
-    let size = size.trim();
+    let size = size.trim().to_ascii_uppercase();
     !size.is_empty()
         && size.len() <= 12
         && size.chars().all(|c| {
-            c.is_ascii_digit() || matches!(c, '.' | 'G' | 'M' | 'T' | '%' | 'F' | 'R' | 'E')
+            c.is_ascii_digit()
+                || matches!(
+                    c,
+                    '.' | 'G' | 'M' | 'T' | 'K' | '%' | 'F' | 'R' | 'E' | 'V' | 'P' | 'S'
+                )
         })
 }
 
@@ -277,18 +281,18 @@ pub fn lvm_create(
         return Err(fail("filesystem no soportado"));
     }
     let size = if size.trim().is_empty() {
-        "100%FREE"
+        "100%FREE".to_string()
     } else {
-        size.trim()
+        size.trim().to_ascii_uppercase()
     };
-    if !valid_size(size) {
+    if !valid_size(&size) {
         return Err(fail("tamaño de volumen inválido"));
     }
     ensure_safe(runner, disk)?;
     check_mounted(runner, disk, unmount)?;
 
     let flag = if unmount { "1" } else { "0" };
-    helper(runner, &["lvm", confirm, disk, vg, lv, size, &fstype, flag])?;
+    helper(runner, &["lvm", confirm, disk, vg, lv, &size, &fstype, flag])?;
     Ok(format!(
         "volumen /dev/{vg}/{lv} creado y montado en /srv/nas"
     ))
@@ -386,7 +390,11 @@ mod tests {
         assert!(!valid_name("a/b"));
 
         assert!(valid_size("100%FREE"));
+        assert!(valid_size("100%free"));
         assert!(valid_size("20G"));
+        assert!(valid_size("20g"));
+        assert!(valid_size("500M"));
+        assert!(valid_size("50%vg"));
         assert!(!valid_size("rm -rf"));
     }
 
