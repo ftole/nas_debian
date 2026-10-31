@@ -103,7 +103,11 @@ fn unmount_device(runner: &Runner, device: &str) {
         for line in out.stdout.lines() {
             let mp = line.trim();
             if !mp.is_empty() {
-                let _ = runner.run(&CommandSpec::new("umount").args([mp]));
+                if let Ok(res) = runner.run(&CommandSpec::new("umount").args([mp])) {
+                    if !res.is_success() {
+                        let _ = runner.run(&CommandSpec::new("umount").args(["-l", mp]));
+                    }
+                }
             }
         }
     }
@@ -266,6 +270,10 @@ pub fn setup_lvm(
         unmount_device(runner, disk);
     }
 
+    let _ = runner.run(&CommandSpec::new("wipefs").args(["-a", disk]));
+    let _ = runner.run(&CommandSpec::new("partprobe").args([disk]));
+    let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
+
     runner
         .run(&CommandSpec::new("pvcreate").args(["-y", "-ff", disk]))?
         .ensure_success()?;
@@ -282,8 +290,9 @@ pub fn setup_lvm(
             .run(&CommandSpec::new("vgcreate").args([vg, disk]))?
             .ensure_success()?;
     }
+    let size_flag = if size.contains('%') { "-l" } else { "-L" };
     runner
-        .run(&CommandSpec::new("lvcreate").args(["-y", "-n", lv, "-l", size, vg]))?
+        .run(&CommandSpec::new("lvcreate").args(["-y", "-n", lv, size_flag, size, vg]))?
         .ensure_success()?;
 
     let path_lv = format!("/dev/{vg}/{lv}");
