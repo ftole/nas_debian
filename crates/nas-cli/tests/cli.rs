@@ -553,3 +553,27 @@ fn helper_accounts_aliases_reconocidos() {
         .unwrap()
         .contains("inválido o reservado"));
 }
+
+#[test]
+fn helper_purge_recycle_valida_o_ejecuta() {
+    let output = nas()
+        .args(["--json", "helper", "purge-recycle", "--days", "15"])
+        .output()
+        .expect("ejecuta");
+    let text = if !output.stderr.is_empty() {
+        String::from_utf8_lossy(&output.stderr).to_string()
+    } else {
+        String::from_utf8_lossy(&output.stdout).to_string()
+    };
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("debe ser salida JSON");
+    assert!(payload.get("success").is_some());
+}
+
+#[test]
+fn helper_backup_manage_freeze_rechaza_id_invalido() {
+    let output = nas()
+        .args(["--json", "helper", "backup-manage", "freeze", "id invalido"])
+        .output()
+        .expect("ejecuta");
+    assert!(!output.status.success());
+}
