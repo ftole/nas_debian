@@ -106,12 +106,22 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
     let mut device_type = "Desconocido".to_string();
 
     if let Some(device) = &device {
-        if let Some(disk) = parent_disk(device) {
-            let disk_path = format!("/dev/{disk}");
+        let target_path = if device.starts_with("/dev/mapper/") {
+            Some(device.clone())
+        } else {
+            parent_disk(device).map(|disk| format!("/dev/{disk}"))
+        };
+
+        if let Some(target_path) = target_path {
             let rotational = runner
-                .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", &disk_path]))
+                .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", &target_path]))
                 .ok()
-                .and_then(|out| out.stdout.trim().parse::<u8>().ok());
+                .and_then(|out| {
+                    out.stdout
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .and_then(|l| l.trim().parse::<u8>().ok())
+                });
             match rotational {
                 Some(0) => {
                     supports_trim = true;
