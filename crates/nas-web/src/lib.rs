@@ -77,6 +77,7 @@ pub fn router(state: AppState) -> Router {
         .route("/js/vendor/jszip.min.js", get(routes::vendor_jszip))
         .route("/js/vendor/docx-preview.min.js", get(routes::vendor_docx))
         .route("/favicon.svg", get(routes::favicon))
+        .route("/favicon.ico", get(routes::favicon_ico))
         .route("/login", get(routes::login_form).post(routes::login_submit))
         .route("/api/auth/login", post(routes::api_login))
         .route("/logout", post(routes::logout))
