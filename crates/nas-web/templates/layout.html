@@ -1286,7 +1286,17 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
 
-        <div class="panel-card">
+        <!-- Selector de pestañas: Rotativos vs Permanentes -->
+        <div class="tabs-nav" style="display:flex; gap:10px; margin-bottom:18px;">
+          <button type="button" class="btn btn-secondary active" id="tab-btn-rotative" onclick="switchBackupTab('rotative')">
+            <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Snapshots Rotativos
+          </button>
+          <button type="button" class="btn btn-secondary" id="tab-btn-permanent" onclick="switchBackupTab('permanent')">
+            <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg> Respaldos Permanentes (Golden Snapshots)
+          </button>
+        </div>
+
+        <div class="panel-card" id="backups-rotative-container">
           <div class="table-responsive">
             <table class="nas-table">
               <thead>
@@ -1297,11 +1307,40 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                   <th>Horario Cron</th>
                   <th>Retención</th>
                   <th>Estado / Progreso</th>
-                  <th style="width:160px; text-align:right;">Acciones</th>
+                  <th style="width:180px; text-align:right;">Acciones</th>
                 </tr>
               </thead>
               <tbody id="backups-table-body">
                 <tr><td colspan="7" style="text-align:center;">Cargando tareas de backup...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel-card" id="backups-permanent-container" style="display:none;">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--border-color);">
+            <div>
+              <h3 style="margin:0; font-size:15px;"><svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg> Golden Snapshots Inmutables</h3>
+              <p style="margin:2px 0 0 0; font-size:12px; color:var(--text-muted);">Respaldos consolidados a costo 0 mediante Hardlinks, aislados de la rotación automática diaria.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openFreezeModal()">
+              <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Congelar nuevo snapshot
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="nas-table">
+              <thead>
+                <tr>
+                  <th>Tarea</th>
+                  <th>Identificador / Fecha</th>
+                  <th>Etiqueta</th>
+                  <th>Ruta en disco</th>
+                  <th>Archivos</th>
+                  <th style="width:180px; text-align:right;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="backups-permanent-table-body">
+                <tr><td colspan="6" style="text-align:center;">Cargando respaldos permanentes...</td></tr>
               </tbody>
             </table>
           </div>
@@ -2055,6 +2094,78 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-backup')">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btn-submit-edit-backup">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Congelar Respaldo Permanente (Golden Snapshot) -->
+  <div class="modal-backdrop modal-static" id="modal-freeze-backup">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg> Congelar Respaldo Permanente</h3>
+        <button class="modal-close" onclick="closeModal('modal-freeze-backup')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-freeze-backup" onsubmit="submitFreezeBackup(event)">
+          <div class="form-group">
+            <label for="freeze-bkp-id">Tarea de respaldo:</label>
+            <select id="freeze-bkp-id" required>
+              <!-- Llenado dinámicamente -->
+            </select>
+            <small>Se congelará el snapshot más reciente completado de esta tarea consumiendo 0 bytes extras.</small>
+          </div>
+          <div class="form-group">
+            <label for="freeze-bkp-tag">Etiqueta descriptiva (opcional):</label>
+            <input type="text" id="freeze-bkp-tag" placeholder="ej. cierre_mensual_octubre" pattern="[a-zA-Z0-9_-]*">
+            <small>Etiqueta identificativa para auditoría y recuperación rápida (máx. 32 caracteres).</small>
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-freeze-backup')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-freeze-backup">Congelar como Permanente</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Restaurar Respaldo -->
+  <div class="modal-backdrop modal-static" id="modal-restore-backup">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar Respaldo</h3>
+        <button class="modal-close" onclick="closeModal('modal-restore-backup')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-restore-backup" onsubmit="submitRestoreBackup(event)">
+          <input type="hidden" id="restore-bkp-task-id">
+          <input type="hidden" id="restore-bkp-snapshot-path">
+          <div class="form-group">
+            <label>Tarea:</label>
+            <div id="restore-bkp-task-name" style="font-weight:600; padding:8px; background:var(--bg-surface); border-radius:4px;"></div>
+          </div>
+          <div class="form-group">
+            <label>Snapshot / Respaldo a restaurar:</label>
+            <div id="restore-bkp-snap-display" style="font-family:monospace; font-size:12px; word-break:break-all; padding:8px; background:var(--bg-surface); border-radius:4px;"></div>
+          </div>
+          <div class="form-group">
+            <label for="restore-bkp-dest-type">Destino de la restauración:</label>
+            <select id="restore-bkp-dest-type" onchange="toggleRestoreTargetField()">
+              <option value="origin">Origen de Red Original (Sobrescribe archivos de la red con el respaldo)</option>
+              <option value="custom">Destino Local Alternativo (en /srv/nas o /tmp)</option>
+            </select>
+          </div>
+          <div class="form-group" id="field-restore-custom-dest" style="display:none;">
+            <label for="restore-bkp-custom-path">Ruta local de destino:</label>
+            <input type="text" id="restore-bkp-custom-path" placeholder="ej. /srv/nas/restauraciones/recuperado_2026">
+          </div>
+          <div class="alert alert-warning" style="margin-top:12px; font-size:12px;">
+            <strong>Aviso de seguridad:</strong> La restauración sincronizará los archivos del respaldo en el destino seleccionado.
+          </div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-restore-backup')">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-restore-backup">Confirmar Restauración</button>
           </div>
         </form>
       </div>
