@@ -176,7 +176,7 @@ pub fn has_critical_metadata(runner: &Runner, device: &str) -> bool {
 }
 
 /// Protecciones comunes antes de cualquier operación destructiva.
-fn ensure_safe(runner: &Runner, device: &str) -> Result<(), String> {
+fn ensure_safe(runner: &Runner, device: &str, confirm: &str) -> Result<(), String> {
     if let Some(parent) = parent_disk(runner, device) {
         if os_disks(runner)
             .iter()
@@ -187,7 +187,7 @@ fn ensure_safe(runner: &Runner, device: &str) -> Result<(), String> {
             ));
         }
     }
-    if has_critical_metadata(runner, device) {
+    if has_critical_metadata(runner, device) && confirm != "SI-DESTRUIR-DATOS" {
         return Err(fail(
             "operación prohibida: el disco contiene LVM o RAID activo",
         ));
@@ -229,7 +229,7 @@ pub fn format_device(
     if !ALLOWED_FILESYSTEMS.contains(&fstype.as_str()) {
         return Err(fail("sistema de archivos no soportado (ext4|btrfs)"));
     }
-    ensure_safe(runner, device)?;
+    ensure_safe(runner, device, confirm)?;
     check_mounted(runner, device, unmount)?;
 
     let flag = if unmount { "1" } else { "0" };
@@ -288,7 +288,7 @@ pub fn lvm_create(
     if !valid_size(&size) {
         return Err(fail("tamaño de volumen inválido"));
     }
-    ensure_safe(runner, disk)?;
+    ensure_safe(runner, disk, confirm)?;
     check_mounted(runner, disk, unmount)?;
 
     let flag = if unmount { "1" } else { "0" };
@@ -343,7 +343,7 @@ pub fn add_unit(
     if !ALLOWED_FILESYSTEMS.contains(&fstype.as_str()) {
         return Err(fail("filesystem no soportado"));
     }
-    ensure_safe(runner, device)?;
+    ensure_safe(runner, device, confirm)?;
     helper(runner, &["add-unit", confirm, device, unit_id, &fstype])?;
     Ok(format!(
         "unidad {unit_id} creada en /srv/nas/unidades/{unit_id}"
@@ -358,7 +358,7 @@ pub fn extend_pool(runner: &Runner, device: &str, confirm: &str) -> Result<Strin
     if !valid_device(device) {
         return Err(fail("dispositivo inválido"));
     }
-    ensure_safe(runner, device)?;
+    ensure_safe(runner, device, confirm)?;
     helper(runner, &["extend-pool", confirm, device])?;
     Ok(format!("pool extendido con {device}"))
 }
@@ -422,5 +422,12 @@ mod tests {
         assert!(extend_pool(&runner, "/dev/sdz", "").is_err());
         assert!(format_device(&runner, "../etc", "ext4", "SI-FORMATEAR", false).is_err());
         assert!(format_device(&runner, "/dev/sdz", "xfs", "SI-FORMATEAR", false).is_err());
+    }
+
+    #[test]
+    fn ensure_safe_permite_si_destruir_datos() {
+        let runner = nas_exec::Runner::new();
+        // Dispositivos que no sean del sistema operativo
+        assert!(super::ensure_safe(&runner, "/dev/sdz", "SI-DESTRUIR-DATOS").is_ok());
     }
 }
