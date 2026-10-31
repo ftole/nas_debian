@@ -47,6 +47,10 @@ while [ $# -gt 0 ]; do
         --version)
             SPECIFIED_VERSION="${2:?falta versión}"; shift 2
             ;;
+        --yes|-y)
+            # Acepta explícitamente flag de actualización/instalación desatendida
+            shift
+            ;;
         --uninstall|uninstall)
             echo -e "${C_YELLOW}[!] Desinstalando la plataforma NAS...${C_RESET}"
             if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/src/core/uninstall.sh" ]; then
