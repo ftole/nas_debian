@@ -442,6 +442,600 @@ pub fn test_ssh_conn(
     }
 }
 
+/// Metadatos e información de un respaldo permanente congelado (Golden Snapshot).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PermanentBackupInfo {
+    /// Identificador de la tarea.
+    pub task: String,
+    /// Nombre del directorio (ej. `FULL_2026-10-30_190000_cierre`).
+    pub name: String,
+    /// Ruta absoluta en disco.
+    pub path: String,
+    /// Fecha de congelación formateada.
+    pub date: String,
+    /// Etiqueta descriptiva opcional.
+    pub tag: Option<String>,
+    /// Tamaño aproximado en bytes.
+    pub size_bytes: u64,
+    /// Número de archivos contenidos.
+    pub files_count: u64,
+}
+
+fn dir_stats(path: &Path) -> (u64, u64) {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    files += 1;
+                    bytes += meta.len();
+                } else if meta.is_dir() {
+                    let (sub_files, sub_bytes) = dir_stats(&entry.path());
+                    files += sub_files;
+                    bytes += sub_bytes;
+                }
+            }
+        }
+    }
+    (files, bytes)
+}
+
+#[derive(Default)]
+struct TaskScriptInfo {
+    dest_root: String,
+    source_type: String,
+    src_ip: Option<String>,
+    src_share: Option<String>,
+    src_path: Option<String>,
+    src_user: Option<String>,
+    src_port: u16,
+    cred_file: Option<String>,
+}
+
+fn read_task_info(id: &str) -> TaskScriptInfo {
+    let runner_path = Path::new("/usr/local/bin").join(format!("backup_{id}.sh"));
+    let content = std::fs::read_to_string(&runner_path).unwrap_or_default();
+    let mut info = TaskScriptInfo {
+        dest_root: "/srv/nas/BACKUPS_HISTORICOS".to_string(),
+        source_type: "local".to_string(),
+        src_port: 22,
+        ..Default::default()
+    };
+
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("DEST_ROOT=") {
+            let val = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
+            if val.starts_with("/srv/nas") {
+                info.dest_root = val.to_string();
+            }
+        } else if let Some(rest) = line.strip_prefix("SOURCE_TYPE=") {
+            info.source_type = rest
+                .trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                .to_ascii_lowercase();
+        } else if let Some(rest) = line.strip_prefix("SRC_IP=") {
+            info.src_ip = Some(
+                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string(),
+            );
+        } else if let Some(rest) = line.strip_prefix("SRC_SHARE=") {
+            info.src_share = Some(
+                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string(),
+            );
+        } else if let Some(rest) = line.strip_prefix("SRC_PATH=") {
+            info.src_path = Some(
+                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string(),
+            );
+        } else if let Some(rest) = line.strip_prefix("SRC_USER=") {
+            info.src_user = Some(
+                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string(),
+            );
+        } else if let Some(rest) = line.strip_prefix("SRC_PORT=") {
+            if let Ok(p) = rest
+                .trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                .parse::<u16>()
+            {
+                info.src_port = p;
+            }
+        } else if let Some(rest) = line.strip_prefix("CRED_FILE=") {
+            info.cred_file = Some(
+                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
+                    .to_string(),
+            );
+        }
+    }
+    info
+}
+
+/// Congela el snapshot más reciente de una tarea como respaldo permanente inmutable (a costo 0).
+pub fn freeze_backup_task(
+    runner: &Runner,
+    id: &str,
+    tag: Option<&str>,
+) -> NasResult<PermanentBackupInfo> {
+    if !valid_id(id) {
+        return Err(NasError::Invalid(format!(
+            "identificador de tarea inválido: '{id}'"
+        )));
+    }
+
+    let task_info = read_task_info(id);
+    let task_dir = Path::new(&task_info.dest_root).join(id);
+
+    // Buscar snapshots existentes
+    let entries = std::fs::read_dir(&task_dir).map_err(|_| {
+        NasError::NotFound(format!(
+            "no se encontró el directorio de la tarea {}",
+            task_dir.display()
+        ))
+    })?;
+    let mut snapshots: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("snapshot_"))
+        })
+        .collect();
+    snapshots.sort();
+
+    let Some(latest) = snapshots.pop() else {
+        return Err(NasError::NotFound(format!(
+            "no hay snapshots disponibles para congelar en '{}'",
+            task_dir.display()
+        )));
+    };
+
+    let perm_root = task_info
+        .dest_root
+        .replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
+    let perm_task_dir = PathBuf::from(&perm_root).join(id);
+    std::fs::create_dir_all(&perm_task_dir).map_err(|e| NasError::Denied(e.to_string()))?;
+    let _ = runner.run(&CommandSpec::new("chown").args([
+        "-R",
+        "root:grp_samba",
+        &perm_task_dir.to_string_lossy(),
+    ]));
+    let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
+
+    let now = chrono::Local::now();
+    let date_str = now.format("%Y-%m-%d_%H%M%S").to_string();
+    let clean_tag = tag
+        .map(|t| {
+            t.trim()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .take(32)
+                .collect::<String>()
+        })
+        .filter(|t| !t.is_empty());
+
+    let folder_name = match &clean_tag {
+        Some(t) => format!("FULL_{date_str}_{t}"),
+        None => format!("FULL_{date_str}"),
+    };
+
+    let target_path = perm_task_dir.join(&folder_name);
+
+    // Clonación instantánea mediante Hardlinks (costo 0 bytes extras)
+    let cp_res = runner.run(
+        &CommandSpec::new("cp")
+            .args([
+                "-al",
+                &latest.to_string_lossy(),
+                &target_path.to_string_lossy(),
+            ])
+            .timeout(Duration::from_secs(120)),
+    )?;
+    if !cp_res.is_success() {
+        return Err(NasError::Invalid(format!(
+            "error al congelar snapshot vía hardlinks: {}",
+            cp_res.stderr
+        )));
+    }
+
+    // Inmutabilidad: remover permisos de escritura recursivamente
+    let _ =
+        runner.run(&CommandSpec::new("chmod").args(["-R", "a-w", &target_path.to_string_lossy()]));
+
+    let (files_count, size_bytes) = dir_stats(&target_path);
+
+    let info = PermanentBackupInfo {
+        task: id.to_string(),
+        name: folder_name.clone(),
+        path: target_path.to_string_lossy().to_string(),
+        date: date_str,
+        tag: clean_tag,
+        size_bytes,
+        files_count,
+    };
+
+    // Guardar metadatos en el snapshot
+    let meta_file = target_path.join(".freeze_meta.json");
+    if let Ok(meta_json) = serde_json::to_string_pretty(&info) {
+        let _ = std::fs::write(&meta_file, meta_json);
+    }
+
+    // Registrar en la bitácora de la tarea
+    let log_file = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
+    let log_line = format!(
+        "[{}] [{}] [FREEZE] Respaldo permanente congelado: {} (desde {})\n",
+        now.format("%F %T"),
+        id,
+        target_path.display(),
+        latest.display()
+    );
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+    {
+        use std::io::Write;
+        let _ = f.write_all(log_line.as_bytes());
+    }
+
+    Ok(info)
+}
+
+/// Lista los respaldos permanentes inmutables existentes.
+pub fn list_permanent_backups(task_filter: Option<&str>) -> NasResult<Vec<PermanentBackupInfo>> {
+    let mut roots = vec![PathBuf::from("/srv/nas/BACKUPS_PERMANENTES")];
+
+    // Buscar en unidades secundarias montadas
+    if let Ok(units) = std::fs::read_dir("/srv/nas/unidades") {
+        for unit in units.flatten() {
+            let perm = unit.path().join("BACKUPS_PERMANENTES");
+            if perm.is_dir() {
+                roots.push(perm);
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+
+    for root in roots {
+        let Ok(tasks) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for task_entry in tasks.flatten() {
+            let task_path = task_entry.path();
+            if !task_path.is_dir() {
+                continue;
+            }
+            let task_name = task_entry.file_name().to_string_lossy().to_string();
+            if let Some(filter) = task_filter {
+                if !filter.trim().is_empty() && filter != task_name {
+                    continue;
+                }
+            }
+
+            let Ok(backups) = std::fs::read_dir(&task_path) else {
+                continue;
+            };
+            for bkp_entry in backups.flatten() {
+                let bkp_path = bkp_entry.path();
+                if !bkp_path.is_dir() {
+                    continue;
+                }
+                let folder_name = bkp_entry.file_name().to_string_lossy().to_string();
+                if !folder_name.starts_with("FULL_") {
+                    continue;
+                }
+
+                // Leer metadatos si existen
+                let meta_path = bkp_path.join(".freeze_meta.json");
+                if let Ok(content) = std::fs::read_to_string(&meta_path) {
+                    if let Ok(info) = serde_json::from_str::<PermanentBackupInfo>(&content) {
+                        result.push(info);
+                        continue;
+                    }
+                }
+
+                // Deducir desde el nombre de carpeta si no hay metadatos
+                let remainder = folder_name.trim_start_matches("FULL_");
+                let parts: Vec<&str> = remainder.split('_').collect();
+                let date_str = parts.first().unwrap_or(&"desconocida").to_string();
+                let tag = if parts.len() > 1 {
+                    Some(parts[1..].join("_"))
+                } else {
+                    None
+                };
+
+                let (files_count, size_bytes) = dir_stats(&bkp_path);
+                result.push(PermanentBackupInfo {
+                    task: task_name.clone(),
+                    name: folder_name,
+                    path: bkp_path.to_string_lossy().to_string(),
+                    date: date_str,
+                    tag,
+                    size_bytes,
+                    files_count,
+                });
+            }
+        }
+    }
+
+    result.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(result)
+}
+
+/// Elimina un respaldo permanente inmutable.
+pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResult<String> {
+    if !valid_id(id) {
+        return Err(NasError::Invalid(format!(
+            "identificador de tarea inválido: '{id}'"
+        )));
+    }
+    let name = name.trim();
+    if !name.starts_with("FULL_")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+    {
+        return Err(NasError::Invalid(format!(
+            "nombre de respaldo permanente inválido: '{name}'"
+        )));
+    }
+
+    let mut found_path = None;
+    let candidates = [PathBuf::from("/srv/nas/BACKUPS_PERMANENTES")
+        .join(id)
+        .join(name)];
+    for cand in &candidates {
+        if cand.is_dir() {
+            found_path = Some(cand.clone());
+            break;
+        }
+    }
+
+    if found_path.is_none() {
+        if let Ok(units) = std::fs::read_dir("/srv/nas/unidades") {
+            for unit in units.flatten() {
+                let cand = unit.path().join("BACKUPS_PERMANENTES").join(id).join(name);
+                if cand.is_dir() {
+                    found_path = Some(cand);
+                    break;
+                }
+            }
+        }
+    }
+
+    let Some(path) = found_path else {
+        return Err(NasError::NotFound(format!(
+            "respaldo permanente '{name}' no encontrado"
+        )));
+    };
+
+    // Restaurar permisos de escritura para permitir eliminación
+    let _ = runner.run(&CommandSpec::new("chmod").args(["-R", "u+w", &path.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("rm").args(["-rf", &path.to_string_lossy()]));
+
+    Ok(format!(
+        "Respaldo permanente '{name}' eliminado exitosamente"
+    ))
+}
+
+/// Restaura un snapshot o respaldo permanente hacia el origen de red o un destino local.
+pub fn restore_backup(
+    runner: &Runner,
+    id: &str,
+    snapshot: &str,
+    target: Option<&str>,
+) -> NasResult<String> {
+    if !valid_id(id) {
+        return Err(NasError::Invalid(format!(
+            "identificador de tarea inválido: '{id}'"
+        )));
+    }
+
+    let snap_str = snapshot.trim();
+    if snap_str.contains("..") {
+        return Err(NasError::Invalid("ruta de snapshot inválida".into()));
+    }
+
+    // Localizar ruta del snapshot
+    let task_info = read_task_info(id);
+    let snap_path = if snap_str.starts_with("/srv/nas/") && Path::new(snap_str).is_dir() {
+        PathBuf::from(snap_str)
+    } else {
+        let perm_path = PathBuf::from(
+            task_info
+                .dest_root
+                .replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES"),
+        )
+        .join(id)
+        .join(snap_str);
+        let hist_path = PathBuf::from(&task_info.dest_root).join(id).join(snap_str);
+
+        if perm_path.is_dir() {
+            perm_path
+        } else if hist_path.is_dir() {
+            hist_path
+        } else {
+            return Err(NasError::NotFound(format!(
+                "snapshot o respaldo permanente '{snap_str}' no encontrado"
+            )));
+        }
+    };
+
+    // Si se especifica un destino local alternativo
+    if let Some(custom_tgt) = target {
+        let custom_tgt = custom_tgt.trim();
+        if !custom_tgt.is_empty() {
+            if !custom_tgt.starts_with("/srv/nas/") && !custom_tgt.starts_with("/tmp/") {
+                return Err(NasError::Denied(
+                    "el destino de restauración debe estar en /srv/nas o /tmp".into(),
+                ));
+            }
+            std::fs::create_dir_all(custom_tgt).map_err(|e| NasError::Denied(e.to_string()))?;
+            let rsync_res = runner.run(
+                &CommandSpec::new("rsync")
+                    .args([
+                        "-aAXH",
+                        "--numeric-ids",
+                        "--safe-links",
+                        &format!("{}/", snap_path.display()),
+                        custom_tgt,
+                    ])
+                    .timeout(Duration::from_secs(300)),
+            )?;
+            if !rsync_res.is_success() {
+                return Err(NasError::Invalid(format!(
+                    "fallo al restaurar en destino: {}",
+                    rsync_res.stderr
+                )));
+            }
+            return Ok(format!(
+                "Restauración completada en destino local: {custom_tgt}"
+            ));
+        }
+    }
+
+    // Restauración hacia el origen original de red
+    match task_info.source_type.as_str() {
+        "cifs" => {
+            let Some(ip) = task_info.src_ip.as_deref() else {
+                return Err(NasError::Invalid(
+                    "falta SRC_IP en la configuración de la tarea".into(),
+                ));
+            };
+            let Some(share) = task_info.src_share.as_deref() else {
+                return Err(NasError::Invalid(
+                    "falta SRC_SHARE en la configuración de la tarea".into(),
+                ));
+            };
+            let Some(cred) = task_info.cred_file.as_deref() else {
+                return Err(NasError::Invalid(
+                    "falta CRED_FILE en la configuración de la tarea".into(),
+                ));
+            };
+
+            let mount_dir = format!("/mnt/restore_targets/{id}");
+            std::fs::create_dir_all(&mount_dir).map_err(|e| NasError::Denied(e.to_string()))?;
+
+            let mount_opt = format!("credentials={cred},rw,iocharset=utf8,vers=3.1.1,noserverino");
+            let mount_res = runner.run(
+                &CommandSpec::new("mount")
+                    .args([
+                        "-t",
+                        "cifs",
+                        &format!("//{ip}/{share}"),
+                        &mount_dir,
+                        "-o",
+                        &mount_opt,
+                    ])
+                    .timeout(Duration::from_secs(30)),
+            )?;
+            if !mount_res.is_success() {
+                return Err(NasError::Invalid(format!(
+                    "no se pudo montar el recurso CIFS en modo escritura: {}",
+                    mount_res.stderr
+                )));
+            }
+
+            let rsync_res = runner.run(
+                &CommandSpec::new("rsync")
+                    .args([
+                        "-aAXH",
+                        "--numeric-ids",
+                        "--safe-links",
+                        &format!("{}/", snap_path.display()),
+                        &format!("{mount_dir}/"),
+                    ])
+                    .timeout(Duration::from_secs(600)),
+            );
+
+            let _ = runner.run(
+                &CommandSpec::new("umount")
+                    .args([&mount_dir])
+                    .timeout(Duration::from_secs(15)),
+            );
+
+            match rsync_res {
+                Ok(res) if res.is_success() || res.code == 24 => Ok(format!(
+                    "Restauración completada exitosamente hacia el recurso CIFS //{ip}/{share}"
+                )),
+                Ok(res) => Err(NasError::Invalid(format!(
+                    "fallo durante la sincronización rsync: {}",
+                    res.stderr
+                ))),
+                Err(e) => Err(e),
+            }
+        }
+        "ssh" => {
+            let Some(ip) = task_info.src_ip.as_deref() else {
+                return Err(NasError::Invalid("falta SRC_IP en la tarea".into()));
+            };
+            let Some(user) = task_info.src_user.as_deref() else {
+                return Err(NasError::Invalid("falta SRC_USER en la tarea".into()));
+            };
+            let path = task_info.src_path.as_deref().unwrap_or("/");
+            let cred = task_info.cred_file.as_deref().unwrap_or_default();
+
+            let mut pass = String::new();
+            if Path::new(cred).is_file() {
+                if let Ok(c) = std::fs::read_to_string(cred) {
+                    pass = c.lines().next().unwrap_or("").trim().to_string();
+                }
+            }
+
+            let mut spec = CommandSpec::new("sshpass");
+            spec = spec.args([
+                "-e",
+                "rsync",
+                "-aAXH",
+                "--numeric-ids",
+                "--safe-links",
+                "-e",
+                &format!("ssh -p {} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup", task_info.src_port),
+                &format!("{}/", snap_path.display()),
+                &format!("{user}@{ip}:{path}/"),
+            ]).timeout(Duration::from_secs(600));
+
+            if !pass.is_empty() {
+                spec = spec.env("SSHPASS", pass);
+            }
+
+            let res = runner.run(&spec)?;
+            if res.is_success() || res.code == 24 {
+                Ok(format!("Restauración completada hacia {user}@{ip}:{path}"))
+            } else {
+                Err(NasError::Invalid(format!(
+                    "fallo al restaurar por SSH: {}",
+                    res.stderr
+                )))
+            }
+        }
+        _ => {
+            let path = task_info.src_path.as_deref().unwrap_or("/");
+            let res = runner.run(
+                &CommandSpec::new("rsync")
+                    .args([
+                        "-aAXH",
+                        "--numeric-ids",
+                        "--safe-links",
+                        &format!("{}/", snap_path.display()),
+                        &format!("{path}/"),
+                    ])
+                    .timeout(Duration::from_secs(300)),
+            )?;
+            if res.is_success() || res.code == 24 {
+                Ok(format!("Restauración local completada en {path}"))
+            } else {
+                Err(NasError::Invalid(format!(
+                    "fallo al restaurar localmente: {}",
+                    res.stderr
+                )))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +1051,30 @@ mod tests {
     fn valida_id_correcto() {
         assert!(valid_id("bkp_servidor1"));
         assert!(valid_id("tarea-diaria-1"));
+    }
+
+    #[test]
+    fn delete_permanent_rechaza_entradas_invalidas() {
+        let runner = Runner::new();
+        assert!(
+            delete_permanent_backup(&runner, "invalido con espacios", "FULL_2026-10-30").is_err()
+        );
+        assert!(delete_permanent_backup(&runner, "tarea1", "../escape").is_err());
+        assert!(delete_permanent_backup(&runner, "tarea1", "NOTFULL_2026").is_err());
+    }
+
+    #[test]
+    fn restore_backup_rechaza_rutas_peligrosas() {
+        let runner = Runner::new();
+        assert!(restore_backup(&runner, "invalido;tarea", "snap", None).is_err());
+        assert!(restore_backup(&runner, "tarea1", "../escape", None).is_err());
+        assert!(restore_backup(&runner, "tarea1", "/etc/shadow", None).is_err());
+        assert!(restore_backup(
+            &runner,
+            "tarea1",
+            "/srv/nas/BACKUPS_PERMANENTES/tarea1/FULL_1",
+            Some("/etc")
+        )
+        .is_err());
     }
 }
