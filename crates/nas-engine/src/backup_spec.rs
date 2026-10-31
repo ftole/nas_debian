@@ -305,6 +305,7 @@ if [ "$DAY_OF_MONTH" = "01" ]; then
         PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
         if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
             chmod -R a-w "$PERM_DEST" 2>/dev/null || true
+            chattr -R +i "$PERM_DEST" 2>/dev/null || true
             log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
         fi
     fi
@@ -322,6 +323,9 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
             log "retención: eliminado $(basename "$OLD")"
         fi
     done
+    if [ -d "$PERM_DIR" ]; then
+        chattr -R +i "$PERM_DIR" 2>/dev/null || true
+    fi
 fi
 "#,
             q_id = shell_single_quote(id),
