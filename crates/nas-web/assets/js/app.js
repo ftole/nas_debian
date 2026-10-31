@@ -1373,21 +1373,24 @@ async function loadPermanentBackups() {
       const sizeStr = formatBytesLocal(p.size_bytes || 0);
       const filesStr = p.files_count !== undefined ? `${p.files_count} archivos` : '-';
 
+      const taskName = p.task || p.task_id || '';
+      const dateStr = p.date || p.created_at || '';
+
       return `
       <tr>
-        <td><strong>${escapeHtml(p.task_id)}</strong></td>
+        <td><strong>${escapeHtml(taskName)}</strong></td>
         <td>
           <div style="font-weight:600;">${escapeHtml(p.name)}</div>
-          <small style="color:var(--text-muted); font-size:11px;">${escapeHtml(p.created_at || '')}</small>
+          <small style="color:var(--text-muted); font-size:11px;">${escapeHtml(dateStr)}</small>
         </td>
         <td>${tagHtml}</td>
         <td><code style="font-size:11px;">${escapeHtml(p.path)}</code></td>
         <td>${filesStr} <small class="text-muted">(${sizeStr})</small></td>
         <td style="text-align:right; white-space:nowrap;">
-          <button class="btn btn-secondary btn-sm" title="Restaurar este respaldo" style="color:var(--accent-primary);" onclick="openRestoreBackup('${escapeHtml(p.task_id)}', '${escapeHtml(p.path)}')">
+          <button class="btn btn-secondary btn-sm" title="Restaurar este respaldo" style="color:var(--accent-primary);" onclick="openRestoreBackup('${escapeHtml(taskName)}', '${escapeHtml(p.path)}')">
             <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar
           </button>
-          <button class="btn btn-secondary btn-sm" title="Eliminar respaldo permanente" style="color:var(--accent-danger);" onclick="deletePermanentBackup('${escapeHtml(p.task_id)}', '${escapeHtml(p.name)}')">
+          <button class="btn btn-secondary btn-sm" title="Eliminar respaldo permanente" style="color:var(--accent-danger);" onclick="deletePermanentBackup('${escapeHtml(taskName)}', '${escapeHtml(p.name)}')">
             <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg>
           </button>
         </td>
