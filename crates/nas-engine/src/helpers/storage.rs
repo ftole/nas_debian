@@ -270,6 +270,22 @@ pub fn setup_lvm(
         unmount_device(runner, disk);
     }
 
+    if let Ok(out) = runner.run(
+        &CommandSpec::new("pvs")
+            .args(["--noheadings", "-o", "vg_name", disk])
+            .timeout(Duration::from_secs(10)),
+    ) {
+        for line in out.stdout.lines() {
+            let existing_vg = line.trim();
+            if !existing_vg.is_empty() {
+                let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", existing_vg]));
+                let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", existing_vg]));
+            }
+        }
+    }
+    let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", vg]));
+    let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", vg]));
+
     let _ = runner.run(&CommandSpec::new("wipefs").args(["-a", disk]));
     let _ = runner.run(&CommandSpec::new("partprobe").args([disk]));
     let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
