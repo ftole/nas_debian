@@ -461,6 +461,10 @@ actualizar_desde_git() {
 
         latest_ver="${latest_tag#v}"
         if [ -n "$current_ver" ] && [ -n "$latest_ver" ] && [ "$current_ver" = "$latest_ver" ]; then
+            if [ "$FORCE_FLAG" == "1" ]; then
+                echo -e " [•] La versión coincide con el último release ($current_ver); ejecutando sincronizaciones de seguridad..."
+                _hook_post_actualizacion
+            fi
             echo -e "${C_GREEN}✔ Ya tienes la última versión oficial instalada ($current_ver).${C_RESET}"
             return 0
         fi
