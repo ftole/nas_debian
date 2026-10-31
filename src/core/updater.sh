@@ -441,13 +441,42 @@ actualizar_desde_git() {
     git config --system --add safe.directory "$PROJECT_ROOT" 2>/dev/null || git config --global --add safe.directory "$PROJECT_ROOT" 2>/dev/null || true
 
     if [ ! -d "$PROJECT_ROOT/.git" ]; then
+        echo -e "${C_CYAN}[i] Entorno de release oficial detectado (sin repositorio Git).${C_RESET}"
+        local current_ver=""
+        if command -v nas >/dev/null 2>&1; then
+            current_ver=$(nas --version 2>/dev/null | awk '{print $2}' || true)
+        elif [ -x "$PROJECT_ROOT/bin/nas" ]; then
+            current_ver=$("$PROJECT_ROOT/bin/nas" --version 2>/dev/null | awk '{print $2}' || true)
+        fi
+
+        local latest_tag="" effective_url api_resp latest_ver
+        effective_url=$(curl -fsSLI -o /dev/null -w "%{url_effective}" --connect-timeout 10 "https://github.com/ftole/nas_debian/releases/latest" 2>/dev/null || true)
+        if [[ "$effective_url" =~ /releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
+            latest_tag="${BASH_REMATCH[1]}"
+        fi
+        if [ -z "$latest_tag" ]; then
+            api_resp=$(curl -sSL -H "Accept: application/vnd.github.v3+json" --connect-timeout 10 "https://api.github.com/repos/ftole/nas_debian/releases/latest" 2>/dev/null || true)
+            latest_tag=$(echo "$api_resp" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | cut -d'"' -f4 || true)
+        fi
+
+        latest_ver="${latest_tag#v}"
+        if [ -n "$current_ver" ] && [ -n "$latest_ver" ] && [ "$current_ver" = "$latest_ver" ]; then
+            echo -e "${C_GREEN}✔ Ya tienes la última versión oficial instalada ($current_ver).${C_RESET}"
+            return 0
+        fi
+
+        echo -e "${C_CYAN}[i] Delegando actualización a install.sh...${C_RESET}"
         if [ -f "$PROJECT_ROOT/install.sh" ]; then
-            echo -e "${C_CYAN}[i] Entorno de release oficial detectado (sin repositorio Git).${C_RESET}"
-            echo -e "${C_CYAN}[i] Delegando actualización a install.sh...${C_RESET}"
             bash "$PROJECT_ROOT/install.sh"
             return $?
         fi
-        echo -e "${C_YELLOW}[!] Este directorio no es un repositorio Git.${C_RESET}"
+        if curl -fsSL --connect-timeout 15 --max-time 300 "https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh" -o /tmp/nas_install.sh; then
+            local res=0
+            bash /tmp/nas_install.sh || res=$?
+            rm -f /tmp/nas_install.sh
+            return $res
+        fi
+        echo -e "${C_YELLOW}[!] No se pudo obtener el instalador oficial.${C_RESET}"
         return 1
     fi
     cd "$PROJECT_ROOT" || return 1
