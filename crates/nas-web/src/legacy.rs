@@ -388,7 +388,7 @@ pub fn file_item(root: &FileRoot, relative: &str, entry: &Entry) -> Value {
 
 /// Migas de pan acumulativas para la ruta actual.
 pub fn breadcrumbs(relative: &str) -> Vec<Value> {
-    let mut crumbs = vec![json!({ "name": "Raíz (/srv/nas)", "path": "" })];
+    let mut crumbs = vec![json!({ "name": "Inicio", "path": "" })];
     let mut accumulated = String::new();
     for part in relative.split('/').filter(|part| !part.is_empty()) {
         if accumulated.is_empty() {
