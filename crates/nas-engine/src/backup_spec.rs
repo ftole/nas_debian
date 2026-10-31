@@ -324,7 +324,7 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
         fi
     done
     if [ -d "$PERM_DIR" ]; then
-        chattr -R +i "$PERM_DIR" 2>/dev/null || true
+        find "$PERM_DIR" -mindepth 1 -maxdepth 1 -type d -name 'FULL_*' -exec chattr -R +i {{}} + 2>/dev/null || true
     fi
 fi
 "#,
