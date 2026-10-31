@@ -227,13 +227,43 @@ pub fn inspect(runner: &Runner, device: &str) -> NasResult<serde_json::Value> {
         .iter()
         .any(|entry| entry.mountpoint.is_some());
 
+    let mut signatures: Vec<String> = Vec::new();
+    if let Some(fs) = &root.fstype {
+        signatures.push(fs.clone());
+    }
+    for child in &root.children {
+        if let Some(fs) = &child.fstype {
+            signatures.push(fs.clone());
+        }
+    }
+    if let Ok(wipe_out) = runner.run(&CommandSpec::new("wipefs").args(["-n", device])) {
+        if wipe_out.is_success() {
+            for line in wipe_out.stdout.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3
+                    && !parts[2].is_empty()
+                    && !signatures.iter().any(|s| s == parts[2])
+                {
+                    signatures.push(parts[2].to_string());
+                }
+            }
+        }
+    }
+    signatures.sort();
+    signatures.dedup();
+
+    let has_data = !root.children.is_empty() || root.fstype.is_some() || !signatures.is_empty();
+
     Ok(serde_json::json!({
         "device": device,
         "name": root.name,
+        "type": root.kind,
         "size": root.size,
         "model": root.model,
         "rotational": root.rotational,
         "in_use": in_use,
+        "has_data": has_data,
+        "signatures": signatures,
         "partitions": root.children.iter().map(|child| serde_json::json!({
             "name": child.name,
             "size": child.size,
