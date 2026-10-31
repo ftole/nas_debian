@@ -441,6 +441,12 @@ actualizar_desde_git() {
     git config --system --add safe.directory "$PROJECT_ROOT" 2>/dev/null || git config --global --add safe.directory "$PROJECT_ROOT" 2>/dev/null || true
 
     if [ ! -d "$PROJECT_ROOT/.git" ]; then
+        if [ -f "$PROJECT_ROOT/install.sh" ]; then
+            echo -e "${C_CYAN}[i] Entorno de release oficial detectado (sin repositorio Git).${C_RESET}"
+            echo -e "${C_CYAN}[i] Delegando actualización a install.sh...${C_RESET}"
+            bash "$PROJECT_ROOT/install.sh"
+            return $?
+        fi
         echo -e "${C_YELLOW}[!] Este directorio no es un repositorio Git.${C_RESET}"
         return 1
     fi
