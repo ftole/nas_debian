@@ -813,11 +813,27 @@ impl FileRoot {
     }
 }
 
-/// Aplica permisos `0660` sobre un archivo recién creado o subido (Unix).
+#[cfg(unix)]
+fn resolve_grp_samba_gid() -> Option<u32> {
+    let content = std::fs::read_to_string("/etc/group").ok()?;
+    for line in content.lines() {
+        let mut parts = line.split(':');
+        if parts.next() == Some("grp_samba") {
+            let _ = parts.next();
+            return parts.next().and_then(|gid| gid.trim().parse::<u32>().ok());
+        }
+    }
+    None
+}
+
+/// Aplica permisos `0660` y pertenencia a `grp_samba` sobre un archivo recién creado o subido (Unix).
 #[cfg(unix)]
 pub fn set_file_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660));
+    if let Some(gid) = resolve_grp_samba_gid() {
+        let _ = std::os::unix::fs::chown(path, None, Some(gid));
+    }
 }
 
 /// No-op fuera de Unix.
@@ -828,6 +844,9 @@ pub fn set_file_permissions(_path: &Path) {}
 fn set_dir_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o2770));
+    if let Some(gid) = resolve_grp_samba_gid() {
+        let _ = std::os::unix::fs::chown(path, None, Some(gid));
+    }
 }
 
 #[cfg(not(unix))]
