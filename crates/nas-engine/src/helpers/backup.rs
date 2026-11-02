@@ -689,8 +689,7 @@ pub fn freeze_backup_task(
     // Inmutabilidad: remover permisos de escritura y asegurar con chattr solo el contenedor (sin -R)
     let _ =
         runner.run(&CommandSpec::new("chmod").args(["-R", "a-w", &target_path.to_string_lossy()]));
-    let _ =
-        runner.run(&CommandSpec::new("chattr").args(["+i", &target_path.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &target_path.to_string_lossy()]));
 
     // Registrar en la bitácora de la tarea
     let log_file = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
@@ -865,10 +864,8 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
                         .and_then(|n| n.to_str())
                         .is_some_and(|n| n.starts_with("FULL_"))
                 {
-                    let _ = runner.run(&CommandSpec::new("chattr").args([
-                        "+i",
-                        &p.to_string_lossy(),
-                    ]));
+                    let _ =
+                        runner.run(&CommandSpec::new("chattr").args(["+i", &p.to_string_lossy()]));
                 }
             }
         }
