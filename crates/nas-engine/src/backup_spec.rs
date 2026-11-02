@@ -295,7 +295,8 @@ fi
 mv "$STAGE" "$FINAL"
 SNAPSHOT_OK=true
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
-chattr -R +i "$FINAL" 2>/dev/null || true
+chmod -R a-w "$FINAL" 2>/dev/null || true
+chattr +i "$FINAL" 2>/dev/null || true
 log "snapshot completado: $FINAL"
 
 DAY_OF_MONTH=$(date +%d)
@@ -305,7 +306,7 @@ if [ "$DAY_OF_MONTH" = "01" ]; then
         PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
         if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
             chmod -R a-w "$PERM_DEST" 2>/dev/null || true
-            chattr -R +i "$PERM_DEST" 2>/dev/null || true
+            chattr +i "$PERM_DEST" 2>/dev/null || true
             log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
         fi
     fi
@@ -324,7 +325,7 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
         fi
     done
     if [ -d "$PERM_DIR" ]; then
-        find "$PERM_DIR" -mindepth 1 -maxdepth 1 -type d -name 'FULL_*' -exec chattr -R +i {{}} + 2>/dev/null || true
+        find "$PERM_DIR" -mindepth 1 -maxdepth 1 -type d -name 'FULL_*' -exec chattr +i {{}} + 2>/dev/null || true
     fi
 fi
 "#,
@@ -476,7 +477,8 @@ mod tests {
         assert!(runner.contains("--link-dest"));
         assert!(runner.contains("/srv/nas/BACKUPS_HISTORICOS/contabilidad"));
         assert!(runner.contains("mount -t cifs"));
-        assert!(runner.contains("chattr -R +i \"$FINAL\""));
+        assert!(runner.contains("chmod -R a-w \"$FINAL\""));
+        assert!(runner.contains("chattr +i \"$FINAL\""));
         assert!(runner.contains("LOCK_DIR:-/var/lock"));
         assert!(runner.contains("MOUNT_ROOT:-/mnt/backup_sources"));
         assert!(runner.contains("ERROR: se descarta el snapshot parcial"));
