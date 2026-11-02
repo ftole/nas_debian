@@ -123,9 +123,12 @@ pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
         return None;
     }
     if base.starts_with("nvme") || base.starts_with("mmcblk") {
-        let trimmed = base.trim_end_matches(|c: char| c.is_ascii_digit());
-        let trimmed = trimmed.trim_end_matches('p');
-        return Some(format!("/dev/{trimmed}"));
+        if let Some((disk, part)) = base.rsplit_once('p') {
+            if !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()) {
+                return Some(format!("/dev/{disk}"));
+            }
+        }
+        return Some(format!("/dev/{base}"));
     }
     let trimmed = base.trim_end_matches(|c: char| c.is_ascii_digit());
     if trimmed.is_empty() {
@@ -406,6 +409,10 @@ mod tests {
         let runner = nas_exec::Runner::new();
         assert_eq!(
             parent_disk(&runner, "/dev/nvme0n1p2").as_deref(),
+            Some("/dev/nvme0n1")
+        );
+        assert_eq!(
+            parent_disk(&runner, "/dev/nvme0n1").as_deref(),
             Some("/dev/nvme0n1")
         );
         assert_eq!(
