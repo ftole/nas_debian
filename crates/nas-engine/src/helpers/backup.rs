@@ -204,12 +204,8 @@ pub fn write_cred(id: &str, file: Option<&Path>, content: Option<&str>) -> NasRe
     let _ = std::fs::create_dir_all("/etc/backup-credentials");
     let cred_dst = format!("/etc/backup-credentials/{id}.cred");
     if let Some(src) = file {
-        std::fs::copy(src, &cred_dst).map_err(|e| NasError::Denied(e.to_string()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&cred_dst, std::fs::Permissions::from_mode(0o600));
-        }
+        let txt = std::fs::read_to_string(src).map_err(|e| NasError::Denied(e.to_string()))?;
+        write_secure_file(Path::new(&cred_dst), &txt)?;
     } else if let Some(txt) = content {
         write_secure_file(Path::new(&cred_dst), txt)?;
     } else {
@@ -370,12 +366,16 @@ pub fn test_cifs_conn(
     let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let temp_dir = std::env::temp_dir().join(format!("cifs_test_{}_{stamp}", std::process::id()));
     let temp_cred = std::env::temp_dir().join(format!("cifs_cred_{}_{stamp}", std::process::id()));
-    let _ = std::fs::create_dir_all(&temp_dir);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o700));
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        builder.mode(0o700);
+        let _ = builder.create(&temp_dir);
     }
+    #[cfg(not(unix))]
+    let _ = std::fs::create_dir_all(&temp_dir);
 
     let cred_content = if let Some((dom, acc)) = user.split_once('\\') {
         format!("domain={dom}\nusername={acc}\npassword={password}\n")
@@ -645,7 +645,7 @@ pub fn freeze_backup_task(
     let target_path = perm_task_dir.join(&folder_name);
 
     // Levantar temporalmente inmutabilidad en el snapshot origen para permitir crear enlaces duros
-    let _ = runner.run(&CommandSpec::new("chattr").args(["-R", "-i", &latest.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &latest.to_string_lossy()]));
 
     // Clonación instantánea mediante Hardlinks (costo 0 bytes extras)
     let cp_res = runner.run(
@@ -658,8 +658,8 @@ pub fn freeze_backup_task(
             .timeout(Duration::from_secs(120)),
     )?;
 
-    // Restaurar inmutabilidad en el snapshot origen
-    let _ = runner.run(&CommandSpec::new("chattr").args(["-R", "+i", &latest.to_string_lossy()]));
+    // Restaurar inmutabilidad en el contenedor origen (sin -R para permitir deduplicación)
+    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &latest.to_string_lossy()]));
 
     if !cp_res.is_success() {
         return Err(NasError::Invalid(format!(
@@ -686,11 +686,11 @@ pub fn freeze_backup_task(
         let _ = std::fs::write(&meta_file, meta_json);
     }
 
-    // Inmutabilidad: remover permisos de escritura y asegurar con chattr
+    // Inmutabilidad: remover permisos de escritura y asegurar con chattr solo el contenedor (sin -R)
     let _ =
         runner.run(&CommandSpec::new("chmod").args(["-R", "a-w", &target_path.to_string_lossy()]));
     let _ =
-        runner.run(&CommandSpec::new("chattr").args(["-R", "+i", &target_path.to_string_lossy()]));
+        runner.run(&CommandSpec::new("chattr").args(["+i", &target_path.to_string_lossy()]));
 
     // Registrar en la bitácora de la tarea
     let log_file = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
@@ -855,13 +855,7 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
         let _ = std::fs::remove_dir_all(&path);
     }
 
-    // Re-asegurar inmutabilidad en los snapshots históricos y permanentes de la tarea
-    let task_info = read_task_info(id);
-    let task_dir = Path::new(&task_info.dest_root).join(id);
-    if task_dir.is_dir() {
-        let _ =
-            runner.run(&CommandSpec::new("chattr").args(["-R", "+i", &task_dir.to_string_lossy()]));
-    }
+    // Re-asegurar inmutabilidad en los snapshots permanentes de la tarea (sin -R para permitir deduplicación)
     if let Some(perm_parent) = path.parent() {
         if let Ok(entries) = std::fs::read_dir(perm_parent) {
             for entry in entries.flatten() {
@@ -872,7 +866,6 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
                         .is_some_and(|n| n.starts_with("FULL_"))
                 {
                     let _ = runner.run(&CommandSpec::new("chattr").args([
-                        "-R",
                         "+i",
                         &p.to_string_lossy(),
                     ]));
