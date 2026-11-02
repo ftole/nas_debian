@@ -174,6 +174,28 @@ pub fn delete_cron(id: &str) -> NasResult<String> {
     Ok(format!("cron {id} eliminado"))
 }
 
+fn write_secure_file(path: &Path, content: &str) -> NasResult<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| NasError::Denied(e.to_string()))?;
+        f.write_all(content.as_bytes())
+            .map_err(|e| NasError::Denied(e.to_string()))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content).map_err(|e| NasError::Denied(e.to_string()))
+    }
+}
+
 /// Escribe o actualiza el archivo de credenciales cifrado/protegido de una tarea.
 pub fn write_cred(id: &str, file: Option<&Path>, content: Option<&str>) -> NasResult<String> {
     if !valid_id(id) {
@@ -183,18 +205,17 @@ pub fn write_cred(id: &str, file: Option<&Path>, content: Option<&str>) -> NasRe
     let cred_dst = format!("/etc/backup-credentials/{id}.cred");
     if let Some(src) = file {
         std::fs::copy(src, &cred_dst).map_err(|e| NasError::Denied(e.to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&cred_dst, std::fs::Permissions::from_mode(0o600));
+        }
     } else if let Some(txt) = content {
-        std::fs::write(&cred_dst, txt).map_err(|e| NasError::Denied(e.to_string()))?;
+        write_secure_file(Path::new(&cred_dst), txt)?;
     } else {
         return Err(NasError::Invalid(
             "se requiere archivo o contenido de credencial".into(),
         ));
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&cred_dst, std::fs::Permissions::from_mode(0o600));
     }
     Ok(format!("credencial {id} instalada"))
 }
@@ -346,9 +367,15 @@ pub fn test_cifs_conn(
         return Err(NasError::Invalid("usuario CIFS inválido".into()));
     }
 
-    let temp_dir = std::env::temp_dir().join(format!("cifs_test_{}", std::process::id()));
-    let temp_cred = std::env::temp_dir().join(format!("cifs_cred_{}", std::process::id()));
+    let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let temp_dir = std::env::temp_dir().join(format!("cifs_test_{}_{stamp}", std::process::id()));
+    let temp_cred = std::env::temp_dir().join(format!("cifs_cred_{}_{stamp}", std::process::id()));
     let _ = std::fs::create_dir_all(&temp_dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o700));
+    }
 
     let cred_content = if let Some((dom, acc)) = user.split_once('\\') {
         format!("domain={dom}\nusername={acc}\npassword={password}\n")
@@ -357,13 +384,7 @@ pub fn test_cifs_conn(
     } else {
         format!("username={user}\npassword={password}\n")
     };
-    std::fs::write(&temp_cred, cred_content).map_err(|e| NasError::Denied(e.to_string()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&temp_cred, std::fs::Permissions::from_mode(0o600));
-    }
+    write_secure_file(&temp_cred, &cred_content)?;
 
     let opts = format!(
         "credentials={},ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl",
