@@ -19,6 +19,13 @@ pub const PBKDF2_ITERATIONS: u32 = 210_000;
 /// Ventana de validez de un token CSRF emitido en `/login` (segundos).
 const LOGIN_CSRF_TTL_SECS: i64 = 7200;
 
+/// Hash PBKDF2 sintético para mitigar ataques de tiempo en cuentas inexistentes.
+const DUMMY_PBKDF2_HASH: &str = concat!(
+    "$pbkdf2-sha512$210000$",
+    "00000000000000000000000000000000$",
+    "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+);
+
 /// Configuración de autenticación del panel.
 #[derive(Clone)]
 pub struct Auth {
@@ -144,16 +151,20 @@ impl Auth {
     pub fn login(&self, username: &str, password: &str, now: i64) -> NasResult<Option<String>> {
         let _ = self.db.purge_expired(now);
 
-        let (canonical_user, stored) = match self.db.user_hash(username)? {
-            Some(hash) => (username.to_string(), hash),
+        let (user_opt, stored): (Option<String>, String) = match self.db.user_hash(username)? {
+            Some(hash) => (Some(username.to_string()), hash),
             None if username.eq_ignore_ascii_case("admin") => match self.db.user_hash("admin")? {
-                Some(hash) => ("admin".to_string(), hash),
-                None => return Ok(None),
+                Some(hash) => (Some("admin".to_string()), hash),
+                None => (None, DUMMY_PBKDF2_HASH.to_string()),
             },
-            None => return Ok(None),
+            None => (None, DUMMY_PBKDF2_HASH.to_string()),
         };
 
-        if !Self::verify_password(password, &stored) {
+        let password_valid = Self::verify_password(password, &stored);
+        let Some(canonical_user) = user_opt else {
+            return Ok(None);
+        };
+        if !password_valid {
             return Ok(None);
         }
 
