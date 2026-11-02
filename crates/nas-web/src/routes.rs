@@ -11,6 +11,7 @@ use nas_engine::parsers::smb::parse_shares;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
 use serde::Deserialize;
+use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
 use crate::files::{sanitize_filename, FileRoot};
@@ -28,6 +29,24 @@ fn hostname() -> String {
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "SRV-NAS".to_string())
+}
+
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        let trimmed = real_ip.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = forwarded.split(',').next() {
+            let trimmed = first.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "127.0.0.1".to_string()
 }
 
 /// Formulario de acceso.
@@ -52,16 +71,43 @@ pub struct LoginForm {
 }
 
 /// Procesa el acceso y emite la cookie de sesión.
-pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
+pub async fn login_submit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LoginForm>,
+) -> Response {
     let now = Utc::now().timestamp();
+    let client_ip = extract_client_ip(&headers);
+
+    if let Ok(false) = state
+        .auth
+        .db()
+        .check_rate_limit(&format!("login:{client_ip}"), now, 60, 5)
+    {
+        let csrf = state.auth.issue_login_csrf(now);
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Html(views::login_with_context(
+                &hostname(),
+                &client_ip,
+                &csrf,
+                Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
+            )),
+        )
+            .into_response();
+    }
+
     if !state
         .auth
         .verify_login_csrf(form.csrf_token.as_deref(), now)
     {
+        let csrf = state.auth.issue_login_csrf(now);
         return (
             StatusCode::FORBIDDEN,
-            Html(views::login(
+            Html(views::login_with_context(
                 &hostname(),
+                &client_ip,
+                &csrf,
                 Some("Token CSRF inválido o expirado."),
             )),
         )
@@ -85,7 +131,7 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
                 StatusCode::UNAUTHORIZED,
                 Html(views::login_with_context(
                     &hostname(),
-                    "127.0.0.1",
+                    &client_ip,
                     &csrf,
                     Some("Usuario o contraseña incorrectos."),
                 )),
@@ -109,6 +155,22 @@ pub async fn api_login(
     axum::Json(form): axum::Json<LoginForm>,
 ) -> Response {
     let now = Utc::now().timestamp();
+    let client_ip = extract_client_ip(&headers);
+
+    if let Ok(false) = state
+        .auth
+        .db()
+        .check_rate_limit(&format!("login:{client_ip}"), now, 60, 5)
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "Demasiados intentos de acceso. Espere un momento e intente de nuevo.",
+            )),
+        )
+            .into_response();
+    }
+
     let csrf_header = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
     let token = form.csrf_token.as_deref().or(csrf_header);
     if !state.auth.verify_login_csrf(token, now) {
@@ -684,6 +746,7 @@ pub async fn files_delete(
 pub async fn files_upload(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
     mut multipart: Multipart,
 ) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
@@ -694,21 +757,32 @@ pub async fn files_upload(
         Err(response) => return *response,
     };
 
-    let mut directory = String::new();
+    let mut directory: Option<String> = query.get("path").cloned();
+    let mut staged_files: Vec<(PathBuf, String)> = Vec::new();
     let mut saved: Vec<String> = Vec::new();
 
     loop {
         let field = match multipart.next_field().await {
             Ok(Some(field)) => field,
             Ok(None) => break,
-            Err(error) => return bad_request(&format!("multipart inválido: {error}")),
+            Err(error) => {
+                for (temp, _) in &staged_files {
+                    let _ = tokio::fs::remove_file(temp).await;
+                }
+                return bad_request(&format!("multipart inválido: {error}"));
+            }
         };
 
         let name = field.name().unwrap_or_default().to_string();
         if name == "path" {
             match field.text().await {
-                Ok(text) => directory = text,
-                Err(error) => return bad_request(&format!("campo path inválido: {error}")),
+                Ok(text) => directory = Some(text),
+                Err(error) => {
+                    for (temp, _) in &staged_files {
+                        let _ = tokio::fs::remove_file(temp).await;
+                    }
+                    return bad_request(&format!("campo path inválido: {error}"));
+                }
             }
             continue;
         }
@@ -718,37 +792,37 @@ pub async fn files_upload(
 
         let filename = match sanitize_filename(field.file_name().unwrap_or_default()) {
             Ok(name) => name,
-            Err(error) => return error_response(error),
+            Err(error) => {
+                for (temp, _) in &staged_files {
+                    let _ = tokio::fs::remove_file(temp).await;
+                }
+                return error_response(error);
+            }
         };
-        let target_dir = match root.resolve_dir(&directory) {
-            Ok(dir) => dir,
-            Err(error) => return error_response(error),
-        };
-        let destination = target_dir.join(&filename);
-        if destination.exists() {
-            return (
-                StatusCode::CONFLICT,
-                axum::Json(ApiResponse::<serde_json::Value>::error(format!(
-                    "el archivo '{filename}' ya existe"
-                ))),
-            )
-                .into_response();
-        }
 
-        let temporary = target_dir.join(format!(".upload-{}", random_hex()));
+        let temporary = root.root().join(format!(".upload-{}", random_hex()));
         let mut file = match tokio::fs::File::create(&temporary).await {
             Ok(file) => file,
-            Err(error) => return server_error(&format!("no se pudo crear el temporal: {error}")),
+            Err(error) => {
+                for (temp, _) in &staged_files {
+                    let _ = tokio::fs::remove_file(temp).await;
+                }
+                return server_error(&format!("no se pudo crear el temporal: {error}"));
+            }
         };
 
         let mut field = field;
         let mut total: u64 = 0;
+        let mut read_error = None;
         loop {
             match field.chunk().await {
                 Ok(Some(chunk)) => {
                     total += chunk.len() as u64;
                     if total > 512 * 1024 * 1024 {
                         let _ = tokio::fs::remove_file(&temporary).await;
+                        for (temp, _) in &staged_files {
+                            let _ = tokio::fs::remove_file(temp).await;
+                        }
                         return (
                             StatusCode::PAYLOAD_TOO_LARGE,
                             axum::Json(ApiResponse::<serde_json::Value>::error(
@@ -759,32 +833,79 @@ pub async fn files_upload(
                     }
                     if let Err(error) = file.write_all(&chunk).await {
                         let _ = tokio::fs::remove_file(&temporary).await;
+                        for (temp, _) in &staged_files {
+                            let _ = tokio::fs::remove_file(temp).await;
+                        }
                         return server_error(&format!("fallo al escribir: {error}"));
                     }
                 }
                 Ok(None) => break,
                 Err(error) => {
-                    let _ = tokio::fs::remove_file(&temporary).await;
-                    return bad_request(&format!("carga interrumpida: {error}"));
+                    read_error = Some(error);
+                    break;
                 }
             }
         }
 
+        if let Some(error) = read_error {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return bad_request(&format!("carga interrumpida: {error}"));
+        }
+
         if let Err(error) = file.flush().await {
             let _ = tokio::fs::remove_file(&temporary).await;
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
             return server_error(&format!("fallo al sincronizar: {error}"));
         }
         drop(file);
 
+        staged_files.push((temporary, filename));
+    }
+
+    let target_dir_str = directory.unwrap_or_default();
+    let target_dir = match root.resolve_dir(&target_dir_str) {
+        Ok(dir) => dir,
+        Err(error) => {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return error_response(error);
+        }
+    };
+
+    for (_, filename) in &staged_files {
+        let destination = target_dir.join(filename);
+        if destination.exists() {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return (
+                StatusCode::CONFLICT,
+                axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "el archivo '{filename}' ya existe"
+                ))),
+            )
+                .into_response();
+        }
+    }
+
+    for (temporary, filename) in staged_files {
+        let destination = target_dir.join(&filename);
         if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
             let _ = tokio::fs::remove_file(&temporary).await;
             return server_error(&format!("no se pudo promover la carga: {error}"));
         }
+        crate::files::set_file_permissions(&destination);
 
-        saved.push(if directory.is_empty() {
+        saved.push(if target_dir_str.is_empty() {
             filename
         } else {
-            format!("{directory}/{filename}")
+            format!("{target_dir_str}/{filename}")
         });
     }
 
