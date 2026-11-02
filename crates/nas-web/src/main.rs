@@ -98,12 +98,23 @@ fn load_or_create_csrf_secret(state_dir: &Path) -> [u8; 32] {
     let mut random = [0u8; 32];
     let _ = getrandom::getrandom(&mut random);
     let hex_key = hex::encode(random);
-    if std::fs::write(&secret_file, &hex_key).is_ok() {
-        #[cfg(unix)]
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&secret_file)
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&secret_file, std::fs::Permissions::from_mode(0o600));
+            let _ = f.write_all(hex_key.as_bytes());
         }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = std::fs::write(&secret_file, &hex_key);
     }
     derive_key(hex_key.as_bytes())
 }
