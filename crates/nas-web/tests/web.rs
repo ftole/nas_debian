@@ -157,6 +157,31 @@ async fn login_incorrecto_devuelve_401() {
 }
 
 #[tokio::test]
+async fn login_rate_limit_y_usuario_inexistente() {
+    let test_app = app(ServerRole::Arquivos);
+
+    let response = test_app
+        .clone()
+        .oneshot(login_request("no_existe", "clave_invalida"))
+        .await
+        .expect("login");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    for _ in 0..4 {
+        let _ = test_app
+            .clone()
+            .oneshot(login_request("admin", "clave_invalida"))
+            .await;
+    }
+    let response = test_app
+        .clone()
+        .oneshot(login_request("admin", "clave_invalida"))
+        .await
+        .expect("rate limit");
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn sesion_permite_metricas_y_red() {
     let app = app(ServerRole::Arquivos);
     let cookie = cookie_for(&app).await;
@@ -452,6 +477,54 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .expect("petición");
     let response = app.oneshot(request).await.expect("upload duplicado");
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn files_rechaza_duplicados_en_mismo_lote() {
+    let app = app(ServerRole::Arquivos);
+    let cookie = cookie_for(&app).await;
+    let boundary = "XBOUNDARYMULTI";
+
+    let crlf = "\r\n";
+    let mut body = String::new();
+    body.push_str(&format!("--{boundary}{crlf}"));
+    body.push_str(&format!(
+        "Content-Disposition: form-data; name=\"path\"{crlf}{crlf}"
+    ));
+    body.push_str("");
+    body.push_str(&format!("{crlf}--{boundary}{crlf}"));
+    body.push_str(&format!(
+        "Content-Disposition: form-data; name=\"file\"; filename=\"duplicado.txt\"{crlf}"
+    ));
+    body.push_str(&format!("Content-Type: text/plain{crlf}{crlf}"));
+    body.push_str("primero");
+    body.push_str(&format!("{crlf}--{boundary}{crlf}"));
+    body.push_str(&format!(
+        "Content-Disposition: form-data; name=\"file\"; filename=\"duplicado.txt\"{crlf}"
+    ));
+    body.push_str(&format!("Content-Type: text/plain{crlf}{crlf}"));
+    body.push_str("segundo");
+    body.push_str(&format!("{crlf}--{boundary}--{crlf}"));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .expect("petición");
+
+    let response = app.oneshot(request).await.expect("upload");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(payload["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("está duplicado"));
 }
 
 #[tokio::test]
