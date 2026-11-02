@@ -90,6 +90,11 @@ fn load_or_create_csrf_secret(state_dir: &Path) -> [u8; 32] {
 
     let secret_file = state_dir.join("csrf.secret");
     if let Ok(existing) = std::fs::read(&secret_file) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&secret_file, std::fs::Permissions::from_mode(0o600));
+        }
         if existing.len() >= 32 {
             return derive_key(&existing);
         }
