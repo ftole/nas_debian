@@ -55,7 +55,7 @@ pub async fn login_form(State(state): State<AppState>) -> Html<String> {
     let csrf = state.auth.issue_login_csrf(now);
     Html(views::login_with_context(
         &hostname(),
-        "127.0.0.1",
+        &server_ip(),
         &csrf,
         None,
     ))
@@ -89,7 +89,7 @@ pub async fn login_submit(
             StatusCode::TOO_MANY_REQUESTS,
             Html(views::login_with_context(
                 &hostname(),
-                &client_ip,
+                &server_ip(),
                 &csrf,
                 Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
             )),
@@ -106,7 +106,7 @@ pub async fn login_submit(
             StatusCode::FORBIDDEN,
             Html(views::login_with_context(
                 &hostname(),
-                &client_ip,
+                &server_ip(),
                 &csrf,
                 Some("Token CSRF inválido o expirado."),
             )),
@@ -131,7 +131,7 @@ pub async fn login_submit(
                 StatusCode::UNAUTHORIZED,
                 Html(views::login_with_context(
                     &hostname(),
-                    &client_ip,
+                    &server_ip(),
                     &csrf,
                     Some("Usuario o contraseña incorrectos."),
                 )),
@@ -505,10 +505,6 @@ pub struct DeleteBody {
     pub permanent: bool,
 }
 
-fn file_root(state: &AppState) -> Result<FileRoot, Box<Response>> {
-    FileRoot::new(state.paths.data_root.clone())
-        .map_err(|error| Box::new(server_error(&error.to_string())))
-}
 
 /// Lista el contenido de un directorio.
 pub async fn files_list(
@@ -752,11 +748,8 @@ pub async fn files_upload(
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let root = match file_root(&state) {
-        Ok(root) => root,
-        Err(response) => return *response,
-    };
 
+    let mut root_name: Option<String> = query.get("root").cloned();
     let mut directory: Option<String> = query.get("path").cloned();
     let mut staged_files: Vec<(PathBuf, String)> = Vec::new();
     let mut saved: Vec<String> = Vec::new();
@@ -774,6 +767,18 @@ pub async fn files_upload(
         };
 
         let name = field.name().unwrap_or_default().to_string();
+        if name == "root" {
+            match field.text().await {
+                Ok(text) => root_name = Some(text),
+                Err(error) => {
+                    for (temp, _) in &staged_files {
+                        let _ = tokio::fs::remove_file(temp).await;
+                    }
+                    return bad_request(&format!("campo root inválido: {error}"));
+                }
+            }
+            continue;
+        }
         if name == "path" {
             match field.text().await {
                 Ok(text) => directory = Some(text),
@@ -800,7 +805,10 @@ pub async fn files_upload(
             }
         };
 
-        let temporary = root.root().join(format!(".upload-{}", random_hex()));
+        let temporary = state
+            .paths
+            .data_root
+            .join(format!(".upload-{}", random_hex()));
         let mut file = match tokio::fs::File::create(&temporary).await {
             Ok(file) => file,
             Err(error) => {
@@ -867,6 +875,16 @@ pub async fn files_upload(
         staged_files.push((temporary, filename));
     }
 
+    let root = match file_root_for(&state, root_name.as_deref()) {
+        Ok(root) => root,
+        Err(response) => {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return *response;
+        }
+    };
+
     let target_dir_str = directory.unwrap_or_default();
     let target_dir = match root.resolve_dir(&target_dir_str) {
         Ok(dir) => dir,
@@ -878,7 +896,20 @@ pub async fn files_upload(
         }
     };
 
+    let mut seen = std::collections::HashSet::new();
     for (_, filename) in &staged_files {
+        if !seen.insert(filename) {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return (
+                StatusCode::CONFLICT,
+                axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "el archivo '{filename}' está duplicado en la carga"
+                ))),
+            )
+                .into_response();
+        }
         let destination = target_dir.join(filename);
         if destination.exists() {
             for (temp, _) in &staged_files {
@@ -896,9 +927,12 @@ pub async fn files_upload(
 
     for (temporary, filename) in staged_files {
         let destination = target_dir.join(&filename);
-        if let Err(error) = tokio::fs::rename(&temporary, &destination).await {
+        if let Err(_error) = tokio::fs::rename(&temporary, &destination).await {
+            if let Err(cp_err) = tokio::fs::copy(&temporary, &destination).await {
+                let _ = tokio::fs::remove_file(&temporary).await;
+                return server_error(&format!("no se pudo promover la carga: {cp_err}"));
+            }
             let _ = tokio::fs::remove_file(&temporary).await;
-            return server_error(&format!("no se pudo promover la carga: {error}"));
         }
         crate::files::set_file_permissions(&destination);
 
