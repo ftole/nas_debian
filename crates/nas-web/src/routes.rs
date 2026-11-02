@@ -505,7 +505,6 @@ pub struct DeleteBody {
     pub permanent: bool,
 }
 
-
 /// Lista el contenido de un directorio.
 pub async fn files_list(
     State(state): State<AppState>,
