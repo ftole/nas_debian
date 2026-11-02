@@ -122,15 +122,30 @@ fn partition_for(device: &str) -> String {
     }
 }
 
-fn mount_options_for(_runner: &Runner, fstype: &str, device: &str) -> String {
+fn mount_options_for(runner: &Runner, fstype: &str, device: &str) -> String {
     if fstype == "btrfs" {
         return "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string();
     }
-    let disk_name = device.trim_start_matches("/dev/");
-    let rota_path = format!("/sys/block/{disk_name}/queue/rotational");
-    let is_hdd = std::fs::read_to_string(&rota_path)
-        .map(|s| s.trim() == "1")
-        .unwrap_or(false);
+    let is_hdd = runner
+        .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", device]))
+        .ok()
+        .and_then(|out| {
+            out.stdout
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .and_then(|l| l.trim().parse::<u8>().ok())
+        })
+        .map(|rota| rota == 1)
+        .unwrap_or_else(|| {
+            let disk_name = device.trim_start_matches("/dev/");
+            let parent = crate::storage_ops::parent_disk(runner, device)
+                .unwrap_or_else(|| format!("/dev/{disk_name}"));
+            let parent_name = parent.trim_start_matches("/dev/");
+            let rota_path = format!("/sys/block/{parent_name}/queue/rotational");
+            std::fs::read_to_string(&rota_path)
+                .map(|s| s.trim() == "1")
+                .unwrap_or(false)
+        });
     if is_hdd {
         "rw,noatime,commit=2,errors=remount-ro".to_string()
     } else {
@@ -496,5 +511,17 @@ mod tests {
     fn calculo_de_particion() {
         assert_eq!(partition_for("/dev/sdb"), "/dev/sdb1");
         assert_eq!(partition_for("/dev/nvme0n1"), "/dev/nvme0n1p1");
+    }
+
+    #[test]
+    fn opciones_de_montaje_segun_tipo_de_disco() {
+        let runner = Runner::new();
+        assert_eq!(
+            mount_options_for(&runner, "btrfs", "/dev/sdb1"),
+            "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+        );
+        let ext4_opts = mount_options_for(&runner, "ext4", "/dev/sdb1");
+        assert!(ext4_opts.starts_with("rw,noatime,commit="));
+        assert!(ext4_opts.ends_with(",errors=remount-ro"));
     }
 }
