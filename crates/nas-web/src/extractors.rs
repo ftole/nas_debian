@@ -44,24 +44,24 @@ impl AuthenticatedUser {
     }
 
     /// Comprueba si el rol del usuario cumple una condición requerida, o devuelve error FORBIDDEN.
-    pub fn require_admin(&self) -> Result<(), Response> {
+    pub fn require_admin(&self) -> Result<(), Box<Response>> {
         if self.is_admin() {
             Ok(())
         } else {
-            Err(forbidden_response(
+            Err(Box::new(forbidden_response(
                 "se requieren privilegios de administrador",
-            ))
+            )))
         }
     }
 
     /// Comprueba si el usuario es superadministrador, o devuelve error FORBIDDEN.
-    pub fn require_superadmin(&self) -> Result<(), Response> {
+    pub fn require_superadmin(&self) -> Result<(), Box<Response>> {
         if self.is_superadmin() {
             Ok(())
         } else {
-            Err(forbidden_response(
+            Err(Box::new(forbidden_response(
                 "se requieren privilegios de superadministrador",
-            ))
+            )))
         }
     }
 }
