@@ -198,9 +198,63 @@ impl RemoteExecutor for OpenSsh {
     }
 }
 
+/// Valida el formato y contenido de una clave privada SSH (Ed25519, RSA, ECDSA, OpenSSH PEM).
+pub fn validate_private_key(content: &str) -> NasResult<()> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err(NasError::Invalid("la clave privada está vacía".into()));
+    }
+    if trimmed.len() < 50 || trimmed.len() > 16384 {
+        return Err(NasError::Invalid("longitud de clave privada inválida".into()));
+    }
+
+    let starts_valid = trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN EC PRIVATE KEY-----")
+        || trimmed.starts_with("-----BEGIN DSA PRIVATE KEY-----");
+
+    let ends_valid = trimmed.ends_with("-----END OPENSSH PRIVATE KEY-----")
+        || trimmed.ends_with("-----END RSA PRIVATE KEY-----")
+        || trimmed.ends_with("-----END PRIVATE KEY-----")
+        || trimmed.ends_with("-----END EC PRIVATE KEY-----")
+        || trimmed.ends_with("-----END DSA PRIVATE KEY-----");
+
+    if !starts_valid || !ends_valid {
+        return Err(NasError::Invalid(
+            "formato de clave privada SSH no reconocido (debe iniciar con -----BEGIN ... PRIVATE KEY-----)".into(),
+        ));
+    }
+
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err(NasError::Invalid(
+            "la clave privada contiene caracteres de control no permitidos".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Construye las opciones seguras de comando SSH para `rsync -e`.
+pub fn rsync_ssh_command(port: u16, key_path: Option<&Path>) -> String {
+    let key_arg = match key_path {
+        Some(path) => format!("-i {} ", quote(&path.to_string_lossy())),
+        None => String::new(),
+    };
+    format!(
+        "ssh {key_arg}-p {port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{quote, quote_all, with_sudo, SshTarget};
+    use super::{
+        quote, quote_all, rsync_ssh_command, validate_private_key, with_sudo, SshTarget,
+    };
+    use std::path::Path;
 
     #[test]
     fn cotiza_argumentos_peligrosos() {
@@ -256,5 +310,35 @@ mod tests {
             .ssh_args()
             .join(" ")
             .contains("-i /home/u/.ssh/id_ed25519"));
+    }
+
+    #[test]
+    fn valida_claves_privadas_ed25519_y_rsa() {
+        let valid_ed25519 = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDH...dummy...content...padding...for...min...length==\n-----END OPENSSH PRIVATE KEY-----\n";
+        assert!(validate_private_key(valid_ed25519).is_ok());
+
+        let valid_rsa = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0dummycontentformintestinglengthvalidationrequirement\n-----END RSA PRIVATE KEY-----";
+        assert!(validate_private_key(valid_rsa).is_ok());
+
+        assert!(validate_private_key("").is_err());
+        assert!(validate_private_key("demasiado corto").is_err());
+        assert!(validate_private_key("-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----").is_err());
+        assert!(validate_private_key("-----BEGIN OPENSSH PRIVATE KEY-----\n\0\0\0\n-----END OPENSSH PRIVATE KEY-----").is_err());
+    }
+
+    #[test]
+    fn genera_comando_rsync_ssh() {
+        let cmd_sin_clave = rsync_ssh_command(22, None);
+        assert_eq!(
+            cmd_sin_clave,
+            "ssh -p 22 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
+        );
+
+        let key = Path::new("/etc/backup-credentials/tarea1.id_ed25519");
+        let cmd_con_clave = rsync_ssh_command(2222, Some(key));
+        assert_eq!(
+            cmd_con_clave,
+            "ssh -i /etc/backup-credentials/tarea1.id_ed25519 -p 2222 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
+        );
     }
 }
