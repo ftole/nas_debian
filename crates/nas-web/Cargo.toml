@@ -19,6 +19,7 @@ path = "src/main.rs"
 nas-core = { workspace = true }
 nas-exec = { workspace = true }
 nas-engine = { workspace = true }
+nas-audit = { workspace = true }
 axum = { workspace = true, features = ["multipart"] }
 tokio = { workspace = true, features = ["fs", "io-util"] }
 tower = { workspace = true }
