@@ -42,6 +42,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 hex = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures-core = "0.3"
 
 nas-core = { path = "crates/nas-core" }
 nas-exec = { path = "crates/nas-exec" }
