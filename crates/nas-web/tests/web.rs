@@ -462,6 +462,10 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .await
         .expect("download");
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        Some("bytes")
+    );
     assert!(response
         .headers()
         .get("content-disposition")
@@ -469,6 +473,69 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .unwrap_or_default()
         .contains("informe.txt"));
     assert_eq!(body_text(response).await, "contenido de prueba");
+
+    // Range request parcial (206 Partial Content)
+    let range_req = Request::builder()
+        .uri("/api/files/download?path=informe.txt")
+        .header("cookie", &cookie)
+        .header("range", "bytes=0-8")
+        .body(Body::empty())
+        .expect("range req");
+    let response = app.clone().oneshot(range_req).await.expect("range download");
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 0-8/19")
+    );
+    assert_eq!(
+        response.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        Some("bytes")
+    );
+    assert_eq!(body_text(response).await, "contenido");
+
+    // Range request sufijo (últimos 6 bytes)
+    let suffix_req = Request::builder()
+        .uri("/api/files/download?path=informe.txt")
+        .header("cookie", &cookie)
+        .header("range", "bytes=-6")
+        .body(Body::empty())
+        .expect("suffix req");
+    let response = app.clone().oneshot(suffix_req).await.expect("suffix download");
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 13-18/19")
+    );
+    assert_eq!(body_text(response).await, "prueba");
+
+    // Range insatisfactorio (416 Range Not Satisfiable)
+    let bad_range = Request::builder()
+        .uri("/api/files/download?path=informe.txt")
+        .header("cookie", &cookie)
+        .header("range", "bytes=100-")
+        .body(Body::empty())
+        .expect("bad range req");
+    let response = app.clone().oneshot(bad_range).await.expect("bad range");
+    assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes */19")
+    );
+
+    // Range en previsualización /api/files/raw
+    let raw_range = Request::builder()
+        .uri("/api/files/raw?path=informe.txt")
+        .header("cookie", &cookie)
+        .header("range", "bytes=0-3")
+        .body(Body::empty())
+        .expect("raw range req");
+    let response = app.clone().oneshot(raw_range).await.expect("raw range");
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        Some("bytes 0-3/19")
+    );
+    assert_eq!(body_text(response).await, "cont");
 
     let request = Request::builder()
         .method("POST")
