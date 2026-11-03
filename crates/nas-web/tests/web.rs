@@ -1120,3 +1120,169 @@ async fn auditoria_de_acl_responde() {
     assert!(payload["data"]["total"].is_number());
     assert!(payload["data"]["shares"].is_object());
 }
+
+#[tokio::test]
+async fn audit_verify_requiere_admin_y_valida_cadena() {
+    let (app, dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+
+    // 1. Sin sesión devuelve 401
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/system/audit/verify")
+                .body(Body::empty())
+                .expect("petición"),
+        )
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Con sesión de administrador devuelve 200 y valida la bitácora vacía
+    let cookie = cookie_for(&app).await;
+    let response = app
+        .clone()
+        .oneshot(get("/api/system/audit/verify", &cookie))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["data"]["valid"], true);
+
+    // 3. Escribir entradas en la cadena criptográfica y volver a verificar
+    let audit_log = nas_audit::AuditLog::new(dir.join("audit").join("nas-audit.jsonl"));
+    let entry1 = nas_audit::AuditEntry::new(
+        "admin",
+        "local",
+        "login",
+        "web",
+        "SUCCESS",
+        "inicio de sesión",
+    );
+    audit_log.append(entry1).expect("append 1");
+
+    let entry2 = nas_audit::AuditEntry::new(
+        "admin",
+        "local",
+        "storage-inspect",
+        "/dev/sdb",
+        "SUCCESS",
+        "inspección",
+    );
+    audit_log.append(entry2).expect("append 2");
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/audit/verify", &cookie))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["data"]["valid"], true);
+    assert_eq!(payload["data"]["count"], 2);
+    assert_eq!(payload["data"]["status"], "VERIFIED");
+}
+
+#[tokio::test]
+async fn extractores_axum_from_request_parts_validan_roles() {
+    use axum::extract::FromRequestParts;
+    use nas_web::extractors::{AdminUser, AuthenticatedUser};
+
+    let dir = temp_dir("extractores");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Clave123"), "superadmin")
+        .expect("admin");
+    db.upsert_user("operador", &sha256_hex("Clave123"), "operator")
+        .expect("operador");
+
+    let auth = Auth::new(db.clone(), 3600, false);
+    let state = AppState::new(auth.clone(), paths_for(&dir), ServerRole::Arquivos);
+
+    // Crear sesión para operador
+    let now = chrono::Utc::now().timestamp();
+    let op_session = auth
+        .login("operador", "Clave123", now)
+        .expect("login")
+        .expect("sesion");
+    let cookie_header = format!("nas_session={op_session}");
+
+    // Request para API
+    let req = Request::builder()
+        .uri("/api/test")
+        .header("cookie", &cookie_header)
+        .body(Body::empty())
+        .expect("req");
+    let (mut parts, _) = req.into_parts();
+
+    // AuthenticatedUser debe resolver operador correctamente
+    let auth_user = AuthenticatedUser::from_request_parts(&mut parts, &state)
+        .await
+        .expect("authenticated user");
+    assert_eq!(auth_user.username(), "operador");
+    assert_eq!(auth_user.role(), "operator");
+    assert!(!auth_user.is_admin());
+    assert!(!auth_user.is_superadmin());
+
+    // AdminUser debe fallar para operador con FORBIDDEN
+    let admin_res = AdminUser::from_request_parts(&mut parts, &state).await;
+    assert!(admin_res.is_err());
+    assert_eq!(admin_res.err().unwrap().status(), StatusCode::FORBIDDEN);
+
+    // Crear sesión para superadmin
+    let admin_session = auth
+        .login("admin", "Clave123", now)
+        .expect("login")
+        .expect("sesion");
+    let admin_cookie_header = format!("nas_session={admin_session}");
+    let req_admin = Request::builder()
+        .uri("/api/test")
+        .header("cookie", &admin_cookie_header)
+        .body(Body::empty())
+        .expect("req");
+    let (mut admin_parts, _) = req_admin.into_parts();
+
+    let admin_user = AdminUser::from_request_parts(&mut admin_parts, &state)
+        .await
+        .expect("admin user");
+    assert_eq!(admin_user.username(), "admin");
+    assert_eq!(admin_user.role(), "superadmin");
+    assert!(admin_user.is_admin());
+    assert!(admin_user.is_superadmin());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn actualizar_password_revoca_sesiones_activas() {
+    let dir = temp_dir("revocacion");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Clave123"), "superadmin")
+        .expect("admin");
+    db.upsert_user("operador", &sha256_hex("Clave123"), "operator")
+        .expect("operador");
+
+    let auth = Auth::new(db.clone(), 3600, false);
+
+    let now = chrono::Utc::now().timestamp();
+    let op_session = auth
+        .login("operador", "Clave123", now)
+        .expect("login")
+        .expect("sesion");
+    assert_eq!(
+        db.session_user(&op_session, now).expect("user"),
+        Some("operador".to_string())
+    );
+
+    // Al cambiar la contraseña se invoca delete_user_sessions
+    db.delete_user_sessions("operador")
+        .expect("delete sessions");
+
+    // La sesión activa anterior queda inmediatamente revocada
+    assert_eq!(db.session_user(&op_session, now).expect("user"), None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
