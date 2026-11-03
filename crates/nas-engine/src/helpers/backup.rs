@@ -133,6 +133,8 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&cred_dst, std::fs::Permissions::from_mode(0o600));
         }
+    } else {
+        let _ = std::fs::remove_file(&cred_dst);
     }
 
     if key_src.exists() && key_src.metadata().map(|m| m.len() > 0).unwrap_or(false) {
@@ -142,6 +144,8 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&key_dst, std::fs::Permissions::from_mode(0o600));
         }
+    } else {
+        let _ = std::fs::remove_file(&key_dst);
     }
 
     let _ = std::fs::remove_file(&runner_src);
