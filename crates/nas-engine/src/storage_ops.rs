@@ -112,10 +112,28 @@ pub fn os_disks(runner: &Runner) -> Vec<String> {
 
 /// Disco padre de un dispositivo (`/dev/sda1` → `/dev/sda`).
 pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
-    if let Ok(output) = run_capture(runner, "lsblk", &["-no", "PKNAME", device]) {
+    if let Ok(output) = run_capture(runner, "lsblk", &["-ndo", "PKNAME", device]) {
         let name = output.lines().next().unwrap_or_default().trim();
         if !name.is_empty() {
-            return Some(format!("/dev/{name}"));
+            let disk_name = if name.starts_with("nvme") || name.starts_with("mmcblk") {
+                if let Some((disk, part)) = name.rsplit_once('p') {
+                    if !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()) {
+                        disk
+                    } else {
+                        name
+                    }
+                } else {
+                    name
+                }
+            } else {
+                let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
+                if trimmed.is_empty() {
+                    name
+                } else {
+                    trimmed
+                }
+            };
+            return Some(format!("/dev/{disk_name}"));
         }
     }
     let base = device.rsplit('/').next().unwrap_or_default();
