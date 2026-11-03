@@ -16,12 +16,14 @@ use tokio::io::{AsyncRead, ReadBuf};
 pub struct ReaderStream<R> {
     reader: R,
     buf: Box<[u8]>,
+    done: bool,
 }
 
 impl<R> std::fmt::Debug for ReaderStream<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReaderStream")
             .field("buf_len", &self.buf.len())
+            .field("done", &self.done)
             .finish()
     }
 }
@@ -37,6 +39,7 @@ impl<R> ReaderStream<R> {
         Self {
             reader,
             buf: vec![0u8; capacity].into_boxed_slice(),
+            done: false,
         }
     }
 }
@@ -46,17 +49,24 @@ impl<R: AsyncRead + Unpin> Stream for ReaderStream<R> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
+        if this.done {
+            return Poll::Ready(None);
+        }
         let mut read_buf = ReadBuf::new(&mut this.buf);
         match Pin::new(&mut this.reader).poll_read(cx, &mut read_buf) {
             Poll::Ready(Ok(())) => {
                 let filled = read_buf.filled();
                 if filled.is_empty() {
+                    this.done = true;
                     Poll::Ready(None)
                 } else {
                     Poll::Ready(Some(Ok(axum::body::Bytes::copy_from_slice(filled))))
                 }
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(Err(e)) => {
+                this.done = true;
+                Poll::Ready(Some(Err(e)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -525,12 +535,41 @@ mod tests {
 /// Tamaño máximo agregado al comprimir una carpeta en ZIP (256 MiB).
 pub const ZIP_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
+fn clean_stale_staging_files(staging: &Path) {
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("tmp") {
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(age) = now.duration_since(modified) {
+                        if age.as_secs() > 3600 {
+                            let _ = std::fs::remove_file(&path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn secure_temp_zip_path() -> PathBuf {
     let staging = Path::new("/var/lib/nas/staging");
     let base_dir = if std::fs::create_dir_all(staging).is_ok() && staging.is_dir() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(staging, std::fs::Permissions::from_mode(0o700));
+        }
+        clean_stale_staging_files(staging);
         staging.to_path_buf()
     } else {
-        std::env::temp_dir()
+        let tmp = std::env::temp_dir();
+        clean_stale_staging_files(&tmp);
+        tmp
     };
     let mut random_bytes = [0u8; 8];
     let _ = getrandom::getrandom(&mut random_bytes);
@@ -592,8 +631,15 @@ impl FileRoot {
             add_to_zip(&mut writer, &options, &source, &name, &mut total)?;
         } else {
             let entries = collect_files(&source, &mut total)?;
+            let mut total_written: u64 = 0;
             for (absolute, relative_name) in entries {
-                add_to_zip(&mut writer, &options, &absolute, &relative_name, &mut total)?;
+                add_to_zip(
+                    &mut writer,
+                    &options,
+                    &absolute,
+                    &relative_name,
+                    &mut total_written,
+                )?;
             }
         }
 
@@ -663,9 +709,10 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     name: &str,
     total: &mut u64,
 ) -> NasResult<()> {
+    use std::io::Read;
+
     let metadata = std::fs::metadata(path).map_err(|e| NasError::io(path, e))?;
-    *total = total.saturating_add(metadata.len());
-    if *total > ZIP_MAX_BYTES {
+    if total.saturating_add(metadata.len()) > ZIP_MAX_BYTES {
         return Err(NasError::Denied(
             "el contenido supera el límite de 256 MiB para descarga ZIP".into(),
         ));
@@ -676,7 +723,14 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
         .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
 
     let mut file = std::fs::File::open(path).map_err(|e| NasError::io(path, e))?;
-    std::io::copy(&mut file, writer).map_err(|e| NasError::io(path, e))?;
+    let mut limited = (&mut file).take(ZIP_MAX_BYTES.saturating_sub(*total) + 1);
+    let copied = std::io::copy(&mut limited, writer).map_err(|e| NasError::io(path, e))?;
+    *total = total.saturating_add(copied);
+    if *total > ZIP_MAX_BYTES {
+        return Err(NasError::Denied(
+            "el contenido supera el límite de 256 MiB para descarga ZIP".into(),
+        ));
+    }
 
     Ok(())
 }
@@ -745,6 +799,32 @@ mod ziptests {
             !path.exists(),
             "el archivo temporal debe eliminarse al hacer drop"
         );
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn zip_temp_no_duplica_conteo_de_tamano_en_carpetas() {
+        let root = root("no-duplica");
+        root.mkdir("datos").expect("mkdir");
+
+        // Creamos dos archivos de 70 MiB cada uno (total carpeta: 140 MiB).
+        // 140 MiB < 256 MiB (ZIP_MAX_BYTES).
+        // En la versión con el bug de doble conteo: 140 MiB + 140 MiB = 280 MiB > 256 MiB, fallando erróneamente.
+        // Con la corrección de total_written independiente, se comprime exitosamente.
+        let f1 = std::fs::File::create(root.root().join("datos/f1.bin")).expect("create f1");
+        f1.set_len(70 * 1024 * 1024).expect("set_len f1");
+        drop(f1);
+
+        let f2 = std::fs::File::create(root.root().join("datos/f2.bin")).expect("create f2");
+        f2.set_len(70 * 1024 * 1024).expect("set_len f2");
+        drop(f2);
+
+        let (temp, size) = root.zip_temp("datos").expect("zip temp exitoso");
+        assert!(size > 0);
+        let path = temp.path().to_path_buf();
+        assert!(path.exists());
+        drop(temp);
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
