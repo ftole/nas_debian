@@ -206,6 +206,8 @@ fn render_block(spec: &ShareSpec) -> String {
     }
     block.push_str("   create mask = 0660\n");
     block.push_str("   directory mask = 2770\n");
+    block.push_str("   force create mode = 0660\n");
+    block.push_str("   force directory mode = 02770\n");
     block.trim_end().to_string()
 }
 
@@ -275,6 +277,8 @@ mod tests {
         assert!(updated.contains("[CONTABILIDAD]"));
         assert!(updated.contains("path = /srv/nas/CONTABILIDAD"));
         assert!(updated.contains("valid users = @grp_samba"));
+        assert!(updated.contains("force create mode = 0660"));
+        assert!(updated.contains("force directory mode = 02770"));
     }
 
     #[test]
