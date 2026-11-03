@@ -510,6 +510,7 @@ mod tests {
             destination_root: "/srv/nas/BACKUPS_HISTORICOS".into(),
             log_dir: "/srv/nas/LOGS_BACKUP".into(),
             credentials_file: None,
+            key_file: None,
         };
         let row = backup_row(&task);
         assert_eq!(row["id"], "demo");
