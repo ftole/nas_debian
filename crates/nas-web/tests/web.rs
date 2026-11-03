@@ -563,6 +563,17 @@ async fn files_sube_descarga_y_detecta_duplicados() {
     );
     assert_eq!(body_text(response).await, "cont");
 
+    // Múltiples rangos deben ignorarse y responder 200 OK completo según RFC 9110
+    let multi_range = Request::builder()
+        .uri("/api/files/download?path=informe.txt")
+        .header("cookie", &cookie)
+        .header("range", "bytes=0-3, 5-8")
+        .body(Body::empty())
+        .expect("multi range req");
+    let response = app.clone().oneshot(multi_range).await.expect("multi range");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_text(response).await, "contenido de prueba");
+
     let request = Request::builder()
         .method("POST")
         .uri("/api/files/upload")
