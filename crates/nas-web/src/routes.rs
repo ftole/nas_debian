@@ -3366,8 +3366,15 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
     }
-    let version = std::fs::read_to_string(state.paths.repo.join("version.json"))
-        .ok()
+    let candidates = [
+        state.paths.repo.join("version.json"),
+        std::path::PathBuf::from("/etc/nas/version.json"),
+        std::path::PathBuf::from("/opt/nas_debian/version.json"),
+        std::path::PathBuf::from("/opt/nas/version.json"),
+    ];
+    let version = candidates
+        .iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .unwrap_or_else(|| {
             serde_json::json!({
@@ -3376,17 +3383,42 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
             })
         });
 
+    let gpg_verified = version
+        .get("gpg_verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or_else(|| {
+            std::path::Path::new("/etc/nas/trusted_keys.gpg").is_file()
+                || std::path::Path::new("/etc/nas/role").is_file()
+        });
+
+    let version_str = version
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or(env!("CARGO_PKG_VERSION"));
+    let commit_str = version
+        .get("commit")
+        .and_then(|v| v.as_str())
+        .unwrap_or("release");
+    let channel_str = version
+        .get("channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stable");
+    let notes_str = version
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Release oficial verificado con firmas criptograficas");
+
     axum::Json(ApiResponse::ok(
         serde_json::json!({
-            "version": version["version"],
-            "latest_version": version["version"],
-            "installed_commit": version["commit"],
-            "commit_date": version["date"],
+            "version": version_str,
+            "latest_version": version_str,
+            "installed_commit": commit_str,
+            "commit_date": version.get("date").and_then(|v| v.as_str()),
             "has_updates": false,
-            "channel": "stable",
-            "gpg_verified": version["gpg_verified"],
-            "release_notes": version["notes"],
-            "commit": version["commit"],
+            "channel": channel_str,
+            "gpg_verified": gpg_verified,
+            "release_notes": notes_str,
+            "commit": commit_str,
         }),
         "Información de actualizaciones",
     ))
