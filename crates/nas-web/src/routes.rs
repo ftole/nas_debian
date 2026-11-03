@@ -534,7 +534,7 @@ pub async fn files_list(
     }
 }
 
-/// Descarga un archivo con cabeceras seguras.
+/// Descarga un archivo con cabeceras seguras mediante streaming asíncrono O(1).
 pub async fn files_download(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -554,29 +554,42 @@ pub async fn files_download(
         .map(str::to_string)
         .unwrap_or_else(|| "descarga.bin".to_string());
 
-    match tokio::task::spawn_blocking(move || root.read(&path, 64 * 1024 * 1024)).await {
-        Ok(Ok(bytes)) => {
-            let mut response = Response::new(axum::body::Body::from(bytes));
-            let response_headers = response.headers_mut();
-            response_headers.insert(
-                axum::http::header::CONTENT_TYPE,
-                HeaderValue::from_static("application/octet-stream"),
-            );
-            if let Ok(value) = HeaderValue::from_str(&format!(
-                "attachment; filename=\"{}\"",
-                name.replace('"', "")
-            )) {
-                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-            }
-            response_headers.insert(
-                "content-security-policy",
-                HeaderValue::from_static("default-src 'none'; sandbox"),
-            );
-            response
-        }
-        Ok(Err(error)) => error_response(error),
-        Err(_) => server_error("descarga interrumpida"),
+    let (file_path, file_size) = match root.resolve_file(&path) {
+        Ok(pair) => pair,
+        Err(error) => return error_response(error),
+    };
+
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(file) => file,
+        Err(e) => return error_response(NasError::io(&file_path, e)),
+    };
+
+    let stream = crate::files::ReaderStream::new(file);
+    let mut response = Response::new(axum::body::Body::from_stream(stream));
+    let response_headers = response.headers_mut();
+    response_headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    response_headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from(file_size),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}\"",
+        name.replace(['"', '\r', '\n'], "")
+    )) {
+        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
     }
+    response_headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    response_headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 /// Crea un directorio.
@@ -2123,7 +2136,7 @@ pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Re
     }
 }
 
-/// Descarga una carpeta (o archivo) como ZIP.
+/// Descarga una carpeta (o archivo) como ZIP en streaming asíncrono con archivo temporal seguro.
 pub async fn files_zip(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2146,29 +2159,40 @@ pub async fn files_zip(
         .map(str::to_string)
         .unwrap_or_else(|| "nas".to_string());
 
-    match tokio::task::spawn_blocking(move || root.zip(&path)).await {
-        Ok(Ok(bytes)) => {
-            let mut response = Response::new(axum::body::Body::from(bytes));
-            let response_headers = response.headers_mut();
-            response_headers.insert(
-                axum::http::header::CONTENT_TYPE,
-                HeaderValue::from_static("application/zip"),
-            );
-            if let Ok(value) = HeaderValue::from_str(&format!(
-                "attachment; filename=\"{}.zip\"",
-                name.replace(['"', '\r', '\n'], "")
-            )) {
-                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-            }
-            response_headers.insert(
-                "content-security-policy",
-                HeaderValue::from_static("default-src 'none'; sandbox"),
-            );
-            response
-        }
-        Ok(Err(error)) => error_response(error),
-        Err(_) => server_error("compresión interrumpida"),
+    let (temp_file, file_size) =
+        match tokio::task::spawn_blocking(move || root.zip_temp(&path)).await {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(error)) => return error_response(error),
+            Err(_) => return server_error("compresión interrumpida"),
+        };
+
+    let tokio_file = match tokio::fs::File::open(temp_file.path()).await {
+        Ok(f) => f,
+        Err(e) => return error_response(NasError::io(temp_file.path(), e)),
+    };
+
+    let stream = crate::files::CleaningReaderStream::new(tokio_file, temp_file);
+    let mut response = Response::new(axum::body::Body::from_stream(stream));
+    let response_headers = response.headers_mut();
+    response_headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/zip"),
+    );
+    response_headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from(file_size),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "attachment; filename=\"{}.zip\"",
+        name.replace(['"', '\r', '\n'], "")
+    )) {
+        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
     }
+    response_headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    response
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -5508,7 +5532,7 @@ fn inline_content_type(name: &str) -> &'static str {
     }
 }
 
-/// Sirve un archivo para previsualización en línea (`/api/files/raw`) aislando vectores XSS.
+/// Sirve un archivo para previsualización en línea (`/api/files/raw`) aislando vectores XSS mediante streaming O(1).
 pub async fn files_raw(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -5529,41 +5553,48 @@ pub async fn files_raw(
         .map(str::to_string)
         .unwrap_or_else(|| "archivo.bin".to_string());
 
-    match tokio::task::spawn_blocking(move || root.read(&path, 64 * 1024 * 1024)).await {
-        Ok(Ok(bytes)) => {
-            let force_attachment = is_active_web_payload(&name);
-            let mut response = Response::new(axum::body::Body::from(bytes));
-            let content_type = if force_attachment {
-                HeaderValue::from_static("application/octet-stream")
-            } else {
-                HeaderValue::from_static(inline_content_type(&name))
-            };
-            let disposition = if force_attachment {
-                "attachment"
-            } else {
-                "inline"
-            };
-            let safe_name = name.replace(['"', '\r', '\n'], "");
-            let response_headers = response.headers_mut();
-            response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
-            if let Ok(value) =
-                HeaderValue::from_str(&format!("{disposition}; filename=\"{safe_name}\""))
-            {
-                response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-            }
-            response_headers.insert(
-                "content-security-policy",
-                HeaderValue::from_static("default-src 'none'; sandbox"),
-            );
-            response_headers.insert(
-                "x-content-type-options",
-                HeaderValue::from_static("nosniff"),
-            );
-            response
-        }
-        Ok(Err(error)) => error_response(error),
-        Err(_) => server_error("lectura interrumpida"),
+    let (file_path, file_size) = match root.resolve_file(&path) {
+        Ok(pair) => pair,
+        Err(error) => return error_response(error),
+    };
+
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(file) => file,
+        Err(e) => return error_response(NasError::io(&file_path, e)),
+    };
+
+    let force_attachment = is_active_web_payload(&name);
+    let stream = crate::files::ReaderStream::new(file);
+    let mut response = Response::new(axum::body::Body::from_stream(stream));
+    let content_type = if force_attachment {
+        HeaderValue::from_static("application/octet-stream")
+    } else {
+        HeaderValue::from_static(inline_content_type(&name))
+    };
+    let disposition = if force_attachment {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let safe_name = name.replace(['"', '\r', '\n'], "");
+    let response_headers = response.headers_mut();
+    response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
+    response_headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from(file_size),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!("{disposition}; filename=\"{safe_name}\"")) {
+        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
     }
+    response_headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    response_headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 fn acl_entries(runner: &Runner, path: &str) -> Option<String> {
