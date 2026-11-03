@@ -119,8 +119,8 @@ impl AuditLog {
         let mut read_len = CHUNK_SIZE.min(file_len);
 
         loop {
-            let seek_offset = file_len - read_len;
-            file.seek(SeekFrom::Start(seek_offset))
+            let at_start = read_len >= file_len;
+            file.seek(SeekFrom::End(-(read_len as i64)))
                 .map_err(|e| NasError::io(&self.path, e))?;
 
             let mut buffer = vec![0u8; read_len as usize];
@@ -129,7 +129,7 @@ impl AuditLog {
 
             let text = String::from_utf8_lossy(&buffer);
             let lines: Vec<&str> = text.lines().collect();
-            let valid_lines = if seek_offset > 0 && lines.len() > 1 {
+            let valid_lines = if !at_start && lines.len() > 1 {
                 &lines[1..]
             } else {
                 &lines[..]
@@ -145,7 +145,7 @@ impl AuditLog {
                 }
             }
 
-            if seek_offset == 0 {
+            if at_start {
                 return Ok(String::from("0"));
             }
 
@@ -405,6 +405,37 @@ mod tests {
             .expect("append 3");
         assert_eq!(log.last_hash().expect("hash 3"), e3.hash);
 
+        let _ = std::fs::remove_file(log.path());
+    }
+
+    #[test]
+    fn last_hash_log_mayor_a_8k_recupera_ultimo_hash_correctamente() {
+        let log = temp_log("log_8k");
+        let mut last_expected = String::new();
+
+        // Creamos más de 60 entradas con datos detallados para superar con creces los 8 KiB
+        for i in 0..60 {
+            let details = format!("detalle de evento de auditoria largo numero {i} con relleno de texto para exceder el tamano de bloque");
+            let entry = log
+                .append(AuditEntry::new(
+                    "operador",
+                    "panel",
+                    "backup_run",
+                    "10.10.1.50",
+                    "SUCCESS",
+                    &details,
+                ))
+                .expect("append");
+            last_expected = entry.hash;
+        }
+
+        let file_len = std::fs::metadata(log.path()).expect("metadata").len();
+        assert!(
+            file_len > 8192,
+            "el log debe superar 8192 bytes para probar lectura parcial desde el final (tam: {file_len})"
+        );
+
+        assert_eq!(log.last_hash().expect("last hash"), last_expected);
         let _ = std::fs::remove_file(log.path());
     }
 }
