@@ -463,7 +463,10 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .expect("download");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("accept-ranges")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes")
     );
     assert!(response
@@ -481,14 +484,24 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .header("range", "bytes=0-8")
         .body(Body::empty())
         .expect("range req");
-    let response = app.clone().oneshot(range_req).await.expect("range download");
+    let response = app
+        .clone()
+        .oneshot(range_req)
+        .await
+        .expect("range download");
     assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(
-        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes 0-8/19")
     );
     assert_eq!(
-        response.headers().get("accept-ranges").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("accept-ranges")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes")
     );
     assert_eq!(body_text(response).await, "contenido");
@@ -500,10 +513,17 @@ async fn files_sube_descarga_y_detecta_duplicados() {
         .header("range", "bytes=-6")
         .body(Body::empty())
         .expect("suffix req");
-    let response = app.clone().oneshot(suffix_req).await.expect("suffix download");
+    let response = app
+        .clone()
+        .oneshot(suffix_req)
+        .await
+        .expect("suffix download");
     assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(
-        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes 13-18/19")
     );
     assert_eq!(body_text(response).await, "prueba");
@@ -518,7 +538,10 @@ async fn files_sube_descarga_y_detecta_duplicados() {
     let response = app.clone().oneshot(bad_range).await.expect("bad range");
     assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
     assert_eq!(
-        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes */19")
     );
 
@@ -532,7 +555,10 @@ async fn files_sube_descarga_y_detecta_duplicados() {
     let response = app.clone().oneshot(raw_range).await.expect("raw range");
     assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(
-        response.headers().get("content-range").and_then(|v| v.to_str().ok()),
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
         Some("bytes 0-3/19")
     );
     assert_eq!(body_text(response).await, "cont");
