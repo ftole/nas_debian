@@ -189,14 +189,18 @@ where
             }
         }
 
-        // 4. Resolver rol del usuario en SQLite
-        let role = app_state
-            .auth
-            .db()
-            .user_role(&username)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "operator".to_string());
+        // 4. Resolver rol del usuario en SQLite (priorizando superadministrador configurado)
+        let role = if crate::routes::configured_superadmin().as_deref() == Some(&username) {
+            "superadmin".to_string()
+        } else {
+            app_state
+                .auth
+                .db()
+                .user_role(&username)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "operator".to_string())
+        };
 
         Ok(AuthenticatedUser {
             username,
