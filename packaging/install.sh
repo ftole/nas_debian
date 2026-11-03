@@ -211,6 +211,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/mkdir -p /var/lib/nas/dev-sync/*, \
     /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
     /usr/bin/install -m 0755 /opt/nas_debian/current/bin/* /usr/local/bin/*, \
+    /usr/bin/install -m 0755 /opt/nas_debian/bin/* /usr/local/bin/*, \
     /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
     /usr/bin/fstrim -v /srv/nas, \
     /usr/local/bin/nas helper *, \
