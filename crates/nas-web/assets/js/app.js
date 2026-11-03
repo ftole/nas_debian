@@ -3799,6 +3799,22 @@ function fallbackCopyText(text, count) {
   }
 }
 
+async function verifyAuditIntegrity() {
+  try {
+    showToast('Verificando cadena criptográfica SHA-256 de auditoría...', 'info');
+    const res = await apiFetch('/api/system/audit/verify');
+    const data = res.data || res;
+    if (data.valid) {
+      const hashShort = data.last_hash && data.last_hash !== '0' ? data.last_hash.substring(0, 16) + '...' : 'vacía';
+      showToast(`Auditoría íntegra: ${data.count} registros validados (Hash: ${hashShort})`, 'success', 6000);
+    } else {
+      showToast(`¡Alerta! Integridad de auditoría comprometida: ${data.error || 'Corrupción detectada'}`, 'error', 10000);
+    }
+  } catch (e) {
+    showToast(`Error al verificar auditoría: ${e.message}`, 'error');
+  }
+}
+
 // ==============================================================================
 // 11. Módulo: Consola Terminal Web Real (Bash Interactivo)
 // ==============================================================================
@@ -7766,6 +7782,7 @@ window.loadLogs = loadLogs;
 window.setLogSource = setLogSource;
 window.debounceLogSearch = debounceLogSearch;
 window.exportOrCopyLogs = exportOrCopyLogs;
+window.verifyAuditIntegrity = verifyAuditIntegrity;
 
 // Consola Terminal
 window.loadTerminal = loadTerminal;
