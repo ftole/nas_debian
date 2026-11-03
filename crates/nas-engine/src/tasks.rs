@@ -67,6 +67,8 @@ pub struct BackupTask {
     pub log_dir: String,
     /// Archivo de credenciales CIFS (0600 root:root).
     pub credentials_file: Option<String>,
+    /// Archivo de clave privada SSH (0600 root:root).
+    pub key_file: Option<String>,
 }
 
 const DEFAULT_DESTINATION: &str = "/srv/nas/BACKUPS_HISTORICOS";
@@ -153,6 +155,7 @@ impl BackupTask {
                 .unwrap_or_else(|| DEFAULT_DESTINATION.to_string()),
             log_dir: extract(script, "LOG_DIR").unwrap_or_else(|| DEFAULT_LOG_DIR.to_string()),
             credentials_file: extract(script, "CRED_FILE"),
+            key_file: extract(script, "KEY_FILE"),
         })
     }
 
@@ -302,16 +305,24 @@ impl BackupTask {
                 let user = self.user.clone().unwrap_or_default();
                 let path = self.path.clone().unwrap_or_default();
                 let port = self.port.unwrap_or(22);
-                let ssh = format!(
-                    "ssh -p {port} -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
-                );
+                let key_opt = self.key_file.as_deref().filter(|k| !k.is_empty());
+                let (use_key, ssh_cmd) = match key_opt {
+                    Some(key) => (
+                        true,
+                        nas_ssh::rsync_ssh_command(port, Some(Path::new(key))),
+                    ),
+                    None => (false, nas_ssh::rsync_ssh_command(port, None)),
+                };
 
-                let mut step = vec!["sshpass".into()];
-                if let Some(cred) = &self.credentials_file {
-                    step.push("-f".into());
-                    step.push(cred.clone());
-                } else {
-                    step.push("-e".into());
+                let mut step = Vec::new();
+                if !use_key {
+                    step.push("sshpass".into());
+                    if let Some(cred) = &self.credentials_file {
+                        step.push("-f".into());
+                        step.push(cred.clone());
+                    } else {
+                        step.push("-e".into());
+                    }
                 }
                 step.extend([
                     "rsync".into(),
@@ -325,7 +336,7 @@ impl BackupTask {
                 }
                 step.extend([
                     "-e".into(),
-                    ssh,
+                    ssh_cmd,
                     format!("{user}@{ip}:{}/", path.trim_end_matches('/')),
                     staging.clone(),
                 ]);
@@ -792,5 +803,31 @@ SRC_PORT=22
     #[test]
     fn id_vacio_es_error() {
         assert!(BackupTask::parse("", CIFS_RUNNER).is_err());
+    }
+
+    #[test]
+    fn plan_ssh_con_clave_privada_no_usa_sshpass() {
+        let script = r#"#!/bin/bash
+TASK="srv-key"
+SOURCE_TYPE="ssh"
+SRC_IP="10.10.1.70"
+SRC_PORT="22"
+SRC_PATH="/var/log"
+SRC_USER="root"
+KEY_FILE="/etc/backup-credentials/srv-key.id_ed25519"
+RETENTION=10
+"#;
+        let task = BackupTask::parse("srv-key", script).expect("tarea");
+        assert_eq!(task.key_file.as_deref(), Some("/etc/backup-credentials/srv-key.id_ed25519"));
+
+        let plan = task.plan(None, &now());
+        // No debe contener paso inicial sshpass
+        assert!(!plan.iter().any(|step| step.first().is_some_and(|arg| arg == "sshpass")));
+
+        let rsync = plan
+            .iter()
+            .find(|step| step.first().is_some_and(|arg| arg == "rsync"))
+            .expect("paso rsync");
+        assert!(rsync.iter().any(|arg| arg.contains("-i /etc/backup-credentials/srv-key.id_ed25519")));
     }
 }
