@@ -650,10 +650,7 @@ pub async fn files_download(
 
     let mut builder = Response::builder()
         .status(status)
-        .header(
-            axum::http::header::CONTENT_TYPE,
-            "application/octet-stream",
-        )
+        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
         .header(axum::http::header::CONTENT_LENGTH, content_length)
         .header(axum::http::header::ACCEPT_RANGES, "bytes")
         .header(
