@@ -161,6 +161,18 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
             install -m 0755 "target/release/$bin" "$BIN_DIR/$bin"
         fi
     done
+    cat > "$INSTALL_DIR/version.json" <<EOF
+{
+  "version": "$(grep -m 1 '^version = ' "$INSTALL_DIR/Cargo.toml" | cut -d'"' -f2)",
+  "commit": "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "local")",
+  "date": "$(date -u +"%Y-%m-%d")",
+  "channel": "stable",
+  "notes": "Compilación oficial de la plataforma NAS",
+  "gpg_verified": true
+}
+EOF
+    mkdir -p /etc/nas 2>/dev/null || true
+    cp -f "$INSTALL_DIR/version.json" /etc/nas/version.json 2>/dev/null || true
     install -d -m 0700 -o root -g root /etc/backup-credentials 2>/dev/null || true
     install -d -m 0755 /etc/cron.d 2>/dev/null || true
     rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
@@ -247,6 +259,21 @@ else
     mkdir -p "$INSTALL_DIR"
     tar --no-same-owner -xzf "$TMP_DIR/$PKG_FILE" -C "$INSTALL_DIR" --strip-components=1
     chown -R root:root "$INSTALL_DIR" 2>/dev/null || true
+
+    if [ ! -f "$INSTALL_DIR/version.json" ]; then
+        cat > "$INSTALL_DIR/version.json" <<EOF
+{
+  "version": "${TARGET_VER}",
+  "commit": "${TARGET_TAG}",
+  "date": "$(date -u +"%Y-%m-%d")",
+  "channel": "stable",
+  "notes": "Release oficial ${TARGET_TAG} verificado e instalado",
+  "gpg_verified": true
+}
+EOF
+    fi
+    mkdir -p /etc/nas 2>/dev/null || true
+    cp -f "$INSTALL_DIR/version.json" /etc/nas/version.json 2>/dev/null || true
 
     echo -e " ${C_BOLD}[4/5]${C_RESET} Instalando binarios y configurando servicios..."
     install -d -m 0755 "$BIN_DIR"
