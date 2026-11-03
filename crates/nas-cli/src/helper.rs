@@ -351,8 +351,9 @@ pub enum TerminalAction {
 }
 
 fn read_stdin_line() -> String {
+    use std::io::Read;
     let mut buffer = String::new();
-    let _ = std::io::stdin().read_line(&mut buffer);
+    let _ = std::io::stdin().read_to_string(&mut buffer);
     buffer.trim_end_matches(['\r', '\n']).to_string()
 }
 
