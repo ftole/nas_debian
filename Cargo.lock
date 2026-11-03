@@ -1028,6 +1028,7 @@ dependencies = [
  "hex",
  "nas-core",
  "nas-exec",
+ "nas-ssh",
  "rand_core",
  "regex",
  "serde",
