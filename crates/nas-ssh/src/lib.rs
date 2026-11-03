@@ -205,7 +205,9 @@ pub fn validate_private_key(content: &str) -> NasResult<()> {
         return Err(NasError::Invalid("la clave privada está vacía".into()));
     }
     if trimmed.len() < 50 || trimmed.len() > 16384 {
-        return Err(NasError::Invalid("longitud de clave privada inválida".into()));
+        return Err(NasError::Invalid(
+            "longitud de clave privada inválida".into(),
+        ));
     }
 
     let starts_valid = trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -251,9 +253,7 @@ pub fn rsync_ssh_command(port: u16, key_path: Option<&Path>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        quote, quote_all, rsync_ssh_command, validate_private_key, with_sudo, SshTarget,
-    };
+    use super::{quote, quote_all, rsync_ssh_command, validate_private_key, with_sudo, SshTarget};
     use std::path::Path;
 
     #[test]
@@ -322,8 +322,14 @@ mod tests {
 
         assert!(validate_private_key("").is_err());
         assert!(validate_private_key("demasiado corto").is_err());
-        assert!(validate_private_key("-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----").is_err());
-        assert!(validate_private_key("-----BEGIN OPENSSH PRIVATE KEY-----\n\0\0\0\n-----END OPENSSH PRIVATE KEY-----").is_err());
+        assert!(validate_private_key(
+            "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+        )
+        .is_err());
+        assert!(validate_private_key(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n\0\0\0\n-----END OPENSSH PRIVATE KEY-----"
+        )
+        .is_err());
     }
 
     #[test]
