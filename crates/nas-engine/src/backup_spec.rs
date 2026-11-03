@@ -214,7 +214,7 @@ impl BackupSpec {
                         k.to_string()
                     }
                 } else {
-                    format!("/etc/backup-credentials/{id}.id_ed25519")
+                    String::new()
                 }
             }
             _ => String::new(),
@@ -660,5 +660,35 @@ mod tests {
         let mut bad_key = ssh_key_spec.clone();
         bad_key.ssh_key = Some("clave-invalida-demasiado-corta".into());
         assert!(bad_key.validate().is_err());
+    }
+
+    #[test]
+    fn tarea_ssh_sin_clave_usa_sshpass_y_no_define_key_file() {
+        let mut ssh_spec = cifs();
+        ssh_spec.id = "srv_pwd_test".into();
+        ssh_spec.proto = "ssh".into();
+        ssh_spec.path = "/var/log".into();
+        ssh_spec.user = "sistemas".into();
+        ssh_spec.password = "secreta".into();
+        ssh_spec.ssh_key = None;
+
+        let proto = ssh_spec.validate().expect("ssh válido");
+        let runner = ssh_spec.render_runner(proto);
+
+        // El runner no debe definir KEY_FILE con una ruta ficticia si no hay clave
+        assert!(runner.contains("KEY_FILE=''") || runner.contains("KEY_FILE=\"\""));
+
+        let parsed = BackupTask::parse("srv_pwd_test", &runner).expect("parse");
+        assert_eq!(parsed.key_file, None);
+
+        let plan = parsed.plan(None, &chrono::Local::now());
+        // Debe usar sshpass porque no tiene clave configurada
+        let has_sshpass = plan
+            .iter()
+            .any(|step| step.first().is_some_and(|arg| arg == "sshpass"));
+        assert!(
+            has_sshpass,
+            "una tarea SSH sin clave debe planificar con sshpass"
+        );
     }
 }
