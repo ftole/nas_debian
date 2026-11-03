@@ -450,7 +450,11 @@ pub fn test_ssh_conn(
         nas_ssh::validate_private_key(trimmed_auth)?;
         let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let temp_key = std::env::temp_dir().join(format!("ssh_key_{}_{stamp}", std::process::id()));
-        write_secure_file(&temp_key, trimmed_auth)?;
+        let mut key_content = trimmed_auth.to_string();
+        if !key_content.ends_with('\n') {
+            key_content.push('\n');
+        }
+        write_secure_file(&temp_key, &key_content)?;
 
         let cmd = CommandSpec::new("ssh")
             .args([
