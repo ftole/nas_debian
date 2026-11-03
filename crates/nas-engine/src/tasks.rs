@@ -307,10 +307,7 @@ impl BackupTask {
                 let port = self.port.unwrap_or(22);
                 let key_opt = self.key_file.as_deref().filter(|k| !k.is_empty());
                 let (use_key, ssh_cmd) = match key_opt {
-                    Some(key) => (
-                        true,
-                        nas_ssh::rsync_ssh_command(port, Some(Path::new(key))),
-                    ),
+                    Some(key) => (true, nas_ssh::rsync_ssh_command(port, Some(Path::new(key)))),
                     None => (false, nas_ssh::rsync_ssh_command(port, None)),
                 };
 
@@ -818,16 +815,23 @@ KEY_FILE="/etc/backup-credentials/srv-key.id_ed25519"
 RETENTION=10
 "#;
         let task = BackupTask::parse("srv-key", script).expect("tarea");
-        assert_eq!(task.key_file.as_deref(), Some("/etc/backup-credentials/srv-key.id_ed25519"));
+        assert_eq!(
+            task.key_file.as_deref(),
+            Some("/etc/backup-credentials/srv-key.id_ed25519")
+        );
 
         let plan = task.plan(None, &now());
         // No debe contener paso inicial sshpass
-        assert!(!plan.iter().any(|step| step.first().is_some_and(|arg| arg == "sshpass")));
+        assert!(!plan
+            .iter()
+            .any(|step| step.first().is_some_and(|arg| arg == "sshpass")));
 
         let rsync = plan
             .iter()
             .find(|step| step.first().is_some_and(|arg| arg == "rsync"))
             .expect("paso rsync");
-        assert!(rsync.iter().any(|arg| arg.contains("-i /etc/backup-credentials/srv-key.id_ed25519")));
+        assert!(rsync
+            .iter()
+            .any(|arg| arg.contains("-i /etc/backup-credentials/srv-key.id_ed25519")));
     }
 }
