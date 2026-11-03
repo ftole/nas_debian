@@ -374,7 +374,7 @@ impl DeployParams {
    server max protocol = SMB3_11\n\
    server signing = mandatory\n\
    smb encrypt = desired\n\
-   smb3 directory leases = no\n\
+   smb3 directory leases = auto\n\
    kernel change notify = yes\n\
    change notify = yes\n\
    vfs objects = acl_xattr streams_xattr recycle\n\
@@ -829,5 +829,11 @@ mod artifact_tests {
 
         p.admin_password = Some("clave-segura-123".into());
         assert!(!p.validate().iter().any(|s| s.contains("contraseña")));
+    }
+
+    #[test]
+    fn base_smb_conf_configura_directory_leases_auto() {
+        let conf = params(ServerRole::Arquivos).base_smb_conf();
+        assert!(conf.contains("smb3 directory leases = auto"));
     }
 }
