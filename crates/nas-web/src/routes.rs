@@ -1279,27 +1279,73 @@ pub async fn backup_plan(
 
 /// Últimas entradas de auditoría del panel.
 pub async fn audit(
+    _admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<AuditQuery>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return (
-            StatusCode::FORBIDDEN,
-            axum::Json(ApiResponse::<serde_json::Value>::error(
-                "se requieren privilegios de administrador",
-            )),
-        )
-            .into_response();
-    }
-
     match state.auth.db().recent_audit(query.limit.clamp(1, 500)) {
         Ok(rows) => axum::Json(ApiResponse::ok(rows, "Auditoría del panel")).into_response(),
         Err(error) => error_response(error),
+    }
+}
+
+/// Verifica la integridad criptográfica de la cadena SHA-256 de nas-audit.
+pub async fn audit_verify(
+    _admin: crate::extractors::AdminUser,
+    State(state): State<AppState>,
+) -> Response {
+    let audit_path = state.paths.audit_log();
+    if !audit_path.is_file() {
+        return axum::Json(ApiResponse::ok(
+            serde_json::json!({
+                "valid": true,
+                "count": 0,
+                "status": "EMPTY",
+                "message": "Bitácora criptográfica sin registros iniciales",
+                "path": audit_path.display().to_string(),
+            }),
+            "Cadena de auditoría verificada",
+        ))
+        .into_response();
+    }
+
+    let log = nas_audit::AuditLog::new(&audit_path);
+    match tokio::task::spawn_blocking(move || {
+        let verify_res = log.verify();
+        let last_hash = log.last_hash().unwrap_or_else(|_| "0".to_string());
+        (verify_res, last_hash)
+    })
+    .await
+    {
+        Ok((Ok(count), last_hash)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({
+                "valid": true,
+                "count": count,
+                "last_hash": last_hash,
+                "status": "VERIFIED",
+                "message": format!("Cadena criptográfica íntegra: {count} registros verificados correctamente"),
+                "path": audit_path.display().to_string(),
+            }),
+            "Auditoría íntegra y verificada",
+        ))
+        .into_response(),
+        Ok((Err(err), last_hash)) => (
+            StatusCode::OK,
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "valid": false,
+                    "count": 0,
+                    "last_hash": last_hash,
+                    "status": "CORRUPTED",
+                    "error": err.to_string(),
+                    "message": format!("Alerta: la integridad de la cadena de auditoría ha fallado: {err}"),
+                    "path": audit_path.display().to_string(),
+                }),
+                "Fallo en la verificación criptográfica",
+            )),
+        )
+            .into_response(),
+        Err(_) => server_error("verificación de auditoría interrumpida"),
     }
 }
 
@@ -1955,13 +2001,19 @@ fn workgroup_value(state: &AppState) -> String {
 }
 
 fn server_ip() -> String {
+    let runner = Runner::new();
+    if let Some(ip) = nas_engine::primary_ip(&runner) {
+        return ip;
+    }
     std::net::UdpSocket::bind("0.0.0.0:0")
         .and_then(|socket| {
-            socket.connect("1.1.1.1:53")?;
+            socket.connect("10.255.255.255:1")?;
             socket.local_addr()
         })
         .map(|addr| addr.ip().to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string())
+        .ok()
+        .filter(|ip| !ip.starts_with("127."))
+        .unwrap_or_else(|| "10.10.1.2".to_string())
 }
 
 fn render_shell(state: &AppState, headers: &HeaderMap, user: &str, active: &str) -> Response {
@@ -4410,6 +4462,9 @@ pub async fn user_update(
                 }
             } else {
                 let _ = state.auth.db().delete_user(&body.username);
+            }
+            if !body.password.is_empty() {
+                let _ = state.auth.db().delete_user_sessions(&body.username);
             }
             let _ =
                 state
