@@ -358,7 +358,9 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
 
 /// Renderiza la pantalla de acceso con valores por defecto.
 pub fn login(hostname: &str, error: Option<&str>) -> String {
-    login_with_context(hostname, "127.0.0.1", &csrf_token(), error)
+    let runner = nas_exec::Runner::new();
+    let ip = nas_engine::primary_ip(&runner).unwrap_or_else(|| "10.10.1.2".to_string());
+    login_with_context(hostname, &ip, &csrf_token(), error)
 }
 
 /// Renderiza la pantalla de acceso con IP y token CSRF firmado.
