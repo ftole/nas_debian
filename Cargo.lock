@@ -1084,6 +1084,7 @@ dependencies = [
  "hex",
  "hmac",
  "http-body-util",
+ "nas-audit",
  "nas-core",
  "nas-engine",
  "nas-exec",
