@@ -1221,7 +1221,8 @@ mod tests {
         // Usuario inválido
         assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "-user", "pwd").is_err());
         // Clave PEM inválida
-        let bad_pem = "-----BEGIN OPENSSH PRIVATE KEY-----\ncorto\n-----END OPENSSH PRIVATE KEY-----";
+        let bad_pem =
+            "-----BEGIN OPENSSH PRIVATE KEY-----\ncorto\n-----END OPENSSH PRIVATE KEY-----";
         assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "root", bad_pem).is_err());
     }
 }
