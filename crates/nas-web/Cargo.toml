@@ -32,6 +32,7 @@ hex = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 getrandom = "0.2"
 zip = { workspace = true }
+futures-core = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
