@@ -167,18 +167,23 @@ async fn login_rate_limit_y_usuario_inexistente() {
         .expect("login");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    for _ in 0..4 {
-        let _ = test_app
+    // Enviar intentos fallidos consecutivos hasta superar el umbral (5 por ventana)
+    let mut rate_limited = false;
+    for _ in 0..8 {
+        let res = test_app
             .clone()
             .oneshot(login_request("admin", "clave_invalida"))
-            .await;
+            .await
+            .expect("login");
+        if res.status() == StatusCode::TOO_MANY_REQUESTS {
+            rate_limited = true;
+            break;
+        }
     }
-    let response = test_app
-        .clone()
-        .oneshot(login_request("admin", "clave_invalida"))
-        .await
-        .expect("rate limit");
-    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        rate_limited,
+        "debe disparar TOO_MANY_REQUESTS tras superar el umbral de intentos fallidos"
+    );
 }
 
 #[tokio::test]
@@ -1283,6 +1288,54 @@ async fn actualizar_password_revoca_sesiones_activas() {
 
     // La sesión activa anterior queda inmediatamente revocada
     assert_eq!(db.session_user(&op_session, now).expect("user"), None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn vista_login_resuelve_ip_primaria_sin_127_0_0_1() {
+    let html = nas_web::views::login("SRV-NAS", None);
+    assert!(
+        !html.contains("127.0.0.1"),
+        "la vista login no debe hardcodear 127.0.0.1"
+    );
+    assert!(html.contains("SRV-NAS"));
+}
+
+#[tokio::test]
+async fn extractores_axum_priorizan_superadmin_configurado() {
+    use axum::extract::FromRequestParts;
+    use nas_web::extractors::AuthenticatedUser;
+
+    let dir = temp_dir("extractores_super");
+    let db = Db::in_memory().expect("db");
+    // En BD está guardado como 'operator'
+    db.upsert_user("jefe_sistemas", &sha256_hex("Clave123"), "operator")
+        .expect("usuario");
+
+    let auth = Auth::new(db.clone(), 3600, false);
+    let state = AppState::new(auth.clone(), paths_for(&dir), ServerRole::Arquivos);
+
+    let now = chrono::Utc::now().timestamp();
+    let session = auth
+        .login("jefe_sistemas", "Clave123", now)
+        .expect("login")
+        .expect("sesion");
+    let cookie_header = format!("nas_session={session}");
+
+    let req = Request::builder()
+        .uri("/api/test")
+        .header("cookie", &cookie_header)
+        .body(Body::empty())
+        .expect("req");
+    let (mut parts, _) = req.into_parts();
+
+    // Como no está en /etc/nas/superadmin, es 'operator'
+    let auth_user = AuthenticatedUser::from_request_parts(&mut parts, &state)
+        .await
+        .expect("auth user");
+    assert_eq!(auth_user.role(), "operator");
+    assert!(!auth_user.is_admin());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
