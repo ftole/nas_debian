@@ -534,6 +534,41 @@ pub async fn files_list(
     }
 }
 
+fn safe_content_disposition(disposition: &str, filename: &str) -> HeaderValue {
+    let ascii_name: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_graphic() && c != '"' && c != '\\' && c != ';' && c != '/' {
+                c
+            } else if c.is_ascii_whitespace() {
+                ' '
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let ascii_name = if ascii_name.trim().is_empty() {
+        "archivo.bin"
+    } else {
+        ascii_name.trim()
+    };
+
+    let mut encoded = String::new();
+    for byte in filename.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{:02X}", byte);
+        }
+    }
+
+    let header_val =
+        format!("{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}");
+    HeaderValue::from_str(&header_val)
+        .unwrap_or_else(|_| HeaderValue::from_static("attachment; filename=\"descarga.bin\""))
+}
+
 /// Descarga un archivo con cabeceras seguras mediante streaming asíncrono O(1).
 pub async fn files_download(
     State(state): State<AppState>,
@@ -549,8 +584,10 @@ pub async fn files_download(
     };
     let path = query.path;
     let name = path
+        .trim_end_matches('/')
         .rsplit('/')
         .next()
+        .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| "descarga.bin".to_string());
 
@@ -575,12 +612,10 @@ pub async fn files_download(
         axum::http::header::CONTENT_LENGTH,
         HeaderValue::from(file_size),
     );
-    if let Ok(value) = HeaderValue::from_str(&format!(
-        "attachment; filename=\"{}\"",
-        name.replace(['"', '\r', '\n'], "")
-    )) {
-        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-    }
+    response_headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        safe_content_disposition("attachment", &name),
+    );
     response_headers.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'none'; sandbox"),
@@ -2171,6 +2206,7 @@ pub async fn files_zip(
         Err(e) => return error_response(NasError::io(temp_file.path(), e)),
     };
 
+    let zip_filename = format!("{name}.zip");
     let stream = crate::files::CleaningReaderStream::new(tokio_file, temp_file);
     let mut response = Response::new(axum::body::Body::from_stream(stream));
     let response_headers = response.headers_mut();
@@ -2182,12 +2218,10 @@ pub async fn files_zip(
         axum::http::header::CONTENT_LENGTH,
         HeaderValue::from(file_size),
     );
-    if let Ok(value) = HeaderValue::from_str(&format!(
-        "attachment; filename=\"{}.zip\"",
-        name.replace(['"', '\r', '\n'], "")
-    )) {
-        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-    }
+    response_headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        safe_content_disposition("attachment", &zip_filename),
+    );
     response_headers.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'none'; sandbox"),
@@ -5576,16 +5610,16 @@ pub async fn files_raw(
     } else {
         "inline"
     };
-    let safe_name = name.replace(['"', '\r', '\n'], "");
     let response_headers = response.headers_mut();
     response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
     response_headers.insert(
         axum::http::header::CONTENT_LENGTH,
         HeaderValue::from(file_size),
     );
-    if let Ok(value) = HeaderValue::from_str(&format!("{disposition}; filename=\"{safe_name}\"")) {
-        response_headers.insert(axum::http::header::CONTENT_DISPOSITION, value);
-    }
+    response_headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        safe_content_disposition(disposition, &name),
+    );
     response_headers.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'none'; sandbox"),
@@ -5722,5 +5756,41 @@ pub async fn shares_access_audit(
     {
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Auditoría de ACL")).into_response(),
         Err(_) => server_error("auditoría de ACL interrumpida"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_content_disposition;
+
+    #[test]
+    fn content_disposition_formatea_ascii_y_rfc6266_unicode() {
+        let h1 = safe_content_disposition("attachment", "reporte.txt");
+        assert_eq!(
+            h1.to_str().expect("str"),
+            "attachment; filename=\"reporte.txt\"; filename*=UTF-8''reporte.txt"
+        );
+
+        let h2 = safe_content_disposition("attachment", "año_2026.pdf");
+        assert_eq!(
+            h2.to_str().expect("str"),
+            "attachment; filename=\"a_o_2026.pdf\"; filename*=UTF-8''a%C3%B1o_2026.pdf"
+        );
+
+        let h3 = safe_content_disposition("inline", "música y diseño.mp3");
+        assert_eq!(
+            h3.to_str().expect("str"),
+            "inline; filename=\"m_sica y dise_o.mp3\"; filename*=UTF-8''m%C3%BAsica%20y%20dise%C3%B1o.mp3"
+        );
+
+        let h4 = safe_content_disposition("attachment", "\"peligroso\r\n.bin\"");
+        let s4 = h4.to_str().expect("str");
+        assert!(!s4.contains('\r') && !s4.contains('\n'));
+
+        let h5 = safe_content_disposition("attachment", "");
+        assert_eq!(
+            h5.to_str().expect("str"),
+            "attachment; filename=\"archivo.bin\"; filename*=UTF-8''"
+        );
     }
 }
