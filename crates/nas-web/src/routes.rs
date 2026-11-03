@@ -248,11 +248,10 @@ pub async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Res
 }
 
 /// Métricas del sistema en JSON (contrato compartido).
-pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn metrics(
+    _user: crate::extractors::AuthenticatedUser,
+    State(state): State<AppState>,
+) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
@@ -274,11 +273,10 @@ pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Respo
 }
 
 /// Inventario de red en JSON.
-pub async fn network(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn network(
+    _user: crate::extractors::AuthenticatedUser,
+    State(state): State<AppState>,
+) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || collect_network(&Runner::new(), &paths)).await {
         Ok(overview) => {
@@ -355,11 +353,10 @@ pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 /// Usuarios administrables (formato que consume `app.js`).
-pub async fn users(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn users(
+    _user: crate::extractors::AuthenticatedUser,
+    State(state): State<AppState>,
+) -> Response {
     let db = state.auth.db().clone();
     match tokio::task::spawn_blocking(move || {
         let (mut users, groups) = nas_engine::users::load_local();
@@ -1084,11 +1081,10 @@ fn default_audit_limit() -> usize {
 }
 
 /// Estado de los demonios clave.
-pub async fn services(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn services(
+    _user: crate::extractors::AuthenticatedUser,
+    State(_state): State<AppState>,
+) -> Response {
     match tokio::task::spawn_blocking(|| crate::legacy::service_rows(&Runner::new())).await {
         Ok(list) => axum::Json(ApiResponse::ok(list, "Estado de servicios")).into_response(),
         Err(_) => server_error("consulta de servicios interrumpida"),
@@ -1097,23 +1093,11 @@ pub async fn services(State(state): State<AppState>, headers: HeaderMap) -> Resp
 
 /// Reinicia o recarga un servicio de la lista blanca.
 pub async fn service_manage(
+    admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::Json(body): axum::Json<ServiceBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return (
-            StatusCode::FORBIDDEN,
-            axum::Json(ApiResponse::<serde_json::Value>::error(
-                "se requieren privilegios de administrador",
-            )),
-        )
-            .into_response();
-    }
+    let user = admin.username().to_string();
     if !nas_engine::services::is_allowed_service(&body.service)
         || !nas_engine::services::is_allowed_action(&body.action)
     {
@@ -1665,6 +1649,9 @@ pub struct TerminalResizeBody {
 }
 
 fn is_superadmin(state: &AppState, user: &str) -> bool {
+    if configured_superadmin().as_deref() == Some(user) {
+        return true;
+    }
     state
         .auth
         .db()
@@ -3494,14 +3481,11 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
 }
 
 /// Ejecuta la actualización en caliente del servidor fuera del sandbox de `nas-web.service`.
-pub async fn system_update_run(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn system_update_run(
+    admin: crate::extractors::AdminUser,
+    State(state): State<AppState>,
+) -> Response {
+    let actor = admin.username().to_string();
     let _ = state
         .auth
         .db()
@@ -4237,7 +4221,7 @@ fn is_master_grp(name: &str) -> bool {
     )
 }
 
-fn configured_superadmin() -> Option<String> {
+pub(crate) fn configured_superadmin() -> Option<String> {
     std::fs::read_to_string("/etc/nas/superadmin")
         .ok()
         .map(|s| s.trim().to_string())
@@ -4302,24 +4286,18 @@ fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String>
 
 /// Crea un usuario del sistema.
 pub async fn user_create(
+    admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.username().to_string();
     if !valid_username(&body.username)
         || is_protected_posix_account(&body.username)
         || !body.groups.iter().all(|group| valid_grp(group))
     {
         return bad_request("usuario o grupo inválido o reservado");
     }
-    if body.is_superadmin && !is_superadmin(&state, &actor) {
+    if body.is_superadmin && !admin.is_superadmin() {
         return forbidden("solo el superadministrador puede otorgar rango de superadministrador");
     }
     if body.password.len() < 6 {
@@ -4379,17 +4357,11 @@ pub async fn user_create(
 
 /// Actualiza un usuario existente.
 pub async fn user_update(
+    admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.username().to_string();
     if !valid_username(&body.username)
         || is_protected_posix_account(&body.username)
         || !body.groups.iter().all(|group| valid_grp(group))
@@ -4397,7 +4369,7 @@ pub async fn user_update(
         return bad_request("usuario o grupo inválido o reservado");
     }
     let target_is_super = is_target_superadmin(&state, &body.username);
-    if (target_is_super || body.is_superadmin) && !is_superadmin(&state, &actor) {
+    if (target_is_super || body.is_superadmin) && !admin.is_superadmin() {
         return forbidden("no se puede modificar el rango del superadministrador");
     }
     if !body.password.is_empty() && body.password.len() < 6 {
@@ -4482,17 +4454,11 @@ pub async fn user_update(
 
 /// Activa o suspende una cuenta.
 pub async fn user_toggle(
+    admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.username().to_string();
     if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
         return bad_request("usuario inválido o reservado del sistema");
     }
@@ -4529,17 +4495,11 @@ pub async fn user_toggle(
 
 /// Elimina una cuenta del sistema.
 pub async fn user_delete(
+    admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.username().to_string();
     if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
         return bad_request("usuario inválido o protegido del sistema");
     }
