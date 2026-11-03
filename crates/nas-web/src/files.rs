@@ -168,8 +168,15 @@ pub fn parse_range(header_val: &str, total_size: u64) -> Result<Option<ByteRange
         return Ok(None);
     };
 
-    let first_range = range_spec.split(',').next().unwrap_or("").trim();
-    if first_range.is_empty() {
+    // Según RFC 9110 sección 14.2, si se solicitan múltiples rangos (separados por coma)
+    // y el servidor no genera multipart/byteranges, DEBE ignorar la cabecera Range y
+    // responder 200 OK con la representación completa (retornar Ok(None)).
+    if range_spec.contains(',') {
+        return Ok(None);
+    }
+
+    let single_range = range_spec.trim();
+    if single_range.is_empty() {
         return Err(RangeError::Malformed);
     }
 
@@ -177,7 +184,7 @@ pub fn parse_range(header_val: &str, total_size: u64) -> Result<Option<ByteRange
         return Err(RangeError::Unsatisfiable);
     }
 
-    if let Some((start_str, end_str)) = first_range.split_once('-') {
+    if let Some((start_str, end_str)) = single_range.split_once('-') {
         let start_str = start_str.trim();
         let end_str = end_str.trim();
 
@@ -1477,6 +1484,9 @@ mod trash_tests {
                 total: 1000
             }
         );
+
+        // Múltiples rangos se ignoran según RFC 9110 (None -> 200)
+        assert_eq!(parse_range("bytes=0-10, 20-30", 1000), Ok(None));
 
         // Sin prefijo bytes= se ignora (None -> 200)
         assert_eq!(parse_range("none", 1000), Ok(None));
