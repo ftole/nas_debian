@@ -6,8 +6,6 @@ use chrono::{Local, Offset};
 use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
 
-use crate::parsers::ip;
-
 /// Métricas de estado del servidor.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SystemMetrics {
@@ -158,16 +156,7 @@ fn read_memory() -> (f64, f64) {
 }
 
 fn primary_ip(runner: &Runner) -> Option<String> {
-    let output = runner
-        .run(&CommandSpec::new("ip").args(["-j", "-4", "addr", "show"]))
-        .ok()?;
-    if !output.is_success() {
-        return None;
-    }
-    ip::parse_interfaces(&output.stdout)
-        .ok()?
-        .into_iter()
-        .find_map(|iface| iface.ipv4)
+    crate::network::primary_ip(runner)
 }
 
 fn format_uptime(seconds: f64) -> String {
