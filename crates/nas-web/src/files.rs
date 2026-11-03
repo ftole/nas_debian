@@ -129,6 +129,105 @@ impl Stream for CleaningReaderStream {
     }
 }
 
+/// Rango de bytes solicitado según HTTP Range (RFC 9110).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteRange {
+    /// Desplazamiento inicial inclusivo (0-indexed).
+    pub start: u64,
+    /// Desplazamiento final inclusivo (0-indexed).
+    pub end: u64,
+    /// Tamaño total del archivo en bytes.
+    pub total: u64,
+}
+
+impl ByteRange {
+    /// Longitud en bytes del rango solicitado.
+    pub fn length(&self) -> u64 {
+        self.end - self.start + 1
+    }
+
+    /// Cabecera `Content-Range: bytes start-end/total`.
+    pub fn content_range_header(&self) -> String {
+        format!("bytes {}-{}/{}", self.start, self.end, self.total)
+    }
+}
+
+/// Error al interpretar la cabecera HTTP Range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeError {
+    /// Sintaxis no reconocida o malformada (debe ignorarse según RFC 9110 y responder 200).
+    Malformed,
+    /// Rango insatisfactorio (debe responder 416 Range Not Satisfiable).
+    Unsatisfiable,
+}
+
+/// Analiza la cabecera HTTP `Range: bytes=...` contra el tamaño total del archivo.
+pub fn parse_range(header_val: &str, total_size: u64) -> Result<Option<ByteRange>, RangeError> {
+    let trimmed = header_val.trim();
+    let Some(range_spec) = trimmed.strip_prefix("bytes=") else {
+        return Ok(None);
+    };
+
+    let first_range = range_spec.split(',').next().unwrap_or("").trim();
+    if first_range.is_empty() {
+        return Err(RangeError::Malformed);
+    }
+
+    if total_size == 0 {
+        return Err(RangeError::Unsatisfiable);
+    }
+
+    if let Some((start_str, end_str)) = first_range.split_once('-') {
+        let start_str = start_str.trim();
+        let end_str = end_str.trim();
+
+        if start_str.is_empty() && end_str.is_empty() {
+            return Err(RangeError::Malformed);
+        }
+
+        if start_str.is_empty() {
+            // Caso sufijo: bytes=-500 (los últimos 500 bytes)
+            let suffix_len: u64 = end_str.parse().map_err(|_| RangeError::Malformed)?;
+            if suffix_len == 0 {
+                return Err(RangeError::Unsatisfiable);
+            }
+            let length = suffix_len.min(total_size);
+            let start = total_size - length;
+            let end = total_size - 1;
+            return Ok(Some(ByteRange {
+                start,
+                end,
+                total: total_size,
+            }));
+        }
+
+        let start: u64 = start_str.parse().map_err(|_| RangeError::Malformed)?;
+        if start >= total_size {
+            return Err(RangeError::Unsatisfiable);
+        }
+
+        let end = if end_str.is_empty() {
+            // Caso abierto: bytes=500- (desde 500 hasta el final)
+            total_size - 1
+        } else {
+            // Caso cerrado: bytes=500-999
+            let explicit_end: u64 = end_str.parse().map_err(|_| RangeError::Malformed)?;
+            if explicit_end < start {
+                return Err(RangeError::Malformed);
+            }
+            explicit_end.min(total_size - 1)
+        };
+
+        Ok(Some(ByteRange {
+            start,
+            end,
+            total: total_size,
+        }))
+    } else {
+        Err(RangeError::Malformed)
+    }
+}
+
 /// Entrada de un directorio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Entry {
@@ -1325,5 +1424,44 @@ mod trash_tests {
             .expect("borrado permanente");
         assert!(!root.root().join("CARPETA").exists());
         let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn analiza_cabeceras_http_range() {
+        use super::{parse_range, ByteRange, RangeError};
+
+        // Rango cerrado normal
+        let r = parse_range("bytes=0-499", 1000).expect("ok").expect("some");
+        assert_eq!(r, ByteRange { start: 0, end: 499, total: 1000 });
+        assert_eq!(r.length(), 500);
+        assert_eq!(r.content_range_header(), "bytes 0-499/1000");
+
+        // Rango abierto hasta el final
+        let r = parse_range("bytes=500-", 1000).expect("ok").expect("some");
+        assert_eq!(r, ByteRange { start: 500, end: 999, total: 1000 });
+        assert_eq!(r.length(), 500);
+
+        // Sufijo (últimos 200 bytes)
+        let r = parse_range("bytes=-200", 1000).expect("ok").expect("some");
+        assert_eq!(r, ByteRange { start: 800, end: 999, total: 1000 });
+        assert_eq!(r.length(), 200);
+
+        // Sufijo mayor que el tamaño total
+        let r = parse_range("bytes=-1500", 1000).expect("ok").expect("some");
+        assert_eq!(r, ByteRange { start: 0, end: 999, total: 1000 });
+
+        // Sin prefijo bytes= se ignora (None -> 200)
+        assert_eq!(parse_range("none", 1000), Ok(None));
+
+        // Rango insatisfactorio (start >= total)
+        assert_eq!(parse_range("bytes=1000-", 1000), Err(RangeError::Unsatisfiable));
+        assert_eq!(parse_range("bytes=1500-2000", 1000), Err(RangeError::Unsatisfiable));
+
+        // Archivo vacío es insatisfactorio
+        assert_eq!(parse_range("bytes=0-10", 0), Err(RangeError::Unsatisfiable));
+
+        // Rango invertido es malformado
+        assert_eq!(parse_range("bytes=500-200", 1000), Err(RangeError::Malformed));
+        assert_eq!(parse_range("bytes=abc-def", 1000), Err(RangeError::Malformed));
     }
 }
