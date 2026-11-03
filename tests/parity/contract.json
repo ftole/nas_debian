@@ -1284,6 +1284,7 @@
       "/api/storage/trim",
       "/api/storage/units",
       "/api/system/applications",
+      "/api/system/audit/verify",
       "/api/system/reboot",
       "/api/system/update/run",
       "/api/system/updates",
@@ -1348,7 +1349,7 @@
     "layout_classes": 159,
     "app_ids": 364,
     "app_selectors": 30,
-    "app_endpoints": 76,
+    "app_endpoints": 77,
     "inline_handlers": 41
   }
 }
