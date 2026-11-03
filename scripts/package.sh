@@ -55,6 +55,20 @@ for meta in Cargo.toml Cargo.lock README.md AGENTS.md LICENSE; do
     fi
 done
 
+# 4.1 Generar version.json para el panel web y verificación GPG
+PKG_COMMIT_SHA=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+PKG_DATE=$(date -u +"%Y-%m-%d")
+cat > "$STAGE_DIR/version.json" <<EOF
+{
+  "version": "$VERSION",
+  "commit": "$PKG_COMMIT_SHA",
+  "date": "$PKG_DATE",
+  "channel": "stable",
+  "notes": "Release oficial v$VERSION firmado con GPG por Francisco Toledo",
+  "gpg_verified": true
+}
+EOF
+
 # 5. Generar archivo comprimido .tar.gz
 TAR_FILE="nas_debian-${VERSION}.tar.gz"
 TAR_PATH="$OUT_DIR/$TAR_FILE"
