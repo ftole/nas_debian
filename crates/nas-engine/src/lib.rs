@@ -54,7 +54,7 @@ pub use deploy::{DeployParams, FileSystem};
 pub use diagnostics::Check;
 pub use domain::DomainStatus;
 pub use lock::TaskLock;
-pub use network::{collect as collect_network, NetworkOverview};
+pub use network::{collect as collect_network, primary_ip, NetworkOverview};
 pub use services::ServiceStatus;
 pub use status::{collect as collect_status, SystemMetrics};
 pub use storage::{Disk, StorageOverview};
