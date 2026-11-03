@@ -10,11 +10,16 @@
 pub mod assets;
 pub mod auth;
 pub mod db;
+pub mod extractors;
 pub mod files;
 pub mod legacy;
 mod routes;
 pub mod template;
 pub mod views;
+
+pub use auth::Auth;
+pub use db::Db;
+pub use extractors::{AdminUser, AuthenticatedUser};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,9 +31,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use nas_core::{ApiResponse, NasPaths, ServerRole};
-
-pub use auth::Auth;
-pub use db::Db;
 
 /// Estado compartido por los manejadores.
 #[derive(Clone, Debug)]
@@ -114,6 +116,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/backups/plan", post(routes::backup_plan))
         .route("/api/backups/run", post(routes::backup_run))
         .route("/api/audit", get(routes::audit))
+        .route(
+            "/api/system/audit/verify",
+            get(routes::audit_verify).post(routes::audit_verify),
+        )
+        .route(
+            "/api/audit/verify",
+            get(routes::audit_verify).post(routes::audit_verify),
+        )
         .route("/api/storage", get(routes::storage))
         .route("/api/storage/disks", get(routes::storage_disks))
         .route("/api/storage/inspect", post(routes::storage_inspect))
