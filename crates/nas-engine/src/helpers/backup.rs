@@ -55,6 +55,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let runner_src = staging.join(format!("nas_backup_{id}.sh"));
     let cron_src = staging.join(format!("nas_backup_{id}.cron"));
     let cred_src = staging.join(format!("nas_backup_{id}.cred"));
+    let key_src = staging.join(format!("nas_backup_{id}.id_ed25519"));
 
     if !runner_src.exists() {
         return Err(NasError::NotFound(format!(
@@ -109,6 +110,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let runner_dst = format!("/usr/local/bin/backup_{id}.sh");
     let cron_dst = format!("/etc/cron.d/backup_{id}");
     let cred_dst = format!("/etc/backup-credentials/{id}.cred");
+    let key_dst = format!("/etc/backup-credentials/{id}.id_ed25519");
 
     std::fs::copy(&runner_src, &runner_dst).map_err(|e| NasError::Denied(e.to_string()))?;
     std::fs::copy(&cron_src, &cron_dst).map_err(|e| NasError::Denied(e.to_string()))?;
@@ -133,9 +135,19 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         }
     }
 
+    if key_src.exists() && key_src.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+        std::fs::copy(&key_src, &key_dst).map_err(|e| NasError::Denied(e.to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_dst, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
     let _ = std::fs::remove_file(&runner_src);
     let _ = std::fs::remove_file(&cron_src);
     let _ = std::fs::remove_file(&cred_src);
+    let _ = std::fs::remove_file(&key_src);
 
     Ok(format!("tarea {id} instalada"))
 }
@@ -340,6 +352,7 @@ pub fn delete_backup_task(id: &str) -> NasResult<String> {
     let _ = std::fs::remove_file(format!("/etc/cron.d/backup_{id}"));
     let _ = std::fs::remove_file(format!("/usr/local/bin/backup_{id}.sh"));
     let _ = std::fs::remove_file(format!("/etc/backup-credentials/{id}.cred"));
+    let _ = std::fs::remove_file(format!("/etc/backup-credentials/{id}.id_ed25519"));
     let _ = std::fs::remove_file(format!("/var/lock/backup_{id}.lock"));
 
     Ok(format!("tarea {id} eliminada (snapshots conservados)"))
@@ -412,13 +425,13 @@ pub fn test_cifs_conn(
     }
 }
 
-/// Prueba de conectividad SSH.
+/// Prueba de conectividad SSH con contraseña o clave privada SSH (Ed25519/RSA).
 pub fn test_ssh_conn(
     runner: &Runner,
     host: &str,
     port: u16,
     user: &str,
-    password: &str,
+    auth: &str,
 ) -> NasResult<String> {
     if !is_valid_host(host) {
         return Err(NasError::Invalid("host inválido".into()));
@@ -431,28 +444,88 @@ pub fn test_ssh_conn(
     }
 
     let _ = std::fs::create_dir_all("/root/.ssh");
-    let mut spec = CommandSpec::new("sshpass")
-        .args([
-            "-e",
-            "ssh",
-            "-p",
-            &port.to_string(),
-            "-l",
-            user,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "UserKnownHostsFile=/root/.ssh/known_hosts_backup",
-            "-o",
-            "ConnectTimeout=10",
-            "--",
-            host,
-            "true",
-        ])
-        .timeout(Duration::from_secs(15));
-    spec = spec.env("SSHPASS", password);
+    let trimmed_auth = auth.trim();
 
-    let res = runner.run(&spec)?;
+    let (spec, temp_guard) = if trimmed_auth.starts_with("-----BEGIN") {
+        nas_ssh::validate_private_key(trimmed_auth)?;
+        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let temp_key = std::env::temp_dir().join(format!("ssh_key_{}_{stamp}", std::process::id()));
+        write_secure_file(&temp_key, trimmed_auth)?;
+
+        let cmd = CommandSpec::new("ssh")
+            .args([
+                "-i",
+                &temp_key.to_string_lossy(),
+                "-p",
+                &port.to_string(),
+                "-l",
+                user,
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "UserKnownHostsFile=/root/.ssh/known_hosts_backup",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
+                "--",
+                host,
+                "true",
+            ])
+            .timeout(Duration::from_secs(15));
+        (cmd, Some(temp_key))
+    } else if !trimmed_auth.is_empty() && Path::new(trimmed_auth).is_file() {
+        let cmd = CommandSpec::new("ssh")
+            .args([
+                "-i",
+                trimmed_auth,
+                "-p",
+                &port.to_string(),
+                "-l",
+                user,
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "UserKnownHostsFile=/root/.ssh/known_hosts_backup",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
+                "--",
+                host,
+                "true",
+            ])
+            .timeout(Duration::from_secs(15));
+        (cmd, None)
+    } else {
+        let mut spec = CommandSpec::new("sshpass")
+            .args([
+                "-e",
+                "ssh",
+                "-p",
+                &port.to_string(),
+                "-l",
+                user,
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "UserKnownHostsFile=/root/.ssh/known_hosts_backup",
+                "-o",
+                "ConnectTimeout=10",
+                "--",
+                host,
+                "true",
+            ])
+            .timeout(Duration::from_secs(15));
+        spec = spec.env("SSHPASS", auth);
+        (spec, None)
+    };
+
+    let res = runner.run(&spec);
+    if let Some(path) = temp_guard {
+        let _ = std::fs::remove_file(path);
+    }
+    let res = res?;
     if res.is_success() {
         Ok(format!("conexión SSH verificada: {user}@{host}:{port}"))
     } else {
@@ -1138,5 +1211,17 @@ mod tests {
             Some("/etc")
         )
         .is_err());
+    }
+
+    #[test]
+    fn test_ssh_conn_valida_entradas_y_clave_pem() {
+        let runner = Runner::new();
+        // Host inválido
+        assert!(test_ssh_conn(&runner, "-invalido", 22, "root", "pwd").is_err());
+        // Usuario inválido
+        assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "-user", "pwd").is_err());
+        // Clave PEM inválida
+        let bad_pem = "-----BEGIN OPENSSH PRIVATE KEY-----\ncorto\n-----END OPENSSH PRIVATE KEY-----";
+        assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "root", bad_pem).is_err());
     }
 }
