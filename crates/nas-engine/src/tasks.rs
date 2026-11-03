@@ -305,7 +305,18 @@ impl BackupTask {
                 let user = self.user.clone().unwrap_or_default();
                 let path = self.path.clone().unwrap_or_default();
                 let port = self.port.unwrap_or(22);
-                let key_opt = self.key_file.as_deref().filter(|k| !k.is_empty());
+                let default_key = format!("/etc/backup-credentials/{}.id_ed25519", self.id);
+                let key_opt = self
+                    .key_file
+                    .as_deref()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        if Path::new(&default_key).is_file() {
+                            Some(default_key.as_str())
+                        } else {
+                            None
+                        }
+                    });
                 let (use_key, ssh_cmd) = match key_opt {
                     Some(key) => (true, nas_ssh::rsync_ssh_command(port, Some(Path::new(key)))),
                     None => (false, nas_ssh::rsync_ssh_command(port, None)),
