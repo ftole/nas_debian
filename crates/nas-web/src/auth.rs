@@ -9,6 +9,7 @@ use nas_core::{NasError, NasResult};
 use sha2::{Digest, Sha256, Sha512};
 
 use crate::db::Db;
+pub use crate::extractors::{AdminUser, AuthenticatedUser};
 
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
@@ -310,7 +311,8 @@ fn pbkdf2_sha512(password: &[u8], salt: &[u8], iterations: u32) -> [u8; 64] {
     dk
 }
 
-fn cookie_value(cookies: &str) -> Option<&str> {
+/// Extrae el valor de la cookie de sesión del panel.
+pub fn cookie_value(cookies: &str) -> Option<&str> {
     cookies
         .split(';')
         .filter_map(|part| part.trim().split_once('='))
