@@ -48,6 +48,9 @@ pub struct BackupSpec {
     /// Puerto SSH del origen.
     #[serde(default)]
     pub port: Option<u16>,
+    /// Clave privada SSH (contenido PEM o ruta al archivo de clave).
+    #[serde(default, alias = "key_file", alias = "key_path", alias = "private_key")]
+    pub ssh_key: Option<String>,
 }
 
 impl BackupSpec {
@@ -135,6 +138,22 @@ impl BackupSpec {
                 if !valid_ssh_user(user) {
                     return Err(NasError::Invalid("usuario SSH inválido".into()));
                 }
+                if let Some(key) = self.ssh_key.as_deref().filter(|s| !s.trim().is_empty()) {
+                    let key = key.trim();
+                    if key.starts_with("-----BEGIN") {
+                        nas_ssh::validate_private_key(key)?;
+                    } else if key.starts_with('/') {
+                        if key.contains("..") || key.chars().any(char::is_control) {
+                            return Err(NasError::Invalid(
+                                "ruta de clave privada SSH inválida".into(),
+                            ));
+                        }
+                    } else {
+                        return Err(NasError::Invalid(
+                            "la clave SSH debe ser contenido PEM (-----BEGIN ...) o una ruta absoluta (/...)".into(),
+                        ));
+                    }
+                }
             }
             Proto::Local => {
                 let path = self.path.trim();
@@ -185,6 +204,21 @@ impl BackupSpec {
             Proto::Cifs | Proto::Ssh => format!("/etc/backup-credentials/{id}.cred"),
             Proto::Local => String::new(),
         };
+        let key_file = match proto {
+            Proto::Ssh => {
+                if let Some(k) = self.ssh_key.as_deref().filter(|s| !s.trim().is_empty()) {
+                    let k = k.trim();
+                    if k.starts_with("-----BEGIN") {
+                        format!("/etc/backup-credentials/{id}.id_ed25519")
+                    } else {
+                        k.to_string()
+                    }
+                } else {
+                    format!("/etc/backup-credentials/{id}.id_ed25519")
+                }
+            }
+            _ => String::new(),
+        };
         let port = self.port.unwrap_or(22);
 
         let (src_type, src_ip, src_share, src_path, src_user) = match proto {
@@ -215,7 +249,7 @@ impl BackupSpec {
 
         let rsync = match proto {
             Proto::Ssh => {
-                "SSHPASS=\"\"\nif [ -f \"$CRED\" ]; then\n    IFS= read -r SSHPASS < \"$CRED\" || true\nfi\nexport SSHPASS\nmkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nsshpass -e rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nunset SSHPASS".to_string()
+                "mkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nif [ -n \"$KEY_FILE\" ] && [ -f \"$KEY_FILE\" ]; then\n    rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i $KEY_FILE -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nelif [ -f \"/etc/backup-credentials/$TASK.id_ed25519\" ]; then\n    rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nelse\n    SSHPASS=\"\"\n    if [ -f \"$CRED\" ]; then\n        IFS= read -r SSHPASS < \"$CRED\" || true\n    fi\n    export SSHPASS\n    sshpass -e rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\n    unset SSHPASS\nfi".to_string()
             }
             _ => {
                 "RSYNC_RC=0\nrsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?".to_string()
@@ -236,6 +270,7 @@ RETENTION={retention}
 DEST_ROOT={q_dest_root}
 LOG_DIR='/srv/nas/LOGS_BACKUP'
 CRED_FILE={q_cred}
+KEY_FILE={q_key}
 MODE="$SOURCE_TYPE"
 CRED="$CRED_FILE"
 BKP_DIR="${{BKP_DIR:-{q_dest}}}"
@@ -339,6 +374,7 @@ fi
             retention = self.retention,
             q_dest_root = shell_single_quote(&dest_root),
             q_cred = shell_single_quote(&cred),
+            q_key = shell_single_quote(&key_file),
             q_dest = shell_single_quote(&dest),
         )
     }
@@ -372,6 +408,23 @@ fi
                 }
             }
             Proto::Local => String::new(),
+        }
+    }
+
+    /// Contenido de la clave privada SSH para guardar en `/etc/backup-credentials/<id>.id_ed25519` (0600 root:root).
+    pub fn render_key(&self, proto: Proto) -> Option<String> {
+        if proto != Proto::Ssh {
+            return None;
+        }
+        let key = self.ssh_key.as_deref()?.trim();
+        if key.starts_with("-----BEGIN") {
+            let mut content = key.to_string();
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            Some(content)
+        } else {
+            None
         }
     }
 }
@@ -442,6 +495,7 @@ mod tests {
             retention: 20,
             dest_unit: "principal".into(),
             port: None,
+            ssh_key: None,
         }
     }
 
@@ -578,5 +632,33 @@ mod tests {
         let mut bad_unit = cifs();
         bad_unit.dest_unit = "../etc".into();
         assert!(bad_unit.validate().is_err());
+    }
+
+    #[test]
+    fn soporta_autenticacion_por_clave_ssh_ed25519() {
+        let mut ssh_key_spec = cifs();
+        ssh_key_spec.id = "srv_ed25519".into();
+        ssh_key_spec.proto = "ssh".into();
+        ssh_key_spec.path = "/opt/data".into();
+        ssh_key_spec.user = "ansible".into();
+        let key_data = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACD012345678901234567890123456789012345678901234567890123456\n-----END OPENSSH PRIVATE KEY-----\n";
+        ssh_key_spec.ssh_key = Some(key_data.into());
+
+        let proto = ssh_key_spec.validate().expect("ssh válido");
+        assert_eq!(proto, Proto::Ssh);
+
+        let key_content = ssh_key_spec.render_key(proto).expect("clave");
+        assert_eq!(key_content, key_data);
+
+        let runner = ssh_key_spec.render_runner(proto);
+        assert!(runner.contains("KEY_FILE='/etc/backup-credentials/srv_ed25519.id_ed25519'"));
+        assert!(runner.contains("ssh -i $KEY_FILE -p $SRC_PORT"));
+        assert!(runner.contains("ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT"));
+        assert!(runner.contains("sshpass -e rsync"));
+
+        // Clave malformada es rechazada
+        let mut bad_key = ssh_key_spec.clone();
+        bad_key.ssh_key = Some("clave-invalida-demasiado-corta".into());
+        assert!(bad_key.validate().is_err());
     }
 }
