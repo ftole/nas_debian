@@ -4,9 +4,120 @@
 //! absolutas, componentes `..` y enlaces simbólicos que escapen de la raíz.
 
 use std::path::{Component, Path, PathBuf};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
+use futures_core::Stream;
 use nas_core::{NasError, NasResult};
 use serde::Serialize;
+use tokio::io::{AsyncRead, ReadBuf};
+
+/// Stream asíncrono sobre un lector con buffer constante O(1) de 64 KiB.
+pub struct ReaderStream<R> {
+    reader: R,
+    buf: Box<[u8]>,
+}
+
+impl<R> std::fmt::Debug for ReaderStream<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReaderStream")
+            .field("buf_len", &self.buf.len())
+            .finish()
+    }
+}
+
+impl<R> ReaderStream<R> {
+    /// Crea un nuevo stream con tamaño de búfer de 64 KiB.
+    pub fn new(reader: R) -> Self {
+        Self::with_capacity(reader, 64 * 1024)
+    }
+
+    /// Crea un nuevo stream especificando el tamaño del búfer.
+    pub fn with_capacity(reader: R, capacity: usize) -> Self {
+        Self {
+            reader,
+            buf: vec![0u8; capacity].into_boxed_slice(),
+        }
+    }
+}
+
+impl<R: AsyncRead + Unpin> Stream for ReaderStream<R> {
+    type Item = std::io::Result<axum::body::Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        let mut read_buf = ReadBuf::new(&mut this.buf);
+        match Pin::new(&mut this.reader).poll_read(cx, &mut read_buf) {
+            Poll::Ready(Ok(())) => {
+                let filled = read_buf.filled();
+                if filled.is_empty() {
+                    Poll::Ready(None)
+                } else {
+                    Poll::Ready(Some(Ok(axum::body::Bytes::copy_from_slice(filled))))
+                }
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// Archivo temporal que se elimina automáticamente al destruirse (`Drop`).
+#[derive(Debug)]
+pub struct TempFile {
+    path: PathBuf,
+}
+
+impl TempFile {
+    /// Envuelve una ruta temporal para borrado garantizado.
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Ruta del archivo temporal.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Stream que sirve un archivo temporal en bloques constantes O(1) y lo elimina
+/// de disco automáticamente al completarse o abortarse la conexión.
+pub struct CleaningReaderStream {
+    stream: ReaderStream<tokio::fs::File>,
+    _guard: TempFile,
+}
+
+impl std::fmt::Debug for CleaningReaderStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CleaningReaderStream")
+            .field("path", &self._guard.path())
+            .finish()
+    }
+}
+
+impl CleaningReaderStream {
+    /// Crea el stream envolviendo el descriptor abierto y la guarda temporal.
+    pub fn new(file: tokio::fs::File, guard: TempFile) -> Self {
+        Self {
+            stream: ReaderStream::new(file),
+            _guard: guard,
+        }
+    }
+}
+
+impl Stream for CleaningReaderStream {
+    type Item = std::io::Result<axum::body::Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.stream).poll_next(cx)
+    }
+}
 
 /// Entrada de un directorio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -223,6 +334,16 @@ impl FileRoot {
         Ok(target)
     }
 
+    /// Resuelve y valida que la ruta corresponda a un archivo regular existente confinado.
+    pub fn resolve_file(&self, relative: &str) -> NasResult<(PathBuf, u64)> {
+        let path = self.resolve(relative)?;
+        let metadata = std::fs::metadata(&path).map_err(|e| NasError::io(&path, e))?;
+        if !metadata.is_file() {
+            return Err(NasError::Invalid(format!("no es un archivo: {relative}")));
+        }
+        Ok((path, metadata.len()))
+    }
+
     /// Lee un archivo con límite de tamaño.
     pub fn read(&self, relative: &str, max_bytes: u64) -> NasResult<Vec<u8>> {
         let path = self.resolve(relative)?;
@@ -374,15 +495,78 @@ mod tests {
         assert!(sanitize_filename("..").is_err());
         assert!(sanitize_filename("").is_err());
     }
+
+    #[tokio::test]
+    async fn resuelve_archivo_y_hace_streaming() {
+        use http_body_util::BodyExt;
+
+        let root = unique_root("stream");
+        std::fs::write(
+            root.root().join("video.mp4"),
+            b"contenido de video de prueba",
+        )
+        .expect("write");
+
+        let (path, size) = root.resolve_file("video.mp4").expect("resolve_file");
+        assert_eq!(size, 28);
+        assert!(root.resolve_file("inexistente.bin").is_err());
+        assert!(root.resolve_file("").is_err());
+
+        let file = tokio::fs::File::open(&path).await.expect("open");
+        let stream = super::ReaderStream::with_capacity(file, 8);
+        let body = axum::body::Body::from_stream(stream);
+        let collected = body.collect().await.expect("collect").to_bytes();
+        assert_eq!(&collected[..], b"contenido de video de prueba");
+
+        let _ = std::fs::remove_dir_all(root.root());
+    }
 }
 
 /// Tamaño máximo agregado al comprimir una carpeta en ZIP (256 MiB).
 pub const ZIP_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
+fn secure_temp_zip_path() -> PathBuf {
+    let staging = Path::new("/var/lib/nas/staging");
+    let base_dir = if std::fs::create_dir_all(staging).is_ok() && staging.is_dir() {
+        staging.to_path_buf()
+    } else {
+        std::env::temp_dir()
+    };
+    let mut random_bytes = [0u8; 8];
+    let _ = getrandom::getrandom(&mut random_bytes);
+    let rand_hex = hex::encode(random_bytes);
+    let stamp = chrono::Local::now().format("%Y%m%d%H%M%S");
+    base_dir.join(format!("zip_{stamp}_{}_{rand_hex}.tmp", std::process::id()))
+}
+
+fn create_secure_temp_file(path: &Path) -> NasResult<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .read(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| NasError::io(path, e))
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .read(true)
+            .open(path)
+            .map_err(|e| NasError::io(path, e))
+    }
+}
+
 impl FileRoot {
-    /// Comprime una carpeta (o archivo) en un ZIP en memoria, con límite de tamaño.
-    pub fn zip(&self, relative: &str) -> NasResult<Vec<u8>> {
-        use std::io::Cursor;
+    /// Comprime una carpeta (o archivo) hacia un archivo temporal seguro en disco
+    /// con cuota máxima de 256 MiB, retornando la guarda para borrado automático y el tamaño.
+    pub fn zip_temp(&self, relative: &str) -> NasResult<(TempFile, u64)> {
+        use std::io::BufWriter;
         use zip::write::SimpleFileOptions;
 
         let source = self.resolve(relative)?;
@@ -390,8 +574,12 @@ impl FileRoot {
             return Err(NasError::NotFound(format!("no existe: {relative}")));
         }
 
-        let mut buffer = Cursor::new(Vec::new());
-        let mut writer = zip::ZipWriter::new(&mut buffer);
+        let temp_path = secure_temp_zip_path();
+        let file = create_secure_temp_file(&temp_path)?;
+        let temp_guard = TempFile::new(temp_path);
+
+        let mut buffered = BufWriter::new(file);
+        let mut writer = zip::ZipWriter::new(&mut buffered);
         let options =
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let mut total: u64 = 0;
@@ -413,7 +601,22 @@ impl FileRoot {
             .finish()
             .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
 
-        Ok(buffer.into_inner())
+        use std::io::Write;
+        buffered
+            .flush()
+            .map_err(|e| NasError::io(temp_guard.path(), e))?;
+
+        let size = std::fs::metadata(temp_guard.path())
+            .map_err(|e| NasError::io(temp_guard.path(), e))?
+            .len();
+
+        Ok((temp_guard, size))
+    }
+
+    /// Comprime una carpeta (o archivo) en un ZIP con límite de tamaño (compatibilidad).
+    pub fn zip(&self, relative: &str) -> NasResult<Vec<u8>> {
+        let (temp_guard, _size) = self.zip_temp(relative)?;
+        std::fs::read(temp_guard.path()).map_err(|e| NasError::io(temp_guard.path(), e))
     }
 }
 
@@ -460,8 +663,6 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     name: &str,
     total: &mut u64,
 ) -> NasResult<()> {
-    use std::io::Write;
-
     let metadata = std::fs::metadata(path).map_err(|e| NasError::io(path, e))?;
     *total = total.saturating_add(metadata.len());
     if *total > ZIP_MAX_BYTES {
@@ -474,10 +675,8 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
         .start_file(name.to_string(), *options)
         .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
 
-    let data = std::fs::read(path).map_err(|e| NasError::io(path, e))?;
-    writer
-        .write_all(&data)
-        .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
+    let mut file = std::fs::File::open(path).map_err(|e| NasError::io(path, e))?;
+    std::io::copy(&mut file, writer).map_err(|e| NasError::io(path, e))?;
 
     Ok(())
 }
@@ -526,6 +725,26 @@ mod ziptests {
         let root = root("escape");
         assert!(root.zip("../etc").is_err());
         assert!(root.zip("/etc").is_err());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn zip_temp_crea_y_limpia_archivo_temporal() {
+        let root = root("zip-temp");
+        root.mkdir("docs").expect("mkdir");
+        std::fs::write(root.root().join("docs/nota.txt"), b"datos de prueba").expect("write");
+
+        let (temp, size) = root.zip_temp("docs").expect("zip temp");
+        let path = temp.path().to_path_buf();
+        assert!(path.exists());
+        assert_eq!(size, std::fs::metadata(&path).expect("meta").len());
+        assert!(size > 0);
+
+        drop(temp);
+        assert!(
+            !path.exists(),
+            "el archivo temporal debe eliminarse al hacer drop"
+        );
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
