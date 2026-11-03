@@ -228,6 +228,12 @@ pub fn validate_private_key(content: &str) -> NasResult<()> {
         ));
     }
 
+    if trimmed.contains("Proc-Type: 4,ENCRYPTED") || trimmed.contains("ENCRYPTED") {
+        return Err(NasError::Invalid(
+            "la clave privada está protegida por frase de paso (passphrase); para respaldos automatizados se requiere una clave sin contraseña".into(),
+        ));
+    }
+
     if trimmed
         .chars()
         .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
@@ -330,6 +336,10 @@ mod tests {
             "-----BEGIN OPENSSH PRIVATE KEY-----\n\0\0\0\n-----END OPENSSH PRIVATE KEY-----"
         )
         .is_err());
+
+        let encrypted_pem = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: DES-EDE3-CBC,1234\n...\n-----END RSA PRIVATE KEY-----";
+        let err = validate_private_key(encrypted_pem).unwrap_err();
+        assert!(err.to_string().contains("passphrase"));
     }
 
     #[test]
