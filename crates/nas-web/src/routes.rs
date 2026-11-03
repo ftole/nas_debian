@@ -593,35 +593,83 @@ pub async fn files_download(
         Err(error) => return error_response(error),
     };
 
-    let file = match tokio::fs::File::open(&file_path).await {
+    let mut file = match tokio::fs::File::open(&file_path).await {
         Ok(file) => file,
         Err(e) => return error_response(NasError::io(&file_path, e)),
     };
 
-    let stream = crate::files::ReaderStream::new(file);
-    let mut response = Response::new(axum::body::Body::from_stream(stream));
-    let response_headers = response.headers_mut();
-    response_headers.insert(
-        axum::http::header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
-    );
-    response_headers.insert(
-        axum::http::header::CONTENT_LENGTH,
-        HeaderValue::from(file_size),
-    );
-    response_headers.insert(
-        axum::http::header::CONTENT_DISPOSITION,
-        safe_content_disposition("attachment", &name),
-    );
-    response_headers.insert(
-        "content-security-policy",
-        HeaderValue::from_static("default-src 'none'; sandbox"),
-    );
-    response_headers.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    response
+    let range_header = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok());
+
+    let byte_range = if let Some(raw_range) = range_header {
+        match crate::files::parse_range(raw_range, file_size) {
+            Ok(Some(range)) => Some(range),
+            Ok(None) => None,
+            Err(crate::files::RangeError::Malformed) => None,
+            Err(crate::files::RangeError::Unsatisfiable) => {
+                let resp = Response::builder()
+                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(
+                        axum::http::header::CONTENT_RANGE,
+                        format!("bytes */{file_size}"),
+                    )
+                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                    .body(axum::body::Body::empty())
+                    .unwrap_or_else(|_| server_error("error al responder 416"));
+                return resp;
+            }
+        }
+    } else {
+        None
+    };
+
+    let (status, content_length, content_range, body) = if let Some(range) = byte_range {
+        use std::io::SeekFrom;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        if let Err(e) = file.seek(SeekFrom::Start(range.start)).await {
+            return error_response(NasError::io(&file_path, e));
+        }
+        let length = range.length();
+        let stream = crate::files::ReaderStream::new(file.take(length));
+        (
+            axum::http::StatusCode::PARTIAL_CONTENT,
+            length,
+            Some(range.content_range_header()),
+            axum::body::Body::from_stream(stream),
+        )
+    } else {
+        let stream = crate::files::ReaderStream::new(file);
+        (
+            axum::http::StatusCode::OK,
+            file_size,
+            None,
+            axum::body::Body::from_stream(stream),
+        )
+    };
+
+    let mut builder = Response::builder()
+        .status(status)
+        .header(
+            axum::http::header::CONTENT_TYPE,
+            "application/octet-stream",
+        )
+        .header(axum::http::header::CONTENT_LENGTH, content_length)
+        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            safe_content_disposition("attachment", &name),
+        )
+        .header("content-security-policy", "default-src 'none'; sandbox")
+        .header("x-content-type-options", "nosniff");
+
+    if let Some(cr) = content_range {
+        builder = builder.header(axum::http::header::CONTENT_RANGE, cr);
+    }
+
+    builder
+        .body(body)
+        .unwrap_or_else(|_| server_error("error al crear respuesta de descarga"))
 }
 
 /// Crea un directorio.
@@ -4717,6 +4765,8 @@ pub struct BackupTestBody {
     pub user: String,
     #[serde(default)]
     pub password: String,
+    #[serde(default, alias = "key_file", alias = "key_path", alias = "private_key")]
+    pub ssh_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4773,6 +4823,12 @@ fn stage_backup_files(
             .map_err(|error| error.to_string())?;
     } else {
         let _ = std::fs::remove_file(dir.join(format!("nas_backup_{id}.cred")));
+    }
+    if let Some(key_content) = spec.render_key(proto) {
+        std::fs::write(dir.join(format!("nas_backup_{id}.id_ed25519")), key_content)
+            .map_err(|error| error.to_string())?;
+    } else {
+        let _ = std::fs::remove_file(dir.join(format!("nas_backup_{id}.id_ed25519")));
     }
     Ok(())
 }
@@ -4914,12 +4970,16 @@ pub async fn backup_test(
     };
     let port = body.port.unwrap_or(22).to_string();
     let user_name = body.user.clone();
-    let password = body.password.clone();
+    let auth = if let Some(key) = body.ssh_key.filter(|k| !k.trim().is_empty()) {
+        key
+    } else {
+        body.password.clone()
+    };
 
     let result = tokio::task::spawn_blocking(move || {
         run_backup_helper(
             &["test", &proto, &host, &target, &port, &user_name],
-            Some(&password),
+            Some(&auth),
         )
     })
     .await
@@ -5607,43 +5667,92 @@ pub async fn files_raw(
         Err(error) => return error_response(error),
     };
 
-    let file = match tokio::fs::File::open(&file_path).await {
+    let mut file = match tokio::fs::File::open(&file_path).await {
         Ok(file) => file,
         Err(e) => return error_response(NasError::io(&file_path, e)),
     };
 
     let force_attachment = is_active_web_payload(&name);
-    let stream = crate::files::ReaderStream::new(file);
-    let mut response = Response::new(axum::body::Body::from_stream(stream));
     let content_type = if force_attachment {
-        HeaderValue::from_static("application/octet-stream")
+        "application/octet-stream"
     } else {
-        HeaderValue::from_static(inline_content_type(&name))
+        inline_content_type(&name)
     };
     let disposition = if force_attachment {
         "attachment"
     } else {
         "inline"
     };
-    let response_headers = response.headers_mut();
-    response_headers.insert(axum::http::header::CONTENT_TYPE, content_type);
-    response_headers.insert(
-        axum::http::header::CONTENT_LENGTH,
-        HeaderValue::from(file_size),
-    );
-    response_headers.insert(
-        axum::http::header::CONTENT_DISPOSITION,
-        safe_content_disposition(disposition, &name),
-    );
-    response_headers.insert(
-        "content-security-policy",
-        HeaderValue::from_static("default-src 'none'; sandbox"),
-    );
-    response_headers.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    response
+
+    let range_header = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok());
+
+    let byte_range = if let Some(raw_range) = range_header {
+        match crate::files::parse_range(raw_range, file_size) {
+            Ok(Some(range)) => Some(range),
+            Ok(None) => None,
+            Err(crate::files::RangeError::Malformed) => None,
+            Err(crate::files::RangeError::Unsatisfiable) => {
+                let resp = Response::builder()
+                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(
+                        axum::http::header::CONTENT_RANGE,
+                        format!("bytes */{file_size}"),
+                    )
+                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                    .body(axum::body::Body::empty())
+                    .unwrap_or_else(|_| server_error("error al responder 416"));
+                return resp;
+            }
+        }
+    } else {
+        None
+    };
+
+    let (status, content_length, content_range, body) = if let Some(range) = byte_range {
+        use std::io::SeekFrom;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        if let Err(e) = file.seek(SeekFrom::Start(range.start)).await {
+            return error_response(NasError::io(&file_path, e));
+        }
+        let length = range.length();
+        let stream = crate::files::ReaderStream::new(file.take(length));
+        (
+            axum::http::StatusCode::PARTIAL_CONTENT,
+            length,
+            Some(range.content_range_header()),
+            axum::body::Body::from_stream(stream),
+        )
+    } else {
+        let stream = crate::files::ReaderStream::new(file);
+        (
+            axum::http::StatusCode::OK,
+            file_size,
+            None,
+            axum::body::Body::from_stream(stream),
+        )
+    };
+
+    let mut builder = Response::builder()
+        .status(status)
+        .header(axum::http::header::CONTENT_TYPE, content_type)
+        .header(axum::http::header::CONTENT_LENGTH, content_length)
+        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            safe_content_disposition(disposition, &name),
+        )
+        .header("content-security-policy", "default-src 'none'; sandbox")
+        .header("x-content-type-options", "nosniff");
+
+    if let Some(cr) = content_range {
+        builder = builder.header(axum::http::header::CONTENT_RANGE, cr);
+    }
+
+    builder
+        .body(body)
+        .unwrap_or_else(|_| server_error("error al crear respuesta raw"))
 }
 
 fn acl_entries(runner: &Runner, path: &str) -> Option<String> {
