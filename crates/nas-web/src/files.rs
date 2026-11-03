@@ -1432,36 +1432,76 @@ mod trash_tests {
 
         // Rango cerrado normal
         let r = parse_range("bytes=0-499", 1000).expect("ok").expect("some");
-        assert_eq!(r, ByteRange { start: 0, end: 499, total: 1000 });
+        assert_eq!(
+            r,
+            ByteRange {
+                start: 0,
+                end: 499,
+                total: 1000
+            }
+        );
         assert_eq!(r.length(), 500);
         assert_eq!(r.content_range_header(), "bytes 0-499/1000");
 
         // Rango abierto hasta el final
         let r = parse_range("bytes=500-", 1000).expect("ok").expect("some");
-        assert_eq!(r, ByteRange { start: 500, end: 999, total: 1000 });
+        assert_eq!(
+            r,
+            ByteRange {
+                start: 500,
+                end: 999,
+                total: 1000
+            }
+        );
         assert_eq!(r.length(), 500);
 
         // Sufijo (últimos 200 bytes)
         let r = parse_range("bytes=-200", 1000).expect("ok").expect("some");
-        assert_eq!(r, ByteRange { start: 800, end: 999, total: 1000 });
+        assert_eq!(
+            r,
+            ByteRange {
+                start: 800,
+                end: 999,
+                total: 1000
+            }
+        );
         assert_eq!(r.length(), 200);
 
         // Sufijo mayor que el tamaño total
         let r = parse_range("bytes=-1500", 1000).expect("ok").expect("some");
-        assert_eq!(r, ByteRange { start: 0, end: 999, total: 1000 });
+        assert_eq!(
+            r,
+            ByteRange {
+                start: 0,
+                end: 999,
+                total: 1000
+            }
+        );
 
         // Sin prefijo bytes= se ignora (None -> 200)
         assert_eq!(parse_range("none", 1000), Ok(None));
 
         // Rango insatisfactorio (start >= total)
-        assert_eq!(parse_range("bytes=1000-", 1000), Err(RangeError::Unsatisfiable));
-        assert_eq!(parse_range("bytes=1500-2000", 1000), Err(RangeError::Unsatisfiable));
+        assert_eq!(
+            parse_range("bytes=1000-", 1000),
+            Err(RangeError::Unsatisfiable)
+        );
+        assert_eq!(
+            parse_range("bytes=1500-2000", 1000),
+            Err(RangeError::Unsatisfiable)
+        );
 
         // Archivo vacío es insatisfactorio
         assert_eq!(parse_range("bytes=0-10", 0), Err(RangeError::Unsatisfiable));
 
         // Rango invertido es malformado
-        assert_eq!(parse_range("bytes=500-200", 1000), Err(RangeError::Malformed));
-        assert_eq!(parse_range("bytes=abc-def", 1000), Err(RangeError::Malformed));
+        assert_eq!(
+            parse_range("bytes=500-200", 1000),
+            Err(RangeError::Malformed)
+        );
+        assert_eq!(
+            parse_range("bytes=abc-def", 1000),
+            Err(RangeError::Malformed)
+        );
     }
 }
