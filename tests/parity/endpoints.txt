@@ -60,6 +60,7 @@
 /api/storage/trim
 /api/storage/units
 /api/system/applications
+/api/system/audit/verify
 /api/system/reboot
 /api/system/update/run
 /api/system/updates
