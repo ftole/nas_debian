@@ -78,6 +78,10 @@ impl Db {
     fn prepare(conn: &Connection) -> NasResult<()> {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db_error)?;
+        conn.pragma_update(None, "busy_timeout", 5000)
+            .map_err(db_error)?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(db_error)?;
 
         let has_window_start: bool = conn
             .query_row(
@@ -432,5 +436,20 @@ mod tests {
         assert_eq!(db.session_user("s1", 1_000).expect("s1"), None);
         db.delete_user("operador").expect("baja");
         assert_eq!(db.user_role("operador").expect("rol"), None);
+    }
+
+    #[test]
+    fn configura_pragmas_wal_busy_timeout_y_synchronous() {
+        let db = Db::in_memory().expect("db");
+        let conn = db.conn.lock().unwrap();
+        let busy_timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(busy_timeout, 5000);
+
+        let synchronous: i64 = conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .expect("synchronous");
+        assert_eq!(synchronous, 1);
     }
 }
