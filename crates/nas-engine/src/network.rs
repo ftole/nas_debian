@@ -133,17 +133,7 @@ fn collect_linux(runner: &Runner, paths: &NasPaths) -> NetworkOverview {
             .unwrap_or_else(|| "SRV-NAS".to_string()),
         workgroup: samba.workgroup.clone(),
         interfaces,
-        primary_ip: runner
-            .run(&CommandSpec::new("ip").args(["-4", "-o", "addr", "show", "scope", "global"]))
-            .ok()
-            .and_then(|out| {
-                out.stdout
-                    .split_whitespace()
-                    .skip_while(|token| *token != "inet")
-                    .nth(1)
-                    .and_then(|cidr| cidr.split('/').next())
-                    .map(str::to_string)
-            }),
+        primary_ip: primary_ip(runner),
         gateway: route.as_ref().and_then(|route| route.gateway.clone()),
         dns,
         dhcp: route.is_some_and(|route| route.dhcp),
@@ -155,6 +145,55 @@ fn collect_linux(runner: &Runner, paths: &NasPaths) -> NetworkOverview {
         generated_at: now.format("%H:%M:%S").to_string(),
         generated_timestamp: now.timestamp(),
     }
+}
+
+/// Resuelve la dirección IPv4 primaria de la red local del servidor sin depender de sockets a internet.
+pub fn primary_ip(runner: &Runner) -> Option<String> {
+    // 1. ip -4 -o addr show scope global
+    if let Ok(out) =
+        runner.run(&CommandSpec::new("ip").args(["-4", "-o", "addr", "show", "scope", "global"]))
+    {
+        if out.is_success() {
+            if let Some(ip) = out
+                .stdout
+                .split_whitespace()
+                .skip_while(|token| *token != "inet")
+                .nth(1)
+                .and_then(|cidr| cidr.split('/').next())
+                .filter(|ip| !ip.starts_with("127."))
+            {
+                return Some(ip.to_string());
+            }
+        }
+    }
+
+    // 2. hostname -I
+    if let Ok(out) = runner.run(&CommandSpec::new("hostname").arg("-I")) {
+        if out.is_success() {
+            if let Some(first_ip) = out
+                .stdout
+                .split_whitespace()
+                .find(|ip| !ip.starts_with("127.") && !ip.is_empty())
+            {
+                return Some(first_ip.to_string());
+            }
+        }
+    }
+
+    // 3. ip -j -4 addr show
+    if let Ok(out) = runner.run(&CommandSpec::new("ip").args(["-j", "-4", "addr", "show"])) {
+        if out.is_success() {
+            if let Ok(interfaces) = ip::parse_interfaces(&out.stdout) {
+                if let Some(ip) = interfaces.into_iter().find_map(|iface| iface.ipv4) {
+                    if !ip.starts_with("127.") {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn collect_samba(runner: &Runner, paths: &NasPaths) -> smb::SambaConfig {
