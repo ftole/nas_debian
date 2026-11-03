@@ -194,8 +194,19 @@ pub fn build_plan(
             link_next.clone(),
             link.clone(),
         ],
-        vec!["nginx".to_string(), "-t".to_string()],
     ];
+
+    for bin in ["nas", "nas-web", "nas-tui", "nasctl", "nas-dev"] {
+        steps.push(vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0755".to_string(),
+            format!("{link}/bin/{bin}"),
+            format!("/usr/local/bin/{bin}"),
+        ]);
+    }
+
+    steps.push(vec!["nginx".to_string(), "-t".to_string()]);
     steps.extend(reloads.clone());
     steps.push(vec![
         "curl".to_string(),
@@ -217,7 +228,21 @@ pub fn build_plan(
             previous_dir,
             link_next.clone(),
         ]);
-        rollback.push(vec!["mv".to_string(), "-T".to_string(), link_next, link]);
+        rollback.push(vec![
+            "mv".to_string(),
+            "-T".to_string(),
+            link_next,
+            link.clone(),
+        ]);
+        for bin in ["nas", "nas-web", "nas-tui", "nasctl", "nas-dev"] {
+            rollback.push(vec![
+                "install".to_string(),
+                "-m".to_string(),
+                "0755".to_string(),
+                format!("{link}/bin/{bin}"),
+                format!("/usr/local/bin/{bin}"),
+            ]);
+        }
         rollback.extend(reloads);
     }
 
@@ -486,8 +511,17 @@ mod tests {
             .iter()
             .any(|step| step.last().is_some_and(|arg| arg.contains("/login"))));
 
-        assert_eq!(plan.rollback.len(), 4);
+        assert_eq!(plan.rollback.len(), 9);
         assert!(plan.rollback[0].contains(&"/opt/nas_debian/releases/1.2.2".to_string()));
+        assert!(plan.steps.iter().any(|step| {
+            step == &vec![
+                "install",
+                "-m",
+                "0755",
+                "/opt/nas_debian/current/bin/nas-web",
+                "/usr/local/bin/nas-web",
+            ]
+        }));
     }
 
     #[test]
