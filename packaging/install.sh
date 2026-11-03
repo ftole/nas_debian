@@ -72,6 +72,8 @@ chmod 0750 "$STATE_DIR" 2>/dev/null || true
 
 install -d -m 2770 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
+install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
+chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
 
 if [ -f "$STATE_DIR/nas.sqlite" ]; then
     chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
