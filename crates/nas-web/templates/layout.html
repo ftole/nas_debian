@@ -2030,6 +2030,15 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <label for="bkp-retention">Snapshots a conservar antes de rotar:</label>
             <input type="number" id="bkp-retention" value="30" min="1" max="365">
           </div>
+          <div class="form-group checkbox-group" style="margin-top:10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="bkp-auto-permanent" checked>
+              <span>Generar respaldo permanente inicial y mensual (Golden Snapshot)</span>
+            </label>
+            <small style="display:block; color:var(--text-muted); margin-top:2px;">
+              Crea automáticamente un Golden Snapshot inicial (FULL_..._INICIAL) y el día 1 de cada mes (FULL_..._MENSUAL) inmutable y deduplicado con hardlinks.
+            </small>
+          </div>
           <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
             <button type="button" class="btn btn-secondary" onclick="testBackupConnection()" id="btn-test-backup" style="margin-right:auto;">
               <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
@@ -2100,6 +2109,15 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="form-group">
             <label for="edit-bkp-retention">Snapshots a conservar antes de rotar:</label>
             <input type="number" id="edit-bkp-retention" value="30" min="1" max="365">
+          </div>
+          <div class="form-group checkbox-group" style="margin-top:10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="edit-bkp-auto-permanent" checked>
+              <span>Generar respaldo permanente inicial y mensual (Golden Snapshot)</span>
+            </label>
+            <small style="display:block; color:var(--text-muted); margin-top:2px;">
+              Crea automáticamente un Golden Snapshot inicial (FULL_..._INICIAL) y el día 1 de cada mes (FULL_..._MENSUAL) inmutable y deduplicado con hardlinks.
+            </small>
           </div>
           <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
             <button type="button" class="btn btn-secondary" onclick="testEditBackupConnection()" id="btn-test-edit-backup" style="margin-right:auto;">
