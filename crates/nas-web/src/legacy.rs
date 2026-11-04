@@ -261,6 +261,33 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         .filter(|unit| !unit.is_empty())
         .unwrap_or("principal");
 
+    let (percent, elapsed, remaining, speed) = if running {
+        if let Some(prog) = read_backup_progress(id) {
+            let spd = if prog.speed.is_empty() {
+                "0.00kB/s".to_string()
+            } else {
+                prog.speed
+            };
+            let elap = if prog.elapsed.is_empty() {
+                "00:00:00".to_string()
+            } else {
+                prog.elapsed
+            };
+            let rem = if prog.remaining.is_empty() {
+                "--:--:--".to_string()
+            } else {
+                prog.remaining
+            };
+            (prog.percent.min(100), elap, rem, spd)
+        } else {
+            (0, "00:00:00".to_string(), "--:--:--".to_string(), "0.00kB/s".to_string())
+        }
+    } else if last_status == "OK" {
+        (100, "00:00:00".to_string(), "00:00:00".to_string(), "0.00kB/s".to_string())
+    } else {
+        (0, "00:00:00".to_string(), "00:00:00".to_string(), "0.00kB/s".to_string())
+    };
+
     json!({
         "id": id,
         "protocol": protocol,
@@ -279,11 +306,38 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         "last_status": last_status,
         "last_run": last_run,
         "running": running,
-        "percent": if running { 50 } else if last_status == "OK" { 100 } else { 0 },
-        "elapsed": "00:00:00",
-        "remaining": "00:00:00",
-        "speed": "0.00kB/s",
+        "percent": percent,
+        "elapsed": elapsed,
+        "remaining": remaining,
+        "speed": speed,
+        "auto_permanent": task.auto_permanent,
     })
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct BackupProgress {
+    #[serde(default)]
+    percent: u32,
+    #[serde(default)]
+    speed: String,
+    #[serde(default)]
+    elapsed: String,
+    #[serde(default)]
+    remaining: String,
+}
+
+fn read_backup_progress(id: &str) -> Option<BackupProgress> {
+    for path in [
+        format!("/run/nas-backup-{id}.progress"),
+        format!("/tmp/nas-backup-{id}.progress"),
+    ] {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(prog) = serde_json::from_str::<BackupProgress>(&content) {
+                return Some(prog);
+            }
+        }
+    }
+    None
 }
 
 fn is_backup_task_running(id: &str) -> bool {
@@ -511,12 +565,14 @@ mod tests {
             log_dir: "/srv/nas/LOGS_BACKUP".into(),
             credentials_file: None,
             key_file: None,
+            auto_permanent: true,
         };
         let row = backup_row(&task);
         assert_eq!(row["id"], "demo");
         assert_eq!(row["dest_path"], "/srv/nas/BACKUPS_HISTORICOS/demo");
         assert_eq!(row["source"], "//10.0.0.5/DATOS");
         assert_eq!(row["retention"], 7);
+        assert_eq!(row["auto_permanent"], true);
         assert!(row["cron_desc"].is_string());
     }
 
