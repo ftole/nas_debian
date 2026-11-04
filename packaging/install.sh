@@ -81,6 +81,9 @@ if [ -f "$STATE_DIR/nas.sqlite" ]; then
 fi
 
 install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" "$DATA_ROOT/BACKUPS_HISTORICOS" "$DATA_ROOT/BACKUPS_PERMANENTES" "$DATA_ROOT/LOGS_BACKUP" 2>/dev/null || true
+if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:"$SERVICE_USER":rwx,g:grp_samba:rwx,d:u:"$SERVICE_USER":rwx,d:g:grp_samba:rwx "$DATA_ROOT" 2>/dev/null || true
+fi
 install -d -m 0755 /etc/nas
 install -d -m 0700 -o root -g root /etc/backup-credentials
 install -d -m 0755 /etc/cron.d
