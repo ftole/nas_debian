@@ -338,6 +338,35 @@ impl FileRoot {
         }
     }
 
+    /// Determina si una ruta dentro de la raíz pertenece a un subsistema protegido de solo lectura
+    /// (como respaldos históricos inmutables contra ransomware, registros o papelera interna).
+    pub fn is_protected_path(&self, relative: &str) -> Option<&'static str> {
+        let root_name = self.root.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if root_name == "BACKUPS_HISTORICOS" || root_name == "BACKUPS_PERMANENTES" {
+            return Some("los respaldos (inmutables contra ransomware)");
+        }
+        if root_name == "LOGS_BACKUP" {
+            return Some("los registros de respaldo del sistema");
+        }
+        if root_name == ".trash" {
+            return Some("la papelera de reciclaje interna");
+        }
+
+        let clean = relative
+            .trim_matches(['/', '\\'].as_ref())
+            .replace('\\', "/");
+        let first = clean.split('/').next().unwrap_or("");
+        match first {
+            "BACKUPS_HISTORICOS" => Some("los respaldos históricos (inmutables contra ransomware)"),
+            "BACKUPS_PERMANENTES" => {
+                Some("los respaldos permanentes (inmutables contra ransomware)")
+            }
+            "LOGS_BACKUP" => Some("los registros de respaldo del sistema (LOGS_BACKUP)"),
+            ".trash" => Some("la papelera de reciclaje interna (.trash)"),
+            _ => None,
+        }
+    }
+
     /// Lista el contenido de un directorio (ordenado: carpetas primero).
     pub fn list(&self, relative: &str) -> NasResult<Vec<Entry>> {
         let dir = self.resolve(relative)?;
@@ -375,6 +404,11 @@ impl FileRoot {
 
     /// Crea un directorio (y sus padres) con permisos de grupo Samba (`2770`).
     pub fn mkdir(&self, relative: &str) -> NasResult<PathBuf> {
+        if let Some(desc) = self.is_protected_path(relative) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura"
+            )));
+        }
         let path = self.resolve(relative)?;
         std::fs::create_dir_all(&path).map_err(|e| NasError::io(&path, e))?;
         set_dir_permissions(&path);
@@ -383,6 +417,16 @@ impl FileRoot {
 
     /// Renombra o mueve un elemento dentro de la raíz.
     pub fn rename(&self, from: &str, to: &str) -> NasResult<PathBuf> {
+        if let Some(desc) = self.is_protected_path(from) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura e inmutables (chattr +i); no se pueden renombrar ni mover"
+            )));
+        }
+        if let Some(desc) = self.is_protected_path(to) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura; no admiten modificaciones"
+            )));
+        }
         let source = self.resolve(from)?;
         let target = self.resolve(to)?;
         if source == self.root || target == self.root {
@@ -394,12 +438,29 @@ impl FileRoot {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
         }
-        std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        std::fs::rename(&source, &target).map_err(|e| {
+            if e.raw_os_error() == Some(1) {
+                NasError::Denied(format!(
+                    "operación no permitida (EPERM): el elemento '{from}' o su contenedor es inmutable o de solo lectura"
+                ))
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(13) {
+                NasError::Denied(format!(
+                    "permiso denegado: el servicio web no tiene permisos suficientes para renombrar o mover '{from}'"
+                ))
+            } else {
+                NasError::io(&source, e)
+            }
+        })?;
         Ok(target)
     }
 
     /// Elimina definitivamente un archivo o carpeta sin pasar por la papelera.
     pub fn delete_permanent(&self, relative: &str) -> NasResult<()> {
+        if let Some(desc) = self.is_protected_path(relative) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura e inmutables (chattr +i); no se pueden eliminar definitivamente desde el explorador. Para gestionar o depurar copias de seguridad, utilice el módulo Respaldos"
+            )));
+        }
         let target = self.resolve(relative)?;
         if target == self.root {
             return Err(NasError::Denied("no se puede eliminar la raíz".into()));
@@ -408,9 +469,33 @@ impl FileRoot {
             return Err(NasError::NotFound(format!("no existe: {relative}")));
         }
         if target.is_dir() {
-            std::fs::remove_dir_all(&target).map_err(|e| NasError::io(&target, e))
+            std::fs::remove_dir_all(&target).map_err(|e| {
+                if e.raw_os_error() == Some(1) {
+                    NasError::Denied(format!(
+                        "operación no permitida (EPERM): el directorio '{relative}' es inmutable o de solo lectura"
+                    ))
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(13) {
+                    NasError::Denied(format!(
+                        "permiso denegado: el servicio web no tiene permisos suficientes para eliminar '{relative}'"
+                    ))
+                } else {
+                    NasError::io(&target, e)
+                }
+            })
         } else {
-            std::fs::remove_file(&target).map_err(|e| NasError::io(&target, e))
+            std::fs::remove_file(&target).map_err(|e| {
+                if e.raw_os_error() == Some(1) {
+                    NasError::Denied(format!(
+                        "operación no permitida (EPERM): el archivo '{relative}' es inmutable o de solo lectura"
+                    ))
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(13) {
+                    NasError::Denied(format!(
+                        "permiso denegado: el servicio web no tiene permisos suficientes para eliminar '{relative}'"
+                    ))
+                } else {
+                    NasError::io(&target, e)
+                }
+            })
         }
     }
 
@@ -424,6 +509,11 @@ impl FileRoot {
         let source = self.resolve(relative)?;
         if source == self.root {
             return Err(NasError::Denied("no se puede eliminar la raíz".into()));
+        }
+        if let Some(desc) = self.is_protected_path(relative) {
+            return Err(NasError::Denied(format!(
+                "operación no permitida: {desc} están protegidos contra escritura e inmutables (chattr +i); no se pueden mover a la papelera. Para gestionar o depurar copias de seguridad, utilice el módulo Respaldos"
+            )));
         }
         if !source.exists() {
             return Err(NasError::NotFound(format!("no existe: {relative}")));
@@ -442,7 +532,23 @@ impl FileRoot {
         let target = trash.join(&id);
         let deleted_at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-        std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        std::fs::rename(&source, &target).map_err(|e| {
+            if e.raw_os_error() == Some(1) {
+                NasError::Denied(format!(
+                    "operación no permitida (EPERM): el elemento '{relative}' o su directorio contenedor es de solo lectura o inmutable"
+                ))
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(13) {
+                NasError::Denied(format!(
+                    "permiso denegado: el servicio web no tiene permisos suficientes para mover '{relative}' a la papelera"
+                ))
+            } else if e.raw_os_error() == Some(18) {
+                NasError::Invalid(format!(
+                    "no se puede mover '{relative}' a la papelera entre diferentes sistemas de archivos o unidades de disco"
+                ))
+            } else {
+                NasError::io(&source, e)
+            }
+        })?;
         if let Err(error) = self.write_trash_meta(&id, relative, &name, actor, &deleted_at) {
             let _ = std::fs::rename(&target, &source);
             return Err(error);
@@ -973,6 +1079,11 @@ struct TrashMetaRecord {
 impl FileRoot {
     /// Escribe un archivo de texto dentro de la raíz con permisos `0660`.
     pub fn write(&self, relative: &str, contents: &str) -> NasResult<u64> {
+        if let Some(desc) = self.is_protected_path(relative) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura"
+            )));
+        }
         let path = self.resolve(relative)?;
         if path == self.root {
             return Err(NasError::Denied("no se puede sobrescribir la raíz".into()));
@@ -1092,7 +1203,19 @@ impl FileRoot {
             counter += 1;
         }
 
-        std::fs::rename(&source, &target).map_err(|e| NasError::io(&target, e))?;
+        std::fs::rename(&source, &target).map_err(|e| {
+            if e.raw_os_error() == Some(1) {
+                NasError::Denied(format!(
+                    "operación no permitida (EPERM): el destino '{relative}' o su directorio contenedor es inmutable o de solo lectura"
+                ))
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(13) {
+                NasError::Denied(format!(
+                    "permiso denegado: el servicio web no tiene permisos suficientes para restaurar '{relative}'"
+                ))
+            } else {
+                NasError::io(&target, e)
+            }
+        })?;
         let _ = self.remove_trash_meta(&real_id);
         Ok(target
             .strip_prefix(&self.root)
@@ -1405,6 +1528,22 @@ mod trash_tests {
         let root = root("seguridad");
         assert!(root.restore_trash("../etc/passwd").is_err());
         assert!(root.delete_trash("a/b").is_err());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn rechaza_modificaciones_en_rutas_protegidas() {
+        let root = root("protegidas");
+        assert!(root.trash("BACKUPS_HISTORICOS/snap/hosts").is_err());
+        assert!(root.trash("BACKUPS_PERMANENTES/full/hosts").is_err());
+        assert!(root.trash("LOGS_BACKUP/tarea.log").is_err());
+        assert!(root.trash(".trash/algo").is_err());
+        assert!(root.delete_permanent("BACKUPS_HISTORICOS/snap").is_err());
+        assert!(root
+            .rename("BACKUPS_HISTORICOS/snap", "BACKUPS_HISTORICOS/snap2")
+            .is_err());
+        assert!(root.mkdir("BACKUPS_HISTORICOS/nueva").is_err());
+        assert!(root.write("BACKUPS_HISTORICOS/nuevo.txt", "x").is_err());
         let _ = std::fs::remove_dir_all(root.root());
     }
 
