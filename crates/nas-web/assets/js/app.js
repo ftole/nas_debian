@@ -1038,7 +1038,7 @@ function scheduleBackupRefresh(anyRunning) {
   if (anyRunning && AppState.activeView === 'backups') {
     _backupRefreshTimer = setTimeout(() => {
       if (AppState.activeView === 'backups') loadBackups();
-    }, 4000);
+    }, 2000);
   }
 }
 
@@ -1090,6 +1090,7 @@ async function submitNewBackup(event) {
   const cron = document.getElementById('bkp-cron').value;
   const retention = parseInt(document.getElementById('bkp-retention').value, 10);
   const dest_unit = document.getElementById('bkp-dest-unit')?.value || 'principal';
+  const auto_permanent = document.getElementById('bkp-auto-permanent')?.checked ?? true;
 
   const btn = document.getElementById('btn-submit-new-backup') || event.target.querySelector('button[type="submit"]');
   if (btn) {
@@ -1111,6 +1112,7 @@ async function submitNewBackup(event) {
         cron,
         retention,
         dest_unit,
+        auto_permanent,
       }),
     });
 
@@ -1211,6 +1213,11 @@ function openEditBackup(id) {
     unitEl.value = t.dest_unit || 'principal';
   }
 
+  const autoPermEl = document.getElementById('edit-bkp-auto-permanent');
+  if (autoPermEl) {
+    autoPermEl.checked = t.auto_permanent !== false;
+  }
+
   toggleEditBackupFields();
   openModal('modal-edit-backup');
 }
@@ -1237,6 +1244,7 @@ async function submitEditBackup(event) {
   const cron = document.getElementById('edit-bkp-cron').value;
   const retention = parseInt(document.getElementById('edit-bkp-retention').value, 10) || 30;
   const dest_unit = document.getElementById('edit-bkp-dest-unit')?.value || 'principal';
+  const auto_permanent = document.getElementById('edit-bkp-auto-permanent')?.checked ?? true;
 
   const btn = document.getElementById('btn-submit-edit-backup') || event.target.querySelector('button[type="submit"]');
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
@@ -1253,6 +1261,7 @@ async function submitEditBackup(event) {
       cron,
       retention,
       dest_unit,
+      auto_permanent,
     };
     if (proto === 'ssh' && _editBkpPort) {
       payload.port = _editBkpPort;
