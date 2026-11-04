@@ -148,10 +148,15 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         let _ = std::fs::remove_file(&key_dst);
     }
 
+    let _ = std::fs::remove_file(&runner_src);
+    let _ = std::fs::remove_file(&cron_src);
+    let _ = std::fs::remove_file(&cred_src);
+    let _ = std::fs::remove_file(&key_src);
+
     let perm_root = dest_root.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
     let perm_task_dir = PathBuf::from(&perm_root).join(id);
     let _ = std::fs::create_dir_all(&perm_task_dir);
-    let _ = runner.run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chown").args(["-R", "root:grp_samba", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
 
     let runner_content = std::fs::read_to_string(&runner_dst).unwrap_or_default();
@@ -888,11 +893,19 @@ pub fn list_permanent_backups(task_filter: Option<&str>) -> NasResult<Vec<Perman
                 // Deducir desde el nombre de carpeta si no hay metadatos
                 let remainder = folder_name.trim_start_matches("FULL_");
                 let parts: Vec<&str> = remainder.split('_').collect();
-                let date_str = parts.first().unwrap_or(&"desconocida").to_string();
-                let tag = if parts.len() > 1 {
-                    Some(parts[1..].join("_"))
+                let (date_str, tag) = if parts.len() >= 3 {
+                    (
+                        format!("{}_{}", parts[0], parts[1]),
+                        Some(parts[2..].join("_")),
+                    )
+                } else if parts.len() == 2 {
+                    if parts[1].len() == 6 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+                        (format!("{}_{}", parts[0], parts[1]), None)
+                    } else {
+                        (parts[0].to_string(), Some(parts[1].to_string()))
+                    }
                 } else {
-                    None
+                    (parts.first().unwrap_or(&"desconocida").to_string(), None)
                 };
 
                 let (files_count, size_bytes) = dir_stats(&bkp_path);
@@ -1270,5 +1283,41 @@ mod tests {
         let bad_pem =
             "-----BEGIN OPENSSH PRIVATE KEY-----\ncorto\n-----END OPENSSH PRIVATE KEY-----";
         assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "root", bad_pem).is_err());
+    }
+
+    #[test]
+    fn list_permanent_backups_deduce_tag_y_fecha_correctamente() {
+        let f1 = "FULL_2026-11-04_144640_INICIAL".trim_start_matches("FULL_");
+        let p1: Vec<&str> = f1.split('_').collect();
+        assert_eq!(p1.len(), 3);
+        let (d1, t1) = if p1.len() >= 3 {
+            (format!("{}_{}", p1[0], p1[1]), Some(p1[2..].join("_")))
+        } else {
+            (p1[0].to_string(), None)
+        };
+        assert_eq!(d1, "2026-11-04_144640");
+        assert_eq!(t1.as_deref(), Some("INICIAL"));
+
+        let f2 = "FULL_2026-12-01_020000_MENSUAL".trim_start_matches("FULL_");
+        let p2: Vec<&str> = f2.split('_').collect();
+        let (d2, t2) = if p2.len() >= 3 {
+            (format!("{}_{}", p2[0], p2[1]), Some(p2[2..].join("_")))
+        } else {
+            (p2[0].to_string(), None)
+        };
+        assert_eq!(d2, "2026-12-01_020000");
+        assert_eq!(t2.as_deref(), Some("MENSUAL"));
+
+        let f3 = "FULL_2026-10-30_120000".trim_start_matches("FULL_");
+        let p3: Vec<&str> = f3.split('_').collect();
+        let (d3, t3) = if p3.len() >= 3 {
+            (format!("{}_{}", p3[0], p3[1]), Some(p3[2..].join("_")))
+        } else if p3.len() == 2 && p3[1].len() == 6 && p3[1].chars().all(|c| c.is_ascii_digit()) {
+            (format!("{}_{}", p3[0], p3[1]), None)
+        } else {
+            (p3[0].to_string(), None)
+        };
+        assert_eq!(d3, "2026-10-30_120000");
+        assert_eq!(t3, None);
     }
 }
