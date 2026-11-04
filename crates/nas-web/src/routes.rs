@@ -827,6 +827,9 @@ pub async fn files_delete(
     }
 }
 
+/// Límite máximo de subida por archivo en streaming (50 GB).
+pub const MAX_UPLOAD_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
+
 /// Sube uno o varios archivos a un directorio, escribiendo por streaming.
 pub async fn files_upload(
     State(state): State<AppState>,
@@ -915,7 +918,7 @@ pub async fn files_upload(
             match field.chunk().await {
                 Ok(Some(chunk)) => {
                     total += chunk.len() as u64;
-                    if total > 512 * 1024 * 1024 {
+                    if total > MAX_UPLOAD_FILE_SIZE {
                         let _ = tokio::fs::remove_file(&temporary).await;
                         for (temp, _) in &staged_files {
                             let _ = tokio::fs::remove_file(temp).await;
@@ -923,7 +926,7 @@ pub async fn files_upload(
                         return (
                             StatusCode::PAYLOAD_TOO_LARGE,
                             axum::Json(ApiResponse::<serde_json::Value>::error(
-                                "el archivo supera el límite de 512 MB",
+                                "el archivo supera el límite de 50 GB",
                             )),
                         )
                             .into_response();
