@@ -210,7 +210,7 @@ Ver **[despliegue_rust.md](despliegue_rust.md)** para la guía completa.
   host virtual de Nginx con `proxy_pass`).
 - `packaging/nas-web.service`: unidad endurecida (`ProtectSystem=strict`,
   `PrivateTmp`, `RestrictAddressFamilies`, `SystemCallFilter`, `ReadWritePaths`).
-- `packaging/nginx-nas-web.conf`: TLS, CSP, gzip y límite de subida 512 MB.
+- `packaging/nginx-nas-web.conf`: TLS, CSP, gzip y límite de subida 50 GB.
 - `packaging/verify.sh`: validaciones estáticas ejecutadas en CI.
 - Cutover A/B con `releases/<versión>` + `current` y rollback documentado al
   panel PHP.
@@ -278,7 +278,7 @@ NAS_WEB_SECRET=0123456789abcdef NAS_WEB_DEV_PASSWORD=Secreta123 NAS_WEB_INSECURE
   `..` y cualquier resolución que escape de la raíz (incluidos symlinks).
 - `list` ordena carpetas primero; `mkdir`, `rename` y `delete` (papelera
   interna `.trash/<fecha>_<nombre>`).
-- `upload` por **streaming** con límite de 512 MB, nombre saneado, escritura en
+- `upload` por **streaming** con límite de 50 GB, nombre saneado, escritura en
   temporal y promoción atómica; 409 si el archivo ya existe.
 - `download` con `Content-Disposition: attachment` y CSP `default-src 'none'; sandbox`.
 
