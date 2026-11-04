@@ -612,7 +612,11 @@ fn entry_metadata(entry: &std::fs::DirEntry) -> (bool, u64, i64) {
         return (false, 0, 0);
     };
     let is_dir = metadata.is_dir();
-    let size = if is_dir { 0 } else { metadata.len() };
+    let size = if is_dir {
+        dir_size_recursive_bounded(&entry.path(), 10_000)
+    } else {
+        metadata.len()
+    };
     let modified = metadata
         .modified()
         .ok()
@@ -661,12 +665,14 @@ mod tests {
     fn lista_ordenando_carpetas_primero() {
         let root = unique_root("listado");
         root.mkdir("carpeta").expect("mkdir");
+        std::fs::write(root.root().join("carpeta/archivo.txt"), b"123456").expect("write");
         std::fs::write(root.root().join("b.txt"), b"hola").expect("write");
         std::fs::write(root.root().join("a.txt"), b"mundo").expect("write");
 
         let entries = root.list("").expect("list");
         assert_eq!(entries[0].name, "carpeta");
         assert!(entries[0].is_dir);
+        assert_eq!(entries[0].size, 6);
         assert_eq!(entries[1].name, "a.txt");
         assert_eq!(entries[1].size, 5);
         assert_eq!(entries[2].name, "b.txt");
@@ -1401,8 +1407,10 @@ fn next_unique_trash_ms(trash: &Path) -> i64 {
     candidate
 }
 
-fn dir_size_recursive(root: &Path) -> u64 {
+/// Calcula el tamaño acumulado de un directorio en bytes, con un límite de elementos para evitar bloqueos.
+pub fn dir_size_recursive_bounded(root: &Path, max_entries: usize) -> u64 {
     let mut total = 0u64;
+    let mut count = 0usize;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -1415,14 +1423,23 @@ fn dir_size_recursive(root: &Path) -> u64 {
             if meta.file_type().is_symlink() {
                 continue;
             }
+            count += 1;
             if meta.is_dir() {
                 stack.push(entry.path());
             } else {
                 total = total.saturating_add(meta.len());
             }
+            if count >= max_entries {
+                return total;
+            }
         }
     }
     total
+}
+
+/// Calcula el tamaño acumulado completo de un directorio en bytes.
+pub fn dir_size_recursive(root: &Path) -> u64 {
+    dir_size_recursive_bounded(root, usize::MAX)
 }
 
 fn split_trash_name(id: &str) -> (&str, &str) {
