@@ -172,6 +172,30 @@ function closeModal(modalId) {
     modal.classList.remove('active');
     modal.classList.remove('open');
     if (modalId === 'modal-file-preview') {
+      const modalHeader = modal.querySelector('.modal-header');
+      if (modalHeader) {
+        modalHeader.style.backgroundColor = '';
+        modalHeader.style.borderBottomColor = '';
+        const titleEl = document.getElementById('preview-file-name');
+        const metaEl = document.getElementById('preview-file-meta');
+        const iconEl = document.getElementById('preview-header-icon');
+        const closeBtn = modalHeader.querySelector('.modal-close');
+        if (titleEl) titleEl.style.color = '';
+        if (metaEl) metaEl.style.color = '';
+        if (iconEl) iconEl.style.color = '';
+        if (closeBtn) closeBtn.style.color = '';
+        modalHeader.querySelectorAll('.btn-secondary').forEach(b => {
+          b.style.backgroundColor = '';
+          b.style.color = '';
+          b.style.borderColor = '';
+        });
+        const saveBtn = document.getElementById('btn-preview-save');
+        if (saveBtn) {
+          saveBtn.style.backgroundColor = '';
+          saveBtn.style.color = '';
+          saveBtn.style.borderColor = '';
+        }
+      }
       const vidEl = document.getElementById('preview-video-element');
       if (vidEl) {
         vidEl.pause();
@@ -4832,112 +4856,248 @@ async function loadTerminal() {
 // 15. Módulo: Explorador de Archivos (Cuadrícula Windows, Previsualizador & Papelera)
 // ==============================================================================
 
+function getContrastTextColor(hexColor) {
+  if (!hexColor || typeof hexColor !== 'string') return '#ffffff';
+  let hex = hexColor.trim();
+  if (hex.startsWith('rgba') || hex.startsWith('rgb')) {
+    const parts = hex.match(/\d+/g);
+    if (parts && parts.length >= 3) {
+      const r = Number(parts[0]) || 0;
+      const g = Number(parts[1]) || 0;
+      const b = Number(parts[2]) || 0;
+      const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+      return yiq >= 150 ? '#0f172a' : '#ffffff';
+    }
+    return '#ffffff';
+  }
+  hex = hex.replace('#', '');
+  if (hex.length === 3) {
+    hex = hex.split('').map(c => c + c).join('');
+  }
+  const r = parseInt(hex.substring(0, 2), 16) || 0;
+  const g = parseInt(hex.substring(2, 4), 16) || 0;
+  const b = parseInt(hex.substring(4, 6), 16) || 0;
+  const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+  return (yiq >= 150) ? '#0f172a' : '#ffffff';
+}
+
+function getFileFormattedSize(item) {
+  if (!item || item.is_dir) return '';
+  if (item.size_formatted && item.size_formatted !== '--' && item.size_formatted !== '0 B') {
+    return item.size_formatted;
+  }
+  const bytes = Number(item.size_bytes ?? item.size ?? 0);
+  if (!isNaN(bytes) && bytes > 0) {
+    return formatBytesLocal(bytes);
+  }
+  return item.size_formatted || '0 B';
+}
+
 function getFileTypeMeta(item) {
+  if (!item) {
+    return {
+      icon: '#icon-file',
+      color: '#64748b',
+      headerBg: '#334155',
+      badgeBg: 'rgba(51, 65, 85, 0.25)',
+      badgeColor: '#94a3b8',
+      badgeBorder: 'rgba(148, 163, 184, 0.35)',
+      typeLabel: 'Archivo',
+      shortLabel: 'Archivo',
+      previewable: false,
+      mediaType: 'unknown',
+    };
+  }
+
   if (item.is_dir) {
     return {
       icon: '#icon-folder',
-      color: '#f59e0b',
-      typeLabel: 'Carpeta',
+      color: '#ffe2bb',
+      headerBg: '#ffe2bb',
+      badgeBg: 'rgba(255, 226, 187, 0.18)',
+      badgeColor: '#ffe2bb',
+      badgeBorder: 'rgba(255, 226, 187, 0.4)',
+      typeLabel: 'Carpeta de archivos',
+      shortLabel: 'Carpeta',
       previewable: false,
+      mediaType: 'folder',
     };
   }
 
-  const name = item.name || '';
+  const name = item.name || item.filename || '';
   const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
 
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
-    return {
-      icon: '#icon-image',
-      color: '#a855f7',
-      typeLabel: `Imagen ${ext.toUpperCase()}`,
-      previewable: true,
-      mediaType: 'image',
-    };
-  }
-
-  if (ext === 'pdf') {
-    return {
-      icon: '#icon-file-text',
-      color: '#ef4444',
-      typeLabel: 'Documento PDF',
-      previewable: true,
-      mediaType: 'pdf',
-    };
-  }
-
-  if (['xlsx', 'xls', 'ods', 'csv', 'tsv'].includes(ext)) {
+  // 1. Hojas de cálculo (Excel: verde)
+  if (['xlsx', 'xls', 'xlsm', 'xlsb', 'ods', 'csv', 'tsv'].includes(ext)) {
     return {
       icon: '#icon-table',
-      color: '#10b981',
-      typeLabel: `Hoja de cálculo (${ext.toUpperCase()})`,
+      color: '#16a34a',
+      headerBg: '#107c41',
+      badgeBg: 'rgba(16, 124, 65, 0.18)',
+      badgeColor: '#22c55e',
+      badgeBorder: 'rgba(34, 197, 94, 0.35)',
+      typeLabel: ext ? `Hoja de cálculo (${ext.toUpperCase()})` : 'Hoja de cálculo',
+      shortLabel: ext ? `Excel (${ext.toUpperCase()})` : 'Excel',
       previewable: true,
       mediaType: 'excel',
     };
   }
 
-  if (['docx', 'doc'].includes(ext)) {
+  // 2. Documentos de texto / ofimática (Word: azul)
+  if (['docx', 'doc', 'docm', 'dotx', 'dot', 'rtf', 'odt'].includes(ext)) {
     return {
       icon: '#icon-file-text',
-      color: '#3b82f6',
-      typeLabel: `Documento Word (${ext.toUpperCase()})`,
+      color: '#2563eb',
+      headerBg: '#185abd',
+      badgeBg: 'rgba(24, 90, 189, 0.18)',
+      badgeColor: '#3b82f6',
+      badgeBorder: 'rgba(59, 130, 246, 0.35)',
+      typeLabel: ext ? `Documento Word (${ext.toUpperCase()})` : 'Documento Word',
+      shortLabel: ext ? `Word (${ext.toUpperCase()})` : 'Word',
       previewable: true,
       mediaType: 'word',
     };
   }
 
-  if (['pptx', 'ppt'].includes(ext)) {
+  // 3. Presentaciones (PowerPoint: naranja)
+  if (['pptx', 'ppt', 'pptm', 'potx', 'odp'].includes(ext)) {
     return {
       icon: '#icon-presentation',
-      color: '#f97316',
-      typeLabel: `Presentación (${ext.toUpperCase()})`,
+      color: '#ea580c',
+      headerBg: '#c43e1c',
+      badgeBg: 'rgba(196, 62, 28, 0.18)',
+      badgeColor: '#f97316',
+      badgeBorder: 'rgba(249, 115, 22, 0.35)',
+      typeLabel: ext ? `Presentación (${ext.toUpperCase()})` : 'Presentación',
+      shortLabel: ext ? `PowerPoint (${ext.toUpperCase()})` : 'PowerPoint',
       previewable: true,
       mediaType: 'presentation',
     };
   }
 
-  if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) {
+  // 4. Documentos PDF (rojo)
+  if (ext === 'pdf') {
+    return {
+      icon: '#icon-file-text',
+      color: '#dc2626',
+      headerBg: '#b91c1c',
+      badgeBg: 'rgba(185, 28, 28, 0.18)',
+      badgeColor: '#ef4444',
+      badgeBorder: 'rgba(239, 68, 68, 0.35)',
+      typeLabel: 'Documento PDF',
+      shortLabel: 'PDF',
+      previewable: true,
+      mediaType: 'pdf',
+    };
+  }
+
+  // 5. Imágenes (morado)
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico', 'tiff', 'tif'].includes(ext)) {
+    return {
+      icon: '#icon-image',
+      color: '#9333ea',
+      headerBg: '#7e22ce',
+      badgeBg: 'rgba(126, 34, 206, 0.18)',
+      badgeColor: '#a855f7',
+      badgeBorder: 'rgba(168, 85, 247, 0.35)',
+      typeLabel: ext ? `Imagen ${ext.toUpperCase()}` : 'Imagen',
+      shortLabel: ext ? `Imagen (${ext.toUpperCase()})` : 'Imagen',
+      previewable: true,
+      mediaType: 'image',
+    };
+  }
+
+  // 6. Video (rosa/fucsia)
+  if (['mp4', 'webm', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'm4v'].includes(ext)) {
     return {
       icon: '#icon-video',
-      color: '#f43f5e',
-      typeLabel: `Video ${ext.toUpperCase()}`,
+      color: '#e11d48',
+      headerBg: '#be123c',
+      badgeBg: 'rgba(190, 18, 60, 0.18)',
+      badgeColor: '#f43f5e',
+      badgeBorder: 'rgba(244, 63, 94, 0.35)',
+      typeLabel: ext ? `Video ${ext.toUpperCase()}` : 'Video',
+      shortLabel: ext ? `Video (${ext.toUpperCase()})` : 'Video',
       previewable: ['mp4', 'webm'].includes(ext),
       mediaType: 'video',
     };
   }
 
-  if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) {
+  // 7. Audio (turquesa/teal)
+  if (['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'wma'].includes(ext)) {
     return {
       icon: '#icon-music',
-      color: '#14b8a6',
-      typeLabel: `Audio ${ext.toUpperCase()}`,
+      color: '#0d9488',
+      headerBg: '#0f766e',
+      badgeBg: 'rgba(15, 118, 110, 0.18)',
+      badgeColor: '#14b8a6',
+      badgeBorder: 'rgba(20, 184, 166, 0.35)',
+      typeLabel: ext ? `Audio ${ext.toUpperCase()}` : 'Audio',
+      shortLabel: ext ? `Audio (${ext.toUpperCase()})` : 'Audio',
       previewable: ['mp3', 'wav', 'ogg'].includes(ext),
       mediaType: 'audio',
     };
   }
 
-  if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) {
+  // 8. Archivos comprimidos (dorado/ámbar)
+  if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'tgz'].includes(ext)) {
     return {
       icon: '#icon-archive',
-      color: '#eab308',
-      typeLabel: `Archivo comprimido (${ext.toUpperCase()})`,
+      color: '#d97706',
+      headerBg: '#b45309',
+      badgeBg: 'rgba(180, 83, 9, 0.18)',
+      badgeColor: '#f59e0b',
+      badgeBorder: 'rgba(245, 158, 11, 0.35)',
+      typeLabel: ext ? `Archivo comprimido (${ext.toUpperCase()})` : 'Comprimido',
+      shortLabel: ext ? `ZIP (${ext.toUpperCase()})` : 'Comprimido',
       previewable: false,
+      mediaType: 'archive',
     };
   }
 
-  if (['txt', 'log', 'conf', 'sh', 'php', 'js', 'json', 'yml', 'yaml', 'ini', 'xml', 'sql', 'md', 'env', 'py', 'css', 'html', 'bat', 'cmd'].includes(ext)) {
+  // 9. Código y scripts (azul cian/índigo)
+  if (['sh', 'bash', 'py', 'js', 'ts', 'jsx', 'tsx', 'php', 'sql', 'json', 'yml', 'yaml', 'html', 'htm', 'css', 'xml', 'rs', 'c', 'cpp', 'h', 'bat', 'cmd', 'ps1'].includes(ext)) {
+    const isScript = ['sh', 'bash', 'bat', 'cmd', 'ps1', 'py'].includes(ext);
     return {
-      icon: '#icon-file-text',
-      color: '#10b981',
-      typeLabel: `Texto / Código (${ext.toUpperCase()})`,
+      icon: isScript ? '#icon-terminal' : '#icon-file-text',
+      color: '#0284c7',
+      headerBg: '#0369a1',
+      badgeBg: 'rgba(3, 105, 161, 0.18)',
+      badgeColor: '#38bdf8',
+      badgeBorder: 'rgba(56, 189, 248, 0.35)',
+      typeLabel: ext ? `Código (${ext.toUpperCase()})` : 'Código',
+      shortLabel: ext ? `Código (${ext.toUpperCase()})` : 'Código',
       previewable: true,
       mediaType: 'text',
     };
   }
 
+  // 10. Texto plano y configuración (pizarra/acero)
+  if (['txt', 'log', 'conf', 'ini', 'env', 'md', 'cfg', 'inf'].includes(ext)) {
+    return {
+      icon: '#icon-file-text',
+      color: '#64748b',
+      headerBg: '#334155',
+      badgeBg: 'rgba(51, 65, 85, 0.25)',
+      badgeColor: '#94a3b8',
+      badgeBorder: 'rgba(148, 163, 184, 0.35)',
+      typeLabel: ext ? `Texto (${ext.toUpperCase()})` : 'Texto',
+      shortLabel: ext ? `Texto (${ext.toUpperCase()})` : 'Texto',
+      previewable: true,
+      mediaType: 'text',
+    };
+  }
+
+  // 11. Genérico / desconocido
   return {
     icon: '#icon-file',
-    color: '#94a3b8',
+    color: '#64748b',
+    headerBg: '#334155',
+    badgeBg: 'rgba(51, 65, 85, 0.25)',
+    badgeColor: '#94a3b8',
+    badgeBorder: 'rgba(148, 163, 184, 0.35)',
     typeLabel: ext ? `Archivo .${ext}` : 'Archivo',
+    shortLabel: ext ? ext.toUpperCase() : 'Archivo',
     previewable: true,
     mediaType: 'unknown',
   };
@@ -5227,8 +5387,8 @@ function renderFileGrid(items) {
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
-    const rawSize = item.size_formatted && item.size_formatted !== '--' ? item.size_formatted : '0 B';
-    const sizeStr = isDir ? `Carpeta · ${rawSize}` : rawSize;
+    const fileSize = getFileFormattedSize(item);
+    const sizeStr = isDir ? 'Carpeta' : fileSize;
 
     const previewBtn = !isDir
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'preview')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
@@ -5247,7 +5407,7 @@ function renderFileGrid(items) {
            onclick="handleCardClick(this)"
            ondblclick="handleCardDblClick(this)"
            onkeydown="handleCardKeyDown(event, this)"
-           title="${escapeHtml(item.name)} (${sizeStr})">
+           title="${escapeHtml(item.name)} • ${escapeHtml(meta.typeLabel)}${isDir ? '' : ` (${fileSize})`}">
         
         <div class="file-card-actions">
           ${previewBtn}
@@ -5262,8 +5422,11 @@ function renderFileGrid(items) {
           <svg class="file-card-icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg>
         </div>
 
-        <span class="file-card-name">${escapeHtml(item.name)}</span>
-        <span class="file-card-meta">${escapeHtml(sizeStr)}</span>
+        <span class="file-card-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+        <div class="file-card-info" style="display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:2px; width:100%;">
+          <span class="file-card-type-tag" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+          <span class="file-card-meta">${isDir ? 'Carpeta' : escapeHtml(fileSize)}</span>
+        </div>
       </div>
     `;
   }).join('');
@@ -5343,7 +5506,8 @@ function renderFileTable(items) {
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
     const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
-    const tableSizeStr = item.size_formatted && item.size_formatted !== '--' ? item.size_formatted : '0 B';
+    const fileSize = getFileFormattedSize(item);
+    const tableSizeStr = isDir ? '—' : fileSize;
 
     const previewAction = !isDir
       ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'preview')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
@@ -5366,13 +5530,14 @@ function renderFileTable(items) {
           onclick="handleTableRowSelect(this)"
           ondblclick="handleTableRowDblClick(this)"
           onkeydown="handleTableRowKeyDown(event, this)">
-        <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
+        <td style="width:36px; text-align:center;"><svg class="icon" style="color:${meta.color}; width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
         <td>
-          <div class="${nameClass}" onclick="handleTableRowNameClick(event, this)">
-            <span>${escapeHtml(item.name)}</span>
+          <div class="${nameClass}" onclick="handleTableRowNameClick(event, this)" style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:500;">${escapeHtml(item.name)}</span>
+            <span class="file-type-badge" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
           </div>
         </td>
-        <td>${escapeHtml(tableSizeStr)}</td>
+        <td style="font-weight:500; color:var(--text-main); white-space:nowrap;">${isDir ? '<span style="color:var(--text-muted);">&mdash;</span>' : escapeHtml(tableSizeStr)}</td>
         <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
         <td>${ownerStr}:${groupStr}</td>
         <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
@@ -6137,13 +6302,19 @@ function renderTrashRows(items) {
   const html = filtered.map(item => {
     const isDir = item.is_dir;
     const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
+    const fileSize = isDir ? '—' : (item.size_formatted || formatBytesLocal(item.size_bytes ?? item.size ?? 0));
 
     return `
       <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
-        <td><svg class="icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg></td>
-        <td><strong>${escapeHtml(item.filename)}</strong></td>
+        <td style="width:36px; text-align:center;"><svg class="icon" style="color:${meta.color}; width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
+        <td>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <strong>${escapeHtml(item.filename)}</strong>
+            <span class="file-type-badge" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+          </div>
+        </td>
         <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
-        <td>${escapeHtml(item.size_formatted || '0 B')}</td>
+        <td style="font-weight:500;">${isDir ? '<span style="color:var(--text-muted);">&mdash;</span>' : escapeHtml(fileSize)}</td>
         <td>${escapeHtml(item.deleted_by || 'sistemas')}</td>
         <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(item.deleted_at || 'N/A')}</td>
         <td style="text-align:right;">
@@ -6378,8 +6549,48 @@ async function previewFile(relPath, fileName) {
   const docxContainer = document.getElementById('preview-docx-container');
   const pptxContainer = document.getElementById('preview-pptx-container');
 
+  const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+  const meta = getFileTypeMeta({ name: fileName, is_dir: false });
+
+  // Buscar el elemento actual para obtener su tamaño formateado si ya existe
+  const currentItem = (AppState.files.items || []).find(i => (i.relative_path || i.path) === relPath || i.name === fileName);
+  const sizeFormatted = currentItem
+    ? (currentItem.size_formatted && currentItem.size_formatted !== '--' ? currentItem.size_formatted : formatBytesLocal(currentItem.size_bytes ?? currentItem.size))
+    : '';
+
+  // Configurar encabezado de la modal con el color representativo del fichero
+  const modalHeader = modal.querySelector('.modal-header');
+  const headerBgColor = meta.headerBg || meta.color;
+  if (modalHeader) {
+    modalHeader.style.backgroundColor = headerBgColor;
+    modalHeader.style.borderBottomColor = 'rgba(0, 0, 0, 0.2)';
+    const textColor = getContrastTextColor(headerBgColor);
+    const isLightHeader = textColor === '#0f172a';
+
+    if (titleEl) titleEl.style.color = textColor;
+    if (metaEl) metaEl.style.color = isLightHeader ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.85)';
+    if (iconEl) {
+      iconEl.style.color = textColor;
+      iconEl.querySelector('use')?.setAttribute('href', meta.icon);
+    }
+    const closeBtn = modalHeader.querySelector('.modal-close');
+    if (closeBtn) closeBtn.style.color = textColor;
+
+    modalHeader.querySelectorAll('.btn-secondary').forEach(b => {
+      b.style.backgroundColor = isLightHeader ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.18)';
+      b.style.color = textColor;
+      b.style.borderColor = isLightHeader ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.3)';
+    });
+
+    if (saveBtn) {
+      saveBtn.style.backgroundColor = isLightHeader ? '#0f172a' : '#ffffff';
+      saveBtn.style.color = isLightHeader ? '#ffffff' : '#0f172a';
+      saveBtn.style.borderColor = 'transparent';
+    }
+  }
+
   if (titleEl) titleEl.textContent = fileName;
-  if (metaEl) metaEl.textContent = 'Cargando información...';
+  if (metaEl) metaEl.textContent = sizeFormatted ? `${sizeFormatted} • ${meta.typeLabel}` : meta.typeLabel;
   if (loadingText) loadingText.textContent = 'Cargando previsualización...';
   if (copyBtn) copyBtn.style.display = 'none';
   if (editBtn) editBtn.style.display = 'none';
@@ -6387,13 +6598,6 @@ async function previewFile(relPath, fileName) {
   if (editLabel) editLabel.textContent = 'Editar';
   if (contentEl) contentEl.style.display = 'block';
   if (editorEl) editorEl.style.display = 'none';
-
-  const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
-  const meta = getFileTypeMeta({ name: fileName, is_dir: false });
-  if (iconEl) {
-    iconEl.style.color = meta.color;
-    iconEl.querySelector('use')?.setAttribute('href', meta.icon);
-  }
 
   // Ocultar todos los contenedores y mostrar cargando
   [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer, spreadsheetContainer, docxContainer, pptxContainer].forEach(c => {
@@ -6415,7 +6619,7 @@ async function previewFile(relPath, fileName) {
       imgEl.onload = () => {
         if (loading) loading.style.display = 'none';
         if (imgContainer) imgContainer.style.display = 'flex';
-        if (metaEl) metaEl.textContent = `Imagen ${ext.toUpperCase()} • ${imgEl.naturalWidth}x${imgEl.naturalHeight} px`;
+        if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Imagen ${ext.toUpperCase()} • ${imgEl.naturalWidth}x${imgEl.naturalHeight} px`;
       };
       imgEl.onerror = () => {
         if (loading) loading.style.display = 'none';
@@ -6438,7 +6642,7 @@ async function previewFile(relPath, fileName) {
     if (frame) frame.src = rawUrl;
     if (loading) loading.style.display = 'none';
     if (pdfContainer) pdfContainer.style.display = 'block';
-    if (metaEl) metaEl.textContent = 'Documento PDF (Visualizador nativo del navegador)';
+    if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Documento PDF (Visualizador nativo del navegador)`;
     return;
   }
 
@@ -6461,7 +6665,7 @@ async function previewFile(relPath, fileName) {
 
     if (loading) loading.style.display = 'none';
     if (mediaContainer) mediaContainer.style.display = 'flex';
-    if (metaEl) metaEl.textContent = `${isVid ? 'Video' : 'Audio'} multimedia • ${ext.toUpperCase()}`;
+    if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}${isVid ? 'Video' : 'Audio'} multimedia • ${ext.toUpperCase()}`;
     return;
   }
 
@@ -6494,7 +6698,7 @@ async function previewFile(relPath, fileName) {
       if (loading) loading.style.display = 'none';
       if (spreadsheetContainer) spreadsheetContainer.style.display = 'flex';
       if (metaEl) {
-        metaEl.textContent = `Hoja de cálculo (${ext.toUpperCase()}) • ${workbook.SheetNames.length} hoja(s)`;
+        metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Hoja de cálculo (${ext.toUpperCase()}) • ${workbook.SheetNames.length} hoja(s)`;
       }
       return;
     } catch (err) {
@@ -6507,7 +6711,7 @@ async function previewFile(relPath, fileName) {
         if (bName) bName.textContent = fileName;
         if (bDet) bDet.textContent = `No se pudo previsualizar la hoja de cálculo: ${err.message || 'error de procesamiento'}`;
       }
-      if (metaEl) metaEl.textContent = 'Hoja de cálculo';
+      if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Hoja de cálculo`;
       return;
     }
   }
@@ -6549,7 +6753,7 @@ async function previewFile(relPath, fileName) {
       if (loading) loading.style.display = 'none';
       if (docxContainer) docxContainer.style.display = 'flex';
       if (metaEl) {
-        metaEl.textContent = 'Documento Word (.DOCX) • Renderizado local seguro';
+        metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Documento Word (.DOCX) • Renderizado local seguro`;
       }
       return;
     } catch (err) {
@@ -6562,7 +6766,7 @@ async function previewFile(relPath, fileName) {
         if (bName) bName.textContent = fileName;
         if (bDet) bDet.textContent = `No se pudo previsualizar el documento Word: ${err.message || 'error de renderizado'}`;
       }
-      if (metaEl) metaEl.textContent = 'Documento Word';
+      if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Documento Word`;
       return;
     }
   }
@@ -6635,7 +6839,7 @@ async function previewFile(relPath, fileName) {
       if (loading) loading.style.display = 'none';
       if (pptxContainer) pptxContainer.style.display = 'flex';
       if (metaEl) {
-        metaEl.textContent = `Presentación PowerPoint (.PPTX) • ${parsedSlides.length} diapositiva(s)`;
+        metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Presentación PowerPoint (.PPTX) • ${parsedSlides.length} diapositiva(s)`;
       }
       return;
     } catch (err) {
@@ -6648,7 +6852,7 @@ async function previewFile(relPath, fileName) {
         if (bName) bName.textContent = fileName;
         if (bDet) bDet.textContent = `No se pudieron extraer diapositivas: ${err.message || 'formato no legible'}`;
       }
-      if (metaEl) metaEl.textContent = 'Presentación PowerPoint';
+      if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Presentación PowerPoint`;
       return;
     }
   }
@@ -6665,7 +6869,7 @@ async function previewFile(relPath, fileName) {
         bDet.textContent = `Formato binario heredado de Microsoft Office (${ext.toUpperCase()}). Para previsualización interactiva en el navegador, guarde el archivo en formato moderno (.${ext}x) o descárguelo directamente.`;
       }
     }
-    if (metaEl) metaEl.textContent = `Documento ${ext.toUpperCase()} (Heredado)`;
+    if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Documento ${ext.toUpperCase()} (Heredado)`;
     return;
   }
 
@@ -6698,7 +6902,7 @@ async function previewFile(relPath, fileName) {
     updatePreviewLineNumbers(d.content || '');
 
     if (metaEl) {
-      metaEl.textContent = `${d.size_formatted || '0 B'} • ${lines} línea(s) • ${d.extension ? d.extension.toUpperCase() : 'TEXTO'}`;
+      metaEl.textContent = `${d.size_formatted || sizeFormatted || '0 B'} • ${lines} línea(s) • ${d.extension ? d.extension.toUpperCase() : 'TEXTO'}`;
     }
 
     if (copyBtn) copyBtn.style.display = 'inline-flex';
@@ -6715,7 +6919,7 @@ async function previewFile(relPath, fileName) {
       if (bName) bName.textContent = fileName;
       if (bDet) bDet.textContent = err.message || 'Archivo no legible como texto plano.';
     }
-    if (metaEl) metaEl.textContent = 'Archivo binario';
+    if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Archivo binario`;
   }
 }
 
