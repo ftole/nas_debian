@@ -978,7 +978,13 @@ async function loadBackups() {
         : (isErr ? 'badge-err'
           : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
       const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
-      const fillColor = isErr ? 'var(--accent-danger)' : 'var(--accent-success)';
+      const isRunning = Boolean(t.running || t.last_status === 'En curso');
+      const fillColor = isErr ? 'var(--accent-danger)' : (isRunning ? 'var(--accent-primary)' : 'var(--accent-success)');
+      const progressSubtitle = isRunning
+        ? `${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}`
+        : (t.last_status === 'OK'
+          ? '100% · Completado'
+          : (isErr ? 'Error · Reintentar' : 'Pendiente'));
 
       return `
       <tr>
@@ -993,7 +999,7 @@ async function loadBackups() {
             <div class="progress-bar-fill" style="width:${pct}%; background:${fillColor};"></div>
           </div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
-            ${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}
+            ${progressSubtitle}
           </div>
         </td>
         <td style="text-align:right; white-space:nowrap;">
