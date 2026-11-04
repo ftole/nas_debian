@@ -218,7 +218,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/delete", post(routes::files_delete))
         .route(
             "/api/files/upload",
-            post(routes::files_upload).layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
+            post(routes::files_upload).layer(DefaultBodyLimit::max(
+                usize::try_from(50u64 * 1024 * 1024 * 1024).unwrap_or(usize::MAX),
+            )),
         )
         .layer(axum::middleware::from_fn_with_state(csrf_state, csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
