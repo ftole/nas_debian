@@ -4900,6 +4900,22 @@ function getFileFormattedSize(item) {
   return item.size_formatted || '0 B';
 }
 
+function isProtectedFilePath(path) {
+  if (!path && AppState.files?.root === 'backups') {
+    return true;
+  }
+  if (!path) return false;
+  const clean = String(path).replace(/\\/g, '/').replace(/^\/+/, '');
+  const first = clean.split('/')[0];
+  return (
+    AppState.files?.root === 'backups' ||
+    first === 'BACKUPS_HISTORICOS' ||
+    first === 'BACKUPS_PERMANENTES' ||
+    first === 'LOGS_BACKUP' ||
+    first === '.trash'
+  );
+}
+
 function getFileTypeMeta(item) {
   if (!item) {
     return {
@@ -5418,6 +5434,15 @@ function renderFileGrid(items) {
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
       : `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
 
+    const isProtected = isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath);
+    const writeActions = !isProtected
+      ? `
+          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
+          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
+          <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
+        `
+      : '';
+
     return `
       <div class="file-card ${isDir ? 'is-folder' : ''} ${isSelected ? 'selected' : ''}"
            tabindex="0"
@@ -5433,9 +5458,7 @@ function renderFileGrid(items) {
           ${previewBtn}
           ${downloadBtn}
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'copy-unc')" title="Copiar ruta UNC"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-copy"></use></svg></button>
-          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
-          <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
-          <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
+          ${writeActions}
         </div>
 
         <div class="file-card-icon-wrap">
@@ -5566,9 +5589,11 @@ function renderFileTable(items) {
             ${previewAction}
             ${downloadAction}
             <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'copy-unc')" title="Copiar ruta UNC"><svg class="icon"><use href="#icon-copy"></use></svg></button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
-            <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+            ${!isProtected ? `
+              <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+            ` : ''}
           </div>
         </td>
       </tr>
@@ -5707,8 +5732,18 @@ function renderFileBreadcrumbs(breadcrumbs, currentPath) {
   const chevronSep = '<span class="file-breadcrumb-separator"><svg class="icon"><use href="#icon-chevron-right"></use></svg></span>';
   const homeIcon = '<svg class="icon" style="width:13px; height:13px; margin-right:4px;"><use href="#icon-home"></use></svg>';
 
+  const isProtected = isProtectedFilePath(currentPath);
+  const btnUpload = document.getElementById('btn-upload-files');
+  const btnNewFolder = document.getElementById('btn-new-folder');
+  if (btnUpload) btnUpload.style.display = isProtected ? 'none' : '';
+  if (btnNewFolder) btnNewFolder.style.display = isProtected ? 'none' : '';
+
+  const lockBadge = isProtected
+    ? ' <span class="badge badge-warn" style="margin-left:8px; font-size:11px;" title="Respaldo inmutable contra ransomware (chattr +i)"><svg class="icon" style="width:12px; height:12px; margin-right:3px; vertical-align:middle;"><use href="#icon-shield"></use></svg>Solo Lectura (Inmutable)</span>'
+    : '';
+
   if (!breadcrumbs || breadcrumbs.length === 0 || !cleanPath) {
-    container.innerHTML = `<span class="file-breadcrumb-current" title="${escapeHtml(humanRoot)}">${homeIcon} ${escapeHtml(humanRoot)}</span>`;
+    container.innerHTML = `<span class="file-breadcrumb-current" title="${escapeHtml(humanRoot)}">${homeIcon} ${escapeHtml(humanRoot)}</span>${lockBadge}`;
     return;
   }
 
@@ -5720,7 +5755,7 @@ function renderFileBreadcrumbs(breadcrumbs, currentPath) {
     const prefix = isFirst ? homeIcon : '';
 
     if (isLast) {
-      return `<span class="file-breadcrumb-current" title="${titleAttr}">${prefix}${escapeHtml(displayName)}</span>`;
+      return `<span class="file-breadcrumb-current" title="${titleAttr}">${prefix}${escapeHtml(displayName)}</span>${lockBadge}`;
     }
     return `<span class="file-breadcrumb-item" data-path="${escapeHtml(bc.path)}" onclick="navigateToSubpath(this.getAttribute('data-path'))" title="${titleAttr}">${prefix}${escapeHtml(displayName)}</span>${chevronSep}`;
   }).join('');
@@ -6103,6 +6138,12 @@ async function submitRenameFile(e) {
   const newName = document.getElementById('rename-file-newname')?.value.trim();
   if (!oldPath || !newName) return;
 
+  if (isProtectedFilePath(oldPath) || isProtectedFilePath(AppState.files.currentPath)) {
+    showToast('Los respaldos históricos son inmutables y no admiten modificaciones.', 'warning');
+    closeModal('modal-rename-file');
+    return;
+  }
+
   const btn = document.getElementById('btn-submit-rename-file') || e.target.querySelector('button[type="submit"]');
   if (btn) {
     btn.disabled = true;
@@ -6149,6 +6190,12 @@ async function submitMoveFile(e) {
   const target = document.getElementById('move-file-target')?.value.trim() ?? '';
   if (!source) return;
 
+  if (isProtectedFilePath(source) || isProtectedFilePath(target) || isProtectedFilePath(AppState.files.currentPath)) {
+    showToast('Los respaldos históricos son inmutables y no admiten modificaciones.', 'warning');
+    closeModal('modal-move-file');
+    return;
+  }
+
   const btn = document.getElementById('btn-submit-move-file') || e.target.querySelector('button[type="submit"]');
   if (btn) {
     btn.disabled = true;
@@ -6190,6 +6237,12 @@ function openDeleteModal(relPath, name) {
 async function confirmDeleteFile() {
   const path = document.getElementById('delete-file-path')?.value;
   if (!path) return;
+
+  if (isProtectedFilePath(path) || isProtectedFilePath(AppState.files.currentPath)) {
+    showToast('Los respaldos históricos son inmutables (chattr +i) y están protegidos contra eliminación. Gestione las copias de seguridad desde el módulo Respaldos.', 'warning');
+    closeModal('modal-delete-file');
+    return;
+  }
 
   const btn = document.getElementById('btn-confirm-delete');
   if (btn) {
