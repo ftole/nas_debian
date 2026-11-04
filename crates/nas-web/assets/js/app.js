@@ -4889,15 +4889,15 @@ function getContrastTextColor(hexColor) {
 }
 
 function getFileFormattedSize(item) {
-  if (!item || item.is_dir) return '';
-  if (item.size_formatted && item.size_formatted !== '--' && item.size_formatted !== '0 B') {
-    return item.size_formatted;
-  }
+  if (!item) return '0 B';
   const bytes = Number(item.size_bytes ?? item.size ?? 0);
   if (!isNaN(bytes) && bytes > 0) {
     return formatBytesLocal(bytes);
   }
-  return item.size_formatted || '0 B';
+  if (item.size_formatted && item.size_formatted !== '--') {
+    return item.size_formatted;
+  }
+  return '0 B';
 }
 
 function isProtectedFilePath(path) {
@@ -5179,9 +5179,7 @@ function updateFilesStatusBar() {
 
   let totalBytes = 0;
   items.forEach(i => {
-    if (!i.is_dir) {
-      totalBytes += Number(i.size_bytes || i.size || 0);
-    }
+    totalBytes += Number(i.size_bytes || i.size || 0);
   });
 
   if (totalEl) {
@@ -5200,7 +5198,8 @@ function updateFilesStatusBar() {
     if (AppState.files.selectedItemPath) {
       const selItem = allItems.find(i => (i.relative_path || i.path) === AppState.files.selectedItemPath);
       if (selItem) {
-        const itemType = selItem.is_dir ? 'Carpeta' : (selItem.size_formatted || '0 B');
+        const itemSize = getFileFormattedSize(selItem) || '0 B';
+        const itemType = selItem.is_dir ? `Carpeta (${itemSize})` : itemSize;
         selectedEl.textContent = `• Seleccionado: ${selItem.name} (${itemType})`;
       } else {
         selectedEl.textContent = '';
@@ -5423,8 +5422,9 @@ function renderFileGrid(items) {
     const meta = getFileTypeMeta(item);
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
+    const isProtected = isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath);
     const fileSize = getFileFormattedSize(item);
-    const sizeStr = isDir ? 'Carpeta' : fileSize;
+    const sizeStr = fileSize || '0 B';
 
     const previewBtn = !isDir
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'preview')" title="Previsualizar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-eye"></use></svg></button>`
@@ -5434,7 +5434,6 @@ function renderFileGrid(items) {
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
       : `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
 
-    const isProtected = isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath);
     const writeActions = !isProtected
       ? `
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
@@ -5452,7 +5451,7 @@ function renderFileGrid(items) {
            onclick="handleCardClick(this)"
            ondblclick="handleCardDblClick(this)"
            onkeydown="handleCardKeyDown(event, this)"
-           title="${escapeHtml(item.name)} • ${escapeHtml(meta.typeLabel)}${isDir ? '' : ` (${fileSize})`}">
+           title="${escapeHtml(item.name)} • ${escapeHtml(meta.typeLabel)} (${escapeHtml(fileSize || '0 B')})">
         
         <div class="file-card-actions">
           ${previewBtn}
@@ -5468,7 +5467,7 @@ function renderFileGrid(items) {
         <span class="file-card-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
         <div class="file-card-info" style="display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:2px; width:100%;">
           <span class="file-card-type-tag ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
-          ${isDir ? '' : `<span class="file-card-meta">${escapeHtml(fileSize)}</span>`}
+          <span class="file-card-meta">${escapeHtml(fileSize || '0 B')}</span>
         </div>
       </div>
     `;
@@ -5549,8 +5548,9 @@ function renderFileTable(items) {
     const relPath = item.relative_path || item.path || '';
     const isSelected = AppState.files.selectedItemPath === relPath;
     const nameClass = isDir ? 'file-row-name is-folder' : 'file-row-name';
+    const isProtected = isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath);
     const fileSize = getFileFormattedSize(item);
-    const tableSizeStr = isDir ? '—' : fileSize;
+    const tableSizeStr = fileSize || '0 B';
 
     const previewAction = !isDir
       ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'preview')" title="Previsualizar archivo"><svg class="icon"><use href="#icon-eye"></use></svg></button>`
@@ -5580,7 +5580,7 @@ function renderFileTable(items) {
             <span class="file-type-badge ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
           </div>
         </td>
-        <td style="font-weight:500; color:var(--text-main); white-space:nowrap;">${isDir ? '<span style="color:var(--text-muted);">&mdash;</span>' : escapeHtml(tableSizeStr)}</td>
+        <td style="font-weight:500; color:var(--text-main); white-space:nowrap;">${escapeHtml(tableSizeStr)}</td>
         <td><code>${escapeHtml(item.permissions || '0660')}</code></td>
         <td>${ownerStr}:${groupStr}</td>
         <td style="font-size:12px; color:var(--text-muted);">${modStr}</td>
@@ -5649,6 +5649,9 @@ function selectTableRow(tr, relPath) {
 }
 
 function handleTableRowAction(btn, action) {
+  if (window.event && typeof window.event.stopPropagation === 'function') {
+    window.event.stopPropagation();
+  }
   const tr = btn.closest('tr');
   if (!tr) return;
   const relPath = tr.getAttribute('data-path') || '';
