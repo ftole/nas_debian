@@ -1147,7 +1147,7 @@ $serverRoleLabel = \App\Services\SystemService::getServerRoleLabel();
                   <svg class="icon" style="width:36px; height:36px;"><use href="#icon-upload"></use></svg>
                 </div>
                 <div class="dropzone-text">Suelta los archivos aquí para subirlos a esta carpeta</div>
-                <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 512 MB por archivo</div>
+                <div style="font-size:13px; color:var(--text-muted);">Soporta transferencias directas de hasta 50 GB por archivo</div>
               </div>
 
               <input type="file" id="files-hidden-input" multiple style="display:none;" onchange="handleFileSelect(event)">
