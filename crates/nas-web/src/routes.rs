@@ -1061,6 +1061,13 @@ fn error_response(error: NasError) -> Response {
         NasError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             StatusCode::NOT_FOUND
         }
+        NasError::Io { source, .. }
+            if source.kind() == std::io::ErrorKind::PermissionDenied
+                || source.raw_os_error() == Some(1)
+                || source.raw_os_error() == Some(13) =>
+        {
+            StatusCode::FORBIDDEN
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
