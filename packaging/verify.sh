@@ -37,7 +37,7 @@ NGINX="$SCRIPT_DIR/nginx-nas-web.conf"
 check "$NGINX" "proxy_pass http://127.0.0.1:8080" "nginx: proxy_pass"
 check "$NGINX" "ssl_certificate" "nginx: TLS"
 check "$NGINX" "Strict-Transport-Security" "nginx: HSTS"
-check "$NGINX" "client_max_body_size 512M" "nginx: límite de subida"
+check "$NGINX" "client_max_body_size 50G" "nginx: límite de subida"
 check "$NGINX" "listen 443 ssl" "nginx: HTTPS"
 
 INSTALL="$SCRIPT_DIR/install.sh"
