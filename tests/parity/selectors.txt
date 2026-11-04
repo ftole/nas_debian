@@ -7,11 +7,14 @@
 #trash-table-body tr.selected
 #users-filter-chips .chip-btn
 #users-table-body tr[data-username]
+.btn-secondary
 .file-card.selected
 .member-name
 .modal-backdrop, .modal-overlay
 .modal-backdrop.active, .modal-backdrop.open, .modal-overlay.active, .modal-overlay.open
+.modal-close
 .modal-dialog, .modal-dialog-preview
+.modal-header
 .perm-matrix-card
 .preview-pptx-slide-thumb
 .preview-sheet-tab
