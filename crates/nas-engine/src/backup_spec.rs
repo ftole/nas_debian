@@ -51,6 +51,13 @@ pub struct BackupSpec {
     /// Clave privada SSH (contenido PEM o ruta al archivo de clave).
     #[serde(default, alias = "key_file", alias = "key_path", alias = "private_key")]
     pub ssh_key: Option<String>,
+    /// Generar respaldo permanente inicial y mensual automático (Golden Snapshot).
+    #[serde(default = "default_true")]
+    pub auto_permanent: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl BackupSpec {
@@ -249,10 +256,10 @@ impl BackupSpec {
 
         let rsync = match proto {
             Proto::Ssh => {
-                "mkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nif [ -n \"$KEY_FILE\" ] && [ -f \"$KEY_FILE\" ]; then\n    rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i $KEY_FILE -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nelif [ -f \"/etc/backup-credentials/$TASK.id_ed25519\" ]; then\n    rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\nelse\n    SSHPASS=\"\"\n    if [ -f \"$CRED\" ]; then\n        IFS= read -r SSHPASS < \"$CRED\" || true\n    fi\n    export SSHPASS\n    sshpass -e rsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?\n    unset SSHPASS\nfi".to_string()
+                "mkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nif [ -n \"$KEY_FILE\" ] && [ -f \"$KEY_FILE\" ]; then\n    rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i $KEY_FILE -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelif [ -f \"/etc/backup-credentials/$TASK.id_ed25519\" ]; then\n    rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelse\n    SSHPASS=\"\"\n    if [ -f \"$CRED\" ]; then\n        IFS= read -r SSHPASS < \"$CRED\" || true\n    fi\n    export SSHPASS\n    sshpass -e rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\n    unset SSHPASS\nfi".to_string()
             }
             _ => {
-                "RSYNC_RC=0\nrsync -aAXH --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" || RSYNC_RC=$?".to_string()
+                "RSYNC_RC=0\nrsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}".to_string()
             }
         };
 
@@ -267,6 +274,7 @@ SRC_PATH={q_path}
 SRC_USER={q_user}
 SRC_PORT={port}
 RETENTION={retention}
+AUTO_PERMANENT={auto_permanent}
 DEST_ROOT={q_dest_root}
 LOG_DIR='/srv/nas/LOGS_BACKUP'
 CRED_FILE={q_cred}
@@ -277,7 +285,9 @@ BKP_DIR="${{BKP_DIR:-{q_dest}}}"
 PERM_DIR="${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK"
 LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
 MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
+PROG_FILE="/run/nas-backup-$TASK.progress"
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
+START_TIME=$(date +%s)
 STAGE="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL="$BKP_DIR/snapshot_$DATE_STR"
 SNAPSHOT_OK=false
@@ -285,6 +295,7 @@ SNAPSHOT_OK=false
 log() {{ printf '[%s] [%s] %s\n' "$(date '+%F %T')" "$TASK" "$*" >> "$LOG"; }}
 cleanup() {{
     local status=$?
+    rm -f "$PROG_FILE" "${{PROG_FILE}}.tmp."* 2>/dev/null || true
     if mountpoint -q "$MOUNT" 2>/dev/null; then umount "$MOUNT" || true; fi
     if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         log "ERROR: se descarta el snapshot parcial (codigo de salida $status)"
@@ -297,6 +308,22 @@ cleanup() {{
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
+
+update_progress() {{
+    local b pct spd rem rest num_pct diff elap tmp_file
+    while read -r b pct spd rem rest; do
+        [ -z "$pct" ] && continue
+        num_pct="${{pct%%%}}"
+        num_pct="${{num_pct//[^0-9]/}}"
+        [ -z "$num_pct" ] && continue
+        diff=$(($(date +%s) - START_TIME))
+        elap=$(printf '%02d:%02d:%02d' $((diff/3600)) $(((diff%3600)/60)) $((diff%60)))
+        tmp_file="${{PROG_FILE}}.tmp.$$"
+        printf '{{"percent":%d,"speed":"%s","elapsed":"%s","remaining":"%s","bytes":"%s"}}\n' \
+            "$num_pct" "${{spd:-0.00kB/s}}" "$elap" "${{rem:---:--:--}}" "${{b//,/}}" > "$tmp_file" 2>/dev/null || true
+        mv -f "$tmp_file" "$PROG_FILE" 2>/dev/null || true
+    done
+}}
 
 mkdir -p "$BKP_DIR" "$LOG_DIR" "$PERM_DIR"
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
@@ -322,6 +349,7 @@ mkdir -p "$STAGE"
 {source_setup}
 
 log "inicio ($MODE): $SRC"
+printf '{{"percent":0,"speed":"0.00kB/s","elapsed":"00:00:00","remaining":"--:--:--","bytes":"0"}}\n' > "$PROG_FILE" 2>/dev/null || true
 {rsync}
 if [ "$RSYNC_RC" -ne 0 ] && [ "$RSYNC_RC" -ne 24 ]; then
     log "ERROR: en replicación rsync (código $RSYNC_RC)"
@@ -331,21 +359,38 @@ mv "$STAGE" "$FINAL"
 SNAPSHOT_OK=true
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
 chmod -R a-w "$FINAL" 2>/dev/null || true
-chattr +i "$FINAL" 2>/dev/null || true
-log "snapshot completado: $FINAL"
 
-DAY_OF_MONTH=$(date +%d)
-if [ "$DAY_OF_MONTH" = "01" ]; then
-    MONTH_TAG=$(date +%Y-%m)
-    if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
-        PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
+if [ "$AUTO_PERMANENT" = "true" ]; then
+    HAS_PERM=false
+    if [ -d "$PERM_DIR" ] && find "$PERM_DIR" -mindepth 1 -maxdepth 1 -type d -name "FULL_*" 2>/dev/null | grep -q .; then
+        HAS_PERM=true
+    fi
+
+    if [ "$HAS_PERM" != "true" ]; then
+        PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_INICIAL"
         if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
             chmod -R a-w "$PERM_DEST" 2>/dev/null || true
             chattr +i "$PERM_DEST" 2>/dev/null || true
-            log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
+            log "congelación inicial automática: FULL_${{DATE_STR}}_INICIAL"
+        fi
+    else
+        DAY_OF_MONTH=$(date +%d)
+        if [ "$DAY_OF_MONTH" = "01" ]; then
+            MONTH_TAG=$(date +%Y-%m)
+            if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
+                PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
+                if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
+                    chmod -R a-w "$PERM_DEST" 2>/dev/null || true
+                    chattr +i "$PERM_DEST" 2>/dev/null || true
+                    log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
+                fi
+            fi
         fi
     fi
 fi
+
+chattr +i "$FINAL" 2>/dev/null || true
+log "snapshot completado: $FINAL"
 
 mapfile -t ALL_SNAPS < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' | LC_ALL=C sort)
 TOTAL_SNAPS="${{#ALL_SNAPS[@]}}"
@@ -372,6 +417,7 @@ fi
             q_user = shell_single_quote(src_user),
             port = port,
             retention = self.retention,
+            auto_permanent = self.auto_permanent,
             q_dest_root = shell_single_quote(&dest_root),
             q_cred = shell_single_quote(&cred),
             q_key = shell_single_quote(&key_file),
@@ -496,6 +542,7 @@ mod tests {
             dest_unit: "principal".into(),
             port: None,
             ssh_key: None,
+            auto_permanent: true,
         }
     }
 
@@ -537,6 +584,10 @@ mod tests {
         assert!(runner.contains("MOUNT_ROOT:-/mnt/backup_sources"));
         assert!(runner.contains("ERROR: se descarta el snapshot parcial"));
         assert!(runner.contains("2>> \"$LOG\""));
+        assert!(runner.contains("--info=progress2"));
+        assert!(runner.contains("update_progress"));
+        assert!(runner.contains("FULL_${DATE_STR}_INICIAL"));
+        assert!(runner.contains("AUTO_PERMANENT=true"));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
