@@ -321,11 +321,14 @@ update_progress() {{
         tmp_file="${{PROG_FILE}}.tmp.$$"
         printf '{{"percent":%d,"speed":"%s","elapsed":"%s","remaining":"%s","bytes":"%s"}}\n' \
             "$num_pct" "${{spd:-0.00kB/s}}" "$elap" "${{rem:---:--:--}}" "${{b//,/}}" > "$tmp_file" 2>/dev/null || true
+        chmod 0644 "$tmp_file" 2>/dev/null || true
         mv -f "$tmp_file" "$PROG_FILE" 2>/dev/null || true
     done
 }}
 
 mkdir -p "$BKP_DIR" "$LOG_DIR" "$PERM_DIR"
+chown root:grp_samba "$PERM_DIR" 2>/dev/null || true
+chmod 2770 "$PERM_DIR" 2>/dev/null || true
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
 flock -n 9 || {{ log "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ==="; exit 0; }}
 
@@ -350,6 +353,7 @@ mkdir -p "$STAGE"
 
 log "inicio ($MODE): $SRC"
 printf '{{"percent":0,"speed":"0.00kB/s","elapsed":"00:00:00","remaining":"--:--:--","bytes":"0"}}\n' > "$PROG_FILE" 2>/dev/null || true
+chmod 0644 "$PROG_FILE" 2>/dev/null || true
 {rsync}
 if [ "$RSYNC_RC" -ne 0 ] && [ "$RSYNC_RC" -ne 24 ]; then
     log "ERROR: en replicación rsync (código $RSYNC_RC)"
@@ -369,6 +373,8 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
     if [ "$HAS_PERM" != "true" ]; then
         PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_INICIAL"
         if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
+            printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"INICIAL","size_bytes":0,"files_count":0}}\n' \
+                "$TASK" "FULL_${{DATE_STR}}_INICIAL" "$PERM_DEST" "$DATE_STR" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
             chmod -R a-w "$PERM_DEST" 2>/dev/null || true
             chattr +i "$PERM_DEST" 2>/dev/null || true
             log "congelación inicial automática: FULL_${{DATE_STR}}_INICIAL"
@@ -380,6 +386,8 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
             if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
                 PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
                 if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
+                    printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"MENSUAL","size_bytes":0,"files_count":0}}\n' \
+                        "$TASK" "FULL_${{DATE_STR}}_MENSUAL" "$PERM_DEST" "$DATE_STR" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
                     chmod -R a-w "$PERM_DEST" 2>/dev/null || true
                     chattr +i "$PERM_DEST" 2>/dev/null || true
                     log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
