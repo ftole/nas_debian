@@ -74,7 +74,7 @@ El servidor incluye el panel web portado a Rust (`nas-web`, axum) conservando la
   `app.js`, CSS, favicon y las librerías de ofimática viajan dentro del binario y se sirven byte a byte, con hashes verificados en CI.
 - **Explorador de Archivos Drag-and-Drop:**
   - Navega con seguridad por las carpetas de `/srv/nas`.
-  - Permite arrastrar y soltar archivos desde Windows con barra de progreso interactiva (hasta 512 MB por archivo).
+  - Permite arrastrar y soltar archivos desde Windows con barra de progreso interactiva (hasta 50 GB por archivo).
   - Descarga archivos individuales o carpetas completas comprimidas en ZIP al vuelo.
   - **Papelera de Reciclaje Integrada (`.trash/`):** Al eliminar un archivo, se mueve a la papelera con su ruta original registrada. El panel muestra un contador flotante (badge) con los elementos en papelera, permitiendo restaurarlos a su ubicación exacta o vaciarla definitivamente.
   - **Visor Universal de Archivos y Ofimática 100% Offline (Excel, Word, PowerPoint, Texto, PDFs y Multimedia):** Permite previsualizar hojas de cálculo (`.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`) con navegación por pestañas y tablas estilizadas (SheetJS local), documentos Word (`.docx`) renderizados fielmente en formato página (docx-preview y JSZip locales), presentaciones PowerPoint (`.pptx`) con navegación interactiva por diapositivas y extracción de contenidos, además de visor y editor de texto en caliente con numeración de líneas, reproductor multimedia HTML5 y visor PDF nativo con cero dependencias en la nube.
