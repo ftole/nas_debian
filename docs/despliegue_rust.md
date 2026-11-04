@@ -41,7 +41,7 @@ sudo bash packaging/install.sh --no-nginx     # solo servicio, helpers y sudoers
    - instala los helpers `nas-samba-apply`, `nas-share-dir`, `nas-share-acl`,
      `nas-accounts` y `nas-backup-manage`;
    - escribe `/etc/sudoers.d/nas-web-rust` (validado con `visudo -cf`);
-   - configura Nginx con **`proxy_pass` a 127.0.0.1:8080**, TLS, CSP y 512 MB
+   - configura Nginx con **`proxy_pass` a 127.0.0.1:8080**, TLS, CSP y 50 GB
      de subida, respaldando la configuración previa.
 
 ## 4. Variables de entorno (`/etc/nas-web.env`)
