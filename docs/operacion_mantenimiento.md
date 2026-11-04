@@ -119,7 +119,7 @@ El sistema detendrá el proceso de `rsync`, liberará el cerrojo de `flock`, des
 
 ## 5. Explorador Web, Edición en Vivo y Papelera
 
-- **Subir archivos grandes:** Arrastra archivos desde tu explorador de Windows directamente a la ventana del navegador (admite transferencias de hasta 512 MB por archivo con barra de progreso).
+- **Subir archivos grandes:** Arrastra archivos desde tu explorador de Windows directamente a la ventana del navegador (admite transferencias de hasta 50 GB por archivo con barra de progreso).
 - **Descargar carpetas en ZIP:** Haz clic en el botón de descarga junto a cualquier carpeta para recibir un archivo comprimido generado en el instante.
 - **Editar archivos de configuración:** Haz clic en cualquier archivo de texto para abrir el visor. Pulsa **"Editar"**, haz las modificaciones directamente en el editor con numeración de líneas y haz clic en **"Guardar"**.
 - **Papelera de reciclaje:**
