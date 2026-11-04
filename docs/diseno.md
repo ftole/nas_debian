@@ -60,7 +60,7 @@ La interfaz cuenta con soporte nativo para **Tema Oscuro** (predeterminado) y **
 
 ### 3.1 Explorador de Archivos Drag-and-Drop
 - **Navegación visual limpia:** Vista en lista con diferenciación clara de carpetas, documentos de oficina, archivos comprimidos, código fuente y medios multimedia.
-- **Subida intuitiva:** Zona interactiva de arrastre desde cualquier explorador de Windows con barra de progreso fluida que soporta archivos de hasta 512 MB.
+- **Subida intuitiva:** Zona interactiva de arrastre desde cualquier explorador de Windows con barra de progreso fluida que soporta archivos de hasta 50 GB.
 - **Descarga flexible:** Descarga individual de archivos y generación al vuelo de archivos comprimidos `.zip` para carpetas completas mediante `ZipArchive`.
 - **Papelera de reciclaje visual (`.trash/`):**
   - Al pulsar "Eliminar", el archivo no se destruye de golpe; se mueve a la papelera registrando su ruta de origen.
