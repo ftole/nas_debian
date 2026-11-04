@@ -38,7 +38,7 @@ SystemCallErrorNumber=EPERM
 ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin /usr/local/sbin -/etc/cron.d -/etc/backup-credentials -/etc/samba
 UMask=0007
 CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_MKNOD CAP_AUDIT_WRITE CAP_KILL CAP_LINUX_IMMUTABLE
-AmbientCapabilities=
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
 
 [Install]
 WantedBy=multi-user.target
