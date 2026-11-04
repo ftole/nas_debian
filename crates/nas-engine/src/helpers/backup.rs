@@ -148,10 +148,44 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         let _ = std::fs::remove_file(&key_dst);
     }
 
-    let _ = std::fs::remove_file(&runner_src);
-    let _ = std::fs::remove_file(&cron_src);
-    let _ = std::fs::remove_file(&cred_src);
-    let _ = std::fs::remove_file(&key_src);
+    let perm_root = dest_root.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
+    let perm_task_dir = PathBuf::from(&perm_root).join(id);
+    let _ = std::fs::create_dir_all(&perm_task_dir);
+    let _ = runner.run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
+
+    let runner_content = std::fs::read_to_string(&runner_dst).unwrap_or_default();
+    let auto_permanent = runner_content.contains("AUTO_PERMANENT=true");
+    if auto_permanent {
+        let has_perm = std::fs::read_dir(&perm_task_dir)
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    e.path().is_dir()
+                        && e.file_name()
+                            .to_str()
+                            .map(|name| name.starts_with("FULL_"))
+                            .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+
+        if !has_perm {
+            let has_snaps = std::fs::read_dir(&task_dest)
+                .map(|entries| {
+                    entries.flatten().any(|e| {
+                        e.path().is_dir()
+                            && e.file_name()
+                                .to_str()
+                                .map(|name| name.starts_with("snapshot_"))
+                                .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false);
+            if has_snaps {
+                let _ = freeze_backup_task(runner, id, Some("INICIAL"));
+            }
+        }
+    }
 
     Ok(format!("tarea {id} instalada"))
 }
@@ -326,6 +360,8 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let _ = runner.run(&CommandSpec::new("pkill").args(["-TERM", "-f", &pattern]));
     std::thread::sleep(Duration::from_millis(500));
     let _ = runner.run(&CommandSpec::new("pkill").args(["-KILL", "-f", &pattern]));
+    let _ = std::fs::remove_file(format!("/run/nas-backup-{id}.progress"));
+    let _ = std::fs::remove_file(format!("/tmp/nas-backup-{id}.progress"));
 
     Ok(format!("tarea {id} detenida"))
 }
@@ -358,6 +394,8 @@ pub fn delete_backup_task(id: &str) -> NasResult<String> {
     let _ = std::fs::remove_file(format!("/etc/backup-credentials/{id}.cred"));
     let _ = std::fs::remove_file(format!("/etc/backup-credentials/{id}.id_ed25519"));
     let _ = std::fs::remove_file(format!("/var/lock/backup_{id}.lock"));
+    let _ = std::fs::remove_file(format!("/run/nas-backup-{id}.progress"));
+    let _ = std::fs::remove_file(format!("/tmp/nas-backup-{id}.progress"));
 
     Ok(format!("tarea {id} eliminada (snapshots conservados)"))
 }
