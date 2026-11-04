@@ -69,6 +69,8 @@ pub struct BackupTask {
     pub credentials_file: Option<String>,
     /// Archivo de clave privada SSH (0600 root:root).
     pub key_file: Option<String>,
+    /// Generación automática de respaldos permanentes inicial y mensual (Golden Snapshot).
+    pub auto_permanent: bool,
 }
 
 const DEFAULT_DESTINATION: &str = "/srv/nas/BACKUPS_HISTORICOS";
@@ -142,6 +144,10 @@ impl BackupTask {
             .unwrap_or(DEFAULT_RETENTION)
             .max(1);
 
+        let auto_permanent = extract(script, "AUTO_PERMANENT")
+            .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
+            .unwrap_or(true);
+
         Ok(Self {
             id: id.to_string(),
             kind,
@@ -156,6 +162,7 @@ impl BackupTask {
             log_dir: extract(script, "LOG_DIR").unwrap_or_else(|| DEFAULT_LOG_DIR.to_string()),
             credentials_file: extract(script, "CRED_FILE"),
             key_file: extract(script, "KEY_FILE"),
+            auto_permanent,
         })
     }
 
