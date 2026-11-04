@@ -176,6 +176,13 @@ function closeModal(modalId) {
       if (modalHeader) {
         modalHeader.style.backgroundColor = '';
         modalHeader.style.borderBottomColor = '';
+        modalHeader.style.removeProperty('--preview-header-bg');
+        modalHeader.style.removeProperty('--preview-header-border');
+        modalHeader.style.removeProperty('--preview-header-text');
+        modalHeader.style.removeProperty('--preview-header-meta');
+        modalHeader.style.removeProperty('--preview-btn-bg');
+        modalHeader.style.removeProperty('--preview-btn-border');
+        modalHeader.style.removeProperty('--preview-btn-hover-bg');
         const titleEl = document.getElementById('preview-file-name');
         const metaEl = document.getElementById('preview-file-meta');
         const iconEl = document.getElementById('preview-header-icon');
@@ -4899,6 +4906,7 @@ function getFileTypeMeta(item) {
       icon: '#icon-file',
       color: '#64748b',
       headerBg: '#334155',
+      badgeClass: 'badge-type-unknown',
       badgeBg: 'rgba(51, 65, 85, 0.25)',
       badgeColor: '#94a3b8',
       badgeBorder: 'rgba(148, 163, 184, 0.35)',
@@ -4914,6 +4922,7 @@ function getFileTypeMeta(item) {
       icon: '#icon-folder',
       color: '#ffe2bb',
       headerBg: '#ffe2bb',
+      badgeClass: 'badge-type-folder',
       badgeBg: 'rgba(255, 226, 187, 0.18)',
       badgeColor: '#ffe2bb',
       badgeBorder: 'rgba(255, 226, 187, 0.4)',
@@ -4933,11 +4942,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-table',
       color: '#16a34a',
       headerBg: '#107c41',
+      badgeClass: 'badge-type-excel',
       badgeBg: 'rgba(16, 124, 65, 0.18)',
       badgeColor: '#22c55e',
       badgeBorder: 'rgba(34, 197, 94, 0.35)',
       typeLabel: ext ? `Hoja de cálculo (${ext.toUpperCase()})` : 'Hoja de cálculo',
-      shortLabel: ext ? `Excel (${ext.toUpperCase()})` : 'Excel',
+      shortLabel: 'Excel',
       previewable: true,
       mediaType: 'excel',
     };
@@ -4949,11 +4959,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-file-text',
       color: '#2563eb',
       headerBg: '#185abd',
+      badgeClass: 'badge-type-word',
       badgeBg: 'rgba(24, 90, 189, 0.18)',
       badgeColor: '#3b82f6',
       badgeBorder: 'rgba(59, 130, 246, 0.35)',
       typeLabel: ext ? `Documento Word (${ext.toUpperCase()})` : 'Documento Word',
-      shortLabel: ext ? `Word (${ext.toUpperCase()})` : 'Word',
+      shortLabel: 'Word',
       previewable: true,
       mediaType: 'word',
     };
@@ -4965,11 +4976,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-presentation',
       color: '#ea580c',
       headerBg: '#c43e1c',
+      badgeClass: 'badge-type-presentation',
       badgeBg: 'rgba(196, 62, 28, 0.18)',
       badgeColor: '#f97316',
       badgeBorder: 'rgba(249, 115, 22, 0.35)',
-      typeLabel: ext ? `Presentación (${ext.toUpperCase()})` : 'Presentación',
-      shortLabel: ext ? `PowerPoint (${ext.toUpperCase()})` : 'PowerPoint',
+      typeLabel: ext ? `Presentación PowerPoint (${ext.toUpperCase()})` : 'Presentación PowerPoint',
+      shortLabel: 'PowerPoint',
       previewable: true,
       mediaType: 'presentation',
     };
@@ -4981,6 +4993,7 @@ function getFileTypeMeta(item) {
       icon: '#icon-file-text',
       color: '#dc2626',
       headerBg: '#b91c1c',
+      badgeClass: 'badge-type-pdf',
       badgeBg: 'rgba(185, 28, 28, 0.18)',
       badgeColor: '#ef4444',
       badgeBorder: 'rgba(239, 68, 68, 0.35)',
@@ -4997,11 +5010,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-image',
       color: '#9333ea',
       headerBg: '#7e22ce',
+      badgeClass: 'badge-type-image',
       badgeBg: 'rgba(126, 34, 206, 0.18)',
       badgeColor: '#a855f7',
       badgeBorder: 'rgba(168, 85, 247, 0.35)',
       typeLabel: ext ? `Imagen ${ext.toUpperCase()}` : 'Imagen',
-      shortLabel: ext ? `Imagen (${ext.toUpperCase()})` : 'Imagen',
+      shortLabel: ext ? ext.toUpperCase() : 'Imagen',
       previewable: true,
       mediaType: 'image',
     };
@@ -5013,11 +5027,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-video',
       color: '#e11d48',
       headerBg: '#be123c',
+      badgeClass: 'badge-type-video',
       badgeBg: 'rgba(190, 18, 60, 0.18)',
       badgeColor: '#f43f5e',
       badgeBorder: 'rgba(244, 63, 94, 0.35)',
       typeLabel: ext ? `Video ${ext.toUpperCase()}` : 'Video',
-      shortLabel: ext ? `Video (${ext.toUpperCase()})` : 'Video',
+      shortLabel: ext ? ext.toUpperCase() : 'Video',
       previewable: ['mp4', 'webm'].includes(ext),
       mediaType: 'video',
     };
@@ -5029,11 +5044,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-music',
       color: '#0d9488',
       headerBg: '#0f766e',
+      badgeClass: 'badge-type-audio',
       badgeBg: 'rgba(15, 118, 110, 0.18)',
       badgeColor: '#14b8a6',
       badgeBorder: 'rgba(20, 184, 166, 0.35)',
       typeLabel: ext ? `Audio ${ext.toUpperCase()}` : 'Audio',
-      shortLabel: ext ? `Audio (${ext.toUpperCase()})` : 'Audio',
+      shortLabel: ext ? ext.toUpperCase() : 'Audio',
       previewable: ['mp3', 'wav', 'ogg'].includes(ext),
       mediaType: 'audio',
     };
@@ -5045,11 +5061,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-archive',
       color: '#d97706',
       headerBg: '#b45309',
+      badgeClass: 'badge-type-archive',
       badgeBg: 'rgba(180, 83, 9, 0.18)',
       badgeColor: '#f59e0b',
       badgeBorder: 'rgba(245, 158, 11, 0.35)',
-      typeLabel: ext ? `Archivo comprimido (${ext.toUpperCase()})` : 'Comprimido',
-      shortLabel: ext ? `ZIP (${ext.toUpperCase()})` : 'Comprimido',
+      typeLabel: ext ? `Archivo comprimido (${ext.toUpperCase()})` : 'Archivo comprimido',
+      shortLabel: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz'].includes(ext) ? ext.toUpperCase() : 'Comprimido',
       previewable: false,
       mediaType: 'archive',
     };
@@ -5062,11 +5079,12 @@ function getFileTypeMeta(item) {
       icon: isScript ? '#icon-terminal' : '#icon-file-text',
       color: '#0284c7',
       headerBg: '#0369a1',
+      badgeClass: 'badge-type-code',
       badgeBg: 'rgba(3, 105, 161, 0.18)',
       badgeColor: '#38bdf8',
       badgeBorder: 'rgba(56, 189, 248, 0.35)',
       typeLabel: ext ? `Código (${ext.toUpperCase()})` : 'Código',
-      shortLabel: ext ? `Código (${ext.toUpperCase()})` : 'Código',
+      shortLabel: ext ? ext.toUpperCase() : 'Código',
       previewable: true,
       mediaType: 'text',
     };
@@ -5078,11 +5096,12 @@ function getFileTypeMeta(item) {
       icon: '#icon-file-text',
       color: '#64748b',
       headerBg: '#334155',
+      badgeClass: 'badge-type-text',
       badgeBg: 'rgba(51, 65, 85, 0.25)',
       badgeColor: '#94a3b8',
       badgeBorder: 'rgba(148, 163, 184, 0.35)',
-      typeLabel: ext ? `Texto (${ext.toUpperCase()})` : 'Texto',
-      shortLabel: ext ? `Texto (${ext.toUpperCase()})` : 'Texto',
+      typeLabel: ext ? `Documento de texto (${ext.toUpperCase()})` : 'Documento de texto',
+      shortLabel: ext ? ext.toUpperCase() : 'Texto',
       previewable: true,
       mediaType: 'text',
     };
@@ -5093,6 +5112,7 @@ function getFileTypeMeta(item) {
     icon: '#icon-file',
     color: '#64748b',
     headerBg: '#334155',
+    badgeClass: 'badge-type-unknown',
     badgeBg: 'rgba(51, 65, 85, 0.25)',
     badgeColor: '#94a3b8',
     badgeBorder: 'rgba(148, 163, 184, 0.35)',
@@ -5419,13 +5439,13 @@ function renderFileGrid(items) {
         </div>
 
         <div class="file-card-icon-wrap">
-          <svg class="file-card-icon" style="color:${meta.color};"><use href="${meta.icon}"></use></svg>
+          <svg class="file-card-icon ${isDir ? 'icon-folder-colored' : ''}" style="${isDir ? '' : 'color:' + meta.color + ';'}"><use href="${meta.icon}"></use></svg>
         </div>
 
         <span class="file-card-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
         <div class="file-card-info" style="display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:2px; width:100%;">
-          <span class="file-card-type-tag" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
-          <span class="file-card-meta">${isDir ? 'Carpeta' : escapeHtml(fileSize)}</span>
+          <span class="file-card-type-tag ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+          ${isDir ? '' : `<span class="file-card-meta">${escapeHtml(fileSize)}</span>`}
         </div>
       </div>
     `;
@@ -5530,11 +5550,11 @@ function renderFileTable(items) {
           onclick="handleTableRowSelect(this)"
           ondblclick="handleTableRowDblClick(this)"
           onkeydown="handleTableRowKeyDown(event, this)">
-        <td style="width:36px; text-align:center;"><svg class="icon" style="color:${meta.color}; width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
+        <td style="width:36px; text-align:center;"><svg class="icon ${isDir ? 'icon-folder-colored' : ''}" style="${isDir ? '' : 'color:' + meta.color + ';'} width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
         <td>
           <div class="${nameClass}" onclick="handleTableRowNameClick(event, this)" style="display:flex; align-items:center; gap:8px;">
             <span style="font-weight:500;">${escapeHtml(item.name)}</span>
-            <span class="file-type-badge" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+            <span class="file-type-badge ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
           </div>
         </td>
         <td style="font-weight:500; color:var(--text-main); white-space:nowrap;">${isDir ? '<span style="color:var(--text-muted);">&mdash;</span>' : escapeHtml(tableSizeStr)}</td>
@@ -6306,11 +6326,11 @@ function renderTrashRows(items) {
 
     return `
       <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
-        <td style="width:36px; text-align:center;"><svg class="icon" style="color:${meta.color}; width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
+        <td style="width:36px; text-align:center;"><svg class="icon ${isDir ? 'icon-folder-colored' : ''}" style="${isDir ? '' : 'color:' + meta.color + ';'} width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
         <td>
           <div style="display:flex; align-items:center; gap:8px;">
             <strong>${escapeHtml(item.filename)}</strong>
-            <span class="file-type-badge" style="background:${meta.badgeBg}; color:${meta.badgeColor}; border:1px solid ${meta.badgeBorder};" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+            <span class="file-type-badge ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
           </div>
         </td>
         <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
@@ -6553,19 +6573,25 @@ async function previewFile(relPath, fileName) {
   const meta = getFileTypeMeta({ name: fileName, is_dir: false });
 
   // Buscar el elemento actual para obtener su tamaño formateado si ya existe
-  const currentItem = (AppState.files.items || []).find(i => (i.relative_path || i.path) === relPath || i.name === fileName);
-  const sizeFormatted = currentItem
-    ? (currentItem.size_formatted && currentItem.size_formatted !== '--' ? currentItem.size_formatted : formatBytesLocal(currentItem.size_bytes ?? currentItem.size))
-    : '';
+  const cleanRel = String(relPath || '').replace(/^\/+/, '');
+  const currentItem = (AppState.files.items || []).find(i => String(i.relative_path || i.path || '').replace(/^\/+/, '') === cleanRel || i.name === fileName);
+  let sizeFormatted = currentItem ? getFileFormattedSize(currentItem) : '';
 
   // Configurar encabezado de la modal con el color representativo del fichero
   const modalHeader = modal.querySelector('.modal-header');
   const headerBgColor = meta.headerBg || meta.color;
   if (modalHeader) {
     modalHeader.style.backgroundColor = headerBgColor;
-    modalHeader.style.borderBottomColor = 'rgba(0, 0, 0, 0.2)';
     const textColor = getContrastTextColor(headerBgColor);
     const isLightHeader = textColor === '#0f172a';
+    modalHeader.style.borderBottomColor = isLightHeader ? 'rgba(0, 0, 0, 0.12)' : 'rgba(0, 0, 0, 0.25)';
+    modalHeader.style.setProperty('--preview-header-bg', headerBgColor);
+    modalHeader.style.setProperty('--preview-header-border', isLightHeader ? 'rgba(0, 0, 0, 0.12)' : 'rgba(0, 0, 0, 0.25)');
+    modalHeader.style.setProperty('--preview-header-text', textColor);
+    modalHeader.style.setProperty('--preview-header-meta', isLightHeader ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.85)');
+    modalHeader.style.setProperty('--preview-btn-bg', isLightHeader ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.18)');
+    modalHeader.style.setProperty('--preview-btn-border', isLightHeader ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.3)');
+    modalHeader.style.setProperty('--preview-btn-hover-bg', isLightHeader ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.28)');
 
     if (titleEl) titleEl.style.color = textColor;
     if (metaEl) metaEl.style.color = isLightHeader ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.85)';
@@ -6684,6 +6710,9 @@ async function previewFile(relPath, fileName) {
       if (!response.ok) throw new Error(`HTTP ${response.status} al descargar archivo.`);
 
       const arrayBuffer = await response.arrayBuffer();
+      if (!sizeFormatted && arrayBuffer && arrayBuffer.byteLength) {
+        sizeFormatted = formatBytesLocal(arrayBuffer.byteLength);
+      }
       const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellDates: true });
 
       if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
@@ -6735,6 +6764,9 @@ async function previewFile(relPath, fileName) {
       if (!response.ok) throw new Error(`HTTP ${response.status} al descargar documento.`);
 
       const arrayBuffer = await response.arrayBuffer();
+      if (!sizeFormatted && arrayBuffer && arrayBuffer.byteLength) {
+        sizeFormatted = formatBytesLocal(arrayBuffer.byteLength);
+      }
       const docxContentEl = document.getElementById('preview-docx-content');
       if (docxContentEl) {
         docxContentEl.innerHTML = '';
@@ -6786,6 +6818,9 @@ async function previewFile(relPath, fileName) {
       if (!response.ok) throw new Error(`HTTP ${response.status} al descargar presentación.`);
 
       const arrayBuffer = await response.arrayBuffer();
+      if (!sizeFormatted && arrayBuffer && arrayBuffer.byteLength) {
+        sizeFormatted = formatBytesLocal(arrayBuffer.byteLength);
+      }
       const zip = await JSZip.loadAsync(arrayBuffer);
 
       const slideEntries = [];
