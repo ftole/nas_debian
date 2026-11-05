@@ -1170,8 +1170,9 @@ mod tests {
 
     #[test]
     fn propaga_el_codigo_real_en_la_entrada() {
-        let entries =
-            parse_backup_log("[2026-10-28 23:11:54] [Creditas] error en replicación rsync (código 11)");
+        let entries = parse_backup_log(
+            "[2026-10-28 23:11:54] [Creditas] error en replicación rsync (código 11)",
+        );
         assert_eq!(entries[0].status, "FAILED");
         assert_eq!(entries[0].code, "rsync 11");
         assert!(entries[0].human.contains("error de lectura o escritura"));
