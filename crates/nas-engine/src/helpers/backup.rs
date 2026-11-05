@@ -464,11 +464,32 @@ pub fn test_cifs_conn(
 
     match mount_res {
         Ok(out) if out.is_success() => Ok(format!("conexión CIFS verificada: {target}")),
-        Ok(out) => Err(NasError::Denied(format!(
-            "falló conexión CIFS: {}",
-            out.stderr
-        ))),
+        Ok(out) => Err(NasError::Denied(clean_cifs_mount_error(&out.stderr))),
         Err(e) => Err(NasError::Denied(format!("error al ejecutar mount: {e}"))),
+    }
+}
+
+fn clean_cifs_mount_error(stderr: &str) -> String {
+    let clean = if let Some((head, _)) = stderr.split_once("\nRefer to the mount.cifs") {
+        head.trim()
+    } else if let Some((head, _)) = stderr.split_once("Refer to the mount.cifs") {
+        head.trim()
+    } else {
+        stderr.trim()
+    };
+
+    if clean.contains("mount error(13): Permission denied") {
+        "falló conexión CIFS: Acceso denegado (usuario o contraseña incorrectos, o permisos insuficientes en el recurso compartido)".to_string()
+    } else if clean.contains("mount error(112): Host is down") || clean.contains("mount error(113): No route to host") {
+        "falló conexión CIFS: Host no disponible (servidor remoto apagado o inaccesible en la red)".to_string()
+    } else if clean.contains("mount error(111): Connection refused") {
+        "falló conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 cerrado o inaccesible)".to_string()
+    } else if clean.contains("mount error(6): No such device or address") || clean.contains("mount error(2): No such file or directory") {
+        "falló conexión CIFS: Recurso compartido no encontrado en el servidor remoto".to_string()
+    } else if clean.contains("mount error(115): Operation now in progress") {
+        "falló conexión CIFS: Tiempo de espera agotado al conectar al servidor remoto".to_string()
+    } else {
+        format!("falló conexión CIFS: {clean}")
     }
 }
 
@@ -1233,6 +1254,22 @@ pub fn restore_backup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_cifs_mount_error_humaniza_y_limpia() {
+        let raw = "mount error(13): Permission denied\nRefer to the mount.cifs(8) manual page (e.g. man mount.cifs) and kernel log messages (dmesg)";
+        let msg = clean_cifs_mount_error(raw);
+        assert!(msg.contains("Acceso denegado"));
+        assert!(!msg.contains("Refer to the mount.cifs"));
+
+        let host_down = "mount error(112): Host is down\nRefer to the mount.cifs...";
+        let msg2 = clean_cifs_mount_error(host_down);
+        assert!(msg2.contains("Host no disponible"));
+
+        let unknown = "mount error(999): Unknown error\nRefer to the mount.cifs...";
+        let msg3 = clean_cifs_mount_error(unknown);
+        assert_eq!(msg3, "falló conexión CIFS: mount error(999): Unknown error");
+    }
 
     #[test]
     fn rechaza_id_invalido() {
