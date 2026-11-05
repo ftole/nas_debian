@@ -156,7 +156,11 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let perm_root = dest_root.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
     let perm_task_dir = PathBuf::from(&perm_root).join(id);
     let _ = std::fs::create_dir_all(&perm_task_dir);
-    let _ = runner.run(&CommandSpec::new("chown").args(["-R", "root:grp_samba", &perm_task_dir.to_string_lossy()]));
+    let _ = runner.run(&CommandSpec::new("chown").args([
+        "-R",
+        "root:grp_samba",
+        &perm_task_dir.to_string_lossy(),
+    ]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
 
     let runner_content = std::fs::read_to_string(&runner_dst).unwrap_or_default();
@@ -372,7 +376,11 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let log_path = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
     let now = chrono::Local::now().format("%F %T");
     let cancel_msg = format!("[{now}] [{id}] === RESPALDO CANCELADO: la ejecución fue detenida manualmente por el usuario ===\n");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         use std::io::Write;
         let _ = f.write_all(cancel_msg.as_bytes());
     }
@@ -489,11 +497,17 @@ fn clean_cifs_mount_error(stderr: &str) -> String {
 
     if clean.contains("mount error(13): Permission denied") {
         "falló conexión CIFS: Acceso denegado (usuario o contraseña incorrectos, o permisos insuficientes en el recurso compartido)".to_string()
-    } else if clean.contains("mount error(112): Host is down") || clean.contains("mount error(113): No route to host") {
-        "falló conexión CIFS: Host no disponible (servidor remoto apagado o inaccesible en la red)".to_string()
+    } else if clean.contains("mount error(112): Host is down")
+        || clean.contains("mount error(113): No route to host")
+    {
+        "falló conexión CIFS: Host no disponible (servidor remoto apagado o inaccesible en la red)"
+            .to_string()
     } else if clean.contains("mount error(111): Connection refused") {
-        "falló conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 cerrado o inaccesible)".to_string()
-    } else if clean.contains("mount error(6): No such device or address") || clean.contains("mount error(2): No such file or directory") {
+        "falló conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 cerrado o inaccesible)"
+            .to_string()
+    } else if clean.contains("mount error(6): No such device or address")
+        || clean.contains("mount error(2): No such file or directory")
+    {
         "falló conexión CIFS: Recurso compartido no encontrado en el servidor remoto".to_string()
     } else if clean.contains("mount error(115): Operation now in progress") {
         "falló conexión CIFS: Tiempo de espera agotado al conectar al servidor remoto".to_string()
