@@ -22,6 +22,8 @@ pub mod domain;
 pub mod helpers;
 /// Bloqueo exclusivo por tarea.
 pub mod lock;
+/// Normalización de bitácoras en descripciones legibles.
+pub mod logs;
 /// Inventario agregado de red.
 pub mod network;
 /// Parsers de salidas del sistema operativo.
@@ -54,6 +56,10 @@ pub use deploy::{DeployParams, FileSystem};
 pub use diagnostics::Check;
 pub use domain::DomainStatus;
 pub use lock::TaskLock;
+pub use logs::{
+    filter_query, group_repeated, parse_admin_events, parse_backup_log, parse_journal,
+    parse_samba_audit, sort_recent, AdminEvent, LogEntry, LogSource,
+};
 pub use network::{collect as collect_network, primary_ip, NetworkOverview};
 pub use services::ServiceStatus;
 pub use status::{collect as collect_status, SystemMetrics};
