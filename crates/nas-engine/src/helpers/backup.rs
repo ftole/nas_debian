@@ -368,7 +368,16 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let _ = std::fs::remove_file(format!("/run/nas-backup-{id}.progress"));
     let _ = std::fs::remove_file(format!("/tmp/nas-backup-{id}.progress"));
 
-    Ok(format!("tarea {id} detenida"))
+    // Registrar explícitamente en la bitácora que la tarea fue cancelada manualmente
+    let log_path = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
+    let now = chrono::Local::now().format("%F %T");
+    let cancel_msg = format!("[{now}] [{id}] === RESPALDO CANCELADO: la ejecución fue detenida manualmente por el usuario ===\n");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        use std::io::Write;
+        let _ = f.write_all(cancel_msg.as_bytes());
+    }
+
+    Ok(format!("tarea {id} cancelada"))
 }
 
 /// Devuelve las últimas N líneas de la bitácora de una tarea.
