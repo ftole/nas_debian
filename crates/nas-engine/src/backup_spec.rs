@@ -297,7 +297,10 @@ cleanup() {{
     local status=$?
     rm -f "$PROG_FILE" "${{PROG_FILE}}.tmp."* 2>/dev/null || true
     if mountpoint -q "$MOUNT" 2>/dev/null; then umount "$MOUNT" || true; fi
-    if [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
+    if [ "$status" -eq 143 ] || [ "$status" -eq 130 ]; then
+        log "=== RESPALDO CANCELADO: la ejecucion fue detenida manualmente por el usuario (codigo de salida $status) ==="
+        rm -rf -- "$STAGE" "$FINAL"
+    elif [ "$SNAPSHOT_OK" != "true" ] && [ "$status" -ne 0 ]; then
         log "ERROR: se descarta el snapshot parcial (codigo de salida $status)"
         rm -rf -- "$STAGE" "$FINAL"
     elif [ -d "$STAGE" ]; then
