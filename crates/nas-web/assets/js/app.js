@@ -1006,6 +1006,117 @@ function repairSambaPermissions(shareName = null) {
 let _backupRefreshTimer = null;
 
 let _backupsData = [];
+let _permanentBackupsData = [];
+let _backupSearchQuery = '';
+
+function filterBackups(val) {
+  _backupSearchQuery = typeof val === 'string' ? val : (document.getElementById('backups-search-input')?.value || '');
+  renderBackupsTable();
+  renderPermanentBackupsTable();
+}
+
+function renderBackupsTable() {
+  const tbody = document.getElementById('backups-table-body');
+  if (!tbody) return;
+
+  if (!_backupsData || _backupsData.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
+    return;
+  }
+
+  const q = (_backupSearchQuery || '').trim().toLowerCase();
+  const tasks = q
+    ? _backupsData.filter(t => {
+        const id = String(t.id || '').toLowerCase();
+        const src = String(t.source || '').toLowerCase();
+        const dst = String(t.destination || '').toLowerCase();
+        const ip = String(t.source_ip || '').toLowerCase();
+        const share = String(t.share || '').toLowerCase();
+        const path = String(t.path || '').toLowerCase();
+        const proto = String(t.protocol || '').toLowerCase();
+        return id.includes(q) || src.includes(q) || dst.includes(q) || ip.includes(q) || share.includes(q) || path.includes(q) || proto.includes(q);
+      })
+    : _backupsData;
+
+  if (tasks.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px 12px;">No se encontraron tareas de respaldo que coincidan con "<strong>${escapeHtml(_backupSearchQuery)}</strong>".</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = tasks.map(t => {
+    const isErr = t.last_status === 'Error' || t.last_status === 'FAILED';
+    const isCancelled = t.last_status === 'Cancelada' || t.last_status === 'Cancelado';
+    const isRunning = Boolean(t.running || t.last_status === 'En curso');
+    const statusBadge = t.last_status === 'OK' ? 'badge-ok'
+      : (isCancelled ? 'badge-warn'
+        : (isErr ? 'badge-err'
+          : (isRunning ? 'badge-blue' : 'badge-gray')));
+    const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
+    const fillColor = isCancelled ? 'var(--accent-warning)'
+      : (isErr ? 'var(--accent-danger)'
+        : (isRunning ? 'var(--accent-primary)' : 'var(--accent-success)'));
+    const progressSubtitle = isRunning
+      ? `${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}`
+      : (t.last_status === 'OK'
+        ? '100% · Completado'
+        : (isCancelled
+          ? 'Cancelada · Lista para ejecutar'
+          : (isErr ? 'Error · Reintentar' : 'Pendiente')));
+
+    const taskSize = t.size_formatted || t.task_size_formatted || '0 B';
+    const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
+      ? `Disco: ${escapeHtml(t.disk_used_formatted)} / ${escapeHtml(t.disk_total_formatted)} (${Math.round(t.disk_used_percent || 0)}%)`
+      : (t.disk_summary ? escapeHtml(t.disk_summary) : 'Disco: N/A');
+
+    return `
+    <tr>
+      <td><strong>${escapeHtml(t.id)}</strong></td>
+      <td><span class="tag-pill">${escapeHtml(t.protocol)}</span></td>
+      <td><code>${escapeHtml(t.source || t.destination || 'N/A')}</code></td>
+      <td>${escapeHtml(t.cron_desc)}</td>
+      <td>${t.retention} snapshots</td>
+      <td>
+        <div><strong>${escapeHtml(taskSize)}</strong></div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+          ${diskText}
+        </div>
+      </td>
+      <td>
+        <span class="badge ${statusBadge}">${escapeHtml(t.last_status)}</span>
+        <div class="progress-bar-wrap" style="margin-top:5px; height:6px;">
+          <div class="progress-bar-fill" style="width:${pct}%; background:${fillColor};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+          ${progressSubtitle}
+        </div>
+      </td>
+      <td style="text-align:right; white-space:nowrap;">
+        ${t.running ? `
+          <button class="btn btn-secondary btn-sm" title="Detener respaldo en curso" style="color:var(--accent-danger);" onclick="stopBackupTask('${escapeHtml(t.id)}')">
+            <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-stop"></use></svg>
+          </button>
+        ` : `
+          <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
+            <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
+          </button>
+        `}
+        <button class="btn btn-secondary btn-sm" title="Congelar como permanente (Golden Snapshot)" style="color:var(--accent-warning);" onclick="openFreezeModal('${escapeHtml(t.id)}')">
+          <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg>
+        </button>
+        <button class="btn btn-secondary btn-sm" title="Editar tarea" onclick="openEditBackup('${escapeHtml(t.id)}')">
+          <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
+        </button>
+        <button class="btn btn-secondary btn-sm" title="Ver bitácora" onclick="viewBackupLogs('${escapeHtml(t.id)}')">
+          <svg class="icon icon-sm"><use href="#icon-file"></use></svg>
+        </button>
+        <button class="btn btn-secondary btn-sm" title="Eliminar tarea" style="color:var(--accent-danger);" onclick="deleteBackupTask('${escapeHtml(t.id)}')">
+          <svg class="icon icon-sm"><use href="#icon-trash"></use></svg>
+        </button>
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
 
 async function loadBackups() {
   const tbody = document.getElementById('backups-table-body');
@@ -1016,88 +1127,9 @@ async function loadBackups() {
     const tasks = res.data || [];
     _backupsData = tasks;
 
-    if (tasks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
-      scheduleBackupRefresh(false);
-      return;
-    }
+    renderBackupsTable();
 
-    let anyRunning = false;
-    tbody.innerHTML = tasks.map(t => {
-      if (t.running) anyRunning = true;
-      const isErr = t.last_status === 'Error' || t.last_status === 'FAILED';
-      const isCancelled = t.last_status === 'Cancelada' || t.last_status === 'Cancelado';
-      const isRunning = Boolean(t.running || t.last_status === 'En curso');
-      const statusBadge = t.last_status === 'OK' ? 'badge-ok'
-        : (isCancelled ? 'badge-warn'
-          : (isErr ? 'badge-err'
-            : (isRunning ? 'badge-blue' : 'badge-gray')));
-      const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
-      const fillColor = isCancelled ? 'var(--accent-warning)'
-        : (isErr ? 'var(--accent-danger)'
-          : (isRunning ? 'var(--accent-primary)' : 'var(--accent-success)'));
-      const progressSubtitle = isRunning
-        ? `${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}`
-        : (t.last_status === 'OK'
-          ? '100% · Completado'
-          : (isCancelled
-            ? 'Cancelada · Lista para ejecutar'
-            : (isErr ? 'Error · Reintentar' : 'Pendiente')));
-
-      const taskSize = t.size_formatted || t.task_size_formatted || '0 B';
-      const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
-        ? `Disco: ${escapeHtml(t.disk_used_formatted)} / ${escapeHtml(t.disk_total_formatted)} (${Math.round(t.disk_used_percent || 0)}%)`
-        : (t.disk_summary ? escapeHtml(t.disk_summary) : 'Disco: N/A');
-
-      return `
-      <tr>
-        <td><strong>${escapeHtml(t.id)}</strong></td>
-        <td><span class="tag-pill">${escapeHtml(t.protocol)}</span></td>
-        <td><code>${escapeHtml(t.source || t.destination || 'N/A')}</code></td>
-        <td>${escapeHtml(t.cron_desc)}</td>
-        <td>${t.retention} snapshots</td>
-        <td>
-          <div><strong>${escapeHtml(taskSize)}</strong></div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
-            ${diskText}
-          </div>
-        </td>
-        <td>
-          <span class="badge ${statusBadge}">${escapeHtml(t.last_status)}</span>
-          <div class="progress-bar-wrap" style="margin-top:5px; height:6px;">
-            <div class="progress-bar-fill" style="width:${pct}%; background:${fillColor};"></div>
-          </div>
-          <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
-            ${progressSubtitle}
-          </div>
-        </td>
-        <td style="text-align:right; white-space:nowrap;">
-          ${t.running ? `
-            <button class="btn btn-secondary btn-sm" title="Detener respaldo en curso" style="color:var(--accent-danger);" onclick="stopBackupTask('${escapeHtml(t.id)}')">
-              <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-stop"></use></svg>
-            </button>
-          ` : `
-            <button class="btn btn-secondary btn-sm" title="Ejecutar ahora" onclick="runBackupTask('${escapeHtml(t.id)}')">
-              <svg class="icon icon-sm" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
-            </button>
-          `}
-          <button class="btn btn-secondary btn-sm" title="Congelar como permanente (Golden Snapshot)" style="color:var(--accent-warning);" onclick="openFreezeModal('${escapeHtml(t.id)}')">
-            <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg>
-          </button>
-          <button class="btn btn-secondary btn-sm" title="Editar tarea" onclick="openEditBackup('${escapeHtml(t.id)}')">
-            <svg class="icon icon-sm"><use href="#icon-edit"></use></svg>
-          </button>
-          <button class="btn btn-secondary btn-sm" title="Ver bitácora" onclick="viewBackupLogs('${escapeHtml(t.id)}')">
-            <svg class="icon icon-sm"><use href="#icon-file"></use></svg>
-          </button>
-          <button class="btn btn-secondary btn-sm" title="Eliminar tarea" style="color:var(--accent-danger);" onclick="deleteBackupTask('${escapeHtml(t.id)}')">
-            <svg class="icon icon-sm"><use href="#icon-trash"></use></svg>
-          </button>
-        </td>
-      </tr>
-    `;
-    }).join('');
-
+    const anyRunning = tasks.some(t => Boolean(t.running || t.last_status === 'En curso'));
     scheduleBackupRefresh(anyRunning);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
@@ -1546,6 +1578,13 @@ function switchBackupTab(tab) {
   const btnPerm = document.getElementById('tab-btn-permanent');
   const rotContainer = document.getElementById('backups-rotative-container');
   const permContainer = document.getElementById('backups-permanent-container');
+  const searchInput = document.getElementById('backups-search-input');
+
+  if (searchInput) {
+    searchInput.placeholder = tab === 'permanent'
+      ? 'Buscar por tarea, nombre o etiqueta...'
+      : 'Buscar por identificador u origen remoto...';
+  }
 
   if (tab === 'permanent') {
     if (btnRot) btnRot.classList.remove('active');
@@ -1562,48 +1601,70 @@ function switchBackupTab(tab) {
   }
 }
 
+function renderPermanentBackupsTable() {
+  const tbody = document.getElementById('backups-permanent-table-body');
+  if (!tbody) return;
+
+  if (!_permanentBackupsData || _permanentBackupsData.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay respaldos permanentes consolidados actualmente.</td></tr>';
+    return;
+  }
+
+  const q = (_backupSearchQuery || '').trim().toLowerCase();
+  const items = q
+    ? _permanentBackupsData.filter(p => {
+        const taskName = String(p.task || p.task_id || '').toLowerCase();
+        const name = String(p.name || '').toLowerCase();
+        const tag = String(p.tag || '').toLowerCase();
+        const path = String(p.path || '').toLowerCase();
+        return taskName.includes(q) || name.includes(q) || tag.includes(q) || path.includes(q);
+      })
+    : _permanentBackupsData;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:24px 12px;">No se encontraron respaldos permanentes que coincidan con "<strong>${escapeHtml(_backupSearchQuery)}</strong>".</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(p => {
+    const tagHtml = p.tag ? `<span class="tag-pill">${escapeHtml(p.tag)}</span>` : '<span class="text-muted">-</span>';
+    const sizeStr = formatBytesLocal(p.size_bytes || 0);
+    const filesStr = p.files_count !== undefined ? `${p.files_count} archivos` : '-';
+
+    const taskName = p.task || p.task_id || '';
+    const dateStr = p.date || p.created_at || '';
+
+    return `
+    <tr>
+      <td><strong>${escapeHtml(taskName)}</strong></td>
+      <td>
+        <div style="font-weight:600;">${escapeHtml(p.name)}</div>
+        <small style="color:var(--text-muted); font-size:11px;">${escapeHtml(dateStr)}</small>
+      </td>
+      <td>${tagHtml}</td>
+      <td><code style="font-size:11px;">${escapeHtml(p.path)}</code></td>
+      <td>${filesStr} <small class="text-muted">(${sizeStr})</small></td>
+      <td style="text-align:right; white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" title="Restaurar este respaldo" style="color:var(--accent-primary);" onclick="openRestoreBackup('${escapeHtml(taskName)}', '${escapeHtml(p.path)}')">
+          <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar
+        </button>
+        <button class="btn btn-secondary btn-sm" title="Eliminar respaldo permanente" style="color:var(--accent-danger);" onclick="deletePermanentBackup('${escapeHtml(taskName)}', '${escapeHtml(p.name)}')">
+          <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg>
+        </button>
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
+
 async function loadPermanentBackups() {
   const tbody = document.getElementById('backups-permanent-table-body');
   if (!tbody) return;
 
   try {
     const res = await apiFetch('/api/backups/permanent');
-    const items = res.data || [];
-
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No hay respaldos permanentes consolidados actualmente.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = items.map(p => {
-      const tagHtml = p.tag ? `<span class="tag-pill">${escapeHtml(p.tag)}</span>` : '<span class="text-muted">-</span>';
-      const sizeStr = formatBytesLocal(p.size_bytes || 0);
-      const filesStr = p.files_count !== undefined ? `${p.files_count} archivos` : '-';
-
-      const taskName = p.task || p.task_id || '';
-      const dateStr = p.date || p.created_at || '';
-
-      return `
-      <tr>
-        <td><strong>${escapeHtml(taskName)}</strong></td>
-        <td>
-          <div style="font-weight:600;">${escapeHtml(p.name)}</div>
-          <small style="color:var(--text-muted); font-size:11px;">${escapeHtml(dateStr)}</small>
-        </td>
-        <td>${tagHtml}</td>
-        <td><code style="font-size:11px;">${escapeHtml(p.path)}</code></td>
-        <td>${filesStr} <small class="text-muted">(${sizeStr})</small></td>
-        <td style="text-align:right; white-space:nowrap;">
-          <button class="btn btn-secondary btn-sm" title="Restaurar este respaldo" style="color:var(--accent-primary);" onclick="openRestoreBackup('${escapeHtml(taskName)}', '${escapeHtml(p.path)}')">
-            <svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-restore"></use></svg> Restaurar
-          </button>
-          <button class="btn btn-secondary btn-sm" title="Eliminar respaldo permanente" style="color:var(--accent-danger);" onclick="deletePermanentBackup('${escapeHtml(taskName)}', '${escapeHtml(p.name)}')">
-            <svg class="icon icon-sm" style="color:var(--accent-danger);"><use href="#icon-trash"></use></svg>
-          </button>
-        </td>
-      </tr>
-    `;
-    }).join('');
+    _permanentBackupsData = res.data || [];
+    renderPermanentBackupsTable();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--accent-danger);">Error al cargar respaldos permanentes: ${escapeHtml(e.message)}</td></tr>`;
   }
