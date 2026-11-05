@@ -1253,11 +1253,12 @@ pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Respo
     let dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
         let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
+        let mut disk_cache = std::collections::HashMap::new();
         tasks
             .into_iter()
             .map(|task| {
                 let last = last_snapshot(&task);
-                let mut row = crate::legacy::backup_row(&task);
+                let mut row = crate::legacy::backup_row_with_metrics(&task, &mut disk_cache);
                 row["task"] = serde_json::json!(task);
                 row["last_snapshot"] = serde_json::json!(last);
                 row
