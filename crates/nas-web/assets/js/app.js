@@ -1026,17 +1026,23 @@ async function loadBackups() {
     tbody.innerHTML = tasks.map(t => {
       if (t.running) anyRunning = true;
       const isErr = t.last_status === 'Error' || t.last_status === 'FAILED';
-      const statusBadge = t.last_status === 'OK' ? 'badge-ok'
-        : (isErr ? 'badge-err'
-          : (t.last_status === 'En curso' ? 'badge-blue' : 'badge-gray'));
-      const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
+      const isCancelled = t.last_status === 'Cancelada' || t.last_status === 'Cancelado';
       const isRunning = Boolean(t.running || t.last_status === 'En curso');
-      const fillColor = isErr ? 'var(--accent-danger)' : (isRunning ? 'var(--accent-primary)' : 'var(--accent-success)');
+      const statusBadge = t.last_status === 'OK' ? 'badge-ok'
+        : (isCancelled ? 'badge-warn'
+          : (isErr ? 'badge-err'
+            : (isRunning ? 'badge-blue' : 'badge-gray')));
+      const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
+      const fillColor = isCancelled ? 'var(--accent-warning)'
+        : (isErr ? 'var(--accent-danger)'
+          : (isRunning ? 'var(--accent-primary)' : 'var(--accent-success)'));
       const progressSubtitle = isRunning
         ? `${pct}% · ${escapeHtml(t.elapsed || '00:00:00')} / ${escapeHtml(t.remaining || '--:--:--')}${t.speed ? ' · ' + escapeHtml(t.speed) : ''}`
         : (t.last_status === 'OK'
           ? '100% · Completado'
-          : (isErr ? 'Error · Reintentar' : 'Pendiente'));
+          : (isCancelled
+            ? 'Cancelada · Lista para ejecutar'
+            : (isErr ? 'Error · Reintentar' : 'Pendiente')));
 
       const taskSize = t.size_formatted || t.task_size_formatted || '0 B';
       const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
@@ -1476,9 +1482,15 @@ async function executeStopBackupConfirm() {
 
   try {
     const res = await apiFetch(`/api/backups/${encodeURIComponent(taskId)}/stop`, { method: 'POST' });
-    showToast(res.message || `Proceso de respaldo [${taskId}] detenido.`, 'info');
+    showToast(`Tarea de respaldo [${taskId}] cancelada.`, 'warning');
     closeModal('modal-stop-backup-confirm');
-    setTimeout(loadBackups, 1000);
+    const task = (_backupsData || []).find(x => x.id === taskId);
+    if (task) {
+      task.running = false;
+      task.last_status = 'Cancelada';
+    }
+    loadBackups();
+    setTimeout(loadBackups, 1200);
   } catch (e) {
     // Ya mostrado por apiFetch
   } finally {
@@ -3896,7 +3908,7 @@ async function loadLogs() {
       return;
     }
 
-    tbody.innerHTML = logs.map(l => {
+    tbody.innerHTML = logs.map((l, index) => {
       const srcBadge = matchSourceBadge(l.source);
       const userText = l.user || l.task || 'sistema';
       const ipText = l.ip ? `<span class="table-logs-ip"><code>${escapeHtml(l.ip)}</code></span>` : '';
@@ -3912,6 +3924,15 @@ async function loadLogs() {
       const details = (isSystem && l.human)
         ? l.human
         : (l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-'));
+      const technical = l.raw || details;
+      const codeBadge = l.code
+        ? `<span class="badge badge-warn" style="margin-bottom:4px;">${escapeHtml(l.code)}</span>`
+        : '';
+      const techId = `log-tech-${index}`;
+      const eyeButton = `
+        <button type="button" class="btn btn-secondary btn-sm" style="padding:2px 5px; flex:0 0 auto;" title="Ver código real del sistema" aria-label="Ver código real del sistema" aria-expanded="false" onclick="toggleLogTech(this, '${techId}')">
+          <svg class="icon icon-sm"><use href="#icon-eye"></use></svg>
+        </button>`;
 
       return `
         <tr>
@@ -3921,12 +3942,38 @@ async function loadLogs() {
           <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span>${countBadge}</td>
           <td class="table-logs-target"><code>${escapeHtml(targetText)}</code></td>
           <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
-          <td class="${isSystem ? 'table-logs-details log-system' : 'table-logs-details'}">${escapeHtml(details)}</td>
+          <td class="${isSystem ? 'table-logs-details log-system' : 'table-logs-details'}">
+            <div style="display:flex; align-items:flex-start; gap:6px;">
+              <span style="flex:1 1 auto;">${escapeHtml(details)}</span>
+              ${eyeButton}
+            </div>
+            <div id="${techId}" hidden style="margin-top:6px; padding:6px 8px; border-radius:6px; background:rgba(127,127,127,0.12); border:1px solid var(--border-color);">
+              ${codeBadge}
+              <pre style="margin:0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; color:var(--text-muted);">${escapeHtml(technical)}</pre>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger); padding:16px;">Error al consultar registros de auditoría: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function toggleLogTech(button, blockId) {
+  const block = document.getElementById(blockId);
+  if (!block) return;
+  const opening = block.hasAttribute('hidden');
+  if (opening) {
+    block.removeAttribute('hidden');
+  } else {
+    block.setAttribute('hidden', '');
+  }
+  button.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  button.title = opening ? 'Ocultar código del sistema' : 'Ver código real del sistema';
+  const icon = button.querySelector('use');
+  if (icon) {
+    icon.setAttribute('href', opening ? '#icon-eye-off' : '#icon-eye');
   }
 }
 
