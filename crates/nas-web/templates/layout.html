@@ -3177,6 +3177,30 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Detalle técnico de un registro -->
+  <div class="modal-backdrop modal-static" id="modal-log-detail">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Detalle del registro</h3>
+        <button class="modal-close" onclick="closeModal('modal-log-detail')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-info" id="log-detail-summary" style="margin-bottom:10px;"></div>
+        <div style="margin-bottom:10px;">
+          <span class="badge badge-warn" id="log-detail-code" hidden></span>
+        </div>
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px;">Texto t&eacute;cnico exacto del sistema:</label>
+        <pre id="log-detail-raw" style="background:#0f172a; color:#e2e8f0; padding:12px; border-radius:6px; font-size:12px; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"></pre>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="log-detail-copy" onclick="copyLogDetail()">
+          <svg class="icon"><use href="#icon-copy"></use></svg> Copiar
+        </button>
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-log-detail')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Contenedor de Alertas Toast -->
   <div id="toast-container" style="position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
 
