@@ -260,7 +260,7 @@ pub struct BackupDiskMetrics {
 }
 
 /// Resuelve una ruta existente subiendo por los ancestros si el directorio no existe aún.
-fn resolve_existing_path<'a>(dest_root: &'a str) -> &'a std::path::Path {
+fn resolve_existing_path(dest_root: &str) -> &std::path::Path {
     let mut path = std::path::Path::new(dest_root);
     while !path.exists() {
         if let Some(parent) = path.parent() {
@@ -295,9 +295,8 @@ pub fn calculate_destination_disk(dest_root: &str) -> BackupDiskMetrics {
                 let total_formatted = human_bytes(total_bytes);
                 let used_formatted = human_bytes(used_bytes);
                 let available_formatted = human_bytes(available_bytes);
-                let summary = format!(
-                    "Disco: {used_formatted} / {total_formatted} ({used_percent:.0}%)"
-                );
+                let summary =
+                    format!("Disco: {used_formatted} / {total_formatted} ({used_percent:.0}%)");
 
                 return BackupDiskMetrics {
                     total_bytes,
@@ -427,12 +426,27 @@ pub fn backup_row_with_metrics(
             };
             (prog.percent.min(100), elap, rem, spd)
         } else {
-            (0, "00:00:00".to_string(), "--:--:--".to_string(), "0.00kB/s".to_string())
+            (
+                0,
+                "00:00:00".to_string(),
+                "--:--:--".to_string(),
+                "0.00kB/s".to_string(),
+            )
         }
     } else if last_status == "OK" {
-        (100, "00:00:00".to_string(), "00:00:00".to_string(), "0.00kB/s".to_string())
+        (
+            100,
+            "00:00:00".to_string(),
+            "00:00:00".to_string(),
+            "0.00kB/s".to_string(),
+        )
     } else {
-        (0, "00:00:00".to_string(), "00:00:00".to_string(), "0.00kB/s".to_string())
+        (
+            0,
+            "00:00:00".to_string(),
+            "00:00:00".to_string(),
+            "0.00kB/s".to_string(),
+        )
     };
 
     let task_dir = task.task_dir();
@@ -827,7 +841,12 @@ mod tests {
         // Advertencia por archivos en uso (código 23) con snapshot completado -> OK
         let warning_23_log = "[2026-10-29 10:00:00] [t1] ADVERTENCIA: algunos ficheros en uso o bloqueados por usuarios no se pudieron leer (codigo 23: el resto de ficheros se respaldo con exito)\n[2026-10-29 10:01:00] [t1] snapshot completado: /tmp/snapshot_2026";
         assert_eq!(
-            classify_backup_status(false, Some(warning_23_log), tmp_root.to_str().unwrap(), "t1"),
+            classify_backup_status(
+                false,
+                Some(warning_23_log),
+                tmp_root.to_str().unwrap(),
+                "t1"
+            ),
             "OK"
         );
 
