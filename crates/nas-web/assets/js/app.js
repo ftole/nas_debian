@@ -1380,26 +1380,112 @@ async function testEditBackupConnection() {
   }
 }
 
-async function runBackupTask(taskId) {
+let _pendingRunBackupTaskId = null;
+let _pendingStopBackupTaskId = null;
+
+function runBackupTask(taskId) {
+  openRunBackupModal(taskId);
+}
+
+function openRunBackupModal(taskId) {
+  _pendingRunBackupTaskId = taskId;
+  const t = (_backupsData || []).find(x => x.id === taskId);
+
+  const idEl = document.getElementById('confirm-run-backup-id');
+  const protoEl = document.getElementById('confirm-run-backup-proto');
+  const srcEl = document.getElementById('confirm-run-backup-source');
+  const destEl = document.getElementById('confirm-run-backup-dest');
+  const cronEl = document.getElementById('confirm-run-backup-cron');
+
+  if (idEl) idEl.textContent = taskId;
+  if (protoEl) protoEl.textContent = t ? (t.protocol || 'CIFS (Windows)') : 'CIFS (Windows)';
+  if (srcEl) srcEl.textContent = t ? (t.source || t.destination || 'N/A') : 'N/A';
+  if (destEl) destEl.textContent = t ? (t.dest_path || `/srv/nas/BACKUPS_HISTORICOS/${taskId}`) : `/srv/nas/BACKUPS_HISTORICOS/${taskId}`;
+  if (cronEl) cronEl.textContent = t ? (t.cron_desc || t.cron || 'Programado') : 'Programado';
+
+  const btn = document.getElementById('btn-confirm-run-backup');
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
+  }
+
+  openModal('modal-run-backup-confirm');
+}
+
+async function executeRunBackupConfirm() {
+  const taskId = _pendingRunBackupTaskId;
+  if (!taskId) return;
+
+  const btn = document.getElementById('btn-confirm-run-backup');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     await apiFetch(`/api/backups/${encodeURIComponent(taskId)}/run`, { method: 'POST' });
     showToast(`Respaldo de [${taskId}] iniciado en segundo plano.`, 'info');
-    setTimeout(loadBackups, 1500);
+    closeModal('modal-run-backup-confirm');
+    setTimeout(loadBackups, 1200);
   } catch (e) {
-    // Ya mostrado
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
-async function stopBackupTask(taskId) {
-  if (!window.confirm(`¿Deseas detener la ejecución en curso del respaldo [${taskId}]?`)) {
-    return;
+function stopBackupTask(taskId) {
+  openStopBackupModal(taskId);
+}
+
+function openStopBackupModal(taskId) {
+  _pendingStopBackupTaskId = taskId;
+  const t = (_backupsData || []).find(x => x.id === taskId);
+
+  const idEl = document.getElementById('confirm-stop-backup-id');
+  const progEl = document.getElementById('confirm-stop-backup-progress');
+  const elapsedEl = document.getElementById('confirm-stop-backup-elapsed');
+  const speedEl = document.getElementById('confirm-stop-backup-speed');
+
+  if (idEl) idEl.textContent = taskId;
+  if (progEl) progEl.textContent = t ? `${Math.round(t.percent || 0)}% completado` : 'En ejecución';
+  if (elapsedEl) elapsedEl.textContent = t ? (t.elapsed || '00:00:00') : '00:00:00';
+  if (speedEl) speedEl.textContent = t ? (t.speed || 'Calculando tasa...') : 'Calculando tasa...';
+
+  const btn = document.getElementById('btn-confirm-stop-backup');
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('is-loading');
   }
+
+  openModal('modal-stop-backup-confirm');
+}
+
+async function executeStopBackupConfirm() {
+  const taskId = _pendingStopBackupTaskId;
+  if (!taskId) return;
+
+  const btn = document.getElementById('btn-confirm-stop-backup');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+
   try {
     const res = await apiFetch(`/api/backups/${encodeURIComponent(taskId)}/stop`, { method: 'POST' });
     showToast(res.message || `Proceso de respaldo [${taskId}] detenido.`, 'info');
+    closeModal('modal-stop-backup-confirm');
     setTimeout(loadBackups, 1000);
   } catch (e) {
     // Ya mostrado por apiFetch
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -8004,8 +8090,12 @@ window.openEditBackup = openEditBackup;
 window.editBackup = openEditBackup;
 window.runBackupNow = runBackupTask;
 window.runBackupTask = runBackupTask;
+window.openRunBackupModal = openRunBackupModal;
+window.executeRunBackupConfirm = executeRunBackupConfirm;
 window.stopBackup = stopBackupTask;
 window.stopBackupTask = stopBackupTask;
+window.openStopBackupModal = openStopBackupModal;
+window.executeStopBackupConfirm = executeStopBackupConfirm;
 window.viewBackupLog = viewBackupLogs;
 window.viewBackupLogs = viewBackupLogs;
 window.deleteBackup = deleteBackupTask;
