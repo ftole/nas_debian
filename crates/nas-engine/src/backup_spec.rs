@@ -248,7 +248,7 @@ impl BackupSpec {
 
         let source_setup = match proto {
             Proto::Cifs => {
-                "mkdir -p \"$MOUNT\"\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl\" 2>> \"$LOG\"\nSRC=\"$MOUNT/\"".to_string()
+                "mkdir -p \"$MOUNT\"\nif mountpoint -q \"$MOUNT\" 2>/dev/null; then umount -f \"$MOUNT\" 2>/dev/null || umount -l \"$MOUNT\" 2>/dev/null || true; fi\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl,file_mode=0777,dir_mode=0777\" 2>> \"$LOG\"\nSRC=\"$MOUNT/\"".to_string()
             }
             Proto::Ssh => "SRC=\"$SRC_USER@$SRC_IP:${SRC_PATH:-/}/\"".to_string(),
             Proto::Local => "SRC=\"${SRC_PATH:-/}/\"".to_string(),
@@ -358,12 +358,21 @@ log "inicio ($MODE): $SRC"
 printf '{{"percent":0,"speed":"0.00kB/s","elapsed":"00:00:00","remaining":"--:--:--","bytes":"0"}}\n' > "$PROG_FILE" 2>/dev/null || true
 chmod 0644 "$PROG_FILE" 2>/dev/null || true
 {rsync}
-if [ "$RSYNC_RC" -ne 0 ] && [ "$RSYNC_RC" -ne 24 ]; then
+if [ "$RSYNC_RC" -eq 0 ]; then
+    log "replicacion rsync completada con exito (codigo 0)"
+elif [ "$RSYNC_RC" -eq 24 ]; then
+    log "ADVERTENCIA: algunos archivos desaparecieron del origen durante la copia (codigo 24: ficheros temporales o eliminados mientras se ejecutaba)"
+elif [ "$RSYNC_RC" -eq 23 ]; then
+    log "ADVERTENCIA: algunos ficheros en uso o bloqueados por usuarios no se pudieron leer (codigo 23: el resto de ficheros se respaldo con exito)"
+elif [ "$RSYNC_RC" -ne 0 ]; then
     log "ERROR: en replicación rsync (código $RSYNC_RC)"
     exit "$RSYNC_RC"
 fi
-mv "$STAGE" "$FINAL"
-SNAPSHOT_OK=true
+
+if [ -d "$STAGE" ]; then
+    mv "$STAGE" "$FINAL"
+    SNAPSHOT_OK=true
+fi
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
 chmod -R a-w "$FINAL" 2>/dev/null || true
 
@@ -599,6 +608,9 @@ mod tests {
         assert!(runner.contains("update_progress"));
         assert!(runner.contains("FULL_${DATE_STR}_INICIAL"));
         assert!(runner.contains("AUTO_PERMANENT=true"));
+        assert!(runner.contains("codigo 23"));
+        assert!(runner.contains("codigo 24"));
+        assert!(runner.contains("nobrl"));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
