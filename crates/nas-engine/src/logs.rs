@@ -83,6 +83,10 @@ pub struct LogEntry {
     pub badge: String,
     /// Frase completa en español que describe lo ocurrido.
     pub human: String,
+    /// Origen legible del evento (`Panel web`, `Terminal web`, `Equipo remoto`, ...).
+    pub origin: String,
+    /// Equipo o host donde se originó el evento.
+    pub origin_detail: String,
     /// Código de error real del sistema (`rsync 11`, `mount error(112)`, `NT_STATUS_...`).
     pub code: String,
     /// Línea original sin transformar.
@@ -109,6 +113,8 @@ impl LogEntry {
             level: "info".to_string(),
             badge: source.badge().to_string(),
             human: String::new(),
+            origin: String::new(),
+            origin_detail: String::new(),
             code: String::new(),
             raw: raw.to_string(),
             count: 1,
@@ -323,6 +329,12 @@ pub fn parse_samba_audit(text: &str) -> Vec<LogEntry> {
             let mut entry = LogEntry::new(LogSource::SambaAudit, timestamp, trimmed);
             entry.user = user.clone();
             entry.ip = ip.clone();
+            entry.origin = "Equipo remoto".to_string();
+            entry.origin_detail = if machine.is_empty() {
+                ip.clone()
+            } else {
+                machine.clone()
+            };
 
             let object = if path.is_empty() {
                 share.clone()
@@ -428,6 +440,11 @@ pub fn parse_admin_events(events: &[AdminEvent<'_>]) -> Vec<LogEntry> {
             let mut entry = LogEntry::new(LogSource::Admin, timestamp, raw.trim());
             entry.user = event.username.to_string();
             entry.target = event.target.to_string();
+            entry.origin = if event.action.starts_with("terminal") {
+                "Terminal web".to_string()
+            } else {
+                "Panel web".to_string()
+            };
 
             let (label, sentence) = admin_sentence(event.action, event.username, event.target);
 
@@ -604,6 +621,7 @@ pub fn parse_backup_log(text: &str) -> Vec<LogEntry> {
             };
 
             let mut entry = LogEntry::new(LogSource::Backup, timestamp, trimmed);
+            entry.origin = "Tarea programada".to_string();
             entry.user = if task.0.is_empty() {
                 "sistema".to_string()
             } else {
@@ -825,6 +843,8 @@ pub fn parse_journal(text: &str) -> Vec<LogEntry> {
             let unit = unit_base(unit_raw);
             let friendly = friendly_unit(&unit);
             let mut entry = LogEntry::new(LogSource::System, timestamp, trimmed);
+            entry.origin = "Sistema".to_string();
+            entry.origin_detail = host.to_string();
             entry.target = if host.is_empty() {
                 unit.clone()
             } else {
@@ -1176,5 +1196,43 @@ mod tests {
         assert_eq!(entries[0].status, "FAILED");
         assert_eq!(entries[0].code, "rsync 11");
         assert!(entries[0].human.contains("error de lectura o escritura"));
+    }
+
+    #[test]
+    fn identifica_origen_y_equipo_del_evento() {
+        let samba = parse_samba_audit(
+            "2026-11-03T17:35:22-06:00 tsdebian smbd_audit: sistemas|10.10.1.250|sis-frank|CONTABILIDAD|openat|ok|CONTABILIDAD/x.xlsx",
+        );
+        assert_eq!(samba[0].origin, "Equipo remoto");
+        assert_eq!(samba[0].origin_detail, "sis-frank");
+
+        let terminal = parse_admin_events(&[AdminEvent {
+            ts: 0,
+            username: "admin",
+            action: "terminal_start",
+            target: "nas-web-admin",
+            result: "SUCCESS",
+            detail: "",
+        }]);
+        assert_eq!(terminal[0].origin, "Terminal web");
+
+        let panel = parse_admin_events(&[AdminEvent {
+            ts: 0,
+            username: "admin",
+            action: "login",
+            target: "web",
+            result: "SUCCESS",
+            detail: "",
+        }]);
+        assert_eq!(panel[0].origin, "Panel web");
+
+        let backup = parse_backup_log("[2026-11-04 16:55:42] [didi] [LOCK_ACQUIRED] [info] x");
+        assert_eq!(backup[0].origin, "Tarea programada");
+
+        let system = parse_journal(
+            "2026-11-04T17:24:28-0600 tsdebian sshd-session[1]: Accepted password for sistemas from 10.10.1.182 port 1 ssh2",
+        );
+        assert_eq!(system[0].origin, "Sistema");
+        assert_eq!(system[0].origin_detail, "tsdebian");
     }
 }
