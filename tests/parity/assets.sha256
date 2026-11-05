@@ -1,9 +1,9 @@
-f6fb9429c536d8a4b8273f4450a10d6bbe0a957643f4c93451e61491ce5d78e6     61240  crates/nas-web/assets/app.css
+88fe4f2e0886c1739c7ee48f3ea2d430c07aadc357ee551d533c74394a6a310b     61290  crates/nas-web/assets/app.css
 136416b7df694bbaf693629bb8b00026610e7202c38879994938ba3c67623cf2      3291  crates/nas-web/assets/login.css
 ed2cf599a097f516cf1ae6c9051b224550449ad0153d1fa98e9ffe68d679b396     10494  crates/nas-web/assets/icons.svg
 20234ad567db1e1c58d6b67811df897d17566d985486502e3383c672dfcef340       571  crates/nas-web/assets/favicon.svg
 67e2f7eb79291c8d4a75ae193f5dbc962eb05e4d222645a169752409e59410eb      2126  crates/nas-web/assets/favicon.ico
-cec48a37b677a71bf6228ec1862ac36db19ca1c3fb0b181a5c794d02126c2cf9    313659  crates/nas-web/assets/js/app.js
+09f66778ebd24acffa5d0ea2f309c4a2a8b752f52907e8380a64692ccfbdfca2    316098  crates/nas-web/assets/js/app.js
 cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41    951904  crates/nas-web/assets/js/vendor/xlsx.full.min.js
 7f839b2d4688b845c105ebf5d2f9803075f91ea0fe72bdaac176c3a04dd3d2c1     97781  crates/nas-web/assets/js/vendor/jszip.min.js
 c4a133c65a112799e35b143c572dfff9e923a3bf39b5fd3b07a06aa0f8f530c2     75527  crates/nas-web/assets/js/vendor/docx-preview.min.js
