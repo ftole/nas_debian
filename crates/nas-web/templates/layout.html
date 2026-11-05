@@ -2203,6 +2203,73 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       </div>
     </div>
   </div>
+
+  <!-- Modal: Confirmar Ejecución Manual de Respaldo -->
+  <div class="modal-backdrop modal-static" id="modal-run-backup-confirm">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon" style="color:var(--accent-success);"><use href="#icon-play"></use></svg>
+          <span>Confirmar Ejecución Manual</span>
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-run-backup-confirm')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-info" style="margin-bottom:14px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-network"></use></svg>
+          <span>Se iniciará un proceso diferencial en segundo plano creando un nuevo snapshot atómico en el histórico.</span>
+        </div>
+        <p style="font-size:13.5px; line-height:1.5; margin-bottom:12px;">
+          ¿Deseas iniciar la ejecución manual del respaldo para la tarea <strong id="confirm-run-backup-id" style="color:var(--accent-primary);"></strong>?
+        </p>
+        <div style="font-size:12px; color:var(--text-secondary); background:var(--bg-input); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color); display:flex; flex-direction:column; gap:6px;">
+          <div><strong>Protocolo:</strong> <span id="confirm-run-backup-proto"></span></div>
+          <div><strong>Origen remoto:</strong> <code id="confirm-run-backup-source"></code></div>
+          <div><strong>Destino:</strong> <span id="confirm-run-backup-dest"></span></div>
+          <div><strong>Horario habitual:</strong> <span id="confirm-run-backup-cron"></span></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-run-backup-confirm')">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-run-backup" onclick="executeRunBackupConfirm()">
+          <svg class="icon icon-sm"><use href="#icon-play"></use></svg> Iniciar Respaldo Ahora
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmar Detención de Respaldo en Curso -->
+  <div class="modal-backdrop modal-static" id="modal-stop-backup-confirm">
+    <div class="modal-dialog" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 style="display:flex; align-items:center; gap:8px;">
+          <svg class="icon" style="color:var(--accent-danger);"><use href="#icon-stop"></use></svg>
+          <span>Confirmar Detención de Respaldo</span>
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-stop-backup-confirm')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-warning" style="margin-bottom:14px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+          <span>Atención: Detener la tarea cancelará de inmediato la sincronización activa y purgará los archivos temporales de staging. Los snapshots finalizados previos se conservarán íntegros.</span>
+        </div>
+        <p style="font-size:13.5px; line-height:1.5; margin-bottom:12px;">
+          ¿Estás seguro de que deseas detener la ejecución activa de <strong id="confirm-stop-backup-id" style="color:var(--accent-danger);"></strong>?
+        </p>
+        <div style="font-size:12px; color:var(--text-secondary); background:var(--bg-input); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-color); display:flex; flex-direction:column; gap:6px;">
+          <div><strong>Progreso alcanzado:</strong> <span id="confirm-stop-backup-progress"></span></div>
+          <div><strong>Tiempo transcurrido:</strong> <span id="confirm-stop-backup-elapsed"></span></div>
+          <div><strong>Velocidad / Tasa:</strong> <span id="confirm-stop-backup-speed"></span></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-stop-backup-confirm')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-stop-backup" onclick="executeStopBackupConfirm()">
+          <svg class="icon icon-sm"><use href="#icon-stop"></use></svg> Detener Respaldo
+        </button>
+      </div>
+    </div>
+  </div>
 <!--ENDIF-->
 
   <!-- Modal: Gestión de Disco -->
