@@ -175,6 +175,8 @@ pub fn classify_backup_status(
                 if let Ok(code) = num_str.parse::<i32>() {
                     if code == 143 || code == 130 {
                         line_is_cancel = true;
+                    } else if code == 24 || code == 23 {
+                        // Advertencias no fatales (archivos desaparecidos o en uso)
                     } else if code != 0 {
                         line_is_error = true;
                     }
@@ -819,6 +821,13 @@ mod tests {
         std::fs::create_dir_all(&snap_dir).expect("snap_dir");
         assert_eq!(
             classify_backup_status(false, Some(ok_log), tmp_root.to_str().unwrap(), "t1"),
+            "OK"
+        );
+
+        // Advertencia por archivos en uso (código 23) con snapshot completado -> OK
+        let warning_23_log = "[2026-10-29 10:00:00] [t1] ADVERTENCIA: algunos ficheros en uso o bloqueados por usuarios no se pudieron leer (codigo 23: el resto de ficheros se respaldo con exito)\n[2026-10-29 10:01:00] [t1] snapshot completado: /tmp/snapshot_2026";
+        assert_eq!(
+            classify_backup_status(false, Some(warning_23_log), tmp_root.to_str().unwrap(), "t1"),
             "OK"
         );
 
