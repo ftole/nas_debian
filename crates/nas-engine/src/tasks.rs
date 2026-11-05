@@ -647,7 +647,7 @@ fn run_step(
     }
 
     let output = runner.run(&spec)?;
-    if is_rsync && output.code == 24 {
+    if is_rsync && (output.code == 24 || output.code == 23) {
         return Ok(output);
     }
     output.ensure_success()
