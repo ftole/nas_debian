@@ -3970,48 +3970,29 @@ async function loadLogs() {
     }
 
     tbody.innerHTML = logs.map((l, index) => {
-      const srcBadge = matchSourceBadge(l.source);
-      const userText = l.user || l.task || 'sistema';
-      const ipText = l.ip ? `<span class="table-logs-ip"><code>${escapeHtml(l.ip)}</code></span>` : '';
+      const srcBadge = logOriginBadge(l);
       const actionLabel = l.action_label || l.event_label || l.action || l.event || l.unit || 'registro';
       const badgeType = l.badge || 'blue';
       const targetText = l.target || l.task || l.unit || '-';
       const status = (l.status || 'OK').toUpperCase();
       const statusBadge = (status === 'SUCCESS' || status === 'OK' || status === 'ALLOW') ? 'badge-ok' : ((status === 'FAILED' || status === 'ERR' || status === 'BLOCK') ? 'badge-err' : 'badge-warn');
-      const isSystem = l.source === 'system';
       const countBadge = (l.count && l.count > 1)
         ? `<span class="badge badge-antispam" title="Evento idéntico repetido ${l.count} veces">x${l.count}</span>`
         : '';
-      const details = (isSystem && l.human)
-        ? l.human
-        : (l.message || (l.details ? (typeof l.details === 'object' ? JSON.stringify(l.details) : l.details) : l.raw || '-'));
-      const technical = l.raw || details;
-      const codeBadge = l.code
-        ? `<span class="badge badge-warn" style="margin-bottom:4px;">${escapeHtml(l.code)}</span>`
-        : '';
-      const techId = `log-tech-${index}`;
-      const eyeButton = `
-        <button type="button" class="btn btn-secondary btn-sm" style="padding:2px 5px; flex:0 0 auto;" title="Ver código real del sistema" aria-label="Ver código real del sistema" aria-expanded="false" onclick="toggleLogTech(this, '${techId}')">
-          <svg class="icon icon-sm"><use href="#icon-eye"></use></svg>
-        </button>`;
+      const humanSummary = l.human || l.message || l.raw || '-';
 
       return `
         <tr>
-          <td class="table-logs-timestamp"><code>${escapeHtml(l.timestamp || '-')}</code></td>
+          <td class="table-logs-timestamp" title="${escapeHtml(l.timestamp || '')}"><code>${escapeHtml(formatLogTimestamp(l.timestamp))}</code></td>
           <td>${srcBadge}</td>
-          <td><span class="table-logs-user">${escapeHtml(userText)}</span>${ipText}</td>
+          <td>${logActorCell(l)}</td>
           <td><span class="badge badge-${badgeType}">${escapeHtml(actionLabel)}</span>${countBadge}</td>
           <td class="table-logs-target"><code>${escapeHtml(targetText)}</code></td>
           <td><span class="badge ${statusBadge}">${escapeHtml(status)}</span></td>
-          <td class="${isSystem ? 'table-logs-details log-system' : 'table-logs-details'}">
-            <div style="display:flex; align-items:flex-start; gap:6px;">
-              <span style="flex:1 1 auto;">${escapeHtml(details)}</span>
-              ${eyeButton}
-            </div>
-            <div id="${techId}" hidden style="margin-top:6px; padding:6px 8px; border-radius:6px; background:rgba(127,127,127,0.12); border:1px solid var(--border-color);">
-              ${codeBadge}
-              <pre style="margin:0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; color:var(--text-muted);">${escapeHtml(technical)}</pre>
-            </div>
+          <td class="table-logs-details">
+            <button type="button" class="btn btn-secondary btn-sm" style="padding:2px 6px;" title="${escapeHtml(humanSummary)}" aria-label="Ver detalle del registro" onclick="openLogDetail(${index})">
+              <svg class="icon icon-sm"><use href="#icon-eye"></use></svg>
+            </button>
           </td>
         </tr>
       `;
@@ -4021,35 +4002,93 @@ async function loadLogs() {
   }
 }
 
-function toggleLogTech(button, blockId) {
-  const block = document.getElementById(blockId);
-  if (!block) return;
-  const opening = block.hasAttribute('hidden');
-  if (opening) {
-    block.removeAttribute('hidden');
-  } else {
-    block.setAttribute('hidden', '');
-  }
-  button.setAttribute('aria-expanded', opening ? 'true' : 'false');
-  button.title = opening ? 'Ocultar código del sistema' : 'Ver código real del sistema';
-  const icon = button.querySelector('use');
-  if (icon) {
-    icon.setAttribute('href', opening ? '#icon-eye-off' : '#icon-eye');
+function formatLogTimestamp(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  try {
+    return new Intl.DateTimeFormat('es-MX', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(date);
+  } catch (e) {
+    return value;
   }
 }
 
-function matchSourceBadge(source) {
-  switch (source) {
+function serverHostname() {
+  const node = document.getElementById('masthead-hostname');
+  const name = node ? node.textContent.trim() : '';
+  return name || window.location.hostname || 'Servidor';
+}
+
+function logOriginBadge(entry) {
+  const label = entry.origin || 'Sistema';
+  let badge = 'gray';
+  switch (entry.source) {
     case 'samba_audit':
-      return '<span class="badge badge-purple">Samba</span>';
+      badge = 'purple';
+      break;
     case 'admin':
-      return '<span class="badge badge-blue">Admin</span>';
+      badge = (entry.action || '').startsWith('terminal') ? 'warn' : 'blue';
+      break;
     case 'backup':
-      return '<span class="badge badge-ok">Backup</span>';
-    case 'system':
+      badge = 'ok';
+      break;
     default:
-      return '<span class="badge badge-gray">Sistema</span>';
+      badge = 'gray';
   }
+  return `<span class="badge badge-${badge}">${escapeHtml(label)}</span>`;
+}
+
+function logActorCell(entry) {
+  const user = entry.user || entry.task || 'sistema';
+  const place = entry.ip || entry.origin_detail || serverHostname();
+  return `<span class="table-logs-user">${escapeHtml(user)}</span><span class="table-logs-ip"><code>${escapeHtml(place)}</code></span>`;
+}
+
+function openLogDetail(index) {
+  const entry = (AppState.logsCache || [])[index];
+  if (!entry) return;
+  const summary = entry.human || entry.message || entry.raw || '-';
+  const summaryEl = document.getElementById('log-detail-summary');
+  if (summaryEl) summaryEl.textContent = summary;
+  const codeEl = document.getElementById('log-detail-code');
+  if (codeEl) {
+    if (entry.code) {
+      codeEl.textContent = entry.code;
+      codeEl.hidden = false;
+    } else {
+      codeEl.textContent = '';
+      codeEl.hidden = true;
+    }
+  }
+  const rawEl = document.getElementById('log-detail-raw');
+  if (rawEl) rawEl.textContent = entry.raw || summary;
+  const copyEl = document.getElementById('log-detail-copy');
+  if (copyEl) copyEl.dataset.raw = entry.raw || '';
+  openModal('modal-log-detail');
+}
+
+function copyLogDetail() {
+  const button = document.getElementById('log-detail-copy');
+  const text = button ? (button.dataset.raw || '') : '';
+  if (!text) {
+    showToast('No hay texto técnico para copiar.', 'warning');
+    return;
+  }
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    showToast('El navegador no permite copiar automáticamente.', 'warning');
+    return;
+  }
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Texto técnico copiado.', 'success'))
+    .catch(() => showToast('No se pudo copiar el texto.', 'error'));
 }
 
 function exportOrCopyLogs() {
