@@ -2429,7 +2429,7 @@ fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
     }
 }
 
-/// Logs recientes y legibles: Samba, auditor├¡a del panel, respaldos y journald.
+/// Logs recientes y legibles: Samba, auditoría del panel, respaldos y journald.
 pub async fn logs(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2526,12 +2526,35 @@ pub async fn logs(
     }
 }
 
-/// Lee ├║nicamente las ├║ltimas `max_lines` l├¡neas de un archivo de bit├ícora.
+/// Lee únicamente las últimas `max_lines` líneas de un archivo de bitácora.
+///
+/// Solo se leen los últimos 256 KB del archivo para que el panel pueda
+/// refrescarse con frecuencia sin cargar bitácoras históricas completas.
 fn read_tail(path: &std::path::Path, max_lines: usize) -> String {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    const WINDOW: u64 = 256 * 1024;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return String::new(),
+    };
+    let length = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let start = length.saturating_sub(WINDOW);
+    if start > 0 && std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(start)).is_err() {
+        return String::new();
+    }
+    let mut bytes = Vec::new();
+    if std::io::Read::read_to_end(&mut file, &mut bytes).is_err() {
+        return String::new();
+    }
+    let buffer = String::from_utf8_lossy(&bytes);
+    let text = if start > 0 {
+        // Al comenzar a media línea se descarta el primer fragmento.
+        buffer.split_once('\n').map_or("", |(_, rest)| rest)
+    } else {
+        buffer.as_ref()
+    };
     let lines: Vec<&str> = text.lines().collect();
-    let start = lines.len().saturating_sub(max_lines.max(1));
-    lines[start..].join("\n")
+    let tail = lines.len().saturating_sub(max_lines.max(1));
+    lines[tail..].join("\n")
 }
 
 /// Mapa de acceso de recursos (recursos, grupos y usuarios).
@@ -4875,11 +4898,56 @@ fn run_backup_helper(args: &[&str], password: Option<&str>) -> Result<String, St
     if output.is_success() {
         Ok(output.stdout)
     } else {
-        Err(if output.stderr.is_empty() {
+        let raw = if output.stderr.is_empty() {
             output.stdout
         } else {
             output.stderr
-        })
+        };
+        Err(clean_helper_error(&raw))
+    }
+}
+
+pub(crate) fn clean_helper_error(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(msg) = val
+            .get("message")
+            .and_then(|v| v.as_str())
+            .or_else(|| val.get("error").and_then(|v| v.as_str()))
+        {
+            return sanitize_error_message(msg);
+        }
+    }
+    sanitize_error_message(trimmed)
+}
+
+fn sanitize_error_message(msg: &str) -> String {
+    let clean = if let Some((head, _)) = msg.split_once("\nRefer to the mount.cifs") {
+        head.trim()
+    } else if let Some((head, _)) = msg.split_once("Refer to the mount.cifs") {
+        head.trim()
+    } else {
+        msg.trim()
+    };
+
+    let clean = clean.strip_prefix("operación denegada: ").unwrap_or(clean);
+
+    if clean.contains("mount error(13): Permission denied") {
+        "Fallo de conexión CIFS: Acceso denegado (usuario o contraseña incorrectos, o permisos insuficientes en el recurso compartido).".to_string()
+    } else if clean.contains("mount error(112): Host is down")
+        || clean.contains("mount error(113): No route to host")
+    {
+        "Fallo de conexión CIFS: Host no disponible (servidor remoto apagado o fuera de red).".to_string()
+    } else if clean.contains("mount error(111): Connection refused") {
+        "Fallo de conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 no disponible).".to_string()
+    } else if clean.contains("mount error(6): No such device or address")
+        || clean.contains("mount error(2): No such file or directory")
+    {
+        "Fallo de conexión CIFS: Recurso compartido no encontrado en el servidor remoto.".to_string()
+    } else if clean.contains("mount error(115): Operation now in progress") {
+        "Fallo de conexión CIFS: Tiempo de espera agotado al conectar al servidor remoto.".to_string()
+    } else {
+        clean.to_string()
     }
 }
 
@@ -6000,5 +6068,23 @@ mod tests {
             h5.to_str().expect("str"),
             "attachment; filename=\"archivo.bin\"; filename*=UTF-8''"
         );
+    }
+
+    #[test]
+    fn clean_helper_error_desempaqueta_json_y_humaniza_mount_cifs() {
+        use super::clean_helper_error;
+
+        let json_err = "{\n  \"success\": false,\n  \"message\": \"operación denegada: falló conexión CIFS: mount error(13): Permission denied\\nRefer to the mount.cifs(8) manual page (e.g. man mount.cifs) and kernel log messages (dmesg)\",\n  \"error\": \"operación denegada: falló conexión CIFS: mount error(13): Permission denied\\nRefer to the mount.cifs(8) manual page (e.g. man mount.cifs) and kernel log messages (dmesg)\"\n}";
+        let res = clean_helper_error(json_err);
+        assert!(res.contains("Acceso denegado"));
+        assert!(!res.contains("Refer to the mount.cifs"));
+        assert!(!res.contains("\"success\""));
+
+        let host_down = "{\n  \"success\": false,\n  \"message\": \"operación denegada: falló conexión CIFS: mount error(112): Host is down\"\n}";
+        let res2 = clean_helper_error(host_down);
+        assert!(res2.contains("Host no disponible"));
+
+        let plain = "error desconocido en ejecución";
+        assert_eq!(clean_helper_error(plain), "error desconocido en ejecución");
     }
 }
