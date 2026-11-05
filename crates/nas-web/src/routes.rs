@@ -2429,7 +2429,7 @@ fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
     }
 }
 
-/// Logs recientes del sistema (journalctl).
+/// Logs recientes y legibles: Samba, auditor├¡a del panel, respaldos y journald.
 pub async fn logs(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2439,55 +2439,99 @@ pub async fn logs(
         return *response;
     }
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let source = query.source.clone().unwrap_or_default();
+    let search = query.q.clone().unwrap_or_default();
+    let grouped = query.grouped != Some(0);
 
-    match tokio::task::spawn_blocking(move || {
-        let spec = nas_exec::CommandSpec::new("journalctl")
-            .args(["-n", &limit.to_string(), "--no-pager", "-o", "short-iso"])
-            .timeout(std::time::Duration::from_secs(20));
-        run_json(spec)
-    })
-    .await
-    {
-        Ok(Ok(text)) => {
-            let entries: Vec<serde_json::Value> = text
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| {
-                    let mut parts = line.splitn(3, ' ');
-                    let timestamp = parts.next().unwrap_or_default();
-                    let unit = parts.next().unwrap_or("system");
-                    let message = parts.next().unwrap_or(line);
-                    let status = if message.to_ascii_lowercase().contains("error")
-                        || message.to_ascii_lowercase().contains("fail")
-                    {
-                        "FAILED"
-                    } else {
-                        "SUCCESS"
-                    };
-                    serde_json::json!({
-                        "source": "system",
-                        "unit": unit,
-                        "timestamp": timestamp,
-                        "message": message,
-                        "action": message,
-                        "action_label": unit,
-                        "badge": if status == "FAILED" { "red" } else { "blue" },
-                        "target": unit,
-                        "status": status,
-                        "user": "sistema",
-                        "ip": "",
-                        "raw": line,
-                        "count": 1,
-                        "human": message,
-                        "level": if status == "FAILED" { "error" } else { "info" },
-                    })
-                })
-                .collect();
-            axum::Json(ApiResponse::ok(entries, "Logs del sistema")).into_response()
+    let outcome = tokio::task::spawn_blocking(move || {
+        let selected = nas_engine::LogSource::parse(&source);
+        let wants =
+            |candidate: nas_engine::LogSource| selected.map_or(true, |choice| choice == candidate);
+        let window = limit.saturating_mul(4);
+        let window_arg = window.to_string();
+        let mut entries: Vec<nas_engine::LogEntry> = Vec::new();
+
+        if wants(nas_engine::LogSource::SambaAudit) {
+            let path = std::env::var("NAS_SAMBA_AUDIT_LOG")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("/var/log/samba/audit.log"));
+            entries.extend(nas_engine::parse_samba_audit(&read_tail(&path, window)));
         }
-        Ok(Err(error)) => server_error(&error),
+
+        if wants(nas_engine::LogSource::Admin) {
+            if let Ok(rows) = state.auth.db().recent_audit(limit) {
+                let events: Vec<nas_engine::AdminEvent<'_>> = rows
+                    .iter()
+                    .map(|row| nas_engine::AdminEvent {
+                        ts: row.ts,
+                        username: &row.username,
+                        action: &row.action,
+                        target: &row.target,
+                        result: &row.result,
+                        detail: &row.detail,
+                    })
+                    .collect();
+                entries.extend(nas_engine::parse_admin_events(&events));
+            }
+        }
+
+        if wants(nas_engine::LogSource::Backup) {
+            let path = std::env::var("NAS_BACKUP_MASTER_LOG")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    state
+                        .paths
+                        .data_root
+                        .join("LOGS_BACKUP")
+                        .join("backups_master.log")
+                });
+            entries.extend(nas_engine::parse_backup_log(&read_tail(&path, window)));
+        }
+
+        if wants(nas_engine::LogSource::System) {
+            let spec = nas_exec::CommandSpec::new("journalctl")
+                .args(["-n", window_arg.as_str(), "--no-pager", "-o", "short-iso"])
+                .timeout(std::time::Duration::from_secs(20));
+            if let Ok(text) = run_json(spec) {
+                entries.extend(nas_engine::parse_journal(&text));
+            }
+        }
+
+        entries = nas_engine::filter_query(entries, &search);
+        nas_engine::sort_recent(&mut entries);
+        if grouped {
+            entries = nas_engine::group_repeated(entries);
+        }
+        entries.truncate(limit);
+
+        entries
+            .into_iter()
+            .filter_map(|entry| {
+                let human = entry.human.clone();
+                let mut value = serde_json::to_value(entry).ok()?;
+                // Compatibilidad con el `app.js` original: usa `message` cuando
+                // no hay `human` (p. ej. el resumen del panel de inicio).
+                value["message"] = serde_json::Value::String(human);
+                Some(value)
+            })
+            .collect::<Vec<serde_json::Value>>()
+    })
+    .await;
+
+    match outcome {
+        Ok(entries) => {
+            axum::Json(ApiResponse::ok(entries, "Registros del sistema")).into_response()
+        }
         Err(_) => server_error("lectura de logs interrumpida"),
     }
+}
+
+/// Lee ├║nicamente las ├║ltimas `max_lines` l├¡neas de un archivo de bit├ícora.
+fn read_tail(path: &std::path::Path, max_lines: usize) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max_lines.max(1));
+    lines[start..].join("\n")
 }
 
 /// Mapa de acceso de recursos (recursos, grupos y usuarios).
