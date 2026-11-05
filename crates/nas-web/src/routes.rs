@@ -4937,15 +4937,19 @@ fn sanitize_error_message(msg: &str) -> String {
     } else if clean.contains("mount error(112): Host is down")
         || clean.contains("mount error(113): No route to host")
     {
-        "Fallo de conexión CIFS: Host no disponible (servidor remoto apagado o fuera de red).".to_string()
+        "Fallo de conexión CIFS: Host no disponible (servidor remoto apagado o fuera de red)."
+            .to_string()
     } else if clean.contains("mount error(111): Connection refused") {
-        "Fallo de conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 no disponible).".to_string()
+        "Fallo de conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 no disponible)."
+            .to_string()
     } else if clean.contains("mount error(6): No such device or address")
         || clean.contains("mount error(2): No such file or directory")
     {
-        "Fallo de conexión CIFS: Recurso compartido no encontrado en el servidor remoto.".to_string()
+        "Fallo de conexión CIFS: Recurso compartido no encontrado en el servidor remoto."
+            .to_string()
     } else if clean.contains("mount error(115): Operation now in progress") {
-        "Fallo de conexión CIFS: Tiempo de espera agotado al conectar al servidor remoto.".to_string()
+        "Fallo de conexión CIFS: Tiempo de espera agotado al conectar al servidor remoto."
+            .to_string()
     } else {
         clean.to_string()
     }
