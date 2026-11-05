@@ -83,6 +83,8 @@ pub struct LogEntry {
     pub badge: String,
     /// Frase completa en español que describe lo ocurrido.
     pub human: String,
+    /// Código de error real del sistema (`rsync 11`, `mount error(112)`, `NT_STATUS_...`).
+    pub code: String,
     /// Línea original sin transformar.
     pub raw: String,
     /// Número de repeticiones agrupadas.
@@ -107,6 +109,7 @@ impl LogEntry {
             level: "info".to_string(),
             badge: source.badge().to_string(),
             human: String::new(),
+            code: String::new(),
             raw: raw.to_string(),
             count: 1,
             first_seen: timestamp.clone(),
@@ -118,6 +121,7 @@ impl LogEntry {
         self.action = action.to_string();
         self.action_label = label.to_string();
         self.human = human.trim().to_string();
+        self.code = detect_code(&self.raw);
         self
     }
 
@@ -182,6 +186,53 @@ pub fn normalize_timestamp(raw: &str) -> String {
     } else {
         chars.into_iter().collect()
     }
+}
+
+/// Extrae el código de error real que lanza el sistema, si existe.
+fn detect_code(text: &str) -> String {
+    let lower = text.to_lowercase();
+    if let Some(position) = lower.find("nt_status_") {
+        let code: String = lower[position..]
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect();
+        if !code.is_empty() {
+            return code.to_uppercase();
+        }
+    }
+    if let Some(position) = lower.find("mount error(") {
+        let rest = &lower[position + "mount error(".len()..];
+        if let Some(end) = rest.find(')') {
+            return format!("mount error({})", &rest[..end]);
+        }
+    }
+    if lower.contains("rsync") {
+        for marker in ["(código ", "(codigo "] {
+            if let Some(position) = lower.find(marker) {
+                let rest = &lower[position + marker.len()..];
+                let digits: String = rest
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .collect();
+                if !digits.is_empty() {
+                    return format!("rsync {digits}");
+                }
+            }
+        }
+    }
+    for marker in ["exit code ", "exit "] {
+        if let Some(position) = lower.find(marker) {
+            let rest = &lower[position + marker.len()..];
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            if !digits.is_empty() {
+                return format!("exit {digits}");
+            }
+        }
+    }
+    String::new()
 }
 
 fn epoch_to_iso(ts: i64) -> String {
@@ -1097,5 +1148,32 @@ mod tests {
     fn humano_simple() {
         assert_eq!(humanize("share_acl_repair"), "Share acl repair");
         assert_eq!(humanize(""), "");
+    }
+
+    #[test]
+    fn detecta_codigos_de_error_del_sistema() {
+        assert_eq!(
+            detect_code("[2026-10-28 23:11:54] [Creditas] error en replicación rsync (código 11)"),
+            "rsync 11"
+        );
+        assert_eq!(
+            detect_code("mount error(112): Host is down"),
+            "mount error(112)"
+        );
+        assert_eq!(
+            detect_code("smbd: open failed NT_STATUS_ACCESS_DENIED"),
+            "NT_STATUS_ACCESS_DENIED"
+        );
+        assert_eq!(detect_code("el script salió con exit code 127"), "exit 127");
+        assert_eq!(detect_code("todo correcto"), "");
+    }
+
+    #[test]
+    fn propaga_el_codigo_real_en_la_entrada() {
+        let entries =
+            parse_backup_log("[2026-10-28 23:11:54] [Creditas] error en replicación rsync (código 11)");
+        assert_eq!(entries[0].status, "FAILED");
+        assert_eq!(entries[0].code, "rsync 11");
+        assert!(entries[0].human.contains("error de lectura o escritura"));
     }
 }
