@@ -207,8 +207,124 @@ pub fn classify_backup_status(
     }
 }
 
+/// Métricas de almacenamiento de la partición de destino de respaldos.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BackupDiskMetrics {
+    /// Capacidad total en bytes del disco/volumen de destino.
+    pub total_bytes: u64,
+    /// Espacio usado en bytes en el disco/volumen de destino.
+    pub used_bytes: u64,
+    /// Espacio disponible en bytes en el disco/volumen de destino.
+    pub available_bytes: u64,
+    /// Porcentaje de ocupación del disco/volumen de destino (0.0 a 100.0).
+    pub used_percent: f64,
+    /// Capacidad total formateada (ej. `232.9 GB`).
+    pub total_formatted: String,
+    /// Espacio usado formateado (ej. `192.5 GB`).
+    pub used_formatted: String,
+    /// Espacio disponible formateado (ej. `40.4 GB`).
+    pub available_formatted: String,
+    /// Resumen legible consolidado (ej. `Disco: 192.5 GB / 232.9 GB (84%)`).
+    pub summary: String,
+}
+
+/// Resuelve una ruta existente subiendo por los ancestros si el directorio no existe aún.
+fn resolve_existing_path<'a>(dest_root: &'a str) -> &'a std::path::Path {
+    let mut path = std::path::Path::new(dest_root);
+    while !path.exists() {
+        if let Some(parent) = path.parent() {
+            if parent.as_os_str().is_empty() {
+                return std::path::Path::new("/");
+            }
+            path = parent;
+        } else {
+            return std::path::Path::new("/");
+        }
+    }
+    path
+}
+
+/// Consulta el uso de disco del punto de montaje donde se aloja el respaldo mediante `df -Pk`.
+pub fn calculate_destination_disk(dest_root: &str) -> BackupDiskMetrics {
+    let check_path = resolve_existing_path(dest_root);
+    let check_path_str = check_path.to_string_lossy();
+    let runner = Runner::new();
+    let spec = nas_exec::CommandSpec::new("df")
+        .args(["-Pk", check_path_str.as_ref()])
+        .timeout(std::time::Duration::from_millis(1500));
+
+    if let Ok(out) = runner.run(&spec) {
+        if out.is_success() {
+            if let Some(df_full) = nas_engine::storage::parse_df_full(&out.stdout) {
+                let total_bytes = df_full.total_kb.saturating_mul(1024);
+                let used_bytes = df_full.used_kb.saturating_mul(1024);
+                let available_bytes = df_full.available_kb.saturating_mul(1024);
+                let used_percent = df_full.used_percent;
+
+                let total_formatted = human_bytes(total_bytes);
+                let used_formatted = human_bytes(used_bytes);
+                let available_formatted = human_bytes(available_bytes);
+                let summary = format!(
+                    "Disco: {used_formatted} / {total_formatted} ({used_percent:.0}%)"
+                );
+
+                return BackupDiskMetrics {
+                    total_bytes,
+                    used_bytes,
+                    available_bytes,
+                    used_percent,
+                    total_formatted,
+                    used_formatted,
+                    available_formatted,
+                    summary,
+                };
+            }
+        }
+    }
+
+    BackupDiskMetrics::default()
+}
+
+/// Calcula el espacio en bytes consumido por el directorio de la tarea de respaldo.
+/// Utiliza `du -sk` con timeout acotado para deduplicación exacta de hardlinks entre snapshots,
+/// con fallback a cálculo acotado en Rust.
+pub fn calculate_task_size(task_dir: &std::path::Path) -> u64 {
+    if !task_dir.is_dir() {
+        return 0;
+    }
+
+    let runner = Runner::new();
+    let spec = nas_exec::CommandSpec::new("du")
+        .args(["-sk", &task_dir.to_string_lossy()])
+        .timeout(std::time::Duration::from_millis(1500));
+
+    if let Ok(out) = runner.run(&spec) {
+        if out.is_success() {
+            if let Some(first_line) = out.stdout.lines().next() {
+                if let Some(kb_str) = first_line.split_whitespace().next() {
+                    if let Ok(kb) = kb_str.parse::<u64>() {
+                        return kb.saturating_mul(1024);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback si `du` no está disponible o finaliza con error
+    crate::files::dir_size_recursive_bounded(task_dir, 5000)
+}
+
 /// Proyección plana de una tarea de respaldo.
 pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
+    let mut disk_cache = std::collections::HashMap::new();
+    backup_row_with_metrics(task, &mut disk_cache)
+}
+
+/// Proyección plana de una tarea de respaldo reutilizando el cálculo de disco por destino.
+pub fn backup_row_with_metrics(
+    task: &nas_engine::tasks::BackupTask,
+    disk_cache: &mut std::collections::HashMap<String, BackupDiskMetrics>,
+) -> Value {
     let id = &task.id;
     let cron = task_cron(id);
     let log_path = format!("{}/backup_{}.log", task.log_dir, id);
@@ -288,6 +404,15 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         (0, "00:00:00".to_string(), "00:00:00".to_string(), "0.00kB/s".to_string())
     };
 
+    let task_dir = task.task_dir();
+    let size_bytes = calculate_task_size(&task_dir);
+    let size_formatted = human_bytes(size_bytes);
+
+    let disk_info = disk_cache
+        .entry(task.destination_root.clone())
+        .or_insert_with(|| calculate_destination_disk(&task.destination_root))
+        .clone();
+
     json!({
         "id": id,
         "protocol": protocol,
@@ -311,6 +436,18 @@ pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
         "remaining": remaining,
         "speed": speed,
         "auto_permanent": task.auto_permanent,
+        "size_bytes": size_bytes,
+        "size_formatted": size_formatted.clone(),
+        "task_size_bytes": size_bytes,
+        "task_size_formatted": size_formatted,
+        "disk_total_bytes": disk_info.total_bytes,
+        "disk_used_bytes": disk_info.used_bytes,
+        "disk_available_bytes": disk_info.available_bytes,
+        "disk_used_percent": disk_info.used_percent,
+        "disk_total_formatted": disk_info.total_formatted,
+        "disk_used_formatted": disk_info.used_formatted,
+        "disk_available_formatted": disk_info.available_formatted,
+        "disk_summary": disk_info.summary,
     })
 }
 
@@ -361,7 +498,7 @@ fn is_backup_task_running(id: &str) -> bool {
 
 /// Tamaño legible en unidades binarias.
 pub fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
     let mut unit = 0;
     while value >= 1024.0 && unit < UNITS.len() - 1 {
@@ -574,6 +711,17 @@ mod tests {
         assert_eq!(row["retention"], 7);
         assert_eq!(row["auto_permanent"], true);
         assert!(row["cron_desc"].is_string());
+        assert_eq!(row["size_bytes"], 0);
+        assert_eq!(row["size_formatted"], "0 B");
+        assert_eq!(row["task_size_bytes"], 0);
+        assert_eq!(row["task_size_formatted"], "0 B");
+        assert!(row["disk_total_formatted"].is_string());
+        assert!(row["disk_summary"].is_string());
+    }
+
+    #[test]
+    fn human_bytes_formatea_terabytes() {
+        assert_eq!(human_bytes(2 * 1024 * 1024 * 1024 * 1024), "2.0 TB");
     }
 
     #[test]
