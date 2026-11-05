@@ -130,12 +130,28 @@ pub fn classify_backup_status(
     };
 
     let mut last_error_idx: Option<usize> = None;
+    let mut last_cancel_idx: Option<usize> = None;
     let mut last_success_idx: Option<usize> = None;
     let mut last_start_idx: Option<usize> = None;
 
     for (idx, line) in recent.iter().enumerate() {
         let upper = line.to_uppercase();
         let mut line_is_error = false;
+        let mut line_is_cancel = false;
+
+        if upper.contains("CANCELADO")
+            || upper.contains("CANCELADA")
+            || upper.contains("DETENIDO")
+            || upper.contains("DETENIDA")
+            || upper.contains("CODIGO DE SALIDA 143")
+            || upper.contains("CÓDIGO DE SALIDA 143")
+            || upper.contains("CODIGO 143")
+            || upper.contains("CÓDIGO 143")
+            || upper.contains("CODIGO DE SALIDA 130")
+            || upper.contains("CÓDIGO DE SALIDA 130")
+        {
+            line_is_cancel = true;
+        }
 
         if upper.contains("ERROR")
             || upper.contains("FALLO")
@@ -157,14 +173,18 @@ pub fn classify_backup_status(
                 let rest = &upper[pos + needle.len()..];
                 let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
                 if let Ok(code) = num_str.parse::<i32>() {
-                    if code != 0 {
+                    if code == 143 || code == 130 {
+                        line_is_cancel = true;
+                    } else if code != 0 {
                         line_is_error = true;
                     }
                 }
             }
         }
 
-        if line_is_error {
+        if line_is_cancel {
+            last_cancel_idx = Some(idx);
+        } else if line_is_error {
             last_error_idx = Some(idx);
         }
 
@@ -172,6 +192,7 @@ pub fn classify_backup_status(
             || upper.contains("INICIANDO BACKUP")
             || upper.contains("=== BACKUP OMITIDO")
             || upper.contains("=== ABORTADO")
+            || upper.contains("=== RESPALDO CANCELADO")
         {
             last_start_idx = Some(idx);
         }
@@ -182,6 +203,14 @@ pub fn classify_backup_status(
             || upper.contains("BACKUP FINALIZADO CON EXITO")
         {
             last_success_idx = Some(idx);
+        }
+    }
+
+    if let Some(cancel_idx) = last_cancel_idx {
+        let is_after_success = last_success_idx.map_or(true, |succ| cancel_idx >= succ);
+        let is_after_error = last_error_idx.map_or(true, |err| cancel_idx >= err);
+        if is_after_success && is_after_error {
+            return "Cancelada";
         }
     }
 
@@ -760,6 +789,20 @@ mod tests {
         assert_eq!(
             classify_backup_status(false, Some(rsync_err), "/tmp", "t1"),
             "Error"
+        );
+
+        // Cancelación explícita por detención del usuario -> Cancelada
+        let cancel_log = "[2026-10-29 10:00:00] [t1] === RESPALDO CANCELADO: la ejecución fue detenida manualmente por el usuario ===";
+        assert_eq!(
+            classify_backup_status(false, Some(cancel_log), "/tmp", "t1"),
+            "Cancelada"
+        );
+
+        // Cancelación con código de salida 143 (SIGTERM) -> Cancelada
+        let term_log = "[2026-10-29 10:00:00] [t1] ERROR: se descarta el snapshot parcial (codigo de salida 143)";
+        assert_eq!(
+            classify_backup_status(false, Some(term_log), "/tmp", "t1"),
+            "Cancelada"
         );
 
         // Éxito afirmado pero sin directorio snapshot_* en disco -> Error
