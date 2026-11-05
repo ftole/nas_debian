@@ -281,7 +281,8 @@ CRED_FILE={q_cred}
 KEY_FILE={q_key}
 MODE="$SOURCE_TYPE"
 CRED="$CRED_FILE"
-BKP_DIR="${{BKP_DIR:-{q_dest}}}"
+# Destino: {dest}
+BKP_DIR="${{BKP_DIR:-$DEST_ROOT/$TASK}}"
 PERM_DIR="${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK"
 LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
 MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
@@ -441,7 +442,7 @@ fi
             q_dest_root = shell_single_quote(&dest_root),
             q_cred = shell_single_quote(&cred),
             q_key = shell_single_quote(&key_file),
-            q_dest = shell_single_quote(&dest),
+            dest = dest,
         )
     }
 
@@ -611,6 +612,8 @@ mod tests {
         assert!(runner.contains("codigo 23"));
         assert!(runner.contains("codigo 24"));
         assert!(runner.contains("nobrl"));
+        assert!(runner.contains("BKP_DIR=\"${BKP_DIR:-$DEST_ROOT/$TASK}\""));
+        assert!(!runner.contains("BKP_DIR=\"${BKP_DIR:-'"));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
