@@ -1181,7 +1181,7 @@ pub fn restore_backup(
             );
 
             match rsync_res {
-                Ok(res) if res.is_success() || res.code == 24 => Ok(format!(
+                Ok(res) if res.is_success() || res.code == 24 || res.code == 23 => Ok(format!(
                     "Restauración completada exitosamente hacia el recurso CIFS //{ip}/{share}"
                 )),
                 Ok(res) => Err(NasError::Invalid(format!(
@@ -1226,7 +1226,7 @@ pub fn restore_backup(
             }
 
             let res = runner.run(&spec)?;
-            if res.is_success() || res.code == 24 {
+            if res.is_success() || res.code == 24 || res.code == 23 {
                 Ok(format!("Restauración completada hacia {user}@{ip}:{path}"))
             } else {
                 Err(NasError::Invalid(format!(
@@ -1248,7 +1248,7 @@ pub fn restore_backup(
                     ])
                     .timeout(Duration::from_secs(300)),
             )?;
-            if res.is_success() || res.code == 24 {
+            if res.is_success() || res.code == 24 || res.code == 23 {
                 Ok(format!("Restauración local completada en {path}"))
             } else {
                 Err(NasError::Invalid(format!(
