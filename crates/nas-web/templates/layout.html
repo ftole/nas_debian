@@ -1299,14 +1299,20 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
         </div>
 
-        <!-- Selector de pestañas: Rotativos vs Permanentes -->
-        <div class="tabs-nav" style="display:flex; gap:10px; margin-bottom:18px;">
-          <button type="button" class="btn btn-secondary active" id="tab-btn-rotative" onclick="switchBackupTab('rotative')">
-            <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Snapshots Rotativos
-          </button>
-          <button type="button" class="btn btn-secondary" id="tab-btn-permanent" onclick="switchBackupTab('permanent')">
-            <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg> Respaldos Permanentes (Golden Snapshots)
-          </button>
+        <!-- Selector de pestañas: Rotativos vs Permanentes y Buscador -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+          <div class="tabs-nav" style="display:flex; gap:10px;">
+            <button type="button" class="btn btn-secondary active" id="tab-btn-rotative" onclick="switchBackupTab('rotative')">
+              <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Snapshots Rotativos
+            </button>
+            <button type="button" class="btn btn-secondary" id="tab-btn-permanent" onclick="switchBackupTab('permanent')">
+              <svg class="icon icon-sm" style="color:var(--accent-warning);"><use href="#icon-shield"></use></svg> Respaldos Permanentes (Golden Snapshots)
+            </button>
+          </div>
+          <div class="search-box" style="width:340px;">
+            <svg class="icon"><use href="#icon-search"></use></svg>
+            <input type="text" id="backups-search-input" placeholder="Buscar por identificador u origen remoto..." oninput="filterBackups(this.value)">
+          </div>
         </div>
 
         <div class="panel-card" id="backups-rotative-container">
