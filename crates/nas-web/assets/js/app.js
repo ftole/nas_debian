@@ -45,6 +45,57 @@ const AppState = {
   },
 };
 
+function cleanErrorMessage(raw) {
+  if (raw === null || raw === undefined) return '';
+  let str = String(raw).trim();
+
+  // Desempaquetar recursivamente strings JSON si vienen serializados
+  for (let i = 0; i < 3; i++) {
+    if (str.startsWith('{') && str.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(str);
+        if (parsed && typeof parsed === 'object') {
+          const candidate = parsed.error || parsed.message || parsed.output;
+          if (candidate && typeof candidate === 'string') {
+            str = candidate.trim();
+            continue;
+          }
+        }
+      } catch (e) {
+        // No es JSON válido
+      }
+    }
+    break;
+  }
+
+  // Eliminar referencias técnicas a páginas de manual
+  if (str.includes('Refer to the mount.cifs')) {
+    str = str.split(/Refer to the mount\.cifs/i)[0].trim();
+  }
+
+  // Quitar prefijo de error interno si existe
+  str = str.replace(/^operación denegada:\s*/i, '');
+
+  // Mapear errores comunes de CIFS/mount a descripciones en español claro
+  if (str.includes('mount error(13)') || (str.toLowerCase().includes('permission denied') && (str.toLowerCase().includes('cifs') || str.toLowerCase().includes('mount')))) {
+    return 'Fallo de autenticación CIFS: Acceso denegado (usuario o contraseña incorrectos, o permisos insuficientes en el recurso compartido).';
+  }
+  if (str.includes('mount error(112)') || str.includes('mount error(113)') || str.toLowerCase().includes('host is down') || str.toLowerCase().includes('no route to host')) {
+    return 'Fallo de conexión CIFS: El servidor remoto no responde o está apagado/fuera de red.';
+  }
+  if (str.includes('mount error(111)') || str.toLowerCase().includes('connection refused')) {
+    return 'Fallo de conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 no disponible en el host).';
+  }
+  if (str.includes('mount error(6)') || str.includes('mount error(2)') || str.toLowerCase().includes('no such device')) {
+    return 'Fallo de conexión CIFS: Recurso compartido no encontrado en el servidor remoto.';
+  }
+  if (str.includes('mount error(115)')) {
+    return 'Fallo de conexión CIFS: Tiempo de espera agotado al conectar con el servidor remoto.';
+  }
+
+  return str;
+}
+
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -56,7 +107,7 @@ function showToast(message, type = 'info') {
   toast.style.transition = 'opacity 0.3s ease';
 
   const msgDiv = document.createElement('div');
-  msgDiv.textContent = String(message ?? '');
+  msgDiv.textContent = type === 'error' ? cleanErrorMessage(message) : String(message ?? '');
   toast.appendChild(msgDiv);
   container.appendChild(toast);
 
@@ -456,12 +507,13 @@ async function apiFetch(endpoint, options = {}) {
     }
 
     if (!res.ok || data.success === false) {
-      throw new Error(data.error || data.message || data.output || `Error ${res.status}`);
+      const rawErr = data.error || data.message || data.output || `Error ${res.status}`;
+      throw new Error(cleanErrorMessage(rawErr));
     }
     return data;
   } catch (err) {
     if (err.message !== 'Sesión expirada.' && !options.silentToast) {
-      showToast(err.message, 'error');
+      showToast(cleanErrorMessage(err.message), 'error');
     }
     throw err;
   }
@@ -8121,6 +8173,10 @@ window.handleDomainJoin = handleDomainJoin;
 window.joinDomain = handleDomainJoin;
 window.handleDomainLeave = handleDomainLeave;
 window.leaveDomain = handleDomainLeave;
+
+// Utilidades y Notificaciones
+window.cleanErrorMessage = cleanErrorMessage;
+window.showToast = showToast;
 
 // Modales Generales
 window.openModal = openModal;
