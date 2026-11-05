@@ -965,7 +965,7 @@ async function loadBackups() {
     _backupsData = tasks;
 
     if (tasks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay tareas de backup programadas actualmente.</td></tr>';
       scheduleBackupRefresh(false);
       return;
     }
@@ -986,6 +986,11 @@ async function loadBackups() {
           ? '100% · Completado'
           : (isErr ? 'Error · Reintentar' : 'Pendiente'));
 
+      const taskSize = t.size_formatted || t.task_size_formatted || '0 B';
+      const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
+        ? `Disco: ${escapeHtml(t.disk_used_formatted)} / ${escapeHtml(t.disk_total_formatted)} (${Math.round(t.disk_used_percent || 0)}%)`
+        : (t.disk_summary ? escapeHtml(t.disk_summary) : 'Disco: N/A');
+
       return `
       <tr>
         <td><strong>${escapeHtml(t.id)}</strong></td>
@@ -993,6 +998,12 @@ async function loadBackups() {
         <td><code>${escapeHtml(t.source || t.destination || 'N/A')}</code></td>
         <td>${escapeHtml(t.cron_desc)}</td>
         <td>${t.retention} snapshots</td>
+        <td>
+          <div><strong>${escapeHtml(taskSize)}</strong></div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+            ${diskText}
+          </div>
+        </td>
         <td>
           <span class="badge ${statusBadge}">${escapeHtml(t.last_status)}</span>
           <div class="progress-bar-wrap" style="margin-top:5px; height:6px;">
@@ -1031,7 +1042,7 @@ async function loadBackups() {
 
     scheduleBackupRefresh(anyRunning);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
     scheduleBackupRefresh(false);
   }
 }
