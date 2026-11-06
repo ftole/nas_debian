@@ -871,7 +871,7 @@
 
       <!-- 5. SERVICIOS Y SALUD DEL SISTEMA (SERVICES & DIAGNOSTICS) -->
       <section id="view-services" class="view-section %%active_group_services_diagnostics%%">
-        <div id="view-diagnostics" style="display:none;"></div>
+        <div id="view-diagnostics" <!--IF:show_diagnostics-->style="display:block;"<!--ELSE-->style="display:none;"<!--ENDIF-->></div>
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Servicios y Salud del Sistema</h2>
@@ -1565,7 +1565,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
 <!--IF:is_admin-->
       <!-- 10. APLICACIONES Y ACTUALIZACIONES (APPLICATIONS & UPDATES) -->
       <section id="view-applications" class="view-section %%active_group_applications_updates%%">
-        <div id="view-updates" style="display:none;"></div>
+        <div id="view-updates" <!--IF:show_updates-->style="display:block;"<!--ELSE-->style="display:none;"<!--ENDIF-->></div>
         <div class="page-head">
           <div>
             <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Aplicaciones y Actualizaciones</h2>
