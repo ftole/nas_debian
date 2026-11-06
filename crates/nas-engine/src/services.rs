@@ -6,6 +6,9 @@ use serde::Serialize;
 /// Demonios gestionables por el panel.
 pub const DEFAULT_SERVICES: &[&str] = &["smbd", "nmbd", "wsdd2", "nginx"];
 
+/// Servicios adicionales gestionables desde el panel.
+pub const EXTRA_SERVICES: &[&str] = &["cron"];
+
 /// Estado de un servicio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServiceStatus {
@@ -23,6 +26,7 @@ pub fn is_allowed_action(action: &str) -> bool {
 /// Indica si el servicio está en la lista blanca.
 pub fn is_allowed_service(service: &str) -> bool {
     DEFAULT_SERVICES.contains(&service)
+        || EXTRA_SERVICES.contains(&service)
         || service == "nas-web"
         || (service.starts_with("php") && service.ends_with("-fpm"))
 }
