@@ -58,14 +58,15 @@ done
 # 4.1 Generar version.json para el panel web y verificación GPG
 PKG_COMMIT_SHA=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
 PKG_DATE=$(date -u +"%Y-%m-%d")
+# Nota: gpg_verified lo fija el manifiesto firmado (Ed25519); version.json
+# refleja el origen (tag GPG del commit) sin afirmar verificación irrelevante.
 cat > "$STAGE_DIR/version.json" <<EOF
 {
   "version": "$VERSION",
   "commit": "$PKG_COMMIT_SHA",
   "date": "$PKG_DATE",
   "channel": "stable",
-  "notes": "Release oficial v$VERSION firmado con GPG por Francisco Toledo",
-  "gpg_verified": true
+  "notes": "Release oficial v$VERSION (tag firmado con GPG por Francisco Toledo)"
 }
 EOF
 
