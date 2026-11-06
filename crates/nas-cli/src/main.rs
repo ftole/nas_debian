@@ -1221,9 +1221,28 @@ fn update_verify(
     json: bool,
 ) -> NasResult<ExitCode> {
     let manifest = ReleaseManifest::load(manifest_path)?;
-    let artifact = artifact
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from(&manifest.artifact));
+    // Resolución del artefacto: 1) ruta explícita provista; 2) ruta declarada
+    // en el manifiesto si es absoluta o existe en el CWD; 3) nombre del
+    // artefacto resuelto SIEMPRE contra el directorio del manifiesto.
+    // Sin esto, los nombres relativos ("nas_debian-X.Y.Z.tar.gz") fallaban con
+    // "No such file or directory" cuando se ejecuta desde otra carpeta.
+    let artifact = match artifact {
+        Some(explicit) => explicit.to_path_buf(),
+        None => {
+            let declared = PathBuf::from(&manifest.artifact);
+            if declared.is_absolute() || declared.exists() {
+                declared
+            } else {
+                let manifest_dir = manifest_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
+                manifest_dir.join(&declared)
+            }
+        }
+    };
 
     let artifact_check = manifest.verify_artifact(&artifact);
     let signature_check = manifest.verify_signature(public_key);
