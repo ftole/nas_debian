@@ -504,11 +504,11 @@
         <!-- Barra de Filtros, Categorías y Búsqueda -->
         <div class="filter-toolbar">
           <div class="filter-chips" id="logs-filter-chips">
-            <button type="button" class="chip-btn active" data-source="all" onclick="setLogSource('all')">Todos</button>
+            <button type="button" class="chip-btn active" data-source="panel" onclick="setLogSource('panel')">Operador (panel + Samba + respaldos)</button>
             <button type="button" class="chip-btn" data-source="samba_audit" onclick="setLogSource('samba_audit')">Auditoría Samba (Archivos)</button>
             <button type="button" class="chip-btn" data-source="admin" onclick="setLogSource('admin')">Auditoría Web / Admin</button>
             <button type="button" class="chip-btn" data-source="backup" onclick="setLogSource('backup')">Respaldos</button>
-            <button type="button" class="chip-btn" data-source="system" onclick="setLogSource('system')">Sistema (journald)</button>
+            <button type="button" class="chip-btn" data-source="system" onclick="setLogSource('system')">Sistema (journald/kernel)</button>
           </div>
 
           <div style="display:flex; align-items:center; gap:12px;">
