@@ -70,7 +70,43 @@ pub struct LoginForm {
     pub csrf_token: Option<String>,
 }
 
-/// Procesa el acceso y emite la cookie de sesión.
+/// Extrae números de una versión tipo `v1.0.2` → `[1, 0, 2]`.
+fn parse_semver(value: &str) -> Vec<u64> {
+    let clean = value.trim().trim_start_matches('v');
+    clean
+        .split(&['.', '-', '+'][..])
+        .map_while(|part| part.parse::<u64>().ok())
+        .collect()
+}
+
+/// Compara dos versiones; devuelve `true` si `latest` es mayor que `current`.
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    let a = parse_semver(latest);
+    let b = parse_semver(current);
+    let max_len = a.len().max(b.len());
+    for i in 0..max_len {
+        let av = *a.get(i).unwrap_or(&0);
+        let bv = *b.get(i).unwrap_or(&0);
+        if av > bv {
+            return true;
+        }
+        if av < bv {
+            return false;
+        }
+    }
+    false
+}
+
+/// Consulta el último release publicado en GitHub usando el motor Rust.
+///
+/// Falla silenciosamente si no hay red (devuelve `None`), de modo que la
+/// vista muestre solo el estado local mientras el acceso remoto no esté AP.
+fn query_github_latest() -> Option<nas_engine::RemoteReleaseInfo> {
+    let runner = Runner::new();
+    nas_engine::fetch_latest_release(&runner, "ftole/nas_debian").ok()
+}
+
+// Procesa el acceso y emite la cookie de sesión.
 pub async fn login_submit(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -3460,15 +3496,14 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
     let gpg_verified = version
         .get("gpg_verified")
         .and_then(|v| v.as_bool())
-        .unwrap_or_else(|| {
-            std::path::Path::new("/etc/nas/trusted_keys.gpg").is_file()
-                || std::path::Path::new("/etc/nas/role").is_file()
-        });
+        .unwrap_or(false);
 
     let version_str = version
         .get("version")
         .and_then(|v| v.as_str())
-        .unwrap_or(env!("CARGO_PKG_VERSION"));
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+        .trim_start_matches('v')
+        .to_string();
     let commit_str = version
         .get("commit")
         .and_then(|v| v.as_str())
@@ -3477,6 +3512,17 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
         .get("channel")
         .and_then(|v| v.as_str())
         .unwrap_or("stable");
+
+    // Consulta remota de GitHub para calcular has_updates de forma honesta.
+    // Sin red, se informa el estado local sin inventar 'al día'.
+    let (latest_version, has_updates) = match query_github_latest() {
+        Some(release) => {
+            let latest = release.tag_name.trim_start_matches('v').to_string();
+            let newer = is_newer_version(&latest, &version_str);
+            (latest, newer)
+        }
+        None => (version_str.clone(), false),
+    };
     let notes_str = version
         .get("notes")
         .and_then(|v| v.as_str())
@@ -3485,10 +3531,10 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
     axum::Json(ApiResponse::ok(
         serde_json::json!({
             "version": version_str,
-            "latest_version": version_str,
+            "latest_version": latest_version,
             "installed_commit": commit_str,
             "commit_date": version.get("date").and_then(|v| v.as_str()),
-            "has_updates": false,
+            "has_updates": has_updates,
             "channel": channel_str,
             "gpg_verified": gpg_verified,
             "release_notes": notes_str,
@@ -3631,67 +3677,72 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
     }
 }
 
-/// Ejecuta la actualización en caliente del servidor fuera del sandbox de `nas-web.service`.
+/// Ejecuta la actualización verificada del servidor desde el panel.
+/// Usa el motor Rust (nas-engine::update) que descarga y verifica el release
+/// con Ed25519 + SHA-256. Sin updater.sh ni systemd-run.
 pub async fn system_update_run(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
 ) -> Response {
     let actor = admin.username().to_string();
+    let paths = state.paths.clone();
     let _ = state
         .auth
         .db()
         .append_audit(&actor, "system_update", "sistema", "STARTED", "");
 
-    let repo_candidate = state.paths.repo.join("src/core/updater.sh");
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let mut candidates = vec![repo_candidate];
-        candidates.extend([
-            std::path::PathBuf::from("/opt/nas_debian/src/core/updater.sh"),
-            std::path::PathBuf::from("/opt/nas/src/core/updater.sh"),
-            std::path::PathBuf::from("/usr/local/lib/nas/src/core/updater.sh"),
-        ]);
-        let script = candidates
-            .iter()
-            .find(|path| path.is_file())
-            .ok_or_else(|| "no se encontró el script de actualización (updater.sh)".to_string())?;
-
+        // Verificamos una instancia anterior (si hay otra en curso, se bloquea)
         let runner = Runner::new();
-        let active = runner
-            .run(
-                &nas_exec::CommandSpec::new("systemctl")
-                    .args(["is-active", "nas-system-update"])
-                    .timeout(std::time::Duration::from_secs(5)),
-            )
-            .map(|out| matches!(out.stdout.trim(), "active" | "activating"))
-            .unwrap_or(false);
-        if active {
-            return Err("ya hay una actualización del sistema en ejecución".to_string());
+        let active = runner.run(
+            &nas_exec::CommandSpec::new("systemctl")
+                .args(["is-active", "nas-system-update"])
+                .timeout(std::time::Duration::from_secs(5)),
+        );
+        let is_running = match &active {
+            Ok(out) => matches!(out.stdout.trim(), "active" | "activating"),
+            _ => false,
+        };
+        if is_running {
+            return Err("ya hay una actualización del sistema en ejecución".into());
         }
 
-        let output = runner
-            .run(
-                &nas_exec::CommandSpec::new("systemd-run")
-                    .args([
-                        "--no-block".to_string(),
-                        "--collect".to_string(),
-                        "--unit=nas-system-update".to_string(),
-                        "/bin/bash".to_string(),
-                        script.to_string_lossy().to_string(),
-                        "--yes".to_string(),
-                    ])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(30)),
-            )
-            .map_err(|error| error.to_string())?;
-
-        if output.is_success() {
-            Ok("Actualización iniciada en segundo plano (unidad nas-system-update).".to_string())
+        // El binario del CLI se lanza a través de `nas update apply --yes`.
+        // Valida el repo sobre /opt/nas_debian y hace rollback si falla healthcheck.
+        let nas_path = paths.repo.join("target/release/nas");
+        let nas_executable = if nas_path.exists() {
+            nas_path
         } else {
-            Err(if output.stderr.is_empty() {
-                output.stdout
-            } else {
-                output.stderr
-            })
+            std::path::PathBuf::from("/usr/local/bin/nas")
+        };
+
+        // Ejecutar en un thread nuevo (no bloquear tokio)
+        let output = std::process::Command::new(nas_executable)
+            .args([
+                "--json",
+                "update",
+                "apply",
+                "--repo",
+                "ftole/nas_debian",
+                "--root",
+                "/opt/nas_debian",
+                "--yes",
+            ])
+            .env(
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            )
+            .env_clear()
+            .output()
+            .map_err(|error| format!("no se pudo ejecutar nas update apply: {error}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if output.status.success() {
+            Ok(stdout)
+        } else {
+            Err(if stderr.is_empty() { stdout } else { stderr })
         }
     })
     .await
@@ -3703,9 +3754,17 @@ pub async fn system_update_run(
                 .auth
                 .db()
                 .append_audit(&actor, "system_update", "sistema", "SUCCESS", "");
+            // La salida es JSON con "success" true si todo va bien
+            let payload = serde_json::from_str::<serde_json::Value>(&output)
+                .map(|data| {
+                    serde_json::json!({ "output": data, "version": env!("CARGO_PKG_VERSION") })
+                })
+                .unwrap_or_else(|_| {
+                    serde_json::json!({ "output": output, "version": env!("CARGO_PKG_VERSION") })
+                });
             axum::Json(ApiResponse::ok(
-                serde_json::json!({ "output": output, "version": env!("CARGO_PKG_VERSION") }),
-                "Actualización del sistema iniciada",
+                payload,
+                "Actualización del sistema aplicada",
             ))
             .into_response()
         }
@@ -6136,5 +6195,47 @@ mod tests {
 
         let plain = "error desconocido en ejecución";
         assert_eq!(clean_helper_error(plain), "error desconocido en ejecución");
+    }
+}
+
+#[cfg(test)]
+mod semver_tests {
+    use super::parse_semver;
+
+    #[test]
+    fn parsea_versiones_comunes() {
+        assert_eq!(parse_semver("1.2.3"), vec![1, 2, 3]);
+        assert_eq!(parse_semver("v1.2.3"), vec![1, 2, 3]);
+        assert_eq!(parse_semver("0.1.9"), vec![0, 1, 9]);
+    }
+
+    #[test]
+    fn maneja_versiones_con_sufijo() {
+        assert_eq!(parse_semver("1.2.3-beta.1"), vec![1, 2, 3]);
+    }
+}
+
+#[cfg(test)]
+mod comparison_tests {
+    use super::is_newer_version;
+
+    #[test]
+    fn detecta_versions_superiores() {
+        assert!(is_newer_version("1.3.0", "1.2.9"));
+        assert!(is_newer_version("2.0.0", "1.9.9"));
+        assert!(is_newer_version("1.0.0", "0.9.9"));
+    }
+
+    #[test]
+    fn rechaza_versions_iguales_y_inferiores() {
+        assert!(!is_newer_version("1.2.3", "1.2.3"));
+        assert!(!is_newer_version("1.2.2", "1.2.3"));
+        assert!(!is_newer_version("0.1.9", "0.1.10"));
+    }
+
+    #[test]
+    fn maneja_diferentes_longitudes() {
+        assert!(is_newer_version("1.2", "1.1.9"));
+        assert!(!is_newer_version("1.2", "1.2.5"));
     }
 }
