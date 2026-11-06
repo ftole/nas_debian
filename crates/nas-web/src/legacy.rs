@@ -344,6 +344,78 @@ pub fn calculate_task_size(task_dir: &std::path::Path) -> u64 {
     crate::files::dir_size_recursive_bounded(task_dir, 5000)
 }
 
+/// Caché en memoria del tamaño (bytes) de cada directorio de tarea, con TTL.
+///
+/// `du -sk` sobre snapshots de respaldo con deduplicación por hardlinks puede
+/// tomar cientos de milisegundos por tarea; para que el panel cargue
+/// instantáneamente entre visitas se reutiliza el último valor durante
+/// `SIZE_CACHE_TTL_SECS` y se recalcula en segundo plano si expiró.
+pub const SIZE_CACHE_TTL_SECS: u64 = 60;
+
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct CachedSize {
+    bytes: u64,
+    computed_at_epoch: u64,
+}
+
+fn size_cache() -> &'static Mutex<std::collections::HashMap<std::path::PathBuf, CachedSize>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<std::path::PathBuf, CachedSize>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Lee el tamaño cacheado si es reciente; `None` indica que hay que calcular.
+fn cached_task_size(task_dir: &std::path::Path) -> Option<u64> {
+    let cache = size_cache().lock().ok()?;
+    let entry = cache.get(task_dir)?;
+    let fresh = now_epoch().saturating_sub(entry.computed_at_epoch) < SIZE_CACHE_TTL_SECS;
+    fresh.then_some(entry.bytes)
+}
+
+/// Guarda el valor calculado en la caché compartida.
+fn store_task_size(task_dir: &std::path::Path, bytes: u64) {
+    if let Ok(mut cache) = size_cache().lock() {
+        cache.insert(
+            task_dir.to_path_buf(),
+            CachedSize {
+                bytes,
+                computed_at_epoch: now_epoch(),
+            },
+        );
+    }
+}
+
+/// Consulta el tamaño respetando la caché; si expiró lanza `du -sk` en un
+/// hilo secundario y devuelve el último valor conocido mientras tanto.
+fn task_size_with_cache(task_dir: &std::path::Path) -> u64 {
+    if !task_dir.is_dir() {
+        return 0;
+    }
+
+    if let Some(cached) = cached_task_size(task_dir) {
+        // Refresco en segundo plano sin bloquear la respuesta HTTP.
+        let path_clone = task_dir.to_path_buf();
+        std::thread::spawn(move || {
+            let fresh = calculate_task_size(&path_clone);
+            store_task_size(&path_clone, fresh);
+        });
+        return cached;
+    }
+
+    let computed = calculate_task_size(task_dir);
+    store_task_size(task_dir, computed);
+    computed
+}
+
 /// Proyección plana de una tarea de respaldo.
 pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
     let mut disk_cache = std::collections::HashMap::new();
@@ -450,7 +522,7 @@ pub fn backup_row_with_metrics(
     };
 
     let task_dir = task.task_dir();
-    let size_bytes = calculate_task_size(&task_dir);
+    let size_bytes = task_size_with_cache(&task_dir);
     let size_formatted = human_bytes(size_bytes);
 
     let disk_info = disk_cache
