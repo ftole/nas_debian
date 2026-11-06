@@ -999,8 +999,10 @@ dependencies = [
  "nas-core",
  "nas-engine",
  "nas-exec",
+ "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
