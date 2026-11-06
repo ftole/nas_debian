@@ -28,7 +28,7 @@ No se detectaron vulnerabilidades **Críticas**. Los controles de seguridad crí
 
 | Control | Resultado |
 |---|---|
-| Ejecución de comandos sin shell (`proc_open` con arrays en `SystemService::runCommand/sudo`) | ✔ Sin superficie de inyección de comandos |
+| Ejecución de comandos sin shell (`nas-exec` con `CommandSpec` tipado; nota histórica de auditoría PHP) | ✔ Sin superficie de inyección de comandos |
 | Path traversal en `/api/files/*` (`resolveSubpath` elimina `..` y `\`) | ✔ Probado: `../../etc/passwd` y `%2e%2e%2f` → 400/404, **sin fuga** |
 | CSRF en operaciones mutantes | ✔ POST sin token → **403** |
 | Validación de nombres de recurso (regex alfanumérica) | ✔ `prueba;id`, `x<script>`, `a b` rechazados |
