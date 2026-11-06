@@ -93,18 +93,19 @@ Este documento recopila las situaciones anómalas más comunes que pueden presen
   ```bash
   # Verificar el estado del servidor web y del procesador PHP
   sudo systemctl status nginx
-  sudo systemctl status php*-fpm
+  # Verificar el estado del panel Rust
+  sudo systemctl status nas-web
 
   # Revisar registros de error
   sudo tail -n 30 /var/log/nginx/error.log
   ```
-  Si PHP-FPM está detenido, inícialo con `sudo systemctl restart php*-fpm`. Recuerda que en reposo el pool `nas-web` utiliza `pm = ondemand` y solo levanta procesos trabajadores cuando recibe peticiones HTTP.
+  Si el panel está detenido, arráncalo con `sudo systemctl restart nas-web`. En reposo el binario consume ~0 MB al no mantener procesos ociosos.
 
 ---
 
 ## 2. Matriz de Modos de Fallo y Resiliencia (FMEA)
 
-El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Actions (`bats tests/`, `pytest tests/`, `php tests/test_web.php`). A continuación se resume cómo responde el sistema ante cada escenario crítico:
+El proyecto incluye pruebas automatizadas en GitHub Actions (`bats tests/`, `cargo test --workspace`, `scripts/parity_extract.py --check`). A continuación se resume cómo responde el sistema ante cada escenario crítico:
 
 ### 2.1 Modos de Fallo en Copias de Seguridad
 
@@ -136,9 +137,9 @@ El proyecto incluye pruebas de inyección de fallos automatizadas en GitHub Acti
 
 | Escenario de Fallo | Comportamiento del Sistema | Mecanismo de Protección | Verificación |
 | :--- | :--- | :--- | :--- |
-| **Intento de salto de directorio (*Path Traversal*)** | Se rechaza con código de error HTTP 400/403 sin exponer el filesystem. | Validación estricta con `realpath()` y `resolveSafePath`. | `test_web.php` |
-| **Intento de inyección de comandos en terminal/API** | Los argumentos no se interpretan por shell; se pasan como arreglo puro a `proc_open`. | Invocación estricta sin `/bin/sh -c`. | `test_web.php` |
-| **Comandos interactivos en terminal web (`nano`, `vi`)** | Se detectan preventivamente y se emite mensaje educativo guiando al visor web o SSH. | Filtro de binarios TTY en `TerminalService`. | `test_web.php` |
+| **Intento de salto de directorio (*Path Traversal*)** | Se rechaza con código de error HTTP 400/403 sin exponer el filesystem. | Normalización en `FileRoot::resolve`. | `crates/nas-web/tests/web.rs` | |
+| **Intento de inyección de comandos en terminal/API** | Los argumentos se pasan como `argv` tipado a `nas-exec`. | Invocación estricta sin `/bin/sh -c`. | `crates/nas-web/tests/web.rs` | |
+| **Comandos interactivos en terminal web (`nano`, `vi`)** | Se detectan preventivamente y se emite mensaje educativo guiando al visor web o SSH. | Sesión tmux por usuario vía helper `nas-terminal`. | `crates/nas-engine/src/terminal.rs` | |
 | **Eliminación accidental de un archivo en la web** | El archivo se resguarda en la papelera `.trash/` y puede recuperarse intacto. | Sistema de Papelera con metadatos JSON. | Pruebas web |
 | **Caída de conexión a Internet** | El panel y todas sus pantallas abren con normalidad al 100%. | Arquitectura 100% Offline (assets embebidos, cero dependencias remotas). | `qa_ui_audit.py` |
 
