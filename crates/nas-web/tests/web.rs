@@ -889,8 +889,19 @@ async fn backup_run_exige_confirmacion_y_tarea_valida() {
             r#"{"path":"fantasma","confirm":true}"#,
         ))
         .await
-        .expect("tarea inexistente");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        .expect("id inválido");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/backups/run",
+            &cookie,
+            r#"{"path":">a b<","confirm":true}"#,
+        ))
+        .await
+        .expect("id con espacios");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = app
         .oneshot(post_json(
