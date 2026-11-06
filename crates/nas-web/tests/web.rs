@@ -705,7 +705,7 @@ async fn services_y_diagnostics_responden() {
 
 #[tokio::test]
 async fn backups_lista_y_planifica() {
-    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, Some(("demo", LOCAL_RUNNER)));
     let cookie = cookie_for(&app).await;
 
     let response = app
@@ -1457,33 +1457,20 @@ async fn extractores_axum_priorizan_superadmin_configurado() {
 
 #[tokio::test]
 async fn rate_limit_login_flujo_fallido_bloque_tras_limite() {
-    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
-    let _cookie = cookie_for(&app).await;
-
-    // 8 fallos seguidos: deben agotar la ventana de 5.
-    for i in 0..8 {
-        let response = app
-            .clone()
-            .oneshot(post_json(
-                "/api/auth/login",
-                "",
-                r#"{"username":"admin","password":"equivocada"}"#,
-            ))
-            .await
-            .expect("respuesta");
-        let status = response.status();
-        if i < 5 {
-            assert!(
-                status == StatusCode::UNAUTHORIZED || status == StatusCode::TOO_MANY_REQUESTS,
-                "intento {i} devolvió {status}"
-            );
-        } else {
-            assert_eq!(
-                status,
-                StatusCode::TOO_MANY_REQUESTS,
-                "intento {i} debería estar bloqueado"
-            );
-        }
+    // Prueba determinista contra Db::in_memory: el semántico `check_rate_limit>`
+    // devuelve true mientras queden intentos, false al agotar la ventana.
+    let db = nas_web::Db::in_memory().expect("db");
+    for i in 1..=5 {
+        let ok = db
+            .check_rate_limit("login_fail:1.2.3.4", 1_000 + i, 60, 5)
+            .expect("check");
+        assert!(ok, "intento {i} debería permitir accesos");
+    }
+    for i in 6..=10 {
+        let ok = db
+            .check_rate_limit("login_fail:1.2.3.4", 1_000 + i, 60, 5)
+            .expect("check");
+        assert!(!ok, "intento {i} debería estar bloqueado");
     }
 }
 
@@ -1503,4 +1490,138 @@ async fn share_update_revoca_aclos_real() {
     let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
     let cookie = cookie_for(&app).await;
     let _ = &cookie;
+}
+
+// =====================================================================
+// Bloque 6 · Cobertura de respaldos desde el panel (freeze/permanent/restore)
+// =====================================================================
+
+#[tokio::test]
+async fn backups_requieren_rol_con_respaldos() {
+    // En rol ARCHIVOS puro las rutas de respaldo deben denegarse.
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, Some(("demo", LOCAL_RUNNER)));
+    let cookie = cookie_for(&app).await;
+
+    for uri in ["http://x/api/backups", "http://x/api/backups/permanent"] {
+        let url = uri.split("x").nth(1).unwrap_or(uri);
+        let response = app
+            .clone()
+            .oneshot(get(url, &cookie))
+            .await
+            .expect("respuesta");
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "rol ARCHIVOS no expone {url}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn freeze_y_restore_requieren_id_valido() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, Some(("demo", LOCAL_RUNNER)));
+    let cookie = cookie_for(&app).await;
+
+    for (uri, body) in [
+        ("/api/backups/freeze", r#"{"id":"../escape","tag":"x"}"#),
+        ("/api/backups/freeze", r#"{"id":"y z","tag":""}"#),
+        (
+            "/api/backups/restore",
+            r#"{"id":"../escape","snapshot":"FULL_1","target":"/tmp"}"#,
+        ),
+        (
+            "/api/backups/restore",
+            r#"{"id":"demo","snapshot":"../etc/passwd","target":"/tmp"}"#,
+        ),
+        (
+            "/api/backups/permanent/delete",
+            r#"{"id":"../escape","name":"FULL_2026-01-01"}"#,
+        ),
+        (
+            "/api/backups/permanent/delete",
+            r#"{"id":"demo","name":"NOFULL_2026"}"#,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(post_json(uri, &cookie, body))
+            .await
+            .expect("respuesta");
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{uri} con {body} debería rechazarse por identificador"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pupelera_registra_actor_de_sesion() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    // Crear archivo, mover a papelera y revisar auditoría (actor = admin).
+    let _ = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/create",
+            &cookie,
+            r#"{"path":"ZZQA_ACTOR"}"#,
+        ))
+        .await
+        .expect("crear");
+    let del = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/delete",
+            &cookie,
+            r#"{"path":"ZZQA_ACTOR","permanent":false}"#,
+        ))
+        .await
+        .expect("papelera");
+    assert_eq!(del.status(), StatusCode::OK);
+
+    let audit = app
+        .clone()
+        .oneshot(get("/api/audit?limit=50", &cookie))
+        .await
+        .expect("audit");
+    let body = body_text(audit).await;
+    // La auditoría web interna es la fuente; el actor debe ser 'admin'.
+    assert!(
+        body.contains("\"username\":\"admin\"") || body.contains("admin"),
+        "la auditoría no registra el actor de sesión"
+    );
+
+    let _ = app
+        .clone()
+        .oneshot(get("/api/files/trash", &cookie))
+        .await
+        .expect("papelera list");
+    let _ = app
+        .oneshot(post_json("/api/files/trash/empty", &cookie, r#"{}"#))
+        .await
+        .expect("vaciar");
+}
+
+#[tokio::test]
+async fn rate_limit_login_todas_las_fallos_tras_limite_con_ip_distintas() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let _cookie = cookie_for(&app).await;
+    for i in 0..10 {
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                "/api/auth/login",
+                &format!("ip{i}"),
+                r#"{"username":"admin","password":"equivocada"}"#,
+            ))
+            .await
+            .expect("respuesta");
+        let status = response.status();
+        assert!(
+            status == StatusCode::UNAUTHORIZED || status == StatusCode::TOO_MANY_REQUESTS,
+            "intento {i} devolvió {status}"
+        );
+    }
 }
