@@ -1328,6 +1328,182 @@ fn update_plan(
     Ok(ExitCode::SUCCESS)
 }
 
+/// Aplica la contraseña del administrador del despliegue.
+///
+/// Eleva con `sudo -n`, propaga los fallos de `chpasswd`/`smbpasswd` y deja el
+/// acceso del panel web sincronizado (misma contraseña en `web_users`).
+fn apply_admin_credentials(
+    runner: &Runner,
+    params: &nas_engine::deploy::DeployParams,
+    sudo: bool,
+) -> Result<(), String> {
+    let Some(password) = &params.admin_password else {
+        return Ok(());
+    };
+    if password.trim().is_empty() {
+        return Err("la contraseña del administrador no puede quedar vacía".into());
+    }
+
+    let configure_sudo = |spec: nas_exec::CommandSpec| nas_exec::CommandSpec {
+        sudo: if sudo {
+            nas_exec::SudoMode::Passwordless
+        } else {
+            nas_exec::SudoMode::None
+        },
+        ..spec
+    };
+
+    let chpasswd = configure_sudo(
+        CommandSpec::new("chpasswd")
+            .stdin_secret(nas_exec::SecretInput::new(format!(
+                "{}:{}\n",
+                params.admin_user, password
+            )))
+            .timeout(Duration::from_secs(30)),
+    );
+    let output = runner
+        .run(&chpasswd)
+        .map_err(|error| format!("chpasswd no se pudo ejecutar: {error}"))?;
+    if !output.is_success() {
+        return Err(format!(
+            "chpasswd falló: {}",
+            if output.stderr.is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            }
+        ));
+    }
+
+    let smb_add = configure_sudo(
+        CommandSpec::new("smbpasswd")
+            .args(["-a", "-s", &params.admin_user])
+            .stdin_secret(nas_exec::SecretInput::new(format!(
+                "{password}\n{password}\n"
+            )))
+            .timeout(Duration::from_secs(30)),
+    );
+    let output = runner
+        .run(&smb_add)
+        .map_err(|error| format!("smbpasswd -a no se pudo ejecutar: {error}"))?;
+    if !output.is_success() {
+        return Err(format!(
+            "smbpasswd -a falló: {}",
+            if output.stderr.is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            }
+        ));
+    }
+
+    let smb_enable = configure_sudo(
+        CommandSpec::new("smbpasswd")
+            .args(["-e", &params.admin_user])
+            .timeout(Duration::from_secs(20)),
+    );
+    let output = runner
+        .run(&smb_enable)
+        .map_err(|error| format!("smbpasswd -e no se pudo ejecutar: {error}"))?;
+    if !output.is_success() {
+        return Err(format!(
+            "smbpasswd -e falló: {}",
+            if output.stderr.is_empty() {
+                output.stdout
+            } else {
+                output.stderr
+            }
+        ));
+    }
+
+    sync_panel_password(params.admin_user.trim(), password)
+        .map_err(|error| format!("contraseña del panel web: {error}"))
+}
+
+/// Sincroniza la contraseña del panel con la del despliegue.
+///
+/// Actualiza `web_users` en SQLite y `NAS_WEB_PASSWORD_SHA256` en
+/// `/etc/nas-web.env` para que ambas vías (panel y sistema) acepten la misma
+/// clave. Si el archivo de entorno no existe (instalación previa ausente) se
+/// deja constancia y no se bloquea el despliegue.
+fn sync_panel_password(user: &str, password: &str) -> Result<(), String> {
+    if user.is_empty() {
+        return Err("usuario del panel inválido".into());
+    }
+    let hash = panel_sha256(password);
+
+    let env_path = std::path::Path::new("/etc/nas-web.env");
+    if env_path.exists() {
+        let content = std::fs::read_to_string(env_path)
+            .map_err(|error| format!("lectura de {}: {error}", env_path.display()))?;
+        let mut updated = String::new();
+        let mut replaced = false;
+        for line in content.lines() {
+            if line.trim_start().starts_with("NAS_WEB_PASSWORD_SHA256=") {
+                updated.push_str(&format!("NAS_WEB_PASSWORD_SHA256={hash}"));
+                replaced = true;
+            } else {
+                updated.push_str(line);
+            }
+            updated.push('\n');
+        }
+        if !replaced {
+            updated.push_str(&format!("NAS_WEB_PASSWORD_SHA256={hash}\n"));
+        }
+        let staged = std::env::temp_dir().join(format!("nas-env-{}", std::process::id()));
+        std::fs::write(&staged, &updated)
+            .map_err(|error| format!("escritura temporal: {error}"))?;
+        let argv = vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0600".to_string(),
+            "-o".to_string(),
+            "root".to_string(),
+            "-g".to_string(),
+            "root".to_string(),
+            staged.to_string_lossy().to_string(),
+            env_path.to_string_lossy().to_string(),
+        ];
+        let result = run_step(&Runner::new(), &argv, true, 30);
+        let _ = std::fs::remove_file(&staged);
+        result.map_err(|error| format!("instalación de {}: {error}", env_path.display()))?;
+    } else {
+        eprintln!(
+            "aviso: /etc/nas-web.env no existe; la contraseña del panel se aplicará en packaging/install.sh"
+        );
+    }
+
+    // La base SQLite puede no existir aún (despliegue previo al primer arranque);
+    // se intenta la actualización y se informa de fallos reales. El hash SHA-256
+    // es el formato legacy que Auth::verify_password acepta y actualiza a
+    // PBKDF2 en el primer login (evita depender de nas-web desde la CLI).
+    let paths = NasPaths::from_env();
+    if paths.database().exists() {
+        let conn = rusqlite::Connection::open(paths.database())
+            .map_err(|error| format!("apertura de {}: {error}", paths.database().display()))?;
+        conn.execute(
+            "INSERT INTO web_users (username, password_sha256, role, created_at)
+             VALUES (?1, ?2, 'superadmin', strftime('%s','now'))
+             ON CONFLICT(username) DO UPDATE SET password_sha256 = excluded.password_sha256",
+            rusqlite::params![user, hash],
+        )
+        .map_err(|error| format!("actualización de web_users: {error}"))?;
+    } else {
+        eprintln!(
+            "aviso: SQLite no existe aún; la contraseña del panel se creará al primer arranque"
+        );
+    }
+    Ok(())
+}
+
+/// Sustituye hash_password del panel con el formato legacy SHA-256 compatible.
+fn panel_sha256(password: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     if request.ext4 && request.btrfs {
         return Err(NasError::Invalid(
@@ -1665,7 +1841,12 @@ fn deploy_apply(
                 "/bin/bash".to_string(),
                 params.admin_user.clone(),
             ];
-            let _ = run_step(&runner, &useradd_cmd, options.sudo, 60);
+            run_step(&runner, &useradd_cmd, options.sudo, 60).map_err(|error| {
+                NasError::Denied(format!(
+                    "no se pudo crear el usuario {}: {error}",
+                    params.admin_user
+                ))
+            })?;
         }
 
         for step in &plan {
@@ -1683,25 +1864,8 @@ fn deploy_apply(
     }
 
     if failure.is_none() {
-        if let Some(pass) = &params.admin_password {
-            let chpasswd_spec = CommandSpec::new("chpasswd")
-                .stdin_secret(nas_exec::SecretInput::new(format!(
-                    "{}:{}\n",
-                    params.admin_user, pass
-                )))
-                .timeout(Duration::from_secs(30));
-            let _ = runner.run(&chpasswd_spec);
-
-            let smb_spec = CommandSpec::new("smbpasswd")
-                .args(["-a", "-s", &params.admin_user])
-                .stdin_secret(nas_exec::SecretInput::new(format!("{pass}\n{pass}\n")))
-                .timeout(Duration::from_secs(30));
-            let _ = runner.run(&smb_spec);
-
-            let enable_spec = CommandSpec::new("smbpasswd")
-                .args(["-e", &params.admin_user])
-                .timeout(Duration::from_secs(20));
-            let _ = runner.run(&enable_spec);
+        if let Err(error) = apply_admin_credentials(&runner, &params, options.sudo) {
+            failure = Some(NasError::Denied(error));
         }
     }
 
