@@ -13,7 +13,7 @@ const AppState = {
   activeView: 'dashboard',
   refreshInterval: null,
   groupsCache: [],
-  logSource: 'all',
+  logSource: 'panel',
   logSearchTimer: null,
   logsCache: [],
   files: {
