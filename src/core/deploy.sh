@@ -26,6 +26,8 @@ CONFIRM=false
 IGNORE_IN_USE=false
 KEEP_DATA=false
 EXTRA_ARGS=()
+PASSWORD_STDIN=false
+ADMIN_PASS=""
 
 POS=0
 while [ $# -gt 0 ]; do
@@ -51,9 +53,11 @@ while [ $# -gt 0 ]; do
             3) SMB_NETBIOS="$1" ;;
             4) ADMIN_USER="$1" ;;
             5)
-                # Token de contraseña (-): si viene por stdin mediante '-', consumir la línea
+                # Token de contraseña: '-' indica que llega por stdin.
                 if [ "$1" = "-" ]; then
-                    IFS= read -r _ 2>/dev/null || true
+                    PASSWORD_STDIN=true
+                else
+                    ADMIN_PASS="$1"
                 fi
                 ;;
             6) SERVER_ROLE="$1" ;;
@@ -99,8 +103,11 @@ CMD=("$NAS_BIN" deploy apply \
 
 [ "$KEEP_DATA" = "true" ] && CMD+=(--keep-data)
 [ "$IGNORE_IN_USE" = "true" ] && CMD+=(--ignore-in-use)
-if [ "$FORCE" = "true" ] || [ "$CONFIRM" = "true" ]; then
+if [ "$FORCE" = "true" ] || [ "$CONFIRM" = "true" ] || [ ! -t 0 ]; then
     CMD+=(--yes)
+fi
+if [ "$PASSWORD_STDIN" = "true" ] || [ -n "$ADMIN_PASS" ]; then
+    CMD+=(--password-stdin)
 fi
 if [ "$KEEP_DATA" != "true" ]; then
     CMD+=(--format-token "SI-FORMATEAR")
@@ -108,6 +115,11 @@ fi
 [ ${#EXTRA_ARGS[@]} -gt 0 ] && CMD+=("${EXTRA_ARGS[@]}")
 
 if command -v "$NAS_BIN" >/dev/null 2>&1; then
+    if [ -n "$ADMIN_PASS" ]; then
+        printf '%s
+' "$ADMIN_PASS" | "${CMD[@]}"
+        exit $?
+    fi
     exec "${CMD[@]}"
 else
     echo "[-] ERROR: Plataforma nativa ($NAS_BIN) no encontrada. Instálela con install.sh" >&2
