@@ -79,24 +79,6 @@ pub async fn login_submit(
     let now = Utc::now().timestamp();
     let client_ip = extract_client_ip(&headers);
 
-    if let Ok(false) = state
-        .auth
-        .db()
-        .check_rate_limit(&format!("login:{client_ip}"), now, 60, 5)
-    {
-        let csrf = state.auth.issue_login_csrf(now);
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Html(views::login_with_context(
-                &hostname(),
-                &server_ip(),
-                &csrf,
-                Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
-            )),
-        )
-            .into_response();
-    }
-
     if !state
         .auth
         .verify_login_csrf(form.csrf_token.as_deref(), now)
@@ -122,11 +104,37 @@ pub async fn login_submit(
             session
         }
         Ok(None) => {
+            // El límite solo cuenta intentos fallidos: los accesos correctos
+            // no desgastan la ventana de 60 s de la IP (NAT corporativo).
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
             let _ = state
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "web", "FAILED", "");
+            let blocked = matches!(
+                state
+                    .auth
+                    .db()
+                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5),
+                Ok(false)
+            );
             let csrf = state.auth.issue_login_csrf(now);
+            if blocked {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Html(views::login_with_context(
+                        &hostname(),
+                        &server_ip(),
+                        &csrf,
+                        Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
+                    )),
+                )
+                    .into_response();
+            }
             return (
                 StatusCode::UNAUTHORIZED,
                 Html(views::login_with_context(
@@ -156,20 +164,6 @@ pub async fn api_login(
 ) -> Response {
     let now = Utc::now().timestamp();
     let client_ip = extract_client_ip(&headers);
-
-    if let Ok(false) = state
-        .auth
-        .db()
-        .check_rate_limit(&format!("login:{client_ip}"), now, 60, 5)
-    {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            axum::Json(ApiResponse::<serde_json::Value>::error(
-                "Demasiados intentos de acceso. Espere un momento e intente de nuevo.",
-            )),
-        )
-            .into_response();
-    }
 
     let csrf_header = headers.get("x-csrf-token").and_then(|v| v.to_str().ok());
     let token = form.csrf_token.as_deref().or(csrf_header);
@@ -212,10 +206,31 @@ pub async fn api_login(
             response
         }
         Ok(None) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
             let _ = state
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "api", "FAILED", "");
+            let blocked = matches!(
+                state
+                    .auth
+                    .db()
+                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5),
+                Ok(false)
+            );
+            if blocked {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    axum::Json(ApiResponse::<serde_json::Value>::error(
+                        "Demasiados intentos de acceso. Espere un momento e intente de nuevo.",
+                    )),
+                )
+                    .into_response();
+            }
             (
                 StatusCode::UNAUTHORIZED,
                 axum::Json(ApiResponse::<serde_json::Value>::error(
@@ -770,21 +785,17 @@ pub async fn files_delete(
     headers: HeaderMap,
     axum::Json(body): axum::Json<DeleteBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
     };
     let path = body.path;
 
-    let user = state
-        .auth
-        .authenticate(cookie_header(&headers), Utc::now().timestamp())
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let client = user.clone();
     let audit_path = path.clone();
     let permanent = body.permanent;
 
@@ -792,7 +803,7 @@ pub async fn files_delete(
         if permanent {
             root.delete_permanent(&path).map(|_| None)
         } else {
-            root.trash(&path).map(Some)
+            root.trash_with_actor(&path, &client).map(Some)
         }
     })
     .await;
@@ -3907,11 +3918,54 @@ fn apply_spec_acls(spec: &nas_engine::samba::ShareSpec) {
         } else {
             "read"
         };
-        let _ = apply_acl(&spec.path, group, level);
+        if apply_acl(&spec.path, group, level).is_err() {
+            eprintln!("aviso: no se pudo aplicar ACL de {group} en {}", spec.path);
+        }
     }
     for group in &spec.write_list {
         if !spec.valid_users.contains(group) {
-            let _ = apply_acl(&spec.path, group, "write");
+            if apply_acl(&spec.path, group, "write").is_err() {
+                eprintln!("aviso: no se pudo aplicar ACL de {group} en {}", spec.path);
+            }
+        }
+    }
+}
+
+/// Revoca las ACLs POSIX de los principais retirados de un recurso.
+///
+/// Pasa el nivel completo a `none` para limpiar la entrada específica y la
+/// herencia por defecto sin tocar el resto.
+fn revoke_removed_acls(
+    previous: &nas_engine::parsers::smb::Share,
+    spec: &nas_engine::samba::ShareSpec,
+) {
+    let keep: std::collections::HashSet<&str> = spec
+        .valid_users
+        .iter()
+        .chain(spec.write_list.iter())
+        .map(|entry| entry.trim_start_matches('@'))
+        .chain(std::iter::once("grp_samba"))
+        .collect();
+
+    let mut removed: Vec<String> = Vec::new();
+    for entry in previous
+        .valid_users
+        .iter()
+        .chain(previous.write_list.iter())
+    {
+        let name = entry.trim_start_matches('@').to_string();
+        if !name.is_empty() && !keep.contains(name.as_str()) && !removed.contains(&name) {
+            removed.push(name);
+        }
+    }
+
+    for name in removed {
+        let ok = apply_acl(&spec.path, &name, "none");
+        if ok.is_err() {
+            eprintln!(
+                "aviso: no se pudo revocar la ACL de {name} en {}",
+                spec.path
+            );
         }
     }
 }
@@ -4004,10 +4058,12 @@ pub async fn share_update(
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
         let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let existing = nas_engine::parsers::smb::parse_shares(&conf)
             .into_iter()
             .find(|share| share.name.eq_ignore_ascii_case(body.name.trim()))
             .ok_or_else(|| format!("no existe el recurso '{}'", body.name))?;
+        let preserved = existing.clone();
         let path = existing
             .path
             .unwrap_or_else(|| share_path(body.name.trim(), "principal"));
@@ -4017,6 +4073,7 @@ pub async fn share_update(
             nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
         stage_and_apply(&updated)?;
         apply_spec_acls(&spec);
+        revoke_removed_acls(&preserved, &spec);
         Ok(())
     })
     .await
