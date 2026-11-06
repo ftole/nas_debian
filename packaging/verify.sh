@@ -42,6 +42,14 @@ check "$NGINX" "listen 443 ssl" "nginx: HTTPS"
 
 INSTALL="$SCRIPT_DIR/install.sh"
 check "$INSTALL" "visudo -cf" "install: valida sudoers"
+check "$INSTALL" "/usr/bin/btrfs subvolume list /srv/nas" "sudoers: subvolúmenes btrfs"
+check "$INSTALL" "/usr/bin/systemctl restart cron" "sudoers: ciclo cron"
+check "$INSTALL" "/usr/bin/systemctl enable sssd" "sudoers: ciclo sssd"
+check "$INSTALL" "/usr/local/sbin/nas-terminal *" "sudoers: helper de terminal"
+check "$INSTALL" "/usr/local/sbin/nas-storage-apply *" "sudoers: helper de almacenamiento"
+check "$INSTALL" "/usr/local/sbin/nas-backup-manage *" "sudoers: helper de respaldos"
+check "$UNIT" "NoNewPrivileges=no" "unit: NoNewPrivileges documentado"
+
 check "$INSTALL" "nginx -t" "install: valida nginx"
 check "$INSTALL" "systemctl enable --now nas-web.service" "install: habilita servicio"
 
