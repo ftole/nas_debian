@@ -41,12 +41,14 @@ pub fn apply_staged_samba(runner: &Runner, staged: &Path) -> NasResult<String> {
         )));
     }
 
-    // 2. Respaldo preventivo del smb.conf actual
+    // 2. Respaldo preventivo del smb.conf actual (crítico: sin respaldo no se fija)
     let stamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
     let backup_path = format!("/etc/samba/smb.conf.bak.{stamp}");
     let current_conf = Path::new("/etc/samba/smb.conf");
     if current_conf.exists() {
-        let _ = std::fs::copy(current_conf, &backup_path);
+        std::fs::copy(current_conf, &backup_path).map_err(|e| {
+            NasError::Denied(format!("no se pudo respaldar /etc/samba/smb.conf: {e}"))
+        })?;
     }
 
     // 3. Instalación de la configuración validada
@@ -62,11 +64,13 @@ pub fn apply_staged_samba(runner: &Runner, staged: &Path) -> NasResult<String> {
     let _ = std::fs::remove_file(staged);
 
     // 4. Recarga de Samba
-    let _ = runner.run(
-        &CommandSpec::new("systemctl")
-            .args(["reload", "smbd"])
-            .timeout(Duration::from_secs(30)),
-    );
+    runner
+        .run(
+            &CommandSpec::new("systemctl")
+                .args(["reload", "smbd"])
+                .timeout(Duration::from_secs(30)),
+        )?
+        .ensure_success()?;
 
     Ok(format!("smb.conf aplicado (respaldo: {backup_path})"))
 }
