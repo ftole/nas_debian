@@ -206,6 +206,8 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl start nas-web, /usr/bin/systemctl stop nas-web, \
     /usr/bin/systemctl restart nas-web, /usr/bin/systemctl reload nas-web, \
     /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \
+    /usr/bin/systemctl start cron, /usr/bin/systemctl stop cron, \
+    /usr/bin/systemctl restart cron, /usr/bin/systemctl reload cron, \
     /usr/bin/systemd-run --no-block --collect systemctl reboot, \
     /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
     /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
@@ -215,7 +217,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/tar -xzf /var/lib/nas/dev-sync/*, /usr/bin/mv -T /var/lib/nas/dev-sync/* /opt/nas_debian/current, \
     /usr/bin/install -m 0755 /opt/nas_debian/current/bin/* /usr/local/bin/*, \
     /usr/bin/install -m 0755 /opt/nas_debian/bin/* /usr/local/bin/*, \
-    /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, \
+    /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, /usr/bin/btrfs subvolume list /srv/nas, \
     /usr/bin/fstrim -v /srv/nas, \
     /usr/local/bin/nas helper *, \
     /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \
