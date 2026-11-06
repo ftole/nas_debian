@@ -1981,49 +1981,41 @@ pub async fn backup_run(
         return forbidden("se requieren privilegios de administrador");
     }
 
-    let dir = state.backup_dir.clone();
+    // Motor único: delega en el runner Bash instalado vía `nas helper
+    // backup-manage run`, igual que cron y `/{id}/run`. Evita dos motores con
+    // bloqueos incompatibles y garantiza sellado, progreso y golden snapshots.
+    if !nas_engine::backup_control::valid_id(&body.path) {
+        return bad_request("identificador de tarea inválido");
+    }
+    if !body.confirm {
+        return forbidden("la ejecución real exige confirm: true");
+    }
+
     let id = body.path.clone();
-    let confirm = body.confirm;
-
-    let outcome = tokio::task::spawn_blocking(move || {
-        let tasks = nas_engine::tasks::BackupTask::discover(&dir)?;
-        let task = tasks
-            .into_iter()
-            .find(|task| task.id == id)
-            .ok_or_else(|| nas_core::NasError::NotFound(format!("tarea '{id}' no encontrada")))?;
-
-        let options = nas_engine::RunOptions {
-            dry_run: false,
-            confirmed: confirm,
-            sudo: true,
-            lock_dir: std::path::PathBuf::from("/var/lock"),
-        };
-
-        nas_engine::run_backup(&Runner::new(), &task, &options, &chrono::Local::now())
-    })
-    .await
-    .unwrap_or_else(|_| Err(nas_core::NasError::Invalid("ejecución interrumpida".into())));
+    let outcome =
+        tokio::task::spawn_blocking(move || nas_engine::backup_control::run(&Runner::new(), &id))
+            .await
+            .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
 
     match outcome {
-        Ok(report) => {
-            let _ = state.auth.db().append_audit(
-                &user,
-                "backup_run",
-                &report.task,
-                "SUCCESS",
-                &report.snapshot,
-            );
-            axum::Json(ApiResponse::ok(report, "Respaldo completado")).into_response()
+        Ok(message) => {
+            let _ =
+                state
+                    .auth
+                    .db()
+                    .append_audit(&user, "backup_run", &body.path, "SUCCESS", &message);
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "message": message }),
+                message,
+            ))
+            .into_response()
         }
         Err(error) => {
-            let _ = state.auth.db().append_audit(
-                &user,
-                "backup_run",
-                &body.path,
-                "FAILED",
-                &error.to_string(),
-            );
-            error_response(error)
+            let _ = state
+                .auth
+                .db()
+                .append_audit(&user, "backup_run", &body.path, "FAILED", &error);
+            error_response(nas_core::NasError::Invalid(error))
         }
     }
 }
