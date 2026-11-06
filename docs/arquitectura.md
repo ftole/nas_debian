@@ -21,7 +21,7 @@ El servidor opera directamente sobre el kernel de Linux y los servicios estánda
      Red SMB/CIFS (Puerto 445)                             Panel Web (Puerto 80/443)
    [Samba 4 + VFS acl/streams]                       [Nginx proxy_pass → axum]
            │                                                     │
-           │                                        proc_open (array de argumentos)
+           │                                        argv tipado (CommandSpec, sin shell)
            │                                                     ▼
            │                                    [nas-web: vistas + API + assets]
            │                                          [nas-engine: lógica]
@@ -101,7 +101,7 @@ crates/
 │   ├── templates/  -> layout.html y login.html generados desde layout.php/login.php
 │   └── assets/     -> app.js, CSS, vendor de ofimática y SVG (include_bytes!)
 ├── nas-engine/     -> Lógica de sistema (almacenamiento, Samba, respaldos, dominio…)
-├── nas-exec/       -> Ejecutor de comandos con allowlist, timeouts y redacción
+├── nas-exec/       -> Ejecutor de comandos con argv tipado, timeouts y redacción
 ├── nas-core/       -> Configuración, rutas, errores y contrato de respuesta
 ├── nas-cli/        -> Comando `nas`
 ├── nas-tui/        -> Asistente `nas-tui` (ratatui)
@@ -109,7 +109,7 @@ crates/
 ```
 
 #### Características del Backend:
-- **Cero inyección de comandos:** Las utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`, `rsync`) se ejecutan con `nas-exec`, que recibe un arreglo de argumentos, aplica *allowlist*, timeout y redacción de secretos; nunca se usa `/bin/sh -c`.
+- **Cero inyección de comandos:** Las utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`, `rsync`) se ejecutan con `nas-exec`, que recibe un arreglo de argumentos tipado, aplica timeout y redacción de secretos; la contención fina se materializa en sudoers acotados y nunca se usa `/bin/sh -c`.
 - **Helpers privilegiados acotados:** Las operaciones que requieren root se delegan en `nas-samba-apply`, `nas-share-dir`, `nas-share-acl`, `nas-accounts` y `nas-backup-manage`, autorizados individualmente en `/etc/sudoers.d/nas-web-rust`.
 - **Base de datos SQLite en modo WAL:** El archivo `/var/lib/nas/nas.sqlite` almacena sesiones, auditoría (`web_audit`), historial de terminal, límites de peticiones (`api_rate_limits`) y usuarios del panel (`web_users`), con 0 MB en reposo.
 - **Assets intocables:** `app.js`, `app.css`, `login.css`, el favicon y las librerías de ofimática se sirven byte a byte desde el binario; sus hashes están fijados en `tests/parity/assets.sha256`.
