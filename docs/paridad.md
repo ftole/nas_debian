@@ -29,8 +29,8 @@ python3 scripts/parity_extract.py --check   # falla si hay deriva (CI)
 
 | Archivo | Contenido | Inventario actual |
 | :--- | :--- | :--- |
-| `tests/parity/contract.json` | IDs, clases, `data-*`, globales `window.NAS_*`, formularios | 527 IDs · 156 clases |
-| `tests/parity/selectors.txt` | Selectores e IDs que `app.js` exige en el DOM | 340 IDs · 30 selectores |
+| `tests/parity/contract.json` | IDs, clases, `data-*`, globales `window.NAS_*`, formularios | 547 IDs · 159 clases |
+| `tests/parity/selectors.txt` | Selectores e IDs que `app.js` exige en el DOM | 382 IDs · 33 selectores |
 | `tests/parity/endpoints.txt` | Endpoints `/api` consumidos por el panel | 60 |
 | `tests/parity/assets.sha256` | Hashes y tamaños de los assets originales | 8 archivos |
 
@@ -73,7 +73,7 @@ Todo lo demás debe coincidir exactamente.
 | **F0** (hecha) | `contract.json`, `selectors.txt`, `endpoints.txt` y `assets.sha256` generados y verificados por `--check` |
 | **F1** | Diff DOM normalizado vacío en las 14 vistas + login |
 | **F2** | Hash del `app.js` servido == hash de `assets.sha256` |
-| **F3** | 72 endpoints (incluidas rutas dinámicas `:id`) implementados con contrato equivalente |
+| **F3** | 77 endpoints (incluidas rutas dinámicas `:id`) implementados con contrato equivalente |
 | **F4** | Checklist funcional de las 14 vistas sin errores de consola |
 | **F5** | CI ejecuta `parity_extract.py --check`, la suite DOM/selectores y `tests/parity.rs` |
 | **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` (completada) |
@@ -86,9 +86,9 @@ Todo lo demás debe coincidir exactamente.
 
 | Prueba | Comprobación |
 | :--- | :--- |
-| `dashboard_preserva_ids_clases_y_globales` | 527 IDs, 156 clases, atributos `data-*`, globales y 14 secciones `view-*` |
+| `dashboard_preserva_ids_clases_y_globales` | 547 IDs, 159 clases, atributos `data-*`, globales y 14 secciones `view-*` |
 | `login_preserva_ids_y_formulario` | IDs del formulario de acceso y campo CSRF |
-| `todos_los_identificadores_de_app_js_existen` | 340 IDs consultados por `app.js` |
+| `todos_los_identificadores_de_app_js_existen` | 382 IDs consultados por `app.js` |
 | `endpoints_del_contrato_existen_y_no_son_501` | 60 rutas: ninguna desaparece ni queda sin implementar |
 
 Además el flujo `.github/workflows/rust.yml` ejecuta
@@ -120,7 +120,7 @@ Resultado en `10.10.1.222`:
 
 ```text
 /dashboard, /files, /shares, /users, /backups, /storage, /terminal, /domain, /services
-  → idéntico (527 IDs por página)
+  → idéntico (547 IDs por página)
 
 21 endpoints → misma forma
 /api/audit   → solo en Rust (no existe en PHP; mejora, no regresión)
@@ -152,14 +152,14 @@ detecta Btrfs en `/proc/mounts` para mostrar los controles de scrub.
 
 | Modo | Comando | Cobertura |
 | :--- | :--- | :--- |
-| Estático (CI) | `python3 scripts/qa_ui_audit.py --static` | 340 IDs de `app.js`, 115 manejadores inline, 14 vistas frente a `layout.html` |
+| Estático (CI) | `python3 scripts/qa_ui_audit.py --static` | 382 IDs de `app.js`, 127 manejadores inline, 14 vistas frente a `layout.html` |
 | En vivo | `NAS_WEB_PANEL_PASSWORD=… python3 scripts/qa_ui_audit.py` | lo anterior + 24 endpoints GET de carga de vista |
 
 Resultados en `10.10.1.222`:
 
 ```text
-[ids]      app.js consulta 340 IDs; faltan 0
-[handlers] 115 inline; sin definición: 0
+[ids]      app.js consulta 382 IDs; faltan 0
+[handlers] 127 inline; sin definición: 0
 [vistas]   14 secciones; nav sin sección: 0
 [api]      24 endpoints GET verificados
 ```
