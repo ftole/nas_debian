@@ -178,6 +178,9 @@ pub struct AdminEvent<'a> {
     pub result: &'a str,
     /// Detalle libre.
     pub detail: &'a str,
+    /// IP de origen del cliente (vacía en registros históricos).
+    #[allow(dead_code)]
+    pub origin_ip: &'a str,
 }
 
 /// Normaliza una marca de tiempo a `AAAA-MM-DDTHH:MM:SS` recortando zona y fracciones.
@@ -434,11 +437,17 @@ pub fn parse_admin_events(events: &[AdminEvent<'_>]) -> Vec<LogEntry> {
         .map(|event| {
             let timestamp = epoch_to_iso(event.ts);
             let raw = format!(
-                "{} {} {} {} {}",
-                event.action, event.target, event.result, event.username, event.detail
+                "{} {} {} {} {} {}",
+                event.action,
+                event.target,
+                event.result,
+                event.username,
+                event.detail,
+                event.origin_ip
             );
             let mut entry = LogEntry::new(LogSource::Admin, timestamp, raw.trim());
             entry.user = event.username.to_string();
+            entry.ip = event.origin_ip.to_string();
             entry.target = event.target.to_string();
             entry.origin = if event.action.starts_with("terminal") {
                 "Terminal web".to_string()
@@ -1067,6 +1076,7 @@ mod tests {
                 target: "SISTEMAS/sdfdsf.txt",
                 result: "SUCCESS",
                 detail: "",
+                origin_ip: "",
             },
             AdminEvent {
                 ts: 1_793_832_965,
@@ -1075,6 +1085,7 @@ mod tests {
                 target: "didi_admin",
                 result: "SUCCESS",
                 detail: "tarea didi_admin iniciada",
+                origin_ip: "",
             },
         ];
         let entries = parse_admin_events(&events);
@@ -1158,6 +1169,7 @@ mod tests {
             target: "SISTEMAS/logo.jpg",
             result: "SUCCESS",
             detail: "",
+            origin_ip: "",
         }]);
         assert_eq!(filter_query(entries.clone(), "logo").len(), 1);
         assert_eq!(filter_query(entries.clone(), "admin").len(), 1);
@@ -1213,6 +1225,7 @@ mod tests {
             target: "nas-web-admin",
             result: "SUCCESS",
             detail: "",
+            origin_ip: "",
         }]);
         assert_eq!(terminal[0].origin, "Terminal web");
 
@@ -1223,6 +1236,7 @@ mod tests {
             target: "web",
             result: "SUCCESS",
             detail: "",
+            origin_ip: "",
         }]);
         assert_eq!(panel[0].origin, "Panel web");
 
