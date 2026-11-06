@@ -9,6 +9,7 @@ use std::task::{Context, Poll};
 
 use futures_core::Stream;
 use nas_core::{NasError, NasResult};
+use nas_exec::Runner;
 use serde::Serialize;
 use tokio::io::{AsyncRead, ReadBuf};
 
@@ -750,8 +751,12 @@ mod tests {
     }
 }
 
-/// Tamaño máximo agregado al comprimir una carpeta en ZIP (256 MiB).
-pub const ZIP_MAX_BYTES: u64 = 256 * 1024 * 1024;
+/// Tamaño máximo agregado al comprimir una carpeta en ZIP.
+///
+/// En línea con el límite de subida (50 GB en nginx/axum) y con la
+/// capacidad esperada de un NAS departamental. Se comprime a disco
+/// (`secure_temp_zip_path`, nunca en RAM) para permitir tamaños grandes.
+pub const ZIP_MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 
 fn clean_stale_staging_files(staging: &Path) {
     let Ok(entries) = std::fs::read_dir(staging) else {
@@ -831,7 +836,24 @@ impl FileRoot {
             return Err(NasError::NotFound(format!("no existe: {relative}")));
         }
 
+        // El ZIP se escribe a disco temporal (generalmente /var o /tmp), por lo
+        // que hay que validar que exista espacio disponible en ese FS. Regla
+        // operativa: exigir al menos el 110% del tamaño del original y
+        // al menos 1 GiB libres, para que la compresión Deflated no muera a
+        // media escritura con "No space left on device".
+        let needed = source_available_estimate(&source);
+        let required_free = needed.saturating_mul(11) / 10;
         let temp_path = secure_temp_zip_path();
+        if let Some(free) = free_bytes_at(&temp_path, false) {
+            if free < required_free || free < 1024 * 1024 * 1024 {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(NasError::Denied(format!(
+                    "espacio insuficiente para comprimir en disco: requeridos al menos {}, disponibles {}. Libera espacio en el volumen temporal o intenta una descarga más pequeña.",
+                    human_bytes_lossy(required_free),
+                    human_bytes_lossy(free)
+                )));
+            }
+        }
         let file = create_secure_temp_file(&temp_path)?;
         let temp_guard = TempFile::new(temp_path);
 
@@ -884,6 +906,48 @@ impl FileRoot {
     }
 }
 
+/// Estimación conservadora del tamaño de origen (carpeta o archivo).
+///
+/// Evita un `du` completo: solo recorre la jerarquía con límites acotados
+/// para proteger el endpoint de carpetas gigantes.
+fn source_available_estimate(source: &std::path::Path) -> u64 {
+    if !source.is_dir() {
+        return std::fs::metadata(source).map(|m| m.len()).unwrap_or(0);
+    }
+    crate::files::dir_size_recursive_bounded(source, 200_000)
+}
+
+/// Espacio libre en bytes del filesystem que aloja `path`.
+/// Si la consulta falla, devuelve `None` (se omite el guard).
+fn free_bytes_at(path: &std::path::Path, _strict: bool) -> Option<u64> {
+    // Resuelve a un ancestro existente (secure_temp_zip_path puede no existir aún).
+    let mut current: Option<std::path::PathBuf> = Some(path.to_path_buf());
+    while let Some(p) = current {
+        if p.exists() {
+            if let Ok(canon) = std::fs::canonicalize(&p) {
+                let canon_str = canon.to_string_lossy().to_string();
+                let output = Runner::new()
+                    .run(
+                        &nas_exec::CommandSpec::new("df")
+                            .args(["-B1", "--output=avail", canon_str.as_str()])
+                            .timeout(std::time::Duration::from_secs(3)),
+                    )
+                    .ok()?;
+                let value = output
+                    .stdout
+                    .lines()
+                    .last()
+                    .and_then(|line| line.trim().parse::<u64>().ok())?;
+                return Some(value);
+            }
+            current = p.parent().map(|parent| parent.to_path_buf());
+        } else {
+            current = p.parent().map(|parent| parent.to_path_buf());
+        }
+    }
+    None
+}
+
 fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String)>> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -904,9 +968,11 @@ fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String
             }
             *total = total.saturating_add(metadata.len());
             if *total > ZIP_MAX_BYTES {
-                return Err(NasError::Denied(
-                    "la carpeta supera el límite de 256 MiB para descarga ZIP".into(),
-                ));
+                return Err(NasError::Denied(format!(
+                    "la carpeta supera el límite de descarga ZIP ({}); contenido actual: {}. Si necesita una descarga mayor, haga un respaldo permanente o descargue los snapshots por partes.",
+                    human_bytes_lossy(ZIP_MAX_BYTES),
+                    human_bytes_lossy(*total)
+                )));
             }
             let name = path
                 .strip_prefix(root)
@@ -931,9 +997,11 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
 
     let metadata = std::fs::metadata(path).map_err(|e| NasError::io(path, e))?;
     if total.saturating_add(metadata.len()) > ZIP_MAX_BYTES {
-        return Err(NasError::Denied(
-            "el contenido supera el límite de 256 MiB para descarga ZIP".into(),
-        ));
+        return Err(NasError::Denied(format!(
+            "el contenido supera el límite de descarga ZIP ({}); al menos {} en la carpeta actual.",
+            human_bytes_lossy(ZIP_MAX_BYTES),
+            human_bytes_lossy(metadata.len())
+        )));
     }
 
     writer
@@ -1474,6 +1542,22 @@ fn format_trash_stamp(stamp: &str) -> String {
 
 fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Convierte bytes a un formato legible sin precisión decimal grande (alias local).
+fn human_bytes_lossy(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
     let mut unit = 0;
     while value >= 1024.0 && unit < UNITS.len() - 1 {
