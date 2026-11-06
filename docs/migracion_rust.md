@@ -113,7 +113,7 @@ Flujo implementado, **sin publicar en el repositorio remoto**:
 5. **Stage**: extracción en `/var/lib/nas-dev/dev-sync/stage/<sha>`.
 6. **Snapshot**: respaldo del docroot actual en `.../backups/<timestamp>.tar.gz`.
 7. **Switch**: `rsync -a --delete --exclude=data/` hacia el docroot de desarrollo.
-8. **Reload**: `systemctl reload nginx` y `php8.4-fpm` (tolerante a fallos).
+8. **Reload**: `systemctl reload nginx` y `restart nas-web` (tolerante a fallos).
 9. **Health**: `curl` a `https://127.0.0.1/login` (200/302).
 10. **Rollback automático**: si el healthcheck falla, restaura el snapshot y
     devuelve error con auditoría.
