@@ -476,21 +476,52 @@ pub fn umount_unit(runner: &Runner, confirm: &str, unit: &str) -> NasResult<Stri
         return Err(NasError::Invalid("nombre de unidad inválido".into()));
     }
     let mount_dir = format!("/srv/nas/unidades/{unit}");
-    let _ = runner.run(&CommandSpec::new("umount").args([&mount_dir]));
+    let out = runner.run(&CommandSpec::new("umount").args([&mount_dir]))?;
+    if !out.is_success() {
+        let detail = if out.stderr.is_empty() {
+            out.stdout
+        } else {
+            out.stderr
+        };
+        return Err(NasError::Invalid(format!(
+            "no se pudo desmontar {mount_dir}: {detail}"
+        )));
+    }
 
-    // Quitar de /etc/fstab
+    // Quitar de /etc/fstab: escritura staging + install para no perder cambios
     let fstab_path = Path::new("/etc/fstab");
     if fstab_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(fstab_path) {
-            let new_lines: Vec<&str> = content
-                .lines()
-                .filter(|line| {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    !(parts.len() >= 2 && parts[1] == mount_dir)
-                })
-                .collect();
-            let _ = std::fs::write(fstab_path, format!("{}\n", new_lines.join("\n")));
-        }
+        let content =
+            std::fs::read_to_string(fstab_path).map_err(|e| NasError::io(fstab_path, e))?;
+        let new_lines: Vec<&str> = content
+            .lines()
+            .filter(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                !(parts.len() >= 2 && parts[1] == mount_dir)
+            })
+            .collect();
+        let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
+        std::fs::write(&staged, format!("{}\n", new_lines.join("\n")))
+            .map_err(|e| NasError::io(&staged, e))?;
+        let argv = vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0644".to_string(),
+            "-o".to_string(),
+            "root".to_string(),
+            "-g".to_string(),
+            "root".to_string(),
+            staged.to_string_lossy().to_string(),
+            fstab_path.to_string_lossy().to_string(),
+        ];
+        let res = runner.run(
+            &CommandSpec::new(&argv[0])
+                .args(argv[1..].to_vec())
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        );
+        let _ = std::fs::remove_file(&staged);
+        res?.ensure_success()?;
     }
     Ok(format!("unidad {unit} desmontada"))
 }
