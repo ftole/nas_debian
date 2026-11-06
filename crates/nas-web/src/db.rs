@@ -27,6 +27,8 @@ pub struct AuditRow {
     pub result: String,
     /// Detalle libre.
     pub detail: String,
+    /// IP de origen del cliente (vacía en entradas históricas).
+    pub origin_ip: String,
 }
 
 /// Acceso compartido a la base de datos.
@@ -105,6 +107,22 @@ impl Db {
             let _ = conn.execute("DROP TABLE api_rate_limits", []);
         }
 
+        // Migración idempotente: columna origin_ip en web_audit (bloque 3-IP)
+        let has_origin_ip: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('web_audit') WHERE name = 'origin_ip'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !has_origin_ip {
+            let _ = conn.execute(
+                "ALTER TABLE web_audit ADD COLUMN origin_ip TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+        }
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS web_users (
                  username TEXT PRIMARY KEY,
@@ -126,7 +144,8 @@ impl Db {
                  action TEXT NOT NULL,
                  target TEXT NOT NULL,
                  result TEXT NOT NULL,
-                 detail TEXT NOT NULL DEFAULT ''
+                 detail TEXT NOT NULL DEFAULT '',
+                 origin_ip TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS idx_web_audit_ts ON web_audit(ts DESC);
              CREATE TABLE IF NOT EXISTS api_rate_limits (
@@ -237,11 +256,32 @@ impl Db {
         result: &str,
         detail: &str,
     ) -> NasResult<()> {
+        self.append_audit_ip(username, action, target, result, detail, None)
+    }
+
+    /// Igual que `append_audit` pero registra la IP de origen del cliente.
+    pub fn append_audit_ip(
+        &self,
+        username: &str,
+        action: &str,
+        target: &str,
+        result: &str,
+        detail: &str,
+        origin_ip: Option<&str>,
+    ) -> NasResult<()> {
         let conn = self.conn.lock().expect("mutex de base de datos");
         conn.execute(
-            "INSERT INTO web_audit (ts, username, action, target, result, detail)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![now_ts(), username, action, target, result, detail],
+            "INSERT INTO web_audit (ts, username, action, target, result, detail, origin_ip)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                now_ts(),
+                username,
+                action,
+                target,
+                result,
+                detail,
+                origin_ip.unwrap_or("")
+            ],
         )
         .map_err(db_error)?;
         Ok(())
@@ -252,7 +292,8 @@ impl Db {
         let conn = self.conn.lock().expect("mutex de base de datos");
         let mut statement = conn
             .prepare(
-                "SELECT id, ts, username, action, target, result, detail
+                "SELECT id, ts, username, action, target, result, detail,
+                        COALESCE(origin_ip, '') AS origin_ip
                  FROM web_audit ORDER BY id DESC LIMIT ?1",
             )
             .map_err(db_error)?;
@@ -267,6 +308,7 @@ impl Db {
                     target: row.get(4)?,
                     result: row.get(5)?,
                     detail: row.get(6)?,
+                    origin_ip: row.get(7)?,
                 })
             })
             .map_err(db_error)?;
