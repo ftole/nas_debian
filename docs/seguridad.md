@@ -194,7 +194,7 @@ El nivel superior protege la interfaz de administración web, el motor de ejecuc
   - `X-XSS-Protection: 1; mode=block`
 
 ### 5.2 Prevención Absoluta de Inyección de Comandos (`nas-exec`)
-Toda invocación al sistema pasa por `nas-exec`, que recibe el programa y un arreglo de argumentos, aplica allowlist, timeout y redacción de secretos:
+Toda invocación al sistema pasa por `nas-exec`, que recibe el programa y un arreglo de argumentos tipado (nunca texto de shell), aplica timeout y redacción de secretos; la contención fina de privilegios se materializa en `/etc/sudoers.d/nas-web-rust` y en los helpers acotados.
 
 ```rust
 Runner::new().run(
@@ -208,13 +208,13 @@ No existe ninguna ruta de código que construya una línea de shell con datos de
 
 ### 5.3 Escalada Acotada con Sudoers (`nas-web-rust`)
 `/etc/sudoers.d/nas-web-rust` autoriza únicamente binarios y argumentos canónicos:
-- `systemctl` para `smbd`, `nmbd`, `wsdd2`, `nginx`, `php8.4-fpm` y `sssd` (start/stop/restart/reload).
-- Helpers validados: `nas-samba-apply` (valida con `testparm`, respalda e instala `smb.conf` de forma atómica), `nas-share-dir`, `nas-share-acl`, `nas-accounts` y `nas-backup-manage`.
+- `systemctl` para `smbd`, `nmbd`, `wsdd2`, `nginx`, `nas-web`, `cron` y el ciclo completo de `sssd` (start/stop/restart/reload/enable/disable).
+- Helpers validados: `nas-samba-apply` (valida con `testparm`, respalda e instala `smb.conf` de forma atómica), `nas-share-dir`, `nas-share-acl`, `nas-accounts`, `nas-backup-manage` (run/stop/logs/freeze/restore), `nas-storage-apply` (formateo, LVM, subvolúmenes, unidades) y `nas-terminal` (PTY de sesión por usuario).
 - `pdbedit -L -s`, `passwd -S *`, `testparm -s`, `realm list|join|leave`, `btrfs scrub`, `fstrim` y `/bin/bash /opt/nas_debian/src/core/updater.sh --yes`.
 - El archivo se valida con `visudo -cf` en cada instalación y actualización.
 
 ### 5.4 Confinamiento contra *Path Traversal* en el Explorador de Archivos
-En el gestor de archivos web, cada ruta solicitada es normalizada mediante `realpath()` y validada contra `/srv/nas`:
+En el gestor de archivos web, cada ruta solicitada es normalizada en `FileRoot::resolve` (se canoniza el ancestro existente y se recompone el resto) y validada contra `/srv/nas`:
 - Intentos de escape con `..`, caracteres nulos o accesos simbólicos que apunten fuera de `/srv/nas` son rechazados con HTTP 400/403.
 - La papelera oculta `.trash` queda estrictamente confinada y protegida contra navegación directa.
 
@@ -288,7 +288,7 @@ La siguiente tabla resume cómo interactúan los 4 niveles defensivos ante vecto
 | **Acceso no Autorizado a Puertos de Red** | Nivel 3 | Firewall UFW (política de denegación por defecto) | Solo puertos autorizados responden; el resto queda en silencio. |
 | **Fuerza Bruta en Acceso SSH** | Nivel 3 | `fail2ban` + `PermitRootLogin no` | Bloqueo automático de IP y prohibición de inicio directo como root. |
 | **Ataque Man-in-the-Middle en Respaldos** | Nivel 3 | OpenSSH con `StrictHostKeyChecking=accept-new` | Cancelación inmediata de la copia si la firma remota fue alterada. |
-| **Inyección de Comandos en Panel Web** | Nivel 4 | Invocación `proc_open` con listas de argumentos | No se invoca shell; parámetros nunca se concatenan como texto. |
+| **Inyección de Comandos en Panel Web** | Nivel 4 | `nas-exec` con argv tipado por `CommandSpec` | No se invoca shell; parámetros nunca se concatenan como texto. |
 | **Falsificación de Peticiones Web (CSRF)** | Nivel 4 | Tokens criptográficos de 64 caracteres hex | Peticiones POST/PUT/DELETE rechazadas si el token no coincide. |
 | **Fuerza Bruta contra el Login Web** | Nivel 4 | Rate Limiting (HTTP 429 tras 5 fallos) | Bloqueo temporal de la IP atacante. |
 | **Escape de Directorio (*Path Traversal*)** | Nivel 4 | Normalización `realpath()` contra `/srv/nas` | Rutas fuera de la raíz autorizada devuelven error 400/403. |
