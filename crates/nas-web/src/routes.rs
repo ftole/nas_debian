@@ -2564,14 +2564,24 @@ pub async fn logs(
         return *response;
     }
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    // Por defecto: SOLO eventos del panel web, respaldos y auditoría de Samba.
+    // El ruido interno del kernel (`system`) se muestra sólo si el usuario pide
+    // explícitamente `source=system`.
+    let default_sources = &["admin", "backup", "samba_audit"];
     let source = query.source.clone().unwrap_or_default();
     let search = query.q.clone().unwrap_or_default();
     let grouped = query.grouped != Some(0);
 
     let outcome = tokio::task::spawn_blocking(move || {
-        let selected = nas_engine::LogSource::parse(&source);
-        let wants =
-            |candidate: nas_engine::LogSource| selected.map_or(true, |choice| choice == candidate);
+        let selected = nas_engine::LogSource::parse(&source).map(|choice| vec![choice]);
+        let selected = selected.unwrap_or_else(|| {
+            default_sources
+                .iter()
+                .filter_map(|name| nas_engine::LogSource::parse(name))
+                .collect()
+        });
+        let list = selected.clone();
+        let wants = move |candidate: nas_engine::LogSource| list.iter().any(|w| *w == candidate);
         let window = limit.saturating_mul(4);
         let window_arg = window.to_string();
         let mut entries: Vec<nas_engine::LogEntry> = Vec::new();
