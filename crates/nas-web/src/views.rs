@@ -167,6 +167,8 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     flags.insert("is_admin", context.is_admin);
     flags.insert("is_super", context.is_super);
     flags.insert("btrfs_controls", data_root_is_btrfs());
+    flags.insert("show_diagnostics", context.active == "diagnostics");
+    flags.insert("show_updates", context.active == "updates");
     flags.insert("net_health_ok", true);
     flags.insert("net_no_interfaces", false);
     flags.insert("net_dhcp_known", true);
@@ -397,6 +399,9 @@ fn view_flag(view: &str) -> &'static str {
         "terminal" => "active_terminal",
         "networking" => "active_networking",
         "domain" => "active_domain",
+        "applications" => "active_applications",
+        "updates" => "active_updates",
+        "diagnostics" => "active_diagnostics",
         _ => "active_dashboard",
     }
 }
