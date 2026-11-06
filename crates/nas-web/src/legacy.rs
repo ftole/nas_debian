@@ -396,7 +396,7 @@ fn cached_task_size(task_dir: &std::path::Path) -> Option<(u64, bool)> {
     let cache = size_cache().lock().ok()?;
     let entry = cache.get(task_dir)?;
     let fresh = now_epoch().saturating_sub(entry.computed_at_epoch) < SIZE_CACHE_TTL_SECS;
-    fresh.then(|| (entry.bytes, entry.complete))
+    fresh.then_some((entry.bytes, entry.complete))
 }
 
 /// Guarda el valor calculado en la caché compartida.
