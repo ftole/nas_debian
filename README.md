@@ -23,7 +23,7 @@ El servidor combina el rendimiento del kernel de Debian 13 con interfaces ágile
 | Ruta | Contenido |
 | :--- | :--- |
 | `crates/nas-core` | Configuración, rutas, errores y contrato de respuesta |
-| `crates/nas-exec` | Ejecución de comandos con allowlist, timeouts y redacción |
+| `crates/nas-exec` | Ejecución de comandos con argv tipado, timeouts y redacción de secretos |
 | `crates/nas-engine` | Almacenamiento, Samba, usuarios, respaldos, dominio, diagnósticos |
 | `crates/nas-cli` | Comando `nas` (ANSI y `--json`) |
 | `crates/nas-web` | Panel web axum + assets embebidos + plantillas portadas |
@@ -41,7 +41,7 @@ Para mantener este repositorio organizado y este documento directo al grano, el 
 | 🏗️ **[Arquitectura del Sistema](docs/arquitectura.md)** | Desglose profundo de capas, kernel sysctl, VFS Samba, SQLite WAL y concurrencia. |
 | ⚡ **[Características y Capacidades](docs/caracteristicas.md)** | Roles del servidor, soporte para +100 puestos en Office/Excel, papelera web y terminal interactiva. |
 | 🧰 **[Tecnologías Usadas y Cuadro Maestro](docs/tecnologias.md)** | Inventario técnico completo de cada componente, demonio y parámetro del kernel con sus beneficios. |
-| 🛡️ **[Seguridad y Endurecimiento](docs/seguridad.md)** | Defensa en profundidad, UFW, SSH blindado, credenciales `0600`, proc_open seguro y rollback. |
+| 🛡️ **[Seguridad y Endurecimiento](docs/seguridad.md)** | Defensa en profundidad, UFW, SSH blindado, credenciales `0600`, ejecución con argv tipado y rollback. |
 | 🎨 **[Sistema de Diseño Slate UI y UX](docs/diseno.md)** | Tokens visuales, filosofía 100% offline, 36 iconos SVG nativos y diseño sereno. |
 | 🔧 **[Operación Diaria y Mantenimiento](docs/operacion_mantenimiento.md)** | Guía de uso diario, restauración de archivos, checklist preventivo y tareas programadas. |
 | 🚀 **[Publicación y Gestión de Releases](docs/releases.md)** | Manual completo para primer release (beta) y versiones continuas con firmas GPG. |
