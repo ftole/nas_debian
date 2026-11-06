@@ -205,7 +205,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx, \
     /usr/bin/systemctl start nas-web, /usr/bin/systemctl stop nas-web, \
     /usr/bin/systemctl restart nas-web, /usr/bin/systemctl reload nas-web, \
-    /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \
+    /usr/bin/systemctl enable sssd, /usr/bin/systemctl disable sssd, /usr/bin/systemctl start sssd, /usr/bin/systemctl stop sssd, /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \
     /usr/bin/systemctl start cron, /usr/bin/systemctl stop cron, \
     /usr/bin/systemctl restart cron, /usr/bin/systemctl reload cron, \
     /usr/bin/systemd-run --no-block --collect systemctl reboot, \
