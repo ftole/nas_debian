@@ -3922,11 +3922,13 @@ fn apply_spec_acls(spec: &nas_engine::samba::ShareSpec) {
             eprintln!("aviso: no se pudo aplicar ACL de {group} en {}", spec.path);
         }
     }
-    for group in &spec.write_list {
-        if !spec.valid_users.contains(group) {
-            if apply_acl(&spec.path, group, "write").is_err() {
-                eprintln!("aviso: no se pudo aplicar ACL de {group} en {}", spec.path);
-            }
+    for group in spec
+        .write_list
+        .iter()
+        .filter(|entry| !spec.valid_users.contains(entry))
+    {
+        if apply_acl(&spec.path, group, "write").is_err() {
+            eprintln!("aviso: no se pudo aplicar ACL de {group} en {}", spec.path);
         }
     }
 }
@@ -4057,7 +4059,6 @@ pub async fn share_update(
     let conf_path = state.paths.samba_conf.clone();
 
     let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let existing = nas_engine::parsers::smb::parse_shares(&conf)
             .into_iter()
