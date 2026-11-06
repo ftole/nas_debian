@@ -49,6 +49,49 @@ jobs:
       - name: Generar paquete oficial, suma y manifiesto
         run: bash scripts/package.sh "${{ steps.vars.outputs.version }}" dist/out target/release
 
+      - name: Preparar clave Ed25519 y derivar la pública
+        env:
+          NAS_RELEASE_KEY: ${{ secrets.NAS_RELEASE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NAS_RELEASE_KEY:-}" ]; then
+            echo "[-] Falta el secreto NAS_RELEASE_KEY (hex Ed25519 de 32 bytes)" >&2
+            exit 1
+          fi
+          if ! printf '%s' "${NAS_RELEASE_KEY}" | grep -qE '^[0-9a-fA-F]{64}$'; then
+            echo "[-] NAS_RELEASE_KEY debe ser hex de 32 bytes (64 caracteres)" >&2
+            exit 1
+          fi
+          printf '%s' "${NAS_RELEASE_KEY}" > /tmp/release.key
+          chmod 0600 /tmp/release.key
+          cargo run --quiet -p nas-cli -- update pubkey --key /tmp/release.key > /tmp/pubkey.txt
+          RELEASE_PUB_HEX=$(tail -1 /tmp/pubkey.txt | tr -d '[:space:]')
+          rm -f /tmp/release.key /tmp/pubkey.txt
+          if [ -z "${RELEASE_PUB_HEX}" ]; then
+            echo "[-] No se pudo derivar la clave pública" >&2
+            exit 1
+          fi
+          echo "${RELEASE_PUB_HEX}" > "dist/out/release.pub"
+          echo "${RELEASE_PUB_HEX}" > packaging/release.pub
+
+      - name: Firmar manifiesto con Ed25519 (obligatorio)
+        env:
+          NAS_RELEASE_KEY: ${{ secrets.NAS_RELEASE_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.vars.outputs.version }}"
+          printf '%s' "${NAS_RELEASE_KEY}" > /tmp/release.key
+          chmod 0600 /tmp/release.key
+          cargo run --quiet -p nas-cli -- update sign \
+            "dist/out/nas-${VERSION}.json" \
+            --out "dist/out/nas-${VERSION}.json" \
+            --key /tmp/release.key
+          rm -f /tmp/release.key
+          cargo run --quiet -p nas-cli -- update verify \
+            "dist/out/nas-${VERSION}.json" \
+            --pubkey "$(cat packaging/release.pub)"
+          echo "Manifiesto firmado y verificado con Ed25519."
+
       - name: Publicar Release en GitHub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,6 +99,8 @@ jobs:
           TAG_NAME="${{ steps.vars.outputs.tag_name }}"
           VERSION="${{ steps.vars.outputs.version }}"
           TITLE="${TAG_NAME} • Servidor NAS & Central de Respaldos Debian 13"
+          echo "Artefactos a publicar (incluye manifiesto firmado Ed25519):"
+          ls -la dist/out/ || true
 
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             echo "Actualizando release existente ${TAG_NAME}..."
