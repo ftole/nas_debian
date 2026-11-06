@@ -316,32 +316,48 @@ pub fn calculate_destination_disk(dest_root: &str) -> BackupDiskMetrics {
 }
 
 /// Calcula el espacio en bytes consumido por el directorio de la tarea de respaldo.
-/// Utiliza `du -sk` con timeout acotado para deduplicación exacta de hardlinks entre snapshots,
-/// con fallback a cálculo acotado en Rust.
-pub fn calculate_task_size(task_dir: &std::path::Path) -> u64 {
+///
+/// Usa `du -sb` con timeout generoso (15 s) porque los snapshots de
+/// respaldos con deduplicación por hardlinks alcanzaban decenas de GB y
+/// millones de inodos; un timeout corto reportaba tamaños truncados (1.4 GB
+/// en un snapshot de 71 GB), dejando la vista `#backups` con números falsos.
+///
+/// Devuelve `(bytes, measurement_complete)`. `measurement_complete=false`
+/// indica que `du` no terminó dentro del tiempo (se reporta un valor de
+/// referencia con marca `≈` en la UI para no confundir al operador).
+pub fn calculate_task_size_ex(task_dir: &std::path::Path) -> (u64, bool) {
     if !task_dir.is_dir() {
-        return 0;
+        return (0, true);
     }
 
     let runner = Runner::new();
     let spec = nas_exec::CommandSpec::new("du")
-        .args(["-sk", &task_dir.to_string_lossy()])
-        .timeout(std::time::Duration::from_millis(1500));
+        .args(["-sb", &task_dir.to_string_lossy()])
+        .timeout(std::time::Duration::from_secs(15));
 
     if let Ok(out) = runner.run(&spec) {
         if out.is_success() {
             if let Some(first_line) = out.stdout.lines().next() {
-                if let Some(kb_str) = first_line.split_whitespace().next() {
-                    if let Ok(kb) = kb_str.parse::<u64>() {
-                        return kb.saturating_mul(1024);
+                if let Some(bytes_str) = first_line.split_whitespace().next() {
+                    if let Ok(bytes) = bytes_str.parse::<u64>() {
+                        return (bytes, true);
                     }
                 }
             }
         }
     }
 
-    // Fallback si `du` no está disponible o finaliza con error
-    crate::files::dir_size_recursive_bounded(task_dir, 5000)
+    // `du` no terminó (timeout) o falló. Devolvemos un valor aproximado
+    // calculado en Rust (más rápido pero menos exacto para hardlinks),
+    // marcado como "no exacto" para que la UI lo dé a conocer.
+    let approx = crate::files::dir_size_recursive_bounded(task_dir, 5000);
+    (approx, false)
+}
+
+/// Compatibilidad: devuelve solo los bytes.
+#[allow(dead_code)]
+pub fn calculate_task_size(task_dir: &std::path::Path) -> u64 {
+    calculate_task_size_ex(task_dir).0
 }
 
 /// Caché en memoria del tamaño (bytes) de cada directorio de tarea, con TTL.
@@ -357,6 +373,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 struct CachedSize {
     bytes: u64,
+    /// `true` si `du` terminó limpio; `false` si se usó un fallback aproximado.
+    complete: bool,
     computed_at_epoch: u64,
 }
 
@@ -374,20 +392,21 @@ fn now_epoch() -> u64 {
 }
 
 /// Lee el tamaño cacheado si es reciente; `None` indica que hay que calcular.
-fn cached_task_size(task_dir: &std::path::Path) -> Option<u64> {
+fn cached_task_size(task_dir: &std::path::Path) -> Option<(u64, bool)> {
     let cache = size_cache().lock().ok()?;
     let entry = cache.get(task_dir)?;
     let fresh = now_epoch().saturating_sub(entry.computed_at_epoch) < SIZE_CACHE_TTL_SECS;
-    fresh.then_some(entry.bytes)
+    fresh.then(|| (entry.bytes, entry.complete))
 }
 
 /// Guarda el valor calculado en la caché compartida.
-fn store_task_size(task_dir: &std::path::Path, bytes: u64) {
+fn store_task_size(task_dir: &std::path::Path, bytes: u64, complete: bool) {
     if let Ok(mut cache) = size_cache().lock() {
         cache.insert(
             task_dir.to_path_buf(),
             CachedSize {
                 bytes,
+                complete,
                 computed_at_epoch: now_epoch(),
             },
         );
@@ -396,24 +415,24 @@ fn store_task_size(task_dir: &std::path::Path, bytes: u64) {
 
 /// Consulta el tamaño respetando la caché; si expiró lanza `du -sk` en un
 /// hilo secundario y devuelve el último valor conocido mientras tanto.
-fn task_size_with_cache(task_dir: &std::path::Path) -> u64 {
+fn task_size_with_cache(task_dir: &std::path::Path) -> (u64, bool) {
     if !task_dir.is_dir() {
-        return 0;
+        return (0, true);
     }
 
-    if let Some(cached) = cached_task_size(task_dir) {
+    if let Some((cached, complete)) = cached_task_size(task_dir) {
         // Refresco en segundo plano sin bloquear la respuesta HTTP.
         let path_clone = task_dir.to_path_buf();
         std::thread::spawn(move || {
-            let fresh = calculate_task_size(&path_clone);
-            store_task_size(&path_clone, fresh);
+            let (fresh, complete) = calculate_task_size_ex(&path_clone);
+            store_task_size(&path_clone, fresh, complete);
         });
-        return cached;
+        return (cached, complete);
     }
 
-    let computed = calculate_task_size(task_dir);
-    store_task_size(task_dir, computed);
-    computed
+    let (computed, complete) = calculate_task_size_ex(task_dir);
+    store_task_size(task_dir, computed, complete);
+    (computed, complete)
 }
 
 /// Proyección plana de una tarea de respaldo.
@@ -522,8 +541,13 @@ pub fn backup_row_with_metrics(
     };
 
     let task_dir = task.task_dir();
-    let size_bytes = task_size_with_cache(&task_dir);
-    let size_formatted = human_bytes(size_bytes);
+    let (size_bytes, size_complete) = task_size_with_cache(&task_dir);
+    // Marcado "≈" cuando `du` no terminó y se usó un cálculo aproximado.
+    let size_formatted = if size_complete {
+        human_bytes(size_bytes)
+    } else {
+        format!("≈ {}", human_bytes(size_bytes))
+    };
 
     let disk_info = disk_cache
         .entry(task.destination_root.clone())
