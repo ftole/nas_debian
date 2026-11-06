@@ -1059,6 +1059,21 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
 }
 
 /// Restaura un snapshot o respaldo permanente hacia el origen de red o un destino local.
+/// Valida un destino de restauración: sin `..`, sin NUL y dentro de las raíces permitidas.
+fn validate_restore_target(target: &str) -> NasResult<String> {
+    let value = target.trim();
+    if value.is_empty() || value.contains('\0') || value.contains("..") {
+        return Err(NasError::Denied("destino de restauración inválido".into()));
+    }
+    if !value.starts_with("/srv/nas/") && !value.starts_with("/tmp/") {
+        return Err(NasError::Denied(
+            "el destino de restauración debe estar en /srv/nas o /tmp".into(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+/// Restaura un snapshot en el origen configurado o en un destino local permitido.
 pub fn restore_backup(
     runner: &Runner,
     id: &str,
@@ -1105,12 +1120,15 @@ pub fn restore_backup(
     if let Some(custom_tgt) = target {
         let custom_tgt = custom_tgt.trim();
         if !custom_tgt.is_empty() {
-            if !custom_tgt.starts_with("/srv/nas/") && !custom_tgt.starts_with("/tmp/") {
+            let safe = validate_restore_target(custom_tgt)?;
+            std::fs::create_dir_all(&safe).map_err(|e| NasError::Denied(e.to_string()))?;
+            let canonical =
+                std::fs::canonicalize(&safe).map_err(|e| NasError::Denied(e.to_string()))?;
+            if !canonical.starts_with("/srv/nas") && !canonical.starts_with("/tmp") {
                 return Err(NasError::Denied(
-                    "el destino de restauración debe estar en /srv/nas o /tmp".into(),
+                    "el destino de restauración escapa de /srv/nas o /tmp".into(),
                 ));
             }
-            std::fs::create_dir_all(custom_tgt).map_err(|e| NasError::Denied(e.to_string()))?;
             let rsync_res = runner.run(
                 &CommandSpec::new("rsync")
                     .args([
@@ -1118,7 +1136,7 @@ pub fn restore_backup(
                         "--numeric-ids",
                         "--safe-links",
                         &format!("{}/", snap_path.display()),
-                        custom_tgt,
+                        &canonical.to_string_lossy(),
                     ])
                     .timeout(Duration::from_secs(300)),
             )?;
@@ -1129,7 +1147,8 @@ pub fn restore_backup(
                 )));
             }
             return Ok(format!(
-                "Restauración completada en destino local: {custom_tgt}"
+                "Restauración completada en destino local: {}",
+                canonical.display()
             ));
         }
     }
