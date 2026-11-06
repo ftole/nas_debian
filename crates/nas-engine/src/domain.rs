@@ -150,6 +150,9 @@ pub fn leave_plan() -> Vec<Vec<String>> {
 }
 
 /// Ejecuta la unión con la contraseña por `stdin` (nunca en `argv`).
+///
+/// Tras `realm join` habilita y arranca `sssd`; el fallo del demonio se
+/// propaga porque el dominio no es usable sin él.
 pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result<(), String> {
     if !is_valid_domain(domain) {
         return Err(format!("dominio inválido: {domain}"));
@@ -168,14 +171,35 @@ pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result
         )
         .map_err(|error| error.to_string())?;
 
-    if output.is_success() {
-        Ok(())
-    } else {
-        Err(output.stderr)
+    if !output.is_success() {
+        return Err(output.stderr);
     }
+
+    for args in [["enable", "sssd"], ["restart", "sssd"]] {
+        let svc = runner
+            .run(
+                &CommandSpec::new("systemctl")
+                    .args(args)
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(60)),
+            )
+            .map_err(|error| error.to_string())?;
+        if !svc.is_success() {
+            return Err(format!(
+                "realm join ok, pero {} sssd falló: {}",
+                args[0],
+                if svc.stderr.is_empty() {
+                    svc.stdout
+                } else {
+                    svc.stderr
+                }
+            ));
+        }
+    }
+    Ok(())
 }
 
-/// Ejecuta la salida del dominio.
+/// Ejecuta la salida del dominio y detiene el demonio SSSD.
 pub fn leave(runner: &Runner) -> Result<(), String> {
     let output = runner
         .run(
@@ -186,11 +210,20 @@ pub fn leave(runner: &Runner) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
 
-    if output.is_success() {
-        Ok(())
-    } else {
-        Err(output.stderr)
+    if !output.is_success() {
+        return Err(output.stderr);
     }
+
+    // Best-effort en stop/disable: si el demo ya estaba parado no es fallo.
+    for args in [["stop", "sssd"], ["disable", "sssd"]] {
+        let _ = runner.run(
+            &CommandSpec::new("systemctl")
+                .args(args)
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(60)),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
