@@ -669,3 +669,49 @@ fn helper_backup_congela_y_restaura_valida_id() {
         .expect("ejecuta");
     assert!(!freeze_bad.status.success());
 }
+
+#[test]
+fn update_verify_artefacto_relativo_resuelve_contra_el_padre_del_manifiesto() {
+    use std::fs;
+    use std::process::Command;
+
+    // Base de directorios temporales, cada uno en un cwd distinto.
+    let dir = std::env::temp_dir().join(format!(
+        "nas-verify-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&dir).expect("dir");
+
+    // El artefacto y el manifiesto viven en el mismo subdirectorio; el CLI se
+    // ejecuta desde otro working directory (p.ej. el padre).
+    let artifact_path = dir.join("nas-probe.tar.gz");
+    fs::write(&artifact_path, b"payload").expect("artifact");
+    let manifest_path = dir.join("nas-probe.json");
+    fs::write(&manifest_path, r#"{"version":"0.1.probe","commit":"x","artifact":"nas-probe.tar.gz","sha256":"AA","published_at":"2026-01-01T00:00:00Z","signature":null}"#).expect("manifest");
+
+    // El directorio de trabajo del CLI será el PADRE del subdirectorio (~/).
+    let cwd = dir.parent().unwrap().to_path_buf();
+    let output = Command::new(env!("CARGO_BIN_EXE_nas"))
+        .arg("--json")
+        .arg("update")
+        .arg("verify")
+        .arg(&manifest_path)
+        .arg("--pubkey")
+        .arg("220d56af9dad91eb44fb9a6fa175adc96cc9ffb25b405a2db2e867b2a9153335")
+        .current_dir(cwd)
+        .output()
+        .expect("run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // El error esperado ya no es "No such file or directory" por ruta relativa;
+    // es SHA-256 mismatch (esperado porque no pasamos una firma válida), pero
+    // importantly: no debe ser "No such file or directory".
+    assert!(
+        !stdout.contains("No such file or directory"),
+        "el CLI debe resolver el nombre del artefacto desde el padre del manifiesto; obtuvo: {stdout}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
