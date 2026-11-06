@@ -89,8 +89,9 @@ jobs:
           rm -f /tmp/release.key
           cargo run --quiet -p nas-cli -- update verify \
             "dist/out/nas-${VERSION}.json" \
+            --artifact "dist/out/nas_debian-${VERSION}.tar.gz" \
             --pubkey "$(cat packaging/release.pub)"
-          echo "Manifiesto firmado y verificado con Ed25519."
+          echo "Manifiesto firmado y verificado con Ed25519 (incluye SHA-256 del paquete)."
 
       - name: Publicar Release en GitHub
         env:
