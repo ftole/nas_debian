@@ -104,7 +104,7 @@
     <rect x="680" y="36" width="200" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="692" y="54" fill="#f8fafc" font-size="12" font-weight="600">SQLite WAL &amp; Aud</text>
     <text x="692" y="70" fill="#94a3b8" font-size="10">nas.sqlite (~0MB reposo)</text>
-    <text x="692" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + proc_open</text>
+    <text x="692" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + argv tipado</text>
   </g>
 
   <!-- Capa 4: Kernel y Almacenamiento -->
