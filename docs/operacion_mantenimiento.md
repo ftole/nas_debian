@@ -18,13 +18,13 @@ El servidor cuenta con el comando global `nas` disponible en cualquier terminal:
 | `sudo nas backup list` | Listado de tareas de respaldo | Para consultar las tareas programadas y su configuración. |
 | `sudo nas backup run <id>` | Ejecución manual de respaldo | Para disparar una copia de seguridad específica desde consola. |
 | `sudo nas deploy plan [args]` | Planificación de despliegue | Simula el particionado, formateo y aprovisionamiento del servidor. |
-| `sudo nas deploy apply [args]` | Despliegue del servidor | Aplica el aprovisionamiento de discos (`ext4`/`Btrfs`), roles y ajustes de kernel. |
-| `sudo nas update` | Verificación y actualización de versiones | Valida y aplica releases firmados criptográficamente (Ed25519/SHA-256) con rollback A/B. |
+| `sudo nas deploy apply [args] --password-stdin` | Despliegue del servidor | Aplica los artefactos (rol, sysctl, udev, logrotate, auditd, scrub, superadmin y smb.conf) y sincroniza la contraseña del administrador con el panel. |
+| `sudo nas update verify <manifiesto> --pubkey <hex>` | Verificación de una release | Valida SHA-256 y firma Ed25519 del manifiesto. |
 | `sudo nas audit verify` | Verifica la cadena de auditoría | Audita criptográficamente la bitácora de eventos del sistema. |
 | `sudo nas uninstall --yes [--scope os]` | Desinstala la plataforma | Conserva `/srv/nas`; `--scope os` retira además sysctl, udev, logrotate y auditd; `--purge` borra `/var/lib/nas` y `/etc/nas`. |
 | `sudo nas uninstall` | Muestra el plan de desinstalación | Revisión previa de los pasos sin ejecutar cambios. |
-| `sudo nas update sign --manifest <json> --key <clave>` | Firma un manifiesto de release (Ed25519) | Publicación de versiones verificables. |
-| `sudo nas update pubkey --key <clave>` | Deriva la clave pública de la privada | Configurar `--pubkey` en verify/apply. |
+| `sudo nas update sign <json> --key <archivo-hex>` | Firma un manifiesto de release (Ed25519) | Publicación de versiones verificables; la clave es un archivo hexadecimal. |
+| `sudo nas update pubkey --key <archivo-hex>` | Deriva la clave pública de la privada | Configurar `--pubkey` en verify/apply. |
 
 > El panel web (`/dashboard`) ofrece las mismas 14 vistas y la misma interfaz
 > Slate UI que el panel original, servida desde `nas-web.service`.
