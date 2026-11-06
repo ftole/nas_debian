@@ -192,28 +192,64 @@ fn sync_groups(
 }
 
 fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>) -> NasResult<()> {
+    let fail = |action: &str, output: &nas_exec::CommandOutput| -> NasError {
+        let detail = if output.stderr.is_empty() {
+            output.stdout.clone()
+        } else {
+            output.stderr.clone()
+        };
+        NasError::Invalid(format!("smbpasswd {action} falló para '{user}': {detail}"))
+    };
+
     if enable {
         if let Some(pass) = password {
             if !pass.is_empty() {
-                let mut spec = CommandSpec::new("smbpasswd")
+                let spec = CommandSpec::new("smbpasswd")
                     .args(["-a", "-s", user])
+                    .stdin_secret(SecretInput::new(format!("{pass}\n{pass}\n")))
                     .timeout(Duration::from_secs(30));
-                let double_pass = format!("{pass}\n{pass}\n");
-                spec = spec.stdin_secret(SecretInput::new(double_pass));
-                let _ = runner.run(&spec);
+                let out = runner.run(&spec)?;
+                if !out.is_success() {
+                    return Err(fail("-a", &out));
+                }
             }
         }
-        let _ = runner.run(
+        let out = runner.run(
             &CommandSpec::new("smbpasswd")
                 .args(["-e", user])
                 .timeout(Duration::from_secs(20)),
-        );
+        )?;
+        if !out.is_success() {
+            return Err(fail("-e", &out));
+        }
     } else {
-        let _ = runner.run(
+        let out = runner.run(
             &CommandSpec::new("smbpasswd")
                 .args(["-d", user])
                 .timeout(Duration::from_secs(20)),
-        );
+        )?;
+        if !out.is_success() {
+            return Err(fail("-d", &out));
+        }
+    }
+    Ok(())
+}
+
+/// Fija la contraseña de sistema con `chpasswd`; el fallo se propaga.
+fn sync_system_password(runner: &Runner, user: &str, password: &str) -> NasResult<()> {
+    let spec = CommandSpec::new("chpasswd")
+        .stdin_secret(SecretInput::new(format!("{user}:{password}\n")))
+        .timeout(Duration::from_secs(30));
+    let out = runner.run(&spec)?;
+    if !out.is_success() {
+        let detail = if out.stderr.is_empty() {
+            out.stdout
+        } else {
+            out.stderr
+        };
+        return Err(NasError::Invalid(format!(
+            "chpasswd falló para '{user}': {detail}"
+        )));
     }
     Ok(())
 }
@@ -258,11 +294,8 @@ pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> 
         )?
         .ensure_success()?;
 
-    // Fijar contraseña de sistema
-    let chpasswd_spec = CommandSpec::new("chpasswd")
-        .stdin_secret(SecretInput::new(format!("{u}:{}\n", args.password)))
-        .timeout(Duration::from_secs(30));
-    let _ = runner.run(&chpasswd_spec);
+    // Fijar contraseña de sistema (el fallo se propaga)
+    sync_system_password(runner, u, &args.password)?;
 
     sync_groups(runner, u, args.admin, args.web, &args.groups)?;
     sync_samba(runner, u, args.samba, Some(&args.password))?;
@@ -277,22 +310,26 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
     let is_super = is_superadmin_account(runner, u);
 
     let full = sanitize_gecos(&args.full_name);
-    runner.run(
-        &CommandSpec::new("usermod")
-            .args(["-c", &full, u])
-            .timeout(Duration::from_secs(20)),
-    )?;
+    runner
+        .run(
+            &CommandSpec::new("usermod")
+                .args(["-c", &full, u])
+                .timeout(Duration::from_secs(20)),
+        )?
+        .ensure_success()?;
 
     let shell = if args.admin || is_super {
         "/bin/bash"
     } else {
         "/usr/sbin/nologin"
     };
-    let _ = runner.run(
-        &CommandSpec::new("usermod")
-            .args(["-s", shell, u])
-            .timeout(Duration::from_secs(20)),
-    );
+    runner
+        .run(
+            &CommandSpec::new("usermod")
+                .args(["-s", shell, u])
+                .timeout(Duration::from_secs(20)),
+        )?
+        .ensure_success()?;
 
     let mut has_new_password = false;
     if let Some(pass) = &args.password {
@@ -302,10 +339,7 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
                     "contraseña demasiado corta (mínimo 6 caracteres)".into(),
                 ));
             }
-            let chpasswd_spec = CommandSpec::new("chpasswd")
-                .stdin_secret(SecretInput::new(format!("{u}:{pass}\n")))
-                .timeout(Duration::from_secs(30));
-            let _ = runner.run(&chpasswd_spec);
+            sync_system_password(runner, u, pass)?;
             has_new_password = true;
         }
     }
@@ -337,14 +371,40 @@ pub fn toggle_user(runner: &Runner, username: &str, enable: bool) -> NasResult<S
     }
 
     if enable {
-        let _ = runner.run(&CommandSpec::new("usermod").args(["-e", "", u]));
-        let _ = runner.run(&CommandSpec::new("usermod").args(["-U", u]));
-        let _ = runner.run(&CommandSpec::new("smbpasswd").args(["-e", u]));
+        for args in [vec!["-e", ""], vec!["-U"]] {
+            runner
+                .run(
+                    &CommandSpec::new("usermod")
+                        .args(args)
+                        .timeout(Duration::from_secs(20)),
+                )?
+                .ensure_success()?;
+        }
+        runner
+            .run(
+                &CommandSpec::new("smbpasswd")
+                    .args(["-e", u])
+                    .timeout(Duration::from_secs(20)),
+            )?
+            .ensure_success()?;
         Ok(format!("usuario {u} reactivado"))
     } else {
-        let _ = runner.run(&CommandSpec::new("usermod").args(["-L", u]));
-        let _ = runner.run(&CommandSpec::new("usermod").args(["-e", "1", u]));
-        let _ = runner.run(&CommandSpec::new("smbpasswd").args(["-d", u]));
+        for args in [vec!["-L"], vec!["-e", "1"]] {
+            runner
+                .run(
+                    &CommandSpec::new("usermod")
+                        .args(args)
+                        .timeout(Duration::from_secs(20)),
+                )?
+                .ensure_success()?;
+        }
+        runner
+            .run(
+                &CommandSpec::new("smbpasswd")
+                    .args(["-d", u])
+                    .timeout(Duration::from_secs(20)),
+            )?
+            .ensure_success()?;
         Ok(format!("usuario {u} suspendido"))
     }
 }
@@ -360,10 +420,14 @@ pub fn delete_user(runner: &Runner, username: &str) -> NasResult<String> {
         ));
     }
 
+    // `smbpasswd -x` es best-effort: puede que el usuario no existiera en Samba.
     let _ = runner.run(&CommandSpec::new("smbpasswd").args(["-x", u]));
     let del = runner.run(&CommandSpec::new("userdel").args(["-r", u]))?;
     if !del.is_success() {
-        let _ = runner.run(&CommandSpec::new("userdel").args([u]));
+        // Reintento sin --r por si el home no existe o está compartido.
+        runner
+            .run(&CommandSpec::new("userdel").args([u]))?
+            .ensure_success()?;
     }
 
     Ok(format!("usuario {u} eliminado"))
