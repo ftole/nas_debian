@@ -546,6 +546,13 @@ pub struct FilesQuery {
     path: String,
     #[serde(default)]
     root: Option<String>,
+    /// Solicitud de preparación previa (informativo; el flujo ZIP pre-comprime).
+    #[serde(default)]
+    prepare: Option<String>,
+    /// Token asociado a un ZIP ya comprimido (informativo para la UI).
+    #[serde(default)]
+    #[allow(dead_code)]
+    token: Option<String>,
 }
 
 /// Cuerpo con una única ruta o con nombre.
@@ -664,7 +671,7 @@ pub async fn files_download(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    let path = query.path;
+    let path = query.path.clone();
     let name = path
         .trim_end_matches('/')
         .rsplit('/')
@@ -672,6 +679,21 @@ pub async fn files_download(
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| "descarga.bin".to_string());
+
+    // Solicitud ZIP de una carpeta (el front-end manda `prepare=1` cuando es
+    // carpeta): resolvemos con el zipper ya existente en `/api/files/zip`.
+    let is_folder_flow = query
+        .prepare
+        .as_deref()
+        .map(|value| !value.is_empty() && value != "0")
+        .unwrap_or(false);
+    if is_folder_flow
+        && std::fs::metadata(root.root().join(&path))
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+    {
+        return files_zip(State(state), headers, Query(query)).await;
+    }
 
     let (file_path, file_size) = match root.resolve_file(&path) {
         Ok(pair) => pair,
