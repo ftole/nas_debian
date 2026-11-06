@@ -31,6 +31,32 @@ fn hostname() -> String {
         .unwrap_or_else(|| "SRV-NAS".to_string())
 }
 
+/// Registra auditoría con la IP de origen automáticamente extraída de las cabeceras.
+///
+/// Todos los handlers de auditoría de `nas-web` deben llamar a esta función en
+/// lugar de acceder a la base directamente, para conservar la trazabilidad de
+/// origen sin repetir `extract_client_ip` en cada sitio.
+fn audit_ip(
+    state: &AppState,
+    headers: &HeaderMap,
+    username: &str,
+    action: &str,
+    target: &str,
+    result: &str,
+    detail: &str,
+) {
+    let ip = extract_client_ip(headers);
+    if let Err(error) =
+        state
+            .auth
+            .db()
+            .append_audit_ip(username, action, target, result, detail, Some(&ip))
+    {
+        eprintln!("aviso: no se pudo registrar auditoría con origen: {error}");
+    }
+}
+
+/// Extrae la IP del cliente respetando proxys (`X-Real-IP`, `X-Forwarded-For`).
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
         let trimmed = real_ip.trim();
@@ -133,10 +159,15 @@ pub async fn login_submit(
     }
     let session = match state.auth.login(&form.username, &form.password, now) {
         Ok(Some(session)) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&form.username, "login", "web", "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &form.username,
+                "login",
+                "web",
+                "SUCCESS",
+                "",
+            );
             session
         }
         Ok(None) => {
@@ -147,10 +178,15 @@ pub async fn login_submit(
                     .auth
                     .db()
                     .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&form.username, "login", "web", "FAILED", "");
+            audit_ip(
+                &state,
+                &headers,
+                &form.username,
+                "login",
+                "web",
+                "FAILED",
+                "",
+            );
             let blocked = matches!(hits, Ok(false));
             let csrf = state.auth.issue_login_csrf(now);
             if blocked {
@@ -208,10 +244,15 @@ pub async fn api_login(
     }
     match state.auth.login(&form.username, &form.password, now) {
         Ok(Some(session)) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&form.username, "login", "api", "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &form.username,
+                "login",
+                "api",
+                "SUCCESS",
+                "",
+            );
             let role = state
                 .auth
                 .db()
@@ -241,10 +282,15 @@ pub async fn api_login(
                     .auth
                     .db()
                     .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&form.username, "login", "api", "FAILED", "");
+            audit_ip(
+                &state,
+                &headers,
+                &form.username,
+                "login",
+                "api",
+                "FAILED",
+                "",
+            );
             let blocked = matches!(hits, Ok(false));
             if blocked {
                 return (
@@ -839,10 +885,7 @@ pub async fn files_delete(
             } else {
                 "file_delete"
             };
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, action, &audit_path, "SUCCESS", "");
+            audit_ip(&state, &headers, &user, action, &audit_path, "SUCCESS", "");
             let msg = if permanent {
                 "Elemento eliminado definitivamente"
             } else {
@@ -1185,13 +1228,16 @@ pub async fn services(
 pub async fn service_manage(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<ServiceBody>,
 ) -> Response {
     let user = admin.username().to_string();
     if !nas_engine::services::is_allowed_service(&body.service)
         || !nas_engine::services::is_allowed_action(&body.action)
     {
-        let _ = state.auth.db().append_audit(
+        audit_ip(
+            &state,
+            &headers,
             &user,
             "service_manage",
             &body.service,
@@ -1211,7 +1257,9 @@ pub async fn service_manage(
 
     match outcome {
         Ok(()) => {
-            let _ = state.auth.db().append_audit(
+            audit_ip(
+                &state,
+                &headers,
                 &user,
                 "service_manage",
                 &body.service,
@@ -1225,7 +1273,9 @@ pub async fn service_manage(
             .into_response()
         }
         Err(error) => {
-            let _ = state.auth.db().append_audit(
+            audit_ip(
+                &state,
+                &headers,
                 &user,
                 "service_manage",
                 &body.service,
@@ -1617,7 +1667,9 @@ pub async fn domain_join(
     if !nas_engine::domain::is_valid_domain(&body.domain)
         || !nas_engine::domain::is_valid_user(&body.user)
     {
-        let _ = state.auth.db().append_audit(
+        audit_ip(
+            &state,
+            &headers,
             &user,
             "domain_join",
             &body.domain,
@@ -1638,21 +1690,30 @@ pub async fn domain_join(
 
     match outcome {
         Ok(()) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "domain_join", &body.domain, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "domain_join",
+                &body.domain,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Equipo unido al dominio",
             ))
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "domain_join", &body.domain, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "domain_join",
+                &body.domain,
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -1674,20 +1735,30 @@ pub async fn domain_leave(State(state): State<AppState>, headers: HeaderMap) -> 
 
     match outcome {
         Ok(()) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "domain_leave", "domain", "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "domain_leave",
+                "domain",
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Equipo retirado del dominio",
             ))
             .into_response()
         }
         Err(error) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "domain_leave", "domain", "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "domain_leave",
+                "domain",
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -1833,19 +1904,27 @@ pub async fn terminal_session(
 
     match outcome {
         Ok(session) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "terminal_start", &session.name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "terminal_start",
+                &session.name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::ok(session, "Sesión de terminal lista")).into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "terminal_start", "terminal", "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "terminal_start",
+                "terminal",
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -1989,10 +2068,15 @@ pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) ->
 
     match outcome {
         Ok(name) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "terminal_kill", &name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "terminal_kill",
+                &name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Sesión cerrada")).into_response()
         }
         Err(error) => server_error(&error),
@@ -2039,11 +2123,15 @@ pub async fn backup_run(
 
     match outcome {
         Ok(message) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "backup_run", &body.path, "SUCCESS", &message);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "backup_run",
+                &body.path,
+                "SUCCESS",
+                &message,
+            );
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -2051,10 +2139,15 @@ pub async fn backup_run(
             .into_response()
         }
         Err(error) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "backup_run", &body.path, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "backup_run",
+                &body.path,
+                "FAILED",
+                &error,
+            );
             error_response(nas_core::NasError::Invalid(error))
         }
     }
@@ -2501,6 +2594,7 @@ pub async fn logs(
                         target: &row.target,
                         result: &row.result,
                         detail: &row.detail,
+                        origin_ip: &row.origin_ip,
                     })
                     .collect();
                 entries.extend(nas_engine::parse_admin_events(&events));
@@ -3430,10 +3524,15 @@ pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) ->
     if !is_admin(&state, &user) {
         return forbidden("se requieren privilegios de administrador");
     }
-    let _ = state
-        .auth
-        .db()
-        .append_audit(&user, "system_reboot", "host", "REQUESTED", "");
+    audit_ip(
+        &state,
+        &headers,
+        &user,
+        "system_reboot",
+        "host",
+        "REQUESTED",
+        "",
+    );
 
     if std::env::var("NAS_TEST_NO_REBOOT").as_deref() == Ok("1")
         || std::env::var("CARGO_MANIFEST_DIR").is_ok()
@@ -3683,13 +3782,19 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
 pub async fn system_update_run(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Response {
     let actor = admin.username().to_string();
     let paths = state.paths.clone();
-    let _ = state
-        .auth
-        .db()
-        .append_audit(&actor, "system_update", "sistema", "STARTED", "");
+    audit_ip(
+        &state,
+        &headers,
+        &actor,
+        "system_update",
+        "sistema",
+        "STARTED",
+        "",
+    );
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
         // Verificamos una instancia anterior (si hay otra en curso, se bloquea)
@@ -3750,10 +3855,15 @@ pub async fn system_update_run(
 
     match result {
         Ok(output) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "system_update", "sistema", "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "system_update",
+                "sistema",
+                "SUCCESS",
+                "",
+            );
             // La salida es JSON con "success" true si todo va bien
             let payload = serde_json::from_str::<serde_json::Value>(&output)
                 .map(|data| {
@@ -3769,11 +3879,15 @@ pub async fn system_update_run(
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&actor, "system_update", "sistema", "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "system_update",
+                "sistema",
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4067,18 +4181,27 @@ pub async fn share_create(
 
     match outcome {
         Ok(()) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "share_create", &share_name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_create",
+                &share_name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Recurso creado")).into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_create", &share_name, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_create",
+                &share_name,
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4134,21 +4257,30 @@ pub async fn share_update(
 
     match outcome {
         Ok(()) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "share_update", &share_name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_update",
+                &share_name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Recurso actualizado",
             ))
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_update", &share_name, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_update",
+                &share_name,
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4187,21 +4319,30 @@ pub async fn share_delete(
 
     match outcome {
         Ok(()) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&user, "share_delete", &body.name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_delete",
+                &body.name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Recurso eliminado",
             ))
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_delete", &body.name, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_delete",
+                &body.name,
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4303,7 +4444,9 @@ pub async fn share_access_update(
 
     match outcome {
         Ok(()) => {
-            let _ = state.auth.db().append_audit(
+            audit_ip(
+                &state,
+                &headers,
                 &user,
                 "share_access",
                 &share_name,
@@ -4316,11 +4459,15 @@ pub async fn share_access_update(
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_access", &share_name, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_access",
+                &share_name,
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4384,11 +4531,15 @@ pub async fn share_access_repair(
 
     match outcome {
         Ok(applied) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_acl_repair", "shares", "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_acl_repair",
+                "shares",
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "applied": applied }),
                 "ACLs reaplicadas",
@@ -4396,11 +4547,15 @@ pub async fn share_access_repair(
             .into_response()
         }
         Err(error) => {
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&user, "share_acl_repair", "shares", "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &user,
+                "share_acl_repair",
+                "shares",
+                "FAILED",
+                &error,
+            );
             server_error(&error)
         }
     }
@@ -4545,6 +4700,7 @@ fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String>
 pub async fn user_create(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
@@ -4601,11 +4757,15 @@ pub async fn user_create(
                     let _ = state.auth.db().upsert_user(&body.username, &hash, role);
                 }
             }
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&actor, "user_create", &body.username, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_create",
+                &body.username,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Usuario creado")).into_response()
         }
         Err(error) => server_error(&error),
@@ -4616,6 +4776,7 @@ pub async fn user_create(
 pub async fn user_update(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
@@ -4695,11 +4856,15 @@ pub async fn user_update(
             if !body.password.is_empty() {
                 let _ = state.auth.db().delete_user_sessions(&body.username);
             }
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&actor, "user_update", &body.username, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_update",
+                &body.username,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Usuario actualizado",
             ))
@@ -4713,6 +4878,7 @@ pub async fn user_update(
 pub async fn user_toggle(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
@@ -4736,11 +4902,15 @@ pub async fn user_toggle(
             if !body.enabled {
                 let _ = state.auth.db().delete_user_sessions(&body.username);
             }
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&actor, "user_toggle", &body.username, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_toggle",
+                &body.username,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Estado actualizado",
             ))
@@ -4754,6 +4924,7 @@ pub async fn user_toggle(
 pub async fn user_delete(
     admin: crate::extractors::AdminUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
@@ -4773,11 +4944,15 @@ pub async fn user_delete(
     match result {
         Ok(_) => {
             let _ = state.auth.db().delete_user(&body.username);
-            let _ =
-                state
-                    .auth
-                    .db()
-                    .append_audit(&actor, "user_delete", &body.username, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_delete",
+                &body.username,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Usuario eliminado",
             ))
@@ -4864,10 +5039,15 @@ pub async fn group_create(
 
     match result {
         Ok(_) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "group_create", &name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "group_create",
+                &name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Grupo creado")).into_response()
         }
         Err(error) => server_error(&error),
@@ -4945,10 +5125,15 @@ pub async fn group_delete(
 
     match result {
         Ok(_) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "group_delete", &name, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "group_delete",
+                &name,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Grupo eliminado",
             ))
@@ -5126,10 +5311,7 @@ async fn install_backup(
 
     match result {
         Ok(_) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, actor_action, &id, "SUCCESS", "");
+            audit_ip(&state, &headers, &actor, actor_action, &id, "SUCCESS", "");
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(format!(
                 "Tarea [{id}] programada"
             )))
@@ -5189,10 +5371,15 @@ pub async fn backup_delete(
 
     match result {
         Ok(_) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_delete", &body.id, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_delete",
+                &body.id,
+                "SUCCESS",
+                "",
+            );
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Tarea eliminada",
             ))
@@ -5280,16 +5467,14 @@ pub struct StorageActionBody {
 
 fn audit_storage(
     state: &AppState,
+    headers: &HeaderMap,
     actor: &str,
     action: &str,
     target: &str,
     status: &str,
     detail: &str,
 ) {
-    let _ = state
-        .auth
-        .db()
-        .append_audit(actor, action, target, status, detail);
+    audit_ip(state, headers, actor, action, target, status, detail);
 }
 
 async fn storage_operation<F>(
@@ -5317,7 +5502,15 @@ where
 
     match outcome {
         Ok(message) => {
-            audit_storage(&state, &actor, action, &audited_target, "SUCCESS", &message);
+            audit_storage(
+                &state,
+                &headers,
+                &actor,
+                action,
+                &audited_target,
+                "SUCCESS",
+                &message,
+            );
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -5325,7 +5518,15 @@ where
             .into_response()
         }
         Err(error) => {
-            audit_storage(&state, &actor, action, &audited_target, "FAILED", &error);
+            audit_storage(
+                &state,
+                &headers,
+                &actor,
+                action,
+                &audited_target,
+                "FAILED",
+                &error,
+            );
             error_response(NasError::Invalid(error))
         }
     }
@@ -5460,10 +5661,15 @@ pub async fn backup_run_id(
 
     match outcome {
         Ok(message) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_run", &id, "SUCCESS", &message);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_run",
+                &id,
+                "SUCCESS",
+                &message,
+            );
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -5471,10 +5677,15 @@ pub async fn backup_run_id(
             .into_response()
         }
         Err(error) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_run", &id, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_run",
+                &id,
+                "FAILED",
+                &error,
+            );
             error_response(NasError::Invalid(error))
         }
     }
@@ -5508,10 +5719,15 @@ pub async fn backup_stop_id(
 
     match outcome {
         Ok(message) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_stop", &id, "SUCCESS", &message);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_stop",
+                &id,
+                "SUCCESS",
+                &message,
+            );
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -5519,10 +5735,15 @@ pub async fn backup_stop_id(
             .into_response()
         }
         Err(error) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_stop", &id, "FAILED", &error);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_stop",
+                &id,
+                "FAILED",
+                &error,
+            );
             error_response(NasError::Invalid(error))
         }
     }
@@ -5644,17 +5865,27 @@ pub async fn backup_freeze_id(
 
     match outcome {
         Ok(msg) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_freeze", &id, "SUCCESS", &msg);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_freeze",
+                &id,
+                "SUCCESS",
+                &msg,
+            );
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_freeze", &id, "FAILED", &err);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_freeze",
+                &id,
+                "FAILED",
+                &err,
+            );
             error_response(NasError::Invalid(err))
         }
     }
@@ -5689,17 +5920,27 @@ pub async fn backup_freeze(
 
     match outcome {
         Ok(msg) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_freeze", &id, "SUCCESS", &msg);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_freeze",
+                &id,
+                "SUCCESS",
+                &msg,
+            );
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_freeze", &id, "FAILED", &err);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_freeze",
+                &id,
+                "FAILED",
+                &err,
+            );
             error_response(NasError::Invalid(err))
         }
     }
@@ -5735,17 +5976,27 @@ pub async fn backup_restore(
 
     match outcome {
         Ok(msg) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_restore", &id, "SUCCESS", &msg);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_restore",
+                &id,
+                "SUCCESS",
+                &msg,
+            );
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
-            let _ = state
-                .auth
-                .db()
-                .append_audit(&actor, "backup_restore", &id, "FAILED", &err);
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "backup_restore",
+                &id,
+                "FAILED",
+                &err,
+            );
             error_response(NasError::Invalid(err))
         }
     }
@@ -5780,7 +6031,9 @@ pub async fn backup_permanent_delete(
 
     match outcome {
         Ok(msg) => {
-            let _ = state.auth.db().append_audit(
+            audit_ip(
+                &state,
+                &headers,
                 &actor,
                 "backup_permanent_delete",
                 &id,
@@ -5790,7 +6043,9 @@ pub async fn backup_permanent_delete(
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
-            let _ = state.auth.db().append_audit(
+            audit_ip(
+                &state,
+                &headers,
                 &actor,
                 "backup_permanent_delete",
                 &id,
