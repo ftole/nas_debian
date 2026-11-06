@@ -1621,6 +1621,15 @@ code, kbd, pre, samp {
 }
 
 /* Tipografía y legibilidad de Auditoría y Registros */
+/* Corrección de distribución: en pantallas estrechas, las columnas de tamaño
+   fijado en línea (160px, 100px, ...) obligan a la tabla a sobrepasar el ancho
+   de la sección, dejando la tabla pegada a la izquierda y el espacio residual
+   a la derecha. Con `table-layout: fixed` + widths % en los th en pantallas
+   normales, y `min-width` razonable en móvil, se corrige visualmente. */
+.nas-table-logs {
+    table-layout: fixed;
+    width: 100%;
+}
 .table-logs-timestamp {
   font-family: var(--font-mono);
   font-size: 11.5px;
