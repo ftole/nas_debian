@@ -36,7 +36,11 @@ impl LogSource {
         }
     }
 
-    /// Interpreta el identificador enviado por el panel (`all` no es fuente).
+    /// Interpreta el identificador enviado por el panel.
+    ///
+    /// El valor `all` (o cualquier valor desconocido como `panel`) no mapean a
+    /// una única fuente: el endpoint lo interpreta como el conjunto por defecto
+    /// (admin + backup + samba_audit), que excluye el ruido interno del kernel.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "samba_audit" | "samba" => Some(Self::SambaAudit),
