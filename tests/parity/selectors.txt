@@ -47,6 +47,7 @@ app-samba-session-count
 backups-permanent-container
 backups-permanent-table-body
 backups-rotative-container
+backups-search-input
 backups-table-body
 badge-backups
 badge-domain
@@ -54,6 +55,7 @@ badge-shares
 badge-trash-count
 badge-updates
 badge-users
+bkp-auto-permanent
 bkp-cron
 bkp-dest-unit
 bkp-id
@@ -70,6 +72,8 @@ btn-confirm-delete
 btn-confirm-empty-trash
 btn-confirm-reboot
 btn-confirm-restore-all
+btn-confirm-run-backup
+btn-confirm-stop-backup
 btn-confirm-trim-ssd
 btn-confirm-unmount-storage
 btn-confirm-zip-download
@@ -122,6 +126,15 @@ chip-count-operator
 chip-count-samba
 chip-count-standard
 chk-group-logs
+confirm-run-backup-cron
+confirm-run-backup-dest
+confirm-run-backup-id
+confirm-run-backup-proto
+confirm-run-backup-source
+confirm-stop-backup-elapsed
+confirm-stop-backup-id
+confirm-stop-backup-progress
+confirm-stop-backup-speed
 dashboard-activity-feed
 del-mode-permanent
 del-mode-trash
@@ -137,6 +150,7 @@ discover-domain-name
 domain-discover-result
 domain-join-panel
 domain-status-card
+edit-bkp-auto-permanent
 edit-bkp-cron
 edit-bkp-dest-unit
 edit-bkp-id
@@ -216,6 +230,10 @@ kpi-storage-alert-text
 kpi-storage-badge
 kpi-storage-bar
 kpi-storage-val
+log-detail-code
+log-detail-copy
+log-detail-raw
+log-detail-summary
 logs-limit-select
 logs-search-input
 logs-table-body
