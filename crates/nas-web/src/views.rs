@@ -183,6 +183,7 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     token(&mut tokens, "workgroup", escape(context.workgroup));
     token(&mut tokens, "server_ip", escape(context.ip));
     token(&mut tokens, "csrf_token", csrf.to_string());
+    token(&mut tokens, "activeView", context.active.to_string());
     token(
         &mut tokens,
         "active_group_services_diagnostics",
