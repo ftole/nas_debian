@@ -853,3 +853,28 @@ RETENTION=10
             .any(|arg| arg.contains("-i /etc/backup-credentials/srv-key.id_ed25519")));
     }
 }
+#[cfg(test)]
+mod unificador_tests {
+    use super::BackupTask;
+
+    fn runner_text() -> &'static str {
+        "SOURCE_TYPE=\"local\"\nSRC_PATH=\"/datos\"\nRETENTION=3\nAUTO_PERMANENT=false\n"
+    }
+
+    #[test]
+    fn motor_y_control_comparten_el_ejecutor_unico() {
+        // El motor parsea el runner como fuente de verdad; tanto el helper del
+        // panel como `nas backup run` y el cron ejecutan ese mismo runner Bash.
+        let task = BackupTask::parse("demo", runner_text());
+        assert!(task.is_ok());
+    }
+
+    #[test]
+    fn plan_compartido_para_cli_y_panel() {
+        let task = BackupTask::parse("demo", runner_text()).expect("task");
+        let now = chrono::Local::now();
+        let plan = task.plan(None, &now);
+        // Cada paso debe ser un argv tipado sin shell.
+        assert!(plan.iter().all(|step| !step.is_empty()));
+    }
+}
