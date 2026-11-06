@@ -353,3 +353,51 @@ Antes de marcar un release como versión final de producción (`v1.0.0` o superi
 - [ ] No existen credenciales, contraseñas ni archivos `.env` versionados en Git.
 - [ ] El script [`updater.sh`](../src/core/updater.sh) preserva intactas las carpetas compartidas y las bases de datos de auditoría (`nas.sqlite`).
 - [ ] La firma del tag es verificada exitosamente en una máquina limpia con `git tag -v`.
+
+---
+
+## 7. Pipeline de firma Ed25519 (novedad, Opción B)
+
+### 7.1 Clave instalada en CI
+
+La clave privada Ed25519 se guarda como el **secreto** `NAS_RELEASE_KEY` en
+GitHub Actions. Solo necesita configurarse una vez:
+
+```bash
+# Genera la clave en un equipo confiable y límpiala del historial
+cargo run --quiet -p nas-cli -- update pubkey --key release.key > release.pub
+printf '%s\n' "NAS_RELEASE_KEY=$(grep -oE '^[a-f0-9]{64}$' release.key | head -1)"
+
+# Configura el secreto (requiere gh CLI conectado)
+gh secret set NAS_RELEASE_KEY < release.key && rm -f release.key
+```
+
+### 7.2 Flujo del release con el tag GPG
+
+El tag GPG firmado con tu clave personal sigue siendo el origen (no se rompe).
+`release.yml` además:
+
+1. Descarga `NAS_RELEASE_KEY` del secret CI.
+2. Firma `nas-X.Y.Z.json` con `nas update sign`.
+3. **Verificación cruzada** con `nas update verify --pubkey release.pub`.
+4. Si la firma falla o no está disponible → **el job aborta** (el release no se publica).
+
+El `dist/out/` resultante incluye:
+
+| Archivo | Contenido |
+|---|---|
+| `nas_debian-X.Y.Z.tar.gz` | Paquete binario binario comprimido |
+| `nas-X.Y.Z.json` | Manifiesto con `"signature": <hex firmado Ed25519>` |
+| `nas_debian-X.Y.Z.tar.gz.sha256` | Suma SHA-256 del paquete |
+| `release.pub` | Clave pública Ed25519 para verificación en cualquier servidor |
+
+### 7.3 Fulano update pipeline desde el panel
+
+El panel (`/dashboard#applications` → **Actualizar ahora**)
+
+* `GET /api/system/updates` consulta GitHub **real** (`fetch_latest_release`) y
+  calcula `has_updates` con SemVer.
+* `POST /api/system/update/run` ejecuta `nas update apply --yes` que hace:
+  `download_and_verify_release` → `build_plan` → rollback A/B con healthcheck.
+* La detección del release ya no usa `updater.sh` ni hace llamadas a GPG;
+  usa **Ed25519** sobre el artefacto.
