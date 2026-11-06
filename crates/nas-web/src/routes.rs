@@ -106,7 +106,7 @@ pub async fn login_submit(
         Ok(None) => {
             // El límite solo cuenta intentos fallidos: los accesos correctos
             // no desgastan la ventana de 60 s de la IP (NAT corporativo).
-            let _ =
+            let hits =
                 state
                     .auth
                     .db()
@@ -115,13 +115,7 @@ pub async fn login_submit(
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "web", "FAILED", "");
-            let blocked = matches!(
-                state
-                    .auth
-                    .db()
-                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5),
-                Ok(false)
-            );
+            let blocked = matches!(hits, Ok(false));
             let csrf = state.auth.issue_login_csrf(now);
             if blocked {
                 return (
@@ -206,7 +200,7 @@ pub async fn api_login(
             response
         }
         Ok(None) => {
-            let _ =
+            let hits =
                 state
                     .auth
                     .db()
@@ -215,13 +209,7 @@ pub async fn api_login(
                 .auth
                 .db()
                 .append_audit(&form.username, "login", "api", "FAILED", "");
-            let blocked = matches!(
-                state
-                    .auth
-                    .db()
-                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5),
-                Ok(false)
-            );
+            let blocked = matches!(hits, Ok(false));
             if blocked {
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
@@ -1257,9 +1245,14 @@ pub async fn diagnostics(State(state): State<AppState>, headers: HeaderMap) -> R
 
 /// Lista las tareas de respaldo instaladas con su último snapshot.
 pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
+    let user = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
+    let _ = &user;
 
     let dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
@@ -5546,6 +5539,9 @@ pub async fn backups_permanent(
 ) -> Response {
     if let Err(response) = require_auth(&state, &headers) {
         return *response;
+    }
+    if !state.role.has_backups() {
+        return forbidden("el rol ARCHIVOS no expone respaldos permanentes");
     }
     let task = query.task;
     match tokio::task::spawn_blocking(move || {
