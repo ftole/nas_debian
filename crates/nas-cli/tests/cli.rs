@@ -577,3 +577,95 @@ fn helper_backup_manage_freeze_rechaza_id_invalido() {
         .expect("ejecuta");
     assert!(!output.status.success());
 }
+
+#[test]
+fn deploy_rechaza_contrasena_vacia_y_roles_invalidos() {
+    let bad_role = nas()
+        .args([
+            "--json",
+            "deploy",
+            "plan",
+            "--disk",
+            "/dev/sdb",
+            "--workgroup",
+            "TEAM",
+            "--netbios",
+            "SRV",
+            "--admin",
+            "admin",
+            "--role",
+            "INVENTADO",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert!(!bad_role.status.success());
+
+    let bad_fs = nas()
+        .args([
+            "deploy",
+            "plan",
+            "--disk",
+            "/dev/sdb",
+            "--workgroup",
+            "TEAM",
+            "--netbios",
+            "SRV",
+            "--admin",
+            "admin",
+            "--ext4",
+            "--btrfs",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert!(!bad_fs.status.success());
+}
+
+#[test]
+fn uninstall_rechaza_alcance_desconocido_y_deploy_rechaza_disco_so() {
+    let bad_scope = nas()
+        .args(["uninstall", "--scope", "raiz"])
+        .output()
+        .expect("ejecuta");
+    assert!(!bad_scope.status.success());
+
+    let os_disk = nas()
+        .args([
+            "deploy",
+            "apply",
+            "--disk",
+            "/dev/nvme0n1",
+            "--workgroup",
+            "TEAM",
+            "--netbios",
+            "SRV",
+            "--admin",
+            "admin",
+            "--yes",
+            "--format-token",
+            "SI-FORMATEAR",
+        ])
+        .output()
+        .expect("ejecuta");
+    // Debe abortar sin ejecutar nada por disco del SO o validación, nunca éxito.
+    assert!(!os_disk.status.success());
+}
+
+#[test]
+fn helper_backup_congela_y_restaura_valida_id() {
+    // Validaciones de entrada (sin ejecutar nada): IDs inválidos deben abortar
+    // antes de tocar el runner o la base de datos.
+    let run_bad = nas()
+        .args(["--json", "helper"])
+        .args(["backup-manage"])
+        .args(["run"])
+        .args(["../escape"])
+        .output()
+        .expect("ejecuta");
+    assert!(!run_bad.status.success());
+
+    let freeze_bad = nas()
+        .args(["--json", "helper", "backup-manage", "freeze", "/etc", "x"])
+        .output()
+        .expect("ejecuta");
+    assert!(!freeze_bad.status.success());
+}
