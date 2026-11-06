@@ -1343,16 +1343,29 @@ pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Respo
     let dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
         let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
-        let mut disk_cache = std::collections::HashMap::new();
-        tasks
+        // Cada tarea se proyecta en un hilo propio: los `du -sk` con snapshot
+        // deduplicado tardan cientos de milisegundos y en serie suman segundos.
+        let handles: Vec<_> = tasks
             .into_iter()
             .map(|task| {
-                let last = last_snapshot(&task);
-                let mut row = crate::legacy::backup_row_with_metrics(&task, &mut disk_cache);
-                row["task"] = serde_json::json!(task);
-                row["last_snapshot"] = serde_json::json!(last);
-                row
+                let handle = std::thread::Builder::new()
+                    .name(format!("backup-row-{}", task.id))
+                    .spawn(move || {
+                        let mut disk_cache = std::collections::HashMap::new();
+                        let last = last_snapshot(&task);
+                        let mut row =
+                            crate::legacy::backup_row_with_metrics(&task, &mut disk_cache);
+                        row["task"] = serde_json::json!(task);
+                        row["last_snapshot"] = serde_json::json!(last);
+                        row
+                    });
+                handle
             })
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|joined| joined.join().unwrap_or(serde_json::json!({})))
             .collect::<Vec<_>>()
     })
     .await
@@ -2581,7 +2594,7 @@ pub async fn logs(
                 .collect()
         });
         let list = selected.clone();
-        let wants = move |candidate: nas_engine::LogSource| list.iter().any(|w| *w == candidate);
+        let wants = move |candidate: nas_engine::LogSource| list.contains(&candidate);
         let window = limit.saturating_mul(4);
         let window_arg = window.to_string();
         let mut entries: Vec<nas_engine::LogEntry> = Vec::new();
