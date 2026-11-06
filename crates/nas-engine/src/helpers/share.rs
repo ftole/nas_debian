@@ -51,16 +51,21 @@ pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasR
     std::fs::create_dir_all(dir_path)
         .map_err(|e| NasError::Denied(format!("no se pudo crear el directorio {dir}: {e}")))?;
 
-    let _ = runner.run(
-        &CommandSpec::new("chown")
-            .args(["-R", "root:grp_samba", &dir])
-            .timeout(Duration::from_secs(30)),
-    );
-    let _ = runner.run(
-        &CommandSpec::new("chmod")
-            .args(["2770", &dir])
-            .timeout(Duration::from_secs(30)),
-    );
+    runner
+        .run(
+            &CommandSpec::new("chown")
+                .args(["-R", "root:grp_samba", &dir])
+                .timeout(Duration::from_secs(30)),
+        )?
+        .ensure_success()?;
+
+    runner
+        .run(
+            &CommandSpec::new("chmod")
+                .args(["2770", &dir])
+                .timeout(Duration::from_secs(30)),
+        )?
+        .ensure_success()?;
 
     Ok(dir)
 }
@@ -103,6 +108,8 @@ pub fn apply_share_acl(
     let level = level.trim().to_ascii_lowercase();
     match level.as_str() {
         "none" => {
+            // La revocación es best-effort: si el principal no constaba en la ACL el
+            // comando falla con "no such entry" y no debe convertirlo en fallo globa.
             let _ = runner.run(
                 &CommandSpec::new("setfacl")
                     .args(["-x", &entry, path])
@@ -178,7 +185,7 @@ pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
             .timeout(Duration::from_secs(120)),
     );
 
-    // 2. Eliminar directorios vacíos remanentes en .recycle
+    // 2. Eliminar directorios vacíos remanentes en .recycle (best-effort)
     let _ = runner.run(
         &CommandSpec::new("find")
             .args([
