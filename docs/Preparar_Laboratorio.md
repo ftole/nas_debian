@@ -139,14 +139,14 @@ source "$HOME/.cargo/env"
 rustc --version && cargo --version
 ```
 
-### Paso 1.3: Clonar Repositorio Base y Habilitar Modo Colaborativo Git
-Descarga el repositorio oficial en `/opt/dev/base_repo` y activa la directiva `core.sharedRepository = group` para que todos los commits y ramas creadas por cualquier usuario o agente hereden los permisos del grupo `devs`.
+### Paso 1.3: Clonar Repositorio Principal y Habilitar Modo Colaborativo Git
+Descarga el repositorio oficial en `/opt/dev/nas_debian` y activa la directiva `core.sharedRepository = group` para que todos los commits, ramas y objetos de Git creados por cualquier usuario o agente hereden los permisos del grupo `devs`.
 
 **Comandos ejecutados:**
 ```bash
 cd /opt/dev
-git clone https://github.com/ftole/nas_debian.git base_repo
-cd /opt/dev/base_repo
+git clone https://github.com/ftole/nas_debian.git nas_debian
+cd /opt/dev/nas_debian
 git config core.sharedRepository group
-ls -la /opt/dev/base_repo
+ls -la /opt/dev/nas_debian
 ```
