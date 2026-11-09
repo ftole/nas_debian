@@ -150,3 +150,32 @@ cd /opt/dev/nas_debian
 git config core.sharedRepository group
 ls -la /opt/dev/nas_debian
 ```
+
+### Paso 1.4: Validación Inicial de Compilación en Debian
+Comprueba que el compilador, las cabeceras del kernel y las bibliotecas C/Rust (`libssl-dev`, `libsqlite3-dev`) funcionen correctamente compilando el workspace con todas las banderas de verificación.
+
+**Comandos ejecutados:**
+```bash
+cd /opt/dev/nas_debian
+cargo check --workspace --all-targets
+```
+
+### Paso 1.5: Creación de los Árboles de Trabajo Aislados (Git Worktrees)
+Crea las carpetas de trabajo físicas independientes en `/opt/dev/workspaces/` asociadas a sus respectivas ramas temáticas. Esto permite que múltiples agentes (OpenCode CLI, Antigravity CLI) o desarrolladores trabajen en paralelo sin colisiones ni bloqueos de Git.
+
+**Comandos ejecutados:**
+```bash
+cd /opt/dev/nas_debian
+
+# 1. Espacio para Almacenamiento (Gestión de discos y pools)
+git worktree add -b feature/storage /opt/dev/workspaces/storage main
+
+# 2. Espacio para Respaldos (Rsync, Btrfs y tareas)
+git worktree add -b feature/backups /opt/dev/workspaces/backups main
+
+# 3. Espacio para Frontend / UI (Modularización de vistas y JS)
+git worktree add -b feature/frontend /opt/dev/workspaces/frontend main
+
+# 4. Listar worktrees activos
+git worktree list
+```
