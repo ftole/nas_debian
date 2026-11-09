@@ -1,0 +1,140 @@
+# Guía de Puesta a Punto: Preparar Laboratorio de Desarrollo Multi-Agente (Debian 13)
+
+> [!NOTE]
+> Este documento registra en tiempo real los pasos exactos y verificados para dejar el servidor Debian 13 limpio "de fábrica" y posteriormente configurarlo para desarrollo colaborativo multi-agente (OpenCode CLI, Antigravity CLI) con *Git Worktrees*.
+
+---
+
+## 1. Información del Entorno
+* **Sistema Operativo:** Debian 13 (Trixie) GNU/Linux x86_64.
+* **Usuario principal:** `frank`.
+* **Host:** `nasdeb`.
+* **Estado inicial:** Servidor con pruebas previas que se restablece a estado base limpio.
+
+---
+
+## FASE 0: Restauración del Sistema a Estado Base ("De Fábrica")
+
+### Paso 0.1: Retirar servicios, binarios y configuraciones del NAS anterior
+Detiene los servicios en segundo plano, retira las unidades systemd, reglas de sudoers, proxies de Nginx, binarios en `/usr/local` y el directorio `/etc/nas`.
+
+**Comandos ejecutados:**
+```bash
+sudo systemctl disable --now nas-web.service 2>/dev/null || true
+sudo rm -f /etc/systemd/system/nas-web.service /etc/sudoers.d/nas-web-rust /etc/nas-web.env
+sudo rm -f /etc/nginx/sites-enabled/nas-web /etc/nginx/sites-available/nas-web
+sudo rm -f /usr/local/bin/nas* /usr/local/sbin/nas-*
+sudo rm -rf /etc/nas /var/lib/nas /var/log/nas /etc/backup-credentials /opt/nas_debian
+sudo systemctl daemon-reload
+```
+
+### Paso 0.2: Restauración de Kernel (sysctl), Udev, Auditoría y Almacenamiento
+Restaura los parámetros de red y memoria del kernel a los valores por defecto de Debian, retira las reglas de precarga udev, limpia las reglas de auditoría y desmonta `/srv/nas` limpiando `/etc/fstab`.
+
+**Comandos ejecutados:**
+```bash
+# 1. Desmontar almacenamiento anterior y limpiar /etc/fstab
+sudo umount -R /srv/nas 2>/dev/null || true
+sudo rm -rf /srv/nas
+sudo sed -i '/\/srv\/nas/d' /etc/fstab
+
+# 2. Retirar reglas de kernel, udev, auditoría y cron
+sudo rm -f /etc/sysctl.d/99-nas-tuning.conf
+sudo rm -f /etc/udev/rules.d/60-nas-readahead.rules
+sudo rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
+sudo rm -f /etc/audit/rules.d/nas.rules
+sudo rm -f /etc/logrotate.d/nas-backups
+sudo rm -f /etc/cron.d/nas-btrfs-scrub
+
+# 3. Recargar configuraciones de fábrica en el sistema
+sudo sysctl --system
+sudo udevadm control --reload-rules
+sudo augenrules --load 2>/dev/null || true
+sudo systemctl restart auditd 2>/dev/null || true
+```
+
+### Paso 0.3: Restauración de Samba a Configuración de Fábrica y Limpieza de Grupos
+Restaura `smb.conf` a la plantilla estándar limpia de Debian, reinicia demonios Samba, elimina credenciales de prueba (`passdb.tdb`) y borra los grupos residuales del NAS (`grp_samba`, `grp_web`, `grp_superadmin`).
+
+**Comandos ejecutados:**
+```bash
+# 1. Restaurar smb.conf limpio
+cat << 'EOF' | sudo tee /etc/samba/smb.conf
+[global]
+   workgroup = WORKGROUP
+   server string = %h server
+   server role = standalone server
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   panic action = /usr/share/samba/panic-action %d
+   obey pam restrictions = yes
+   unix password sync = yes
+   pam password change = yes
+   map to guest = bad user
+EOF
+
+# 2. Reiniciar demonios Samba y limpiar bases de contraseñas de prueba
+sudo rm -f /var/lib/samba/private/passdb.tdb /var/lib/samba/passdb.tdb 2>/dev/null || true
+sudo systemctl restart smbd nmbd 2>/dev/null || true
+
+# 3. Eliminar grupos residuales del NAS anterior
+sudo groupdel grp_samba 2>/dev/null || true
+sudo groupdel grp_web 2>/dev/null || true
+sudo groupdel grp_superadmin 2>/dev/null || true
+```
+
+---
+
+## FASE 1: Configuración del Directorio Colaborativo y Permisos Multi-Usuario
+
+### Paso 1.1: Creación del Grupo `devs`, Usuarios Desarrolladores (`beto`, `chris`) y Directorio `/opt/dev`
+Crea el grupo común `devs`, da de alta a los desarrolladores `beto` y `chris` (con home `/home/<usuario>`, shell `/bin/bash` y privilegios `sudo`), vincula a `frank`, `beto` y `chris` al grupo `devs`, y crea la estructura en `/opt/dev/workspaces` con permiso especial `setgid` (`2775`). Esto garantiza que cualquier archivo o commit creado por cualquier usuario o agente herede automáticamente los permisos de lectura y escritura para todo el equipo.
+
+**Comandos ejecutados:**
+```bash
+# 1. Crear grupo devs y asociar al usuario frank
+sudo groupadd -f devs
+sudo usermod -aG devs frank
+
+# 2. Crear los usuarios desarrolladores beto y chris (con sudo y grupo devs)
+id -u beto >/dev/null 2>&1 || sudo useradd -m -s /bin/bash -g devs -G sudo beto
+id -u chris >/dev/null 2>&1 || sudo useradd -m -s /bin/bash -g devs -G sudo chris
+
+# 3. Asignar contraseña temporal a beto y chris (pueden cambiarla con passwd)
+echo "beto:<contraseña_asignada>" | sudo chpasswd
+echo "chris:<contraseña_asignada>" | sudo chpasswd
+
+# 4. Asegurar pertenencia al grupo común devs y sudo
+sudo usermod -aG sudo,devs frank
+sudo usermod -aG sudo,devs beto
+sudo usermod -aG sudo,devs chris
+
+# 5. Crear directorios para el repositorio base y los worktrees
+sudo mkdir -p /opt/dev/workspaces
+
+# 6. Asignar propiedad a frank:devs y activar el bit setgid (2775)
+sudo chown -R frank:devs /opt/dev
+sudo chmod -R 2775 /opt/dev
+
+# 7. Verificación
+getent group devs
+ls -ld /opt/dev
+```
+
+### Paso 1.2: Instalación de Paquetes del Sistema y Toolchain de Rust
+Instala las dependencias nativas de Debian 13 requeridas para compilar el workspace (compilador C, bibliotecas de desarrollo SSL, SQLite, herramientas de almacenamiento y servicios auxiliares) e instala Rust vía `rustup`.
+
+**Comandos ejecutados:**
+```bash
+# 1. Actualizar repositorios e instalar paquetes esenciales
+sudo apt update && sudo apt install -y \
+  git curl build-essential pkg-config libssl-dev libsqlite3-dev \
+  samba nginx ufw wsdd2 tmux rsync btrfs-progs lvm2 parted acl
+
+# 2. Instalar toolchain de Rust oficial (rustup) para frank
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# 3. Comprobación de versión
+rustc --version && cargo --version
+```
