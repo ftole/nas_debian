@@ -44,11 +44,15 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | Archivo / Ruta | Tipo | Descripción |
 | :--- | :--- | :--- |
 | `install.sh` | Script Bash CLI | **Instalador Remoto Oficial** que instala la toolchain de Rust, clona/actualiza el repositorio, compila el workspace y ejecuta `packaging/install.sh` (servicio, nginx, sudoers y helpers). |
-| `crates/nas-cli` | Rust CLI | **CLI Unificado `nas`** (almacenamiento, LVM/Btrfs, Samba, respaldos, papelera, usuarios, dominio AD, auditoría y servicios) con salida ANSI y `--json`. |
-| `crates/nas-web` | Rust (axum) | **Panel web**: plantillas portadas 1:1 de `layout.php`, assets embebidos byte a byte, API completa y helpers privilegiados acotados. |
-| `crates/nas-tui` | Rust (ratatui) | **Asistente visual de terminal** con dashboard, servicios, respaldos y diagnóstico. |
-| `crates/nas-engine` | Rust Lib | Lógica de sistema: almacenamiento, Samba, usuarios, respaldos, dominio, actualizaciones firmadas y diagnósticos. |
+| `crates/nas-core` | Rust Lib | Tipos base, contratos (`ApiResponse`), roles (`ServerRole`), errores y cotización de argumentos shell. |
 | `crates/nas-exec` | Rust Lib | Ejecutor de comandos con argv tipado, timeouts, redacción de secretos y modo sudo sin contraseña. |
+| `crates/nas-audit` | Rust Lib | Bitácora de auditoría append-only con encadenamiento criptográfico de hashes SHA-256. |
+| `crates/nas-inventory` | Rust Lib | Modelado y validación de inventarios YAML multi-servidor (`inventory.yaml`). |
+| `crates/nas-ssh` | Rust Lib | Transporte OpenSSH para ejecución remota con claves dedicadas y verificación de huellas. |
+| `crates/nas-engine` | Rust Lib | Lógica de sistema: almacenamiento, Samba, usuarios, respaldos, dominio, actualizaciones firmadas y diagnósticos. |
+| `crates/nas-cli` | Rust CLI | **CLI Unificado `nas`** modularizado en subcomandos (`src/commands/`) con salida ANSI y `--json`. |
+| `crates/nas-web` | Rust (axum) | **Panel web**: modularizado por dominios (`src/routes/`), assets embebidos byte a byte, API completa y helpers acotados. |
+| `crates/nas-tui` | Rust (ratatui) | **Asistente visual de terminal** con dashboard, servicios, respaldos y diagnóstico. |
 | `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** (ola B pendiente de portar): detección de entorno, protección de partición raíz, roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), formateo, Samba, Nginx y parches de Debian 13. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
@@ -56,9 +60,9 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas GPG, problemas/soluciones y diagramas SVG. |
+| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas, problemas/soluciones y diagramas SVG. |
 | `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
-| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Flake8 y PHP (con `php-sqlite3 php-zip`). |
+| `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Rust (fmt, clippy, test, release, packaging/verify, paridad) y sintaxis JS. |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto y Resumen Ejecutivo** del servidor NAS y Central de Respaldos. |
 | `AGENTS.md` | Markdown | **Este documento maestro de contexto para agentes de IA**. |
