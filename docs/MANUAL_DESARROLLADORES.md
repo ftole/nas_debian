@@ -1,173 +1,156 @@
-# Manual del Desarrollador: Guía Completa de Ramas, Git y Despliegue
+# Manual de Trabajo: Programar, Testear y Desplegar
 
-> [!IMPORTANT]
-> Este manual explica en lenguaje claro y humano cómo trabajar en equipo en el servidor `nasdeb`. Explica cómo crear ramas, cómo probar con tus agentes de IA, cómo subir tus cambios a GitHub, cómo fusionarlos en `main` y cómo desplegarlos en vivo en el servidor.
-
----
-
-## 1. La Regla Básica: ¿Por qué cada quien tiene su carpeta de trabajo?
-
-En Git, **una carpeta física solo puede mostrar UNA rama a la vez**.
-Si Frank cambia de rama a `feature/almacenamiento` y Beto cambia a `feature/respaldos`, **no pueden estar dentro de la misma carpeta al mismo tiempo**, porque uno le borraría de la pantalla los archivos al otro.
-
-Por eso, cada desarrollador trabaja en su propio espacio en disco:
-* **Frank:** Entra a su carpeta `/opt/dev/workspaces/storage` (o `~/nas_debian`)
-* **Beto:** Entra a su carpeta `/opt/dev/workspaces/backups` (o `~/nas_debian`)
-* **Chris:** Entra a su carpeta `/opt/dev/workspaces/frontend` (o `~/nas_debian`)
-
-Así, cada quien puede tener su propia rama abierta al mismo tiempo sin estorbarse.
+> [!NOTE]
+> Este manual está escrito para cualquier desarrollador (`dev1`, `dev2`, etc.), sin importar su nivel de experiencia en Git o Linux. Sigue el flujo natural de trabajo en 3 etapas: **1. Programar -> 2. Testear -> 3. Desplegar**.
 
 ---
 
-## 2. El Flujo de Trabajo Completo (De principio a fin)
+## Dónde está el proyecto en el servidor
 
-Todo desarrollador sigue este ciclo de 5 etapas para cada función o corrección que programe:
+Todos los desarrolladores trabajan sobre el repositorio ubicado en la ruta real del servidor:
+
+```bash
+/opt/dev/nas_debian
+```
+
+---
+
+# El Flujo de Trabajo en 3 Pasos
 
 ```text
-  1. CREAR RAMA      2. PROGRAMAR CON IA      3. COMMIT & PUSH      4. PASAR A MAIN      5. DESPLEGAR EN VIVO
- [git checkout -b] -> [opencode / agy / kimi] -> [git push origin] -> [Pull Request / merge] -> [sudo ./packaging/install.sh]
+┌────────────────────────┐      ┌────────────────────────┐      ┌────────────────────────┐
+│      1. PROGRAMAR      │ ──>  │      2. TESTEAR        │ ──>  │      3. DESPLEGAR      │
+│  Crear rama y codificar│      │  Compilar y probar     │      │  Guardar, unir y lanzar│
+└────────────────────────┘      └────────────────────────┘      └────────────────────────┘
 ```
 
 ---
 
-### ETAPA 1: Empezar una tarea (Crear tu rama)
+## PASO 1: PROGRAMAR (Escribir el código)
 
-Antes de escribir una sola línea de código, te aseguras de tener la última versión de `main` y creas una rama con un nombre representativo:
+Cualquier desarrollador (`dev1`) entra por SSH a su cuenta y sigue estos pasos:
 
+### 1.1 Entrar a la carpeta del proyecto
 ```bash
-# 1. Entrar a tu carpeta de trabajo
-cd /opt/dev/workspaces/<tu_carpeta>
+cd /opt/dev/nas_debian
+```
 
-# 2. Ir a main y descargar lo más reciente de GitHub
+### 1.2 Descargar la versión más reciente
+Antes de hacer nada, asegúrate de tener lo último que hayan hecho los demás:
+```bash
 git checkout main
 git pull origin main
-
-# 3. Crear tu rama nueva y cambiarte a ella
-git checkout -b feature/mi-nueva-funcion
 ```
 
-> **¿Qué hace `git checkout -b`?**  
-> Crea una copia aislada de `main` llamada `feature/mi-nueva-funcion`. Todo lo que hagas ahí dentro es privado para ti hasta que decidas subirlo.
+### 1.3 Crear tu propia rama de trabajo
+Para no modificar la rama principal directamente, creas tu propia rama con tu nombre y tarea:
+```bash
+git checkout -b dev1-mi-tarea
+```
+*(A partir de aquí, estás trabajando en tu rama `dev1-mi-tarea`. Nada de lo que hagas afecta a los demás).*
+
+### 1.4 Escribir código con tu Agente de IA
+Abres tu herramienta de IA en la terminal:
+```bash
+opencode
+```
+*(O puedes usar `agy` o `kimi`).*
+
+Le pides a la IA lo que necesitas:
+> *"Modifica la función de almacenamiento para listar los discos disponibles. Trabaja solo en los archivos de almacenamiento."*
 
 ---
 
-### ETAPA 2: Programar con tu Agente de IA y Probar
+## PASO 2: TESTEAR (Probar que todo funciona)
 
-Lanzas tu agente preferido en la terminal:
+**Regla de oro:** Ningún código se sube ni se despliega si no pasa las pruebas.
 
+Sal de la herramienta de IA (con `/exit` o `Ctrl+C`) y ejecuta las pruebas del compilador:
+
+### 2.1 Comprobar que no hay errores de sintaxis
 ```bash
-# Lanza tu agente de IA
-opencode    # O escribe: agy (Frank), o: kimi (Beto/Chris)
-```
-
-Le pides la tarea a tu agente:
-> *"Modifica el módulo de discos para que liste la salud SMART y agregue el botón de expansión. Al terminar verifica que compile."*
-
-#### La Prueba Obligatoria (Antes de guardar nada):
-Una vez que el agente termina, **tú o el agente deben verificar que el código compila y no rompió nada**:
-
-```bash
-# 1. Comprobar que no hay errores de sintaxis
 cargo check --workspace --all-targets
+```
+*Si la salida dice `Finished dev profile`, el código está bien escrito y compila.*
 
-# 2. Correr las pruebas automatizadas del proyecto
+### 2.2 Ejecutar las pruebas automáticas
+```bash
 cargo test
 ```
+*Si el resultado final dice `test result: ok`, todas las pruebas pasaron exitosamente.*
 
-Si el resultado termina en `test result: ok`, el código está sano.
+Si alguna prueba falla, vuelve a abrir tu agente de IA y dile:
+> *"El comando cargo test falló con este error: [pegar error]. Corrígelo."*
 
 ---
 
-### ETAPA 3: Guardar tus cambios y subirlos a GitHub
+## PASO 3: DESPLEGAR (Guardar, subir a GitHub y activar en el servidor)
 
-Ahora guardas tus cambios en Git y los envías a GitHub:
+Una vez que el código pasó las pruebas de la Etapa 2, es momento de publicarlo y ponerlo en vivo en el servidor.
 
+### 3.1 Guardar tus cambios en tu rama
 ```bash
-# 1. Revisar qué archivos modificaste
+# 1. Ver qué archivo modificaste
 git status
 
-# 2. Agregar el archivo modificado (un commit por archivo, regla del proyecto)
-git add ruta/al/archivo_modificado.rs
+# 2. Agregar el archivo
+git add ruta/al/archivo.rs
 
-# 3. Guardar el cambio con mensaje descriptivo en español
-git commit -m "feat: agregar deteccion visual de discos"
+# 3. Guardar el cambio con una descripción de lo que hiciste
+git commit -m "feat: agregar listado de discos"
 
 # 4. Subir tu rama a GitHub
-git push origin feature/mi-nueva-funcion
+git push origin dev1-mi-tarea
 ```
 
-A partir de este momento, tu trabajo está respaldado en la nube en GitHub.
-
----
-
-### ETAPA 4: Pasar tus cambios a `main` (Integración)
-
-Una vez que tu función está 100% probada, es momento de unirla a la rama principal (`main`). Hay dos formas:
-
-#### Opción A (La forma recomendada: Vía Pull Request en GitHub):
-1. Entras a GitHub en tu navegador: `https://github.com/ftole/nas_debian`.
-2. Verás un banner amarillo arriba que dice: *`feature/mi-nueva-funcion had recent pushes`*.
-3. Haces clic en el botón verde **`Compare & pull request`**.
-4. Escribes un resumen de lo que hiciste y das clic en **`Create pull request`**.
-5. Cuando el equipo o Frank lo aprueba, haces clic en **`Merge pull request`** y luego **`Confirm merge`**.  
-   ¡Listo! Tu código ya forma parte oficial de `main`.
-
-#### Opción B (Directo por consola en Debian):
-Si prefieres unirlo directamente desde la terminal:
+### 3.2 Pasar tus cambios a la rama principal (`main`)
+Ahora unes tu trabajo a `main` para que forme parte oficial del sistema:
 ```bash
-# 1. Cambiarte a main
+# 1. Cambiar a main y descargar cambios
 git checkout main
-
-# 2. Descargar lo último por si alguien más subió algo
 git pull origin main
 
-# 3. Unir tu rama a main
-git merge feature/mi-nueva-funcion
+# 2. Unir tu rama
+git merge dev1-mi-tarea
 
-# 4. Subir el main actualizado a GitHub
+# 3. Subir el main actualizado a GitHub
 git push origin main
 
-# 5. Borrar tu rama local porque ya quedó integrada
-git branch -d feature/mi-nueva-funcion
+# 4. (Opcional) Borrar tu rama porque ya se unió a main
+git branch -d dev1-mi-tarea
 ```
 
----
-
-### ETAPA 5: Desplegar en vivo en el servidor NAS (Producción)
-
-Ya que el código nuevo está en `main`, el último paso es **hacer que el servidor NAS empiece a ejecutar la nueva versión**:
-
+### 3.3 Desplegar en vivo en el servidor NAS
+Este es el paso final que **instala el código nuevo en el servidor real**:
 ```bash
-# 1. Ir a la carpeta principal del proyecto
-cd /opt/dev/nas_debian
-
-# 2. Asegurarte de tener el main con todos los cambios integrados
-git checkout main
-git pull origin main
-
-# 3. Ejecutar el instalador y desplegador oficial del servidor
 sudo ./packaging/install.sh
 ```
 
-### ¿Qué hace `sudo ./packaging/install.sh`?
-1. Compila todo el código nuevo en modo de máxima velocidad (`cargo build --release`).
-2. Actualiza los binarios en `/usr/local/bin` (`nas-web`, `nas`, etc.).
-3. Actualiza las reglas de Nginx y reinicia el servicio web en 2 segundos.
-4. Abre `https://10.10.1.222` en tu navegador: **tu nueva función ya está viva y funcionando para todos los usuarios de la red.**
+### ¿Qué hace este comando de despliegue?
+1. Compila todo el código nuevo en modo optimizado de producción.
+2. Actualiza los ejecutables en el sistema (`/usr/local/bin/nas-web`, etc.).
+3. Reinicia el servicio web en 2 segundos.
+4. **Listo:** Al abrir `https://10.10.1.222` en el navegador, tu cambio ya está funcionando en vivo.
 
 ---
 
-## 3. Resumen Rápido de Comandos (Para tener siempre a mano)
+## Chuleta de Comandos Rápidos (Para el día a día)
 
-| Qué quiero hacer | Comando en la terminal |
-| :--- | :--- |
-| **Ver en qué rama estoy** | `git branch` |
-| **Actualizar main antes de empezar** | `git checkout main && git pull origin main` |
-| **Crear mi rama de trabajo** | `git checkout -b feature/nombre-de-mi-tarea` |
-| **Comprobar si mi código compila** | `cargo check --workspace --all-targets` |
-| **Correr las pruebas** | `cargo test` |
-| **Ver qué archivos cambié** | `git status` |
-| **Guardar un cambio** | `git add <archivo> && git commit -m "feat: <mensaje>"` |
-| **Subir mi rama a GitHub** | `git push origin feature/nombre-de-mi-tarea` |
-| **Unir mi rama a main (consola)** | `git checkout main && git pull && git merge feature/<mi-rama> && git push` |
-| **Desplegar en el NAS en vivo** | `sudo ./packaging/install.sh` |
+```bash
+# 1. PROGRAMAR
+cd /opt/dev/nas_debian
+git checkout main && git pull origin main
+git checkout -b dev1-tarea
+opencode
+
+# 2. TESTEAR
+cargo check --workspace --all-targets
+cargo test
+
+# 3. DESPLEGAR
+git add <archivo>
+git commit -m "feat: descripcion"
+git push origin dev1-tarea
+git checkout main && git pull && git merge dev1-tarea && git push origin main
+sudo ./packaging/install.sh
+```
