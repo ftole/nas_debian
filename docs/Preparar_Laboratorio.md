@@ -164,16 +164,20 @@ cd /opt/dev/nas_debian
 cargo check --workspace --all-targets
 ```
 
-### Paso 1.4.1: Despliegue Local Rápido de Verificación
-Ejecuta la compilación e instalación del servicio `nas-web` en `/usr/local/bin` y reinicia el servicio. Debe ejecutarse **sin `sudo` al inicio** para compilar con el usuario normal; el script solicita privilegios automáticamente solo al final para copiar los binarios a `/usr/local/bin` y reiniciar el servicio systemd.
+### Paso 1.4.1: Aprovisionamiento y Puesta en Marcha del Panel Web
+Tras una limpieza de fábrica o en una instalación nueva, el servicio `nas-web.service` de systemd y la configuración de Nginx aún no existen en el sistema. Para poner en marcha la web por primera vez se realiza el flujo en dos partes:
 
-**Comandos ejecutados:**
-```bash
-cd /opt/dev/nas_debian
-./scripts/deploy_local.sh
-# O para compilar e instalar todos los binarios:
-./scripts/deploy_local.sh --all
-```
+1. **Compilar el workspace completo (sin `sudo`):**
+   ```bash
+   cd /opt/dev/nas_debian
+   ./scripts/deploy_local.sh --all
+   ```
+2. **Aprovisionar el servicio systemd, configurar Nginx y arrancar:**
+   ```bash
+   sudo bash packaging/install.sh
+   ```
+
+> **Nota:** En el trabajo diario de desarrollo, una vez que el servicio ya fue aprovisionado con `packaging/install.sh`, solo se necesita ejecutar `./scripts/deploy_local.sh` para actualizar los cambios y reiniciar el demonio.
 
 ### Paso 1.5: Creación de los Árboles de Trabajo Aislados (Git Worktrees)
 Crea las carpetas de trabajo físicas independientes en `/opt/dev/workspaces/` asociadas a sus respectivas ramas temáticas. Esto permite que múltiples agentes (OpenCode CLI, Antigravity CLI) o desarrolladores trabajen en paralelo sin colisiones ni bloqueos de Git.
