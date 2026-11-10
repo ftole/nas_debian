@@ -21,14 +21,16 @@ setup() {
 }
 
 @test "obtener_workgroup_defecto debe retornar WORKGROUP si no hay smb.conf" {
-    export SMB_CONF_PATH="$BATS_TEST_TMPDIR/no_existe.conf"
+    local tmp_dir="${BATS_TEST_TMPDIR:-${BATS_TMPDIR:-/tmp}}"
+    export SMB_CONF_PATH="$tmp_dir/no_existe.conf"
     run obtener_workgroup_defecto
     [ "$status" -eq 0 ]
     [ "$output" = "WORKGROUP" ]
 }
 
 @test "obtener_workgroup_defecto lee correctamente el workgroup desde smb.conf" {
-    export SMB_CONF_PATH="$BATS_TEST_TMPDIR/smb.conf"
+    local tmp_dir="${BATS_TEST_TMPDIR:-${BATS_TMPDIR:-/tmp}}"
+    export SMB_CONF_PATH="$tmp_dir/smb.conf"
     echo "   workgroup = EMPRESA_TEST" > "$SMB_CONF_PATH"
     run obtener_workgroup_defecto
     [ "$status" -eq 0 ]
@@ -66,6 +68,9 @@ setup() {
         skip "la raiz no es un dispositivo de bloque en este entorno"
     fi
     lsblk "$root_dev" >/dev/null 2>&1 || skip "lsblk no reconoce el dispositivo de la raiz en este runner"
+    if ! lsblk -s -n -o NAME,TYPE "$root_dev" 2>/dev/null | grep -q "disk"; then
+        skip "el dispositivo raiz no posee ancestros de tipo disk en este entorno"
+    fi
     run resolver_discos_raiz "$root_dev"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
