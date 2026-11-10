@@ -179,3 +179,38 @@ git worktree add -b feature/frontend /opt/dev/workspaces/frontend main
 # 4. Listar worktrees activos
 git worktree list
 ```
+
+---
+
+## FASE 2: Migración de Clave GPG para Firma de Commits y Tags
+
+### Paso 2.1: Exportación desde Windows e Importación en Debian
+Transfiere la clave de firma digital GPG (`B10B8F775202C0EA` de Francisco Toledo) desde el entorno de Windows hacia Debian para mantener la firma verificada en GitHub.
+
+**1. En Windows (Git Bash):**
+```bash
+gpg --armor --export B10B8F775202C0EA > /c/Users/Francisco/clave_publica.asc
+gpg --armor --export-secret-keys B10B8F775202C0EA > /c/Users/Francisco/clave_privada.asc
+scp /c/Users/Francisco/clave_*.asc frank@10.10.1.222:~
+```
+
+**2. En Debian (`frank@nasdeb`):**
+```bash
+# Importar llaves pública y privada
+gpg --import ~/clave_publica.asc
+gpg --import ~/clave_privada.asc
+
+# Asignar confianza definitiva (Trust Ultimate)
+echo -e "5\ny\n" | gpg --command-fd 0 --expert --edit-key B10B8F775202C0EA trust
+
+# Configurar Git para firmar commits y tags por defecto
+git config --global user.signingkey B10B8F775202C0EA
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+
+# Eliminar archivos planos de clave por seguridad
+rm -f ~/clave_publica.asc ~/clave_privada.asc
+
+# Comprobar firma
+gpg --list-secret-keys --keyid-format=long
+```
