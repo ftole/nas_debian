@@ -103,13 +103,8 @@ pub fn update_sign(
     let target = out.unwrap_or(manifest_path);
     let text = serde_json::to_string_pretty(&manifest)
         .map_err(|error| nas_core::NasError::Invalid(error.to_string()))?;
-    std::fs::write(
-        target,
-        format!(
-            "{text}\n"
-        ),
-    )
-    .map_err(|error| nas_core::NasError::io(target, error))?;
+    std::fs::write(target, format!("{text}\n"))
+        .map_err(|error| nas_core::NasError::io(target, error))?;
 
     if json {
         print_json(&ApiResponse::ok(
