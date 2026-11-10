@@ -363,7 +363,7 @@ almacenamiento, archivos, dominio, terminal, auditoría).
 | `test_remote.py` (SSH/SFTP) | `nas-ssh` + `nas-dev` | ✅ transporte OpenSSH, upload y sincronización |
 | `nas_admin.py` (keyring, perfiles) | `nasctl` + `nas-inventory` | ✅ inventario y perfiles; claves vía `ssh-agent`/`-i` |
 | `web/` (Nginx + PHP-FPM) | `nas-web` (axum) | ✅ Portado, verificado y retirado (referencia en `legacy-php-final`) |
-| `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ✅ Sustituido y retirado a `legacy/` |
+| `src/asistente.sh` (whiptail) | `nas-tui` (ratatui) | ✅ Sustituido y retirado (referencia en tag `legacy-php-final`) |
 | `src/core/deploy.sh`, `updater.sh`, `uninstall.sh` | `nas-engine::{deploy,update,uninstall}` | 🟡 `deploy` nativo cubre disco, montaje, rol, sysctl, udev, logrotate, scrub y auditd; faltan Samba, panel/TLS, AIDE y UFW; `uninstall` cubre panel y `--scope os` |
 
 ## 15. Seguridad implementada
