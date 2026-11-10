@@ -214,3 +214,37 @@ rm -f ~/clave_publica.asc ~/clave_privada.asc
 # Comprobar firma
 gpg --list-secret-keys --keyid-format=long
 ```
+
+---
+
+## FASE 3: Instalación de Agentes de IA en Terminal (Antigravity, OpenCode, Kimi)
+
+### Paso 3.1: Instalación de Antigravity CLI (`agy`) para Frank
+Instala el CLI oficial de Google Antigravity en el perfil de `frank`.
+
+**Comando ejecutado:**
+```bash
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+source ~/.bashrc 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+agy --version
+```
+
+### Paso 3.2: Instalación Global de OpenCode CLI (`opencode`)
+Instala OpenCode CLI y lo enlaza a `/usr/local/bin/opencode` para que esté disponible para `frank`, `beto` y `chris`.
+
+**Comando ejecutado:**
+```bash
+curl -fsSL https://opencode.ai/install | bash
+sudo ln -sf "$HOME/.local/bin/opencode" /usr/local/bin/opencode 2>/dev/null || sudo cp "$HOME/.local/bin/opencode" /usr/local/bin/
+opencode --version
+```
+
+### Paso 3.3: Instalación Global de Kimi CLI (`kimi`)
+Instala el asistente de terminal Kimi Code de Moonshot AI y lo enlaza a `/usr/local/bin/kimi` para que esté disponible para `beto` y `chris`.
+
+**Comando ejecutado:**
+```bash
+curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+sudo ln -sf "$HOME/.local/bin/kimi" /usr/local/bin/kimi 2>/dev/null || sudo cp "$HOME/.local/bin/kimi" /usr/local/bin/
+kimi --version
+```
