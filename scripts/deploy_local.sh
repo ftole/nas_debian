@@ -113,6 +113,18 @@ for bin in "${BINS_TO_INSTALL[@]}"; do
     fi
 done
 
+# Desplegar reglas de auditoría del kernel si auditd está presente en el servidor
+if [ -f "$REPO_DIR/packaging/nas.rules" ] && [ -d /etc/audit ]; then
+    "${SUDO_CMD[@]}" install -d -m 0750 /etc/audit/rules.d 2>/dev/null || true
+    "${SUDO_CMD[@]}" install -m 0640 "$REPO_DIR/packaging/nas.rules" /etc/audit/rules.d/nas.rules 2>/dev/null || true
+    if command -v augenrules >/dev/null 2>&1; then
+        "${SUDO_CMD[@]}" augenrules --load >/dev/null 2>&1 || true
+    fi
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet auditd; then
+        "${SUDO_CMD[@]}" systemctl restart auditd >/dev/null 2>&1 || true
+    fi
+fi
+
 if [ "$RESTART_SERVICE" -eq 1 ]; then
     for bin in "${BINS_TO_INSTALL[@]}"; do
         if [ "$bin" = "nas-web" ]; then
