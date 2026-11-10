@@ -77,7 +77,7 @@ Todo lo demás debe coincidir exactamente.
 | **F4** | Checklist funcional de las 14 vistas sin errores de consola |
 | **F5** | CI ejecuta `parity_extract.py --check`, la suite DOM/selectores y `tests/parity.rs` |
 | **F6** | Comparación en vivo PHP vs Rust antes de retirar `web/` a `legacy/` (completada) |
-| **F7** | Ola A ejecutada: panel PHP/CLI/asistente retirados; `legacy/` conservado para rollback. Ola B pendiente (`deploy.sh`/`uninstall.sh`) |
+| **F7** | Ola A ejecutada: panel PHP/CLI/asistente retirados en su totalidad (referencia en tag `legacy-php-final`). Ola B pendiente (`deploy.sh`/`uninstall.sh`) |
 
 ### F5 — Suite de paridad en CI (completada)
 
