@@ -228,16 +228,18 @@ nas_debian/
 ├── crates/
 │   ├── nas-core/          -> Configuración, rutas, errores y contrato
 │   ├── nas-exec/          -> Ejecución segura (argv, sudo, timeout, redacción)
+│   ├── nas-audit/         -> Bitácora append-only con encadenamiento SHA-256
+│   ├── nas-inventory/     -> Inventarios YAML multi-servidor y separación dev/prod
+│   ├── nas-ssh/           -> Transporte OpenSSH y ejecución remota
 │   ├── nas-engine/        -> Almacenamiento, Samba, respaldos, dominio, diagnósticos
-│   ├── nas-cli/           -> Comando `nas` (ANSI y --json)
-│   ├── nas-web/           -> Panel axum + plantillas portadas + assets embebidos
-│   ├── nas-tui/           -> Asistente de terminal (ratatui)
+│   ├── nas-cli/           -> CLI unificada `nas` modularizada en subcomandos
+│   ├── nas-web/           -> Panel axum modularizado por dominios + assets embebidos
+│   ├── nas-tui/           -> Asistente visual de terminal (ratatui)
 │   └── nasctl/, nas-dev/  -> Multi-host e inspección de desarrollo
 ├── packaging/             -> Unidad systemd, nginx, helpers privilegiados e instalador
-├── scripts/               -> Contrato de paridad, auditoría UI y retiro legacy
-├── src/core/, src/lib/    -> Motor Bash de despliegue/desinstalación (ola B pendiente)
+├── scripts/               -> Contrato de paridad, auditoría UI y validaciones
+├── src/core/, src/lib/    -> Motor Bash de despliegue/desinstalación y shims
 ├── tests/parity/          -> Contrato congelado (IDs, clases, endpoints y hashes)
-├── legacy/                -> Panel PHP, whiptail, CLI PHP y utilidades Python retiradas
 └── docs/                  -> Documentación técnica y operativa
 ```
 
