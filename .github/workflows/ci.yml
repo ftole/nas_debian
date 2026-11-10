@@ -58,7 +58,7 @@ jobs:
           mv -n tests/deploy_shim.bats tests/deploy_shim.bats.skipped || true
 
       - name: Ejecutar suite del motor de despliegue
-        run: bats tests/*.bats
+        run: bats --print-output-on-failure tests/*.bats
 
   rust:
     name: Plataforma Rust (fmt, clippy, pruebas, empaquetado y paridad)
