@@ -48,8 +48,12 @@ detect_default_user() {
 # Resolución del disco físico (base) que contiene un dispositivo dado.
 # Soporta particiones, LVM, LUKS y subvolúmenes btrfs.
 resolver_disco_base() {
-    local dev="$1" base parent
+    local dev="$1" base parent real
     dev="${dev%%[*}"
+    real=$(readlink -f "$dev" 2>/dev/null || echo "$dev")
+    if [ -b "$real" ]; then
+        dev="$real"
+    fi
     base=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -n1)
     while [ -n "$base" ]; do
         parent=$(lsblk -no PKNAME "/dev/$base" 2>/dev/null | head -n1)
@@ -65,8 +69,12 @@ resolver_disco_base() {
 # Lista los discos físicos (tipo disk) que respaldan un dispositivo dado.
 # Soporta md/RAID, LVM, LUKS y subvolúmenes btrfs.
 resolver_discos_raiz() {
-    local dev="$1"
+    local dev="$1" real
     dev="${dev%%[*}"
+    real=$(readlink -f "$dev" 2>/dev/null || echo "$dev")
+    if [ -b "$real" ]; then
+        dev="$real"
+    fi
     lsblk -s -n -o NAME,TYPE "$dev" 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'
 }
 
