@@ -19,3 +19,9 @@
 *.eot   binary
 *.svg   text eol=lf
 *.pyc   binary
+
+# Excluir del conteo de lenguajes de GitHub (assets embebidos y fixtures de paridad)
+tests/parity/fixtures/*.php linguist-vendored
+crates/nas-web/assets/js/vendor/* linguist-vendored
+crates/nas-web/templates/* linguist-generated
+scripts/*.py linguist-documentation
