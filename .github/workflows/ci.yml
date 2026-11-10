@@ -58,7 +58,18 @@ jobs:
           mv -n tests/deploy_shim.bats tests/deploy_shim.bats.skipped || true
 
       - name: Ejecutar suite del motor de despliegue
-        run: bats -t tests/*.bats
+        run: |
+          set -o pipefail
+          if ! bats -t tests/*.bats 2>&1 | tee /tmp/bats.log; then
+            echo "### Resumen de fallos en suite BATS" >> "$GITHUB_STEP_SUMMARY"
+            echo '```tap' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/bats.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^not ok' /tmp/bats.log | while IFS= read -r err_line; do
+              echo "::error::$err_line"
+            done
+            exit 1
+          fi
 
   rust:
     name: Plataforma Rust (fmt, clippy, pruebas, empaquetado y paridad)
