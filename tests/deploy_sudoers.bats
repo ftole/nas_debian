@@ -22,8 +22,13 @@ _extraer_bloque_sudoers() {
 
     # El heredoc es expandido por bash: ${PHP_VER} -> 8.4 y \\ -> \
     sed -i -e 's/\${PHP_VER}/8.4/g' -e 's/\\\\/\\/g' "$tmp"
+    chmod 0440 "$tmp"
 
-    run visudo -c -f "$tmp"
+    if [ "${EUID:-$(id -u)}" -ne 0 ] && sudo -n true 2>/dev/null; then
+        run sudo visudo -c -f "$tmp"
+    else
+        run visudo -c -f "$tmp"
+    fi
     rm -f "$tmp"
     [ "$status" -eq 0 ]
 }
