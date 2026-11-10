@@ -48,9 +48,11 @@ setup() {
 @test "resolver_disco_base retorna un disco base no vacio" {
     local root_dev
     root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+    root_dev=$(readlink -f "$root_dev" 2>/dev/null || echo "$root_dev")
     if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
         skip "la raiz no es un dispositivo de bloque en este entorno"
     fi
+    lsblk "$root_dev" >/dev/null 2>&1 || skip "lsblk no reconoce el dispositivo de la raiz en este runner"
     run resolver_disco_base "$root_dev"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
@@ -59,9 +61,11 @@ setup() {
 @test "resolver_discos_raiz retorna al menos un disco para la raiz" {
     local root_dev
     root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+    root_dev=$(readlink -f "$root_dev" 2>/dev/null || echo "$root_dev")
     if [ -z "$root_dev" ] || [ ! -b "$root_dev" ]; then
         skip "la raiz no es un dispositivo de bloque en este entorno"
     fi
+    lsblk "$root_dev" >/dev/null 2>&1 || skip "lsblk no reconoce el dispositivo de la raiz en este runner"
     run resolver_discos_raiz "$root_dev"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
