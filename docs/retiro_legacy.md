@@ -43,7 +43,7 @@ Fases que ejecuta:
 
 - `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/updater.sh` y
   `install.sh` (bootstrap del sistema operativo).
-- `legacy/` completo: permite volver al panel PHP y auditar la migración.
+- Material histórico retirado: disponible mediante la etiqueta Git `legacy-php-final` (purgado del árbol activo en F7.2).
 
 ## 5. Pasos manuales posteriores
 
