@@ -151,10 +151,13 @@ Este es el paso final que **compila e instala el código nuevo en el servidor re
 ./scripts/deploy_local.sh --all
 ```
 
+> [!IMPORTANT]
+> **Primera vez tras instalación o reseteo del servidor:**  
+> Si el servicio `nas-web.service` o la configuración de Nginx aún no existen (por ejemplo tras una limpieza de fábrica), primero compila con `./scripts/deploy_local.sh --all` y luego aprovisiona el servicio y el proxy con `sudo bash packaging/install.sh`.  
+> A partir de ese momento, para el trabajo diario de desarrollo solo necesitas ejecutar `./scripts/deploy_local.sh`.
+
 > [!TIP]
 > **Caché del navegador:** Si modificaste la interfaz web (`app.js`, HTML o CSS), recarga la página en tu navegador con **`Ctrl + Shift + R`** (o **`Ctrl + F5`**) para invalidar la caché HTTP (`max-age=300`) y ver los cambios al instante.
-
-*(Para aprovisionamiento general de infraestructura o actualizar plantillas de Nginx/sudoers, se utiliza `sudo ./packaging/install.sh`).*
 
 ### ¿Qué hace `deploy_local.sh`?
 1. Compila el código modificado en modo optimizado de producción (`--release`).
