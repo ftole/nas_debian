@@ -6,8 +6,8 @@ use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
 use nas_engine::deploy::{DeployParams, FileSystem};
 use nas_exec::{CommandSpec, Runner};
 
-use crate::DeployArgs;
 use super::common::{print_json, run_step};
+use crate::DeployArgs;
 
 /// Opciones de ejecución del despliegue.
 #[derive(Debug, Default)]
@@ -317,9 +317,7 @@ pub fn uninstall_command(
             }
             println!("  (no se elimina /srv/nas)");
             if !confirmed {
-                println!(
-                    "\nRepita con --yes para ejecutar."
-                );
+                println!("\nRepita con --yes para ejecutar.");
             }
         }
         return Ok(ExitCode::SUCCESS);
