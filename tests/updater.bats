@@ -88,9 +88,6 @@ setup() {
     run grep -q 'SESSION="nas-web-term-\${TARGET_USER}"' "$fake_term"
     [ "$status" -eq 0 ]
 
-    if [ ! -s "$fake_sudoers" ]; then
-        echo "fake_sudoers inexistente o vacio; salida hook: $output"
-    fi
     [ -s "$fake_sudoers" ]
     run grep -q 'NAS_STORAGE' "$fake_sudoers"
     [ "$status" -eq 0 ]
