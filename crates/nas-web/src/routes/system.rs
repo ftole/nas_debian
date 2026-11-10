@@ -320,6 +320,7 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
                 "active": nginx_active,
                 "status": if nginx_active { "activo" } else { "inactivo" },
                 "pool_mode": "axum/tokio",
+                "rust_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
                 "php_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
                 "memory_mb": process_rss_mb(),
             },
