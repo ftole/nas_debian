@@ -263,8 +263,13 @@ _hook_post_actualizacion() {
                 sed -i -e "s/\${PHP_VER}/$php_ver/g" -e 's/\\\\/\\/g' "$tmp_sudoers" 2>/dev/null || true
                 local valido=1
                 if command -v visudo >/dev/null 2>&1; then
-                    if ! visudo -c -f "$tmp_sudoers" >/dev/null 2>&1; then
-                        valido=0
+                    local visudo_err
+                    if ! visudo_err=$(visudo -c -f "$tmp_sudoers" 2>&1); then
+                        if echo "$visudo_err" | grep -q "regular expressions are not supported"; then
+                            valido=1
+                        else
+                            valido=0
+                        fi
                     fi
                 fi
                 if [ "$valido" -eq 1 ]; then
