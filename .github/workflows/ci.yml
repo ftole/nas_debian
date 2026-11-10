@@ -65,9 +65,7 @@ jobs:
             echo '```tap' >> "$GITHUB_STEP_SUMMARY"
             cat /tmp/bats.log >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            grep -E '^not ok' /tmp/bats.log | while IFS= read -r err_line; do
-              echo "::error::$err_line"
-            done
+            awk '/^not ok/{flag=1; print "::error::" $0; next} /^ok/{flag=0} flag{print "::error::" $0}' /tmp/bats.log
             exit 1
           fi
 
