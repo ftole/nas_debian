@@ -308,7 +308,7 @@
         <div class="nav-item %%active_group_applications_updates%%" data-view="applications">
           <div class="nav-item-left">
             <svg class="icon"><use href="#icon-apps"></use></svg>
-            <span>Aplicaciones y Actualizaciones</span>
+            <span>Plataforma y Actualizaciones</span>
           </div>
           <span class="nav-badge" id="badge-updates">Al día</span>
         </div>
@@ -1568,8 +1568,8 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div id="view-updates" <!--IF:show_updates-->style="display:block;"<!--ELSE-->style="display:none;"<!--ENDIF-->></div>
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Aplicaciones y Actualizaciones</h2>
-            <p>Control de versiones, actualización desde GitHub y componentes del servidor NAS Debian 13</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-apps"></use></svg> Plataforma y Actualizaciones</h2>
+            <p>Control de versiones, actualización desde GitHub y plataforma del servidor NAS Debian 13</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-secondary" id="btn-refresh-applications" onclick="triggerSystemUpdatesCheck(this)">
@@ -1584,7 +1584,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <!-- Pestañas de Navegación Slate UI -->
         <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
           <button type="button" class="chip-btn active" id="apps-tab-btn-components" onclick="switchApplicationsTab('components')">
-            <svg class="icon icon-sm"><use href="#icon-apps"></use></svg> Componentes del Servidor (<span id="apps-count-components">6</span>)
+            <svg class="icon icon-sm"><use href="#icon-apps"></use></svg> Plataforma y Componentes (<span id="apps-count-components">6</span>)
           </button>
           <button type="button" class="chip-btn" id="apps-tab-btn-updates" onclick="switchApplicationsTab('updates')">
             <svg class="icon icon-sm"><use href="#icon-download"></use></svg> Repositorio y Actualizaciones
@@ -1620,7 +1620,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero Nginx con backend nativo Rust (axum / tokio), consumo ~0 MB RAM en reposo.</div>
               <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar servicio web
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar servicio nas-web
                 </button>
               </div>
             </div>
