@@ -413,12 +413,9 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 manifest,
                 artifact,
                 pubkey,
-            }) => commands::update::update_verify(
-                &manifest,
-                artifact.as_deref(),
-                &pubkey,
-                cli.json,
-            ),
+            }) => {
+                commands::update::update_verify(&manifest, artifact.as_deref(), &pubkey, cli.json)
+            }
             Some(UpdateAction::Apply {
                 manifest,
                 artifact,
