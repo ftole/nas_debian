@@ -11,6 +11,19 @@
 * **Host:** `nasdeb`.
 * **Estado inicial:** Servidor con pruebas previas que se restablece a estado base limpio.
 
+### Regla Crítica: Instalador Oficial (`install.sh`) vs Despliegue de Desarrollo (`deploy_local.sh`)
+
+> [!WARNING]
+> **NUNCA ejecutes `./scripts/deploy_local.sh` en un servidor virgen.**  
+> `deploy_local.sh` NO instala infraestructura (no instala paquetes del sistema, ni Nginx, ni Samba, ni el servicio systemd, ni variables de entorno). Su único propósito es **recompilar binarios durante el desarrollo en un servidor que YA TIENE la plataforma instalada**.
+
+| Escenario | Comando Oficial | ¿Qué hace? |
+| :--- | :--- | :--- |
+| **Servidor limpio (recién instalado Debian)** | `curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh \| sudo bash` | **Instalador Oficial 1-Paso:** Instala dependencias con apt, descarga release oficial precompilado, crea el servicio systemd, Nginx y arranca la web en 30 segundos. |
+| **Servidor limpio (compilando desde código)** | `git clone ... && cd nas_debian && sudo bash install.sh --build-from-source` | Instala dependencias apt, instala toolchain de Rust, compila todo el workspace y aprovisiona el servicio. |
+| **Servidor tras reseteo / fábrica** | `cd /opt/dev/nas_debian && ./scripts/deploy_local.sh --all && sudo bash packaging/install.sh` | Compila los binarios y aprovisiona el servicio systemd y proxy Nginx. |
+| **Desarrollo diario (código ya modificado)** | `./scripts/deploy_local.sh` | Solo recompila el binario modificado, lo copia a `/usr/local/bin` y reinicia el servicio activo en 2 segundos. |
+
 ---
 
 ## FASE 0: Restauración del Sistema a Estado Base ("De Fábrica")
