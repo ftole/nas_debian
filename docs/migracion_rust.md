@@ -21,7 +21,7 @@
 El sistema en producción (`10.10.1.222`) ejecuta **la plataforma Rust** desde el
 cutover de F6 y el retiro de F7 (ola A): `nas-web.service` sirve el panel con
 `proxy_pass`, los binarios `nas`/`nas-tui` están instalados y el material anterior
-vive en `legacy/`. El motor Bash (`src/core/deploy.sh`, `uninstall.sh`, `updater.sh`)
+fue completamente retirado del proyecto y del servidor. El motor Bash (`src/core/deploy.sh`, `uninstall.sh`, `updater.sh`)
 permanece vigente para el aprovisionamiento hasta completar la ola B.
 
 ## 2. Estructura del workspace
@@ -33,8 +33,10 @@ crates/
 ├── nas-inventory/  inventario multi-servidor: validación y perfiles dev/prod
 ├── nas-ssh/        transporte OpenSSH, cotización de argumentos y host keys
 ├── nas-engine/     parsers del SO, métricas, red, respaldos y tareas
-├── nas-audit/      bitácora JSONL con encadenamiento de hashes
-├── nas-cli/        binario `nas`     (estado, red, servicios, diagnóstico, auditoría)
+├── nas-audit/      bitácora JSONL con encadenamiento de hashes SHA-256
+├── nas-cli/        binario `nas` modularizado en subcomandos (`src/commands/`)
+├── nas-web/        servidor HTTP axum modularizado por dominios (`src/routes/`)
+├── nas-tui/        asistente visual interactivo de terminal (`ratatui`)
 ├── nas-dev/        binario `nas-dev` (preflight, plan, pack, sync sin push)
 └── nasctl/         binario `nasctl`  (inventario y perfiles de producción)
 ```
