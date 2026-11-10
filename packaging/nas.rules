@@ -1,0 +1,16 @@
+-D
+-b 8192
+-f 1
+
+# Auditoría de alteraciones a privilegios y sudoers
+-w /etc/sudoers -p wa -k sudoers_changes
+-w /etc/sudoers.d/ -p wa -k sudoers_changes
+
+# Auditoría de modificaciones a la configuración de Samba
+-w /etc/samba/smb.conf -p wa -k samba_conf_changes
+
+# Auditoría de accesos a credenciales de respaldos corporativos
+-w /etc/backup-credentials/ -p rwa -k backup_credentials
+
+# Auditoría de ejecuciones de la terminal administrativa segura
+-w /usr/local/sbin/nas-terminal -p x -k nas_terminal
