@@ -24,13 +24,15 @@ El servidor combina el rendimiento del kernel de Debian 13 con interfaces ágile
 | :--- | :--- |
 | `crates/nas-core` | Configuración, rutas, errores y contrato de respuesta |
 | `crates/nas-exec` | Ejecución de comandos con argv tipado, timeouts y redacción de secretos |
+| `crates/nas-audit` | Bitácora append-only con encadenamiento criptográfico SHA-256 |
+| `crates/nas-inventory` | Inventario YAML multi-servidor y separación de perfiles dev/prod |
+| `crates/nas-ssh` | Transporte OpenSSH y ejecución remota con claves dedicadas |
 | `crates/nas-engine` | Almacenamiento, Samba, usuarios, respaldos, dominio, diagnósticos |
-| `crates/nas-cli` | Comando `nas` (ANSI y `--json`) |
-| `crates/nas-web` | Panel web axum + assets embebidos + plantillas portadas |
-| `crates/nas-tui` | Asistente de terminal (ratatui) |
-| `crates/nasctl`, `crates/nas-dev` | Multi-host e inspección de entorno de desarrollo |
-| `src/core`, `src/lib` | Motor Bash de despliegue/desinstalación (aún vigente) |
-| `legacy/` | Panel PHP, asistente `whiptail`, CLI PHP y utilidades Python retiradas |
+| `crates/nas-cli` | CLI unificada `nas` modularizada en comandos (`src/commands/`) con salida ANSI y `--json` |
+| `crates/nas-web` | Panel web axum modularizado en dominios (`src/routes/`) con assets embebidos |
+| `crates/nas-tui` | Asistente de terminal visual interactivo (ratatui) |
+| `crates/nasctl`, `crates/nas-dev` | Orquestación multi-host e inspección de entorno de desarrollo |
+| `src/core`, `src/lib` | Motor Bash y shims de compatibilidad para despliegue y desinstalación |
 
 ## 📚 Documentación Técnica Detallada
 
