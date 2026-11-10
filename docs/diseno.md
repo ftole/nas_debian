@@ -85,7 +85,7 @@ La interfaz cuenta con soporte nativo para **Tema Oscuro** (predeterminado) y **
 
 ### 3.3 Dashboard y Monitoreo en Tiempo Real
 - **Tarjetas de estado comprensibles:** Métricas clave (Uso de Procesador, Memoria RAM libre, Ocupación de Discos y Tráfico de Red) acompañadas de colores contextuales (Verde para estado óptimo, Ámbar para precaución, Rojo para saturación).
-- **Control de servicios:** Indicadores visuales en vivo del estado de los demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`, `cron`, `php8.4-fpm`, `sssd`), permitiendo reiniciar o detener servicios con un solo clic.
+- **Control de servicios:** Indicadores visuales en vivo del estado de los demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`, `cron`, `sssd`), permitiendo reiniciar o detener servicios con un solo clic.
 
 ---
 
