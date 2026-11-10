@@ -144,10 +144,11 @@ Este es el paso final que **compila e instala el código nuevo en el servidor re
 
 ```bash
 # Opción recomendada para desarrollo (rápido, compila y reinicia nas-web):
-sudo ./scripts/deploy_local.sh
+# Ejecútalo como usuario normal (sin sudo al inicio; el script pedirá sudo solo para instalar):
+./scripts/deploy_local.sh
 
 # O si modificaste todos los crates del workspace:
-sudo ./scripts/deploy_local.sh --all
+./scripts/deploy_local.sh --all
 ```
 
 > [!TIP]
@@ -182,5 +183,5 @@ git add <archivo>
 git commit -m "feat: descripcion"
 git push origin dev1-tarea
 git checkout main && git pull && git merge dev1-tarea && git push origin main
-sudo ./scripts/deploy_local.sh
+./scripts/deploy_local.sh
 ```
