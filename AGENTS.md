@@ -39,6 +39,11 @@
     4. Los commits deben ser **atómicos y frecuentes**, y se debe ejecutar `git pull --rebase` antes de commitear.
     5. **Está prohibido** ejecutar tests que modifiquen el sistema o servicios de producción en paralelo.
     6. **Está prohibido** reiniciar o detener servicios productivos (`nas-web`, `smbd`, `nmbd`) desde tests de agentes.
+  * **PROTOCOLO DE APLICACIÓN DE CAMBIOS EN LA PLATAFORMA LOCAL (DEPLOY INMEDIATO):**
+    En la arquitectura actual (`crates/nas-web`), los recursos frontend (`app.js`, HTML, CSS) y los endpoints residen compilados e incrustados byte a byte dentro del binario ejecutable (`include_bytes!`/`include_str!`). En consecuencia, editar el código fuente en `/opt/dev/nas_debian` **no altera el servicio activo** hasta que se compila, instala y reinicia el demonio:
+    1. **Comando oficial de despliegue local:** Ejecutar `scripts/deploy_local.sh` (o `sudo ./scripts/deploy_local.sh`). Para recompilar todo el workspace usar `./scripts/deploy_local.sh --all`.
+    2. **Invalidación de caché cliente obligatoria:** El archivo `/js/app.js` se sirve con cabecera `Cache-Control: public, max-age=300`. Es imperativo recargar el navegador con `Ctrl + Shift + R` (o `Ctrl + F5`) para ver los cambios de interfaz inmediatamente.
+    3. **No usar `install.sh --build-from-source` para cambios de desarrollo:** `install.sh` está reservado para aprovisionamiento general inicial de infraestructura y reinstalaciones completas.
 
 ---
 
@@ -70,6 +75,7 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** (ola B pendiente de portar): detección de entorno, protección de partición raíz, roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), formateo, Samba, Nginx y parches de Debian 13. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
+| `scripts/deploy_local.sh` | Script Bash CLI | **Despliegue Local Rápido** para compilar, instalar en `/usr/local/bin` y reiniciar servicios en desarrollo sin reinstalar el servidor. |
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
