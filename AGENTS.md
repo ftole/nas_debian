@@ -26,6 +26,12 @@
     * `refactor: <descripción en español>` (mejoras de código)
     * `ci: <descripción en español>` (cambios en integración continua)
   * **REGLA DE INTEGRACIÓN CONTINUA (CI):** Cada *push* debe validar el CI de GitHub Actions. En caso de fallo, se debe corregir el código y volver a validar. **Bajo ninguna circunstancia se pueden utilizar directivas para ignorar advertencias en el CI** (`# shellcheck disable` o banderas `-e`). El código debe ajustarse a la regla, no la regla al código.
+  * **VALIDACIÓN LOCAL PREVIA OBLIGATORIA (Pre-Push):** Antes de ejecutar `git push origin main`, se debe validar la suite completa en local para garantizar cero fallos en el CI remoto:
+    1. **Pruebas del Motor Bash (BATS):** `PATH="$PATH:/usr/sbin" bats --print-output-on-failure tests/*.bats` (o `/tmp/bats/bin/bats` si no está en `/usr/bin/bats`).
+    2. **Análisis de Scripts Bash:** `find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 shellcheck -x` y `bash -n install.sh`.
+    3. **Sintaxis JavaScript:** `find crates/nas-web/assets/js -type f -name "*.js" -print0 | xargs -0 -n1 node --check`.
+    4. **Suite Rust Completa:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`.
+    5. **Empaquetado y Paridad:** `bash packaging/verify.sh`, `python3 scripts/parity_extract.py --check` y `python3 scripts/qa_ui_audit.py --static`.
 
 ---
 
