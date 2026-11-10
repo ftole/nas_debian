@@ -4701,17 +4701,17 @@ async function loadApplications() {
       `;
     }
 
-    // 2. Nginx & PHP-FPM
+    // 2. Nginx & nas-web (Rust)
     const badgeWeb = document.getElementById('app-badge-web');
     const bodyWeb = document.getElementById('app-body-web');
     if (badgeWeb) {
       badgeWeb.className = a.web.active ? 'badge badge-ok' : 'badge badge-err';
-      badgeWeb.textContent = a.web.active ? '● Activo (ondemand)' : '○ Inactivo';
+      badgeWeb.textContent = a.web.active ? '● Activo (axum/tokio)' : '○ Inactivo';
     }
     if (bodyWeb) {
       bodyWeb.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Plataforma:</strong> <code>${escapeHtml(a.web.php_version)}</code> | <strong>Servidor:</strong> <code>Nginx-light</code></div>
+          <div><strong>Plataforma:</strong> <code>${escapeHtml(a.web.rust_version || a.web.php_version)}</code> | <strong>Servidor:</strong> <code>Nginx-light</code></div>
           <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.pool_mode)}</code> (alto rendimiento)</div>
           <div><strong>Consumo de memoria:</strong> <span class="badge badge-teal">${a.web.memory_mb} MB RAM</span> (~0 MB en reposo)</div>
         </div>
