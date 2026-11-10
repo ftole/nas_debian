@@ -286,7 +286,8 @@ fn resolve_pubkey(specified: Option<&str>) -> NasResult<String> {
     if let Ok(candidates_env) = std::env::var("NAS_RELEASE_PUBKEY_CANDIDATES") {
         if candidates_env == "none" || candidates_env.is_empty() {
             return Err(NasError::Denied(
-                "clave pública Ed25519 obligatoria para verificar la actualización (--pubkey)".into(),
+                "clave pública Ed25519 obligatoria para verificar la actualización (--pubkey)"
+                    .into(),
             ));
         }
     }
