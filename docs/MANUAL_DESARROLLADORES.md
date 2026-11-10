@@ -50,22 +50,26 @@ git checkout -b dev1-mi-tarea
 *(A partir de aquí, estás trabajando en tu rama `dev1-mi-tarea`. Nada de lo que hagas afecta a los demás).*
 
 ### 1.4 Escribir código con tu Agente de IA
+El proyecto está **completamente modularizado** para que varios desarrolladores puedan trabajar a la vez sin colisionar en Git:
+* Si trabajas en el **panel web**, tu lógica vive en su archivo de dominio dentro de `crates/nas-web/src/routes/` (ej. `shares.rs`, `backups.rs`, `storage.rs`, `users.rs`).
+* Si trabajas en la **CLI**, tu comando vive en `crates/nas-cli/src/commands/` (ej. `status.rs`, `backup.rs`, `deploy.rs`).
+
 Abres tu herramienta de IA en la terminal:
 ```bash
 opencode
 ```
 *(O puedes usar `agy` o `kimi`).*
 
-Le pides a la IA lo que necesitas:
-> *"Modifica la función de almacenamiento para listar los discos disponibles. Trabaja solo en los archivos de almacenamiento."*
+Le pides a la IA lo que necesitas delimitando el archivo:
+> *"Modifica la función de almacenamiento para listar los discos disponibles. Trabaja exclusivamente en crates/nas-web/src/routes/storage.rs y crates/nas-cli/src/commands/storage.rs."*
 
 ---
 
 ## PASO 2: TESTEAR (Probar que todo funciona)
 
-**Regla de oro:** Ningún código se sube ni se despliega si no pasa las pruebas.
+**Regla de oro:** Ningún código se sube ni se despliega si no pasa las pruebas y linters del CI.
 
-Sal de la herramienta de IA (con `/exit` o `Ctrl+C`) y ejecuta las pruebas del compilador:
+Sal de la herramienta de IA (con `/exit` o `Ctrl+C`) y ejecuta las verificaciones del compilador:
 
 ### 2.1 Comprobar que no hay errores de sintaxis
 ```bash
@@ -73,14 +77,26 @@ cargo check --workspace --all-targets
 ```
 *Si la salida dice `Finished dev profile`, el código está bien escrito y compila.*
 
-### 2.2 Ejecutar las pruebas automáticas
+### 2.2 Verificar formato de código (Obligatorio en CI)
 ```bash
-cargo test
+cargo fmt --all --check
+```
+*Si marca diferencias, ejecuta `cargo fmt --all` para formatear automáticamente.*
+
+### 2.3 Analizar con Clippy (Cero advertencias requeridas)
+```bash
+cargo clippy --workspace --all-targets --locked -- -D warnings
+```
+*Garantiza que el código cumple con las mejores prácticas y no tiene malas construcciones.*
+
+### 2.4 Ejecutar la suite completa de pruebas
+```bash
+cargo test --workspace --locked
 ```
 *Si el resultado final dice `test result: ok`, todas las pruebas pasaron exitosamente.*
 
-Si alguna prueba falla, vuelve a abrir tu agente de IA y dile:
-> *"El comando cargo test falló con este error: [pegar error]. Corrígelo."*
+Si alguna prueba o verificación falla, vuelve a abrir tu agente de IA y dile:
+> *"El comando [cargo test / cargo clippy / cargo fmt] falló con este error: [pegar error]. Corrígelo en mi módulo."*
 
 ---
 
@@ -88,12 +104,15 @@ Si alguna prueba falla, vuelve a abrir tu agente de IA y dile:
 
 Una vez que el código pasó las pruebas de la Etapa 2, es momento de publicarlo y ponerlo en vivo en el servidor.
 
+> [!IMPORTANT]
+> **Regla de Commits Granulares:** Realiza un commit independiente por cada archivo modificado con mensaje convencional en español (`feat: ...`, `fix: ...`, `refactor: ...`).
+
 ### 3.1 Guardar tus cambios en tu rama
 ```bash
 # 1. Ver qué archivo modificaste
 git status
 
-# 2. Agregar el archivo
+# 2. Agregar el archivo (uno por uno)
 git add ruta/al/archivo.rs
 
 # 3. Guardar el cambio con una descripción de lo que hiciste
@@ -143,9 +162,10 @@ git checkout main && git pull origin main
 git checkout -b dev1-tarea
 opencode
 
-# 2. TESTEAR
-cargo check --workspace --all-targets
-cargo test
+# 2. TESTEAR (Obligatorio antes de subir)
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 
 # 3. DESPLEGAR
 git add <archivo>
