@@ -74,8 +74,14 @@ if ! command -v cargo >/dev/null 2>&1; then
     if [ -x "$HOME/.cargo/bin/cargo" ]; then
         PATH="$HOME/.cargo/bin:$PATH"
         export PATH
+    elif [ -n "${SUDO_USER:-}" ] && [ -x "/home/$SUDO_USER/.cargo/bin/cargo" ]; then
+        PATH="/home/$SUDO_USER/.cargo/bin:$PATH"
+        export PATH
     elif [ -x "/root/.cargo/bin/cargo" ]; then
         PATH="/root/.cargo/bin:$PATH"
+        export PATH
+    elif [ -x "/usr/local/cargo/bin/cargo" ]; then
+        PATH="/usr/local/cargo/bin:$PATH"
         export PATH
     fi
 fi
