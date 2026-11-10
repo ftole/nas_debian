@@ -32,6 +32,13 @@
     3. **Sintaxis JavaScript:** `find crates/nas-web/assets/js -type f -name "*.js" -print0 | xargs -0 -n1 node --check`.
     4. **Suite Rust Completa:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`.
     5. **Empaquetado y Paridad:** `bash packaging/verify.sh`, `python3 scripts/parity_extract.py --check` y `python3 scripts/qa_ui_audit.py --static`.
+  * **COEXISTENCIA DE AGENTES / IA (OBLIGATORIA):** Cuando más de un agente o desarrollador trabaja sobre el mismo repositorio simultáneamente:
+    1. Cada agente debe usar un **worktree propio** (`git worktree add`) para aislar su directorio de trabajo.
+    2. Cada agente debe usar un **`CARGO_TARGET_DIR` separado** para evitar bloqueos de cargo y conflictos de permisos.
+    3. **Está prohibido** editar simultáneamente archivos compartidos de alto tráfico: `Cargo.lock`, `AGENTS.md`, `README.md`, `crates/nas-web/assets/js/app.js`, `crates/nas-web/templates/layout.html`, `crates/nas-web/src/routes/mod.rs`, `crates/nas-cli/src/commands/mod.rs`, `crates/nas-cli/src/main.rs`, `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/updater.sh`.
+    4. Los commits deben ser **atómicos y frecuentes**, y se debe ejecutar `git pull --rebase` antes de commitear.
+    5. **Está prohibido** ejecutar tests que modifiquen el sistema o servicios de producción en paralelo.
+    6. **Está prohibido** reiniciar o detener servicios productivos (`nas-web`, `smbd`, `nmbd`) desde tests de agentes.
 
 ---
 
