@@ -294,10 +294,24 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
         let nmbd_active = active("nmbd");
         let auditd_active = active("auditd");
         let aide_active = active("dailyaidecheck.timer");
-        let audit_rules = if std::path::Path::new("/etc/audit/rules.d/nas.rules").is_file() {
+        let has_nas_rules = std::path::Path::new("/etc/audit/rules.d/nas.rules").is_file();
+        let audit_rules = if has_nas_rules {
             "reglas activas (/etc/audit/rules.d/nas.rules)"
+        } else if auditd_active {
+            "protección activa del kernel"
         } else {
             "sin reglas personalizadas"
+        };
+        let fim_status = if std::path::Path::new("/usr/bin/aide").is_file()
+            || std::path::Path::new("/usr/sbin/aide").is_file()
+        {
+            if aide_active {
+                "AIDE activo (escaneo programado)"
+            } else {
+                "AIDE preparado"
+            }
+        } else {
+            "Auditoría activa del kernel"
         };
 
         serde_json::json!({
@@ -343,7 +357,7 @@ pub async fn system_applications(State(state): State<AppState>, headers: HeaderM
                 "auditd_active": auditd_active,
                 "aide_active": aide_active,
                 "audit_rules": audit_rules,
-                "fim_status": "AIDE configurado",
+                "fim_status": fim_status,
             },
         })
     })
