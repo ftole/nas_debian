@@ -4681,108 +4681,107 @@ async function loadApplications() {
       sambaCountSpan.textContent = a.samba.sessions || 0;
     }
 
-    // 1. Samba 4 & VFS
+    // 1. Servicio de Archivos (SMB)
     const badgeSamba = document.getElementById('app-badge-samba');
     const bodySamba = document.getElementById('app-body-samba');
     if (badgeSamba) {
       badgeSamba.className = a.samba.active ? 'badge badge-ok' : 'badge badge-err';
       badgeSamba.textContent = a.samba.active
-        ? `● Activo (${a.samba.sessions} ${a.samba.sessions === 1 ? 'sesión' : 'sesiones'})`
-        : '○ Inactivo';
+        ? `● En ejecución (${a.samba.sessions} ${a.samba.sessions === 1 ? 'sesión' : 'sesiones'})`
+        : '○ Detenido';
     }
     if (bodySamba) {
-      const vfsList = (a.samba.vfs_modules || ['acl_xattr', 'streams_xattr']).map(m => `<code>${escapeHtml(m)}</code>`).join(', ');
       bodySamba.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Versión:</strong> <code>${escapeHtml(a.samba.version)}</code></div>
-          <div><strong>Sesiones concurrentes:</strong> <span class="badge badge-blue">${a.samba.sessions} activas</span></div>
-          <div><strong>Módulos VFS:</strong> ${vfsList} (concurrencia Excel sin bloqueos de temporales <code>~$</code>)</div>
+          <div><strong>Estado:</strong> ${a.samba.active ? '<span class="badge badge-ok">En ejecución</span>' : '<span class="badge badge-err">Detenido</span>'} (Protocolo SMB 3.1.1)</div>
+          <div><strong>Sesiones activas:</strong> <span class="badge badge-blue">${a.samba.sessions} conectadas</span></div>
+          <div><strong>Compatibilidad:</strong> Red corporativa optimizada para Windows, Mac y Linux sin bloqueos</div>
         </div>
       `;
     }
 
-    // 2. Nginx & nas-web (Rust)
+    // 2. File Station & Portal Web
     const badgeWeb = document.getElementById('app-badge-web');
     const bodyWeb = document.getElementById('app-body-web');
     if (badgeWeb) {
       badgeWeb.className = a.web.active ? 'badge badge-ok' : 'badge badge-err';
-      badgeWeb.textContent = a.web.active ? '● Activo (axum/tokio)' : '○ Inactivo';
+      badgeWeb.textContent = a.web.active ? '● En ejecución' : '○ Detenido';
     }
     if (bodyWeb) {
       bodyWeb.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Plataforma:</strong> <code>${escapeHtml(a.web.rust_version || a.web.php_version)}</code> | <strong>Servidor:</strong> <code>Nginx-light</code></div>
-          <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.pool_mode)}</code> (alto rendimiento)</div>
-          <div><strong>Consumo de memoria:</strong> <span class="badge badge-teal">${a.web.memory_mb} MB RAM</span> (~0 MB en reposo)</div>
+          <div><strong>Servicio:</strong> ${a.web.active ? '<span class="badge badge-ok">En ejecución</span>' : '<span class="badge badge-err">Detenido</span>'} (Portal HTTPS + Nginx)</div>
+          <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.rust_version || a.web.php_version)}</code> (${escapeHtml(a.web.pool_mode)})</div>
+          <div><strong>Consumo de memoria:</strong> <span class="badge badge-teal">${a.web.memory_mb} MB RAM</span> (Ultraligero)</div>
         </div>
       `;
     }
 
-    // 3. BTRFS con Zstandard
+    // 3. Administrador de Almacenamiento
     const badgeBtrfs = document.getElementById('app-badge-btrfs');
     const bodyBtrfs = document.getElementById('app-body-btrfs');
     if (badgeBtrfs) {
       badgeBtrfs.className = a.btrfs.active ? 'badge badge-ok' : 'badge badge-gray';
-      badgeBtrfs.textContent = a.btrfs.active ? '● Activo (Zstd:3)' : '○ ' + escapeHtml(a.btrfs.filesystem);
+      badgeBtrfs.textContent = a.btrfs.active ? '● Saludable' : '○ ' + escapeHtml(a.btrfs.filesystem);
     }
     if (bodyBtrfs) {
       bodyBtrfs.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Filesystem:</strong> <code>${escapeHtml(a.btrfs.filesystem)}</code> (Compresión <code>${escapeHtml(a.btrfs.compression)}</code>, ahorro ~20-40%)</div>
-          <div><strong>Auditoría Scrub Bit Rot:</strong> <code>${escapeHtml(a.btrfs.scrub_status)}</code> (${escapeHtml(a.btrfs.scrub_errors)})</div>
-          <div><strong>Mantenimiento preventivo:</strong> ${escapeHtml(a.btrfs.schedule)}</div>
+          <div><strong>Estado de volumen:</strong> <span class="badge badge-ok">${a.btrfs.active ? 'Saludable (Btrfs)' : escapeHtml(a.btrfs.filesystem)}</span></div>
+          <div><strong>Compresión transparente:</strong> <code>${escapeHtml(a.btrfs.compression)}</code> (Ahorro 20-40% en disco)</div>
+          <div><strong>Protección Bit Rot:</strong> ${escapeHtml(a.btrfs.scrub_status)} (${escapeHtml(a.btrfs.scrub_errors)})</div>
         </div>
       `;
     }
 
-    // 4. Rsync Multiplataforma
+    // 4. Active Backup & Replicación
     const badgeRsync = document.getElementById('app-badge-rsync');
     const bodyRsync = document.getElementById('app-body-rsync');
     if (badgeRsync) {
-      badgeRsync.className = 'badge badge-blue';
-      badgeRsync.textContent = `● ${a.rsync.tasks_count} ${a.rsync.tasks_count === 1 ? 'Tarea' : 'Tareas'}`;
+      badgeRsync.className = a.rsync.tasks_count > 0 ? 'badge badge-ok' : 'badge badge-blue';
+      badgeRsync.textContent = `● Listo (${a.rsync.tasks_count} ${a.rsync.tasks_count === 1 ? 'tarea' : 'tareas'})`;
     }
     if (bodyRsync) {
       const protoList = (a.rsync.protocols || ['CIFS 3.1.1', 'SSH']).join(', ');
       bodyRsync.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Deduplicación diferencial:</strong> ${escapeHtml(a.rsync.deduplication)}</div>
-          <div><strong>Staging de resiliencia:</strong> <code>${escapeHtml(a.rsync.staging)}</code> (blindaje ante cortes)</div>
+          <div><strong>Estado:</strong> <span class="badge badge-ok">Listo</span> (${a.rsync.tasks_count} tareas configuradas)</div>
+          <div><strong>Deduplicación histórica:</strong> ${escapeHtml(a.rsync.deduplication)}</div>
           <div><strong>Conectores remotos:</strong> ${escapeHtml(protoList)}</div>
         </div>
       `;
     }
 
-    // 5. WSDD2 & NetBIOS
+    // 5. Descubrimiento de Red (WSD)
     const badgeWsdd2 = document.getElementById('app-badge-wsdd2');
     const bodyWsdd2 = document.getElementById('app-body-wsdd2');
     if (badgeWsdd2) {
       badgeWsdd2.className = a.wsdd2.active ? 'badge badge-ok' : 'badge badge-err';
-      badgeWsdd2.textContent = a.wsdd2.active ? '● Activo (WSD LLMNR)' : '○ Inactivo';
+      badgeWsdd2.textContent = a.wsdd2.active ? '● En ejecución' : '○ Detenido';
     }
     if (bodyWsdd2) {
       bodyWsdd2.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
-          <div><strong>Protocolo:</strong> ${escapeHtml(a.wsdd2.protocol)}</div>
+          <div><strong>Estado de red:</strong> ${a.wsdd2.active ? '<span class="badge badge-ok">Visible en red</span>' : '<span class="badge badge-err">No visible</span>'} (WSD / LLMNR)</div>
           <div><strong>Demonios:</strong> WSDD2 ${a.wsdd2.wsdd_active ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Inactivo</span>'} | nmbd ${a.wsdd2.nmbd_active ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Inactivo</span>'}</div>
-          <div><strong>Compatibilidad:</strong> Visibilidad instantánea en Windows 10/11 sin SMBv1 ni broadcasts obsoletos</div>
+          <div><strong>Compatibilidad:</strong> Detección instantánea en explorador de Windows 10/11</div>
         </div>
       `;
     }
 
-    // 6. Seguridad Activa (AIDE & auditd)
+    // 6. Consejero de Seguridad
     const badgeSecurity = document.getElementById('app-badge-security');
     const bodySecurity = document.getElementById('app-body-security');
     if (badgeSecurity) {
       badgeSecurity.className = a.security.active ? 'badge badge-ok' : 'badge badge-warn';
-      badgeSecurity.textContent = a.security.active ? '● Activo (auditd + AIDE)' : '● Parcial';
+      badgeSecurity.textContent = a.security.active ? '● Protegido' : '● Parcial';
     }
     if (bodySecurity) {
       bodySecurity.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
+          <div><strong>Estado del sistema:</strong> ${a.security.active ? '<span class="badge badge-ok">Protegido</span>' : '<span class="badge badge-warn">Parcial</span>'} (Auditoría en tiempo real)</div>
           <div><strong>Auditoría del Kernel:</strong> ${escapeHtml(a.security.audit_rules)}</div>
-          <div><strong>Monitoreo de Integridad:</strong> ${escapeHtml(a.security.fim_status)}</div>
-          <div><strong>Demonios:</strong> auditd ${a.security.auditd_active ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Inactivo</span>'} | AIDE timer ${a.security.aide_active ? '<span class="badge badge-ok">Activo</span>' : '<span class="badge badge-err">Inactivo</span>'}</div>
+          <div><strong>Monitoreo de accesos:</strong> Vigilancia de <code>sudoers</code>, <code>smb.conf</code> y credenciales</div>
         </div>
       `;
     }
