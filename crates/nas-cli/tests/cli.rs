@@ -194,6 +194,7 @@ fn update_apply_sin_pubkey_falla_con_error_claro() {
     let output = nas()
         .args(["update", "apply"])
         .env_remove("NAS_RELEASE_PUBKEY")
+        .env("NAS_RELEASE_PUBKEY_CANDIDATES", "none")
         .output()
         .expect("ejecuta");
 
