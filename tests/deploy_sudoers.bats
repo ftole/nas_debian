@@ -29,8 +29,11 @@ _extraer_bloque_sudoers() {
     else
         run visudo -c -f "$tmp"
     fi
+    local res=$status
+    local out="$output"
     rm -f "$tmp"
-    [ "$status" -eq 0 ]
+    echo "$out"
+    [ "$res" -eq 0 ]
 }
 
 @test "el fragmento sudoers evita patrones que rompen el parser" {
