@@ -6,8 +6,8 @@ use nas_engine::collect_status;
 use nas_exec::Runner;
 use serde::Deserialize;
 
-use crate::AppState;
 use super::common::{require_auth, run_json, server_error};
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct DiagBody {
