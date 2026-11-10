@@ -5,10 +5,10 @@ use nas_core::ApiResponse;
 use nas_exec::Runner;
 use serde::Deserialize;
 
-use crate::AppState;
 use super::common::{
     audit_ip, bad_request, configured_superadmin, forbidden, is_admin, require_auth, server_error,
 };
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct UserBody {
