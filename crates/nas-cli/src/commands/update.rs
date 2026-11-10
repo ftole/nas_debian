@@ -283,6 +283,13 @@ fn resolve_pubkey(specified: Option<&str>) -> NasResult<String> {
         }
         return Ok(trimmed.to_string());
     }
+    if let Ok(candidates_env) = std::env::var("NAS_RELEASE_PUBKEY_CANDIDATES") {
+        if candidates_env == "none" || candidates_env.is_empty() {
+            return Err(NasError::Denied(
+                "clave pública Ed25519 obligatoria para verificar la actualización (--pubkey)".into(),
+            ));
+        }
+    }
     for candidate in [
         "/etc/nas/release.pub",
         "/opt/nas_debian/packaging/release.pub",
