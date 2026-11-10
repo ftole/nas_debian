@@ -171,6 +171,17 @@ if [ -f "$SCRIPT_DIR/60-nas-readahead.rules" ]; then
     udevadm control --reload-rules >/dev/null 2>&1 || true
 fi
 
+if [ -f "$SCRIPT_DIR/nas.rules" ]; then
+    install -d -m 0750 /etc/audit/rules.d
+    install -m 0640 "$SCRIPT_DIR/nas.rules" /etc/audit/rules.d/nas.rules
+    if command -v augenrules >/dev/null 2>&1; then
+        augenrules --load >/dev/null 2>&1 || true
+    fi
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet auditd; then
+        systemctl restart auditd >/dev/null 2>&1 || true
+    fi
+fi
+
 echo "    Instalando tarea diaria de auto-purga de papelera Samba..."
 install -d -m 0755 /etc/cron.daily
 cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'
