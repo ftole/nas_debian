@@ -97,15 +97,18 @@ y publicado por Nginx mediante `proxy_pass http://127.0.0.1:8080`. El workspace 
 
 ```
 crates/
-├── nas-web/        -> Rutas, manejadores, plantillas portadas 1:1 y assets embebidos
-│   ├── templates/  -> layout.html y login.html generados desde layout.php/login.php
-│   └── assets/     -> app.js, CSS, vendor de ofimática y SVG (include_bytes!)
-├── nas-engine/     -> Lógica de sistema (almacenamiento, Samba, respaldos, dominio…)
-├── nas-exec/       -> Ejecutor de comandos con argv tipado, timeouts y redacción
-├── nas-core/       -> Configuración, rutas, errores y contrato de respuesta
-├── nas-cli/        -> Comando `nas`
-├── nas-tui/        -> Asistente `nas-tui` (ratatui)
-└── nasctl/, nas-dev/ -> Multi-host e inspección de entorno
+├── nas-core/         -> Configuración, rutas, roles (`ServerRole`), errores y contratos
+├── nas-exec/         -> Ejecutor de comandos con argv tipado, timeouts y redacción
+├── nas-audit/        -> Bitácora append-only con encadenamiento criptográfico SHA-256
+├── nas-inventory/    -> Inventarios YAML multi-servidor y separación de perfiles
+├── nas-ssh/          -> Transporte OpenSSH con ejecución remota y host keys
+├── nas-engine/       -> Lógica de sistema (almacenamiento, Samba, respaldos, dominio…)
+├── nas-cli/          -> CLI `nas` modularizada en subcomandos (`src/commands/`)
+├── nas-web/          -> Panel web axum modularizado por dominios (`src/routes/`)
+│   ├── templates/    -> layout.html y login.html generados desde layout.php/login.php
+│   └── assets/       -> app.js, CSS, vendor de ofimática y SVG (include_bytes!)
+├── nas-tui/          -> Asistente visual interactivo `nas-tui` (ratatui)
+└── nasctl/, nas-dev/ -> Orquestación multi-host e inspección de entorno
 ```
 
 #### Características del Backend:
