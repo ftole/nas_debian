@@ -135,7 +135,11 @@ sudo apt update && sudo apt install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# 3. Comprobación de versión
+# 3. Enlazar cargo y rustc globalmente a /usr/local/bin
+sudo ln -sf /home/frank/.cargo/bin/cargo /usr/local/bin/cargo
+sudo ln -sf /home/frank/.cargo/bin/rustc /usr/local/bin/rustc
+
+# 4. Comprobación de versión
 rustc --version && cargo --version
 ```
 
@@ -158,6 +162,17 @@ Comprueba que el compilador, las cabeceras del kernel y las bibliotecas C/Rust (
 ```bash
 cd /opt/dev/nas_debian
 cargo check --workspace --all-targets
+```
+
+### Paso 1.4.1: Despliegue Local Rápido de Verificación
+Ejecuta la compilación e instalación del servicio `nas-web` en `/usr/local/bin` y reinicia el servicio. Debe ejecutarse **sin `sudo` al inicio** para compilar con el usuario normal; el script solicita privilegios automáticamente solo al final para copiar los binarios a `/usr/local/bin` y reiniciar el servicio systemd.
+
+**Comandos ejecutados:**
+```bash
+cd /opt/dev/nas_debian
+./scripts/deploy_local.sh
+# O para compilar e instalar todos los binarios:
+./scripts/deploy_local.sh --all
 ```
 
 ### Paso 1.5: Creación de los Árboles de Trabajo Aislados (Git Worktrees)
