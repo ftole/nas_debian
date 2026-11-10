@@ -182,20 +182,26 @@ cd /opt/dev/nas_debian
 cargo check --workspace --all-targets
 ```
 
-### Paso 1.4.1: Aprovisionamiento y Puesta en Marcha del Panel Web
-Tras una limpieza de fábrica o en una instalación nueva, el servicio `nas-web.service` de systemd y la configuración de Nginx aún no existen en el sistema. Para poner en marcha la web por primera vez se realiza el flujo en dos partes:
+### Paso 1.4.1: Instalación Oficial y Puesta en Marcha del Servidor (`install.sh`)
+Una vez clonado el repositorio y configurada la toolchain de Rust tanto para el usuario `frank` como para `root`, se ejecuta el instalador oficial con compilación desde código fuente. Este comando compila todo el workspace, instala los binarios en `/usr/local/bin`, crea el servicio `nas-web.service` en systemd, aprovisiona Nginx con proxy inverso SSL en los puertos 80/443 y arranca el panel web.
 
-1. **Compilar el workspace completo (sin `sudo`):**
-   ```bash
-   cd /opt/dev/nas_debian
-   ./scripts/deploy_local.sh --all
-   ```
-2. **Aprovisionar el servicio systemd, configurar Nginx y arrancar:**
-   ```bash
-   sudo bash packaging/install.sh
-   ```
+**Comandos ejecutados:**
+```bash
+cd /opt/dev/nas_debian
 
-> **Nota:** En el trabajo diario de desarrollo, una vez que el servicio ya fue aprovisionado con `packaging/install.sh`, solo se necesita ejecutar `./scripts/deploy_local.sh` para actualizar los cambios y reiniciar el demonio.
+# 1. Configurar safe.directory para permitir operaciones Git de root sobre el repositorio
+sudo git config --system --add safe.directory "*"
+
+# 2. Ejecutar la instalación oficial desde fuentes
+sudo bash install.sh --build-from-source
+```
+
+**Resultado verificado:**
+* Servicio activo: `systemctl status nas-web` en estado `active (running)`.
+* Proxy web: Nginx escuchando en puertos 80 y 443 con proxy a `127.0.0.1:8080`.
+* Panel web accesible inmediatamente en el navegador: `https://<IP_DEL_SERVIDOR>/`.
+
+> **Nota para desarrollo posterior:** Una vez que el servidor ya tiene la infraestructura instalada con este paso, para actualizar cambios de código futuros durante el desarrollo solo se ejecuta `./scripts/deploy_local.sh`.
 
 ### Paso 1.5: Creación de los Árboles de Trabajo Aislados (Git Worktrees)
 Crea las carpetas de trabajo físicas independientes en `/opt/dev/workspaces/` asociadas a sus respectivas ramas temáticas. Esto permite que múltiples agentes (OpenCode CLI, Antigravity CLI) o desarrolladores trabajen en paralelo sin colisiones ni bloqueos de Git.
@@ -296,3 +302,18 @@ source "$HOME/.cargo/env" 2>/dev/null || true
 source ~/.bashrc 2>/dev/null || true
 opencode --version && kimi --version && cargo --version
 ```
+
+---
+
+## 3. Comprobación y Operación del Servidor en Vivo
+
+Una vez completada la instalación, el servidor se opera y verifica con los siguientes comandos estándar:
+
+| Acción | Comando en la Terminal | Resultado esperado |
+| :--- | :--- | :--- |
+| **Comprobar servicio web** | `sudo systemctl status nas-web --no-pager` | `Active: active (running)` en puerto `127.0.0.1:8080` |
+| **Comprobar Nginx** | `sudo systemctl status nginx --no-pager` | `Active: active (running)` en puertos `80` y `443` |
+| **Ver puertos de red** | `sudo ss -tulpn \| grep -E '80\|443\|8080'` | Nginx y nas-web en estado `LISTEN` |
+| **Ver IP del servidor** | `hostname -I \| awk '{print $1}'` | Muestra la dirección IP para ingresar desde el navegador |
+| **Acceso al Panel Web** | Abrir navegador en `https://<IP>/` | Slate UI 100% interactiva y offline |
+| **Despliegue tras cambios** | `./scripts/deploy_local.sh` | Recompila e instala la nueva versión en 2 segundos |
