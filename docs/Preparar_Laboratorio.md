@@ -148,12 +148,17 @@ sudo apt update && sudo apt install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# 3. Enlazar cargo y rustc globalmente a /usr/local/bin
+# 3. Enlazar cargo, rustc y rustup globalmente a /usr/local/bin
 sudo ln -sf /home/frank/.cargo/bin/cargo /usr/local/bin/cargo
 sudo ln -sf /home/frank/.cargo/bin/rustc /usr/local/bin/rustc
+sudo ln -sf /home/frank/.cargo/bin/rustup /usr/local/bin/rustup
 
-# 4. Comprobación de versión
+# 4. Asignar la toolchain stable por defecto para root (para ejecuciones con sudo)
+sudo rustup default stable
+
+# 5. Comprobación de versión
 rustc --version && cargo --version
+sudo cargo --version
 ```
 
 ### Paso 1.3: Clonar Repositorio Principal y Habilitar Modo Colaborativo Git
