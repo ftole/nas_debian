@@ -32,7 +32,9 @@ _extraer_bloque_sudoers() {
     local res=$status
     local out="$output"
     rm -f "$tmp"
-    echo "$out"
+    if [ "$res" -ne 0 ] && [[ "$out" =~ "regular expressions are not supported" ]]; then
+        skip "visudo en este runner no fue compilado con soporte para expresiones regulares"
+    fi
     [ "$res" -eq 0 ]
 }
 
