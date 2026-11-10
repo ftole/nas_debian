@@ -1584,13 +1584,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <!-- Pestañas de Navegación Slate UI -->
         <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
           <button type="button" class="chip-btn active" id="apps-tab-btn-components" onclick="switchApplicationsTab('components')">
-            <svg class="icon icon-sm"><use href="#icon-apps"></use></svg> Plataforma y Componentes (<span id="apps-count-components">6</span>)
+            <svg class="icon icon-sm"><use href="#icon-apps"></use></svg> Servicios Instalados (<span id="apps-count-components">6</span>)
           </button>
           <button type="button" class="chip-btn" id="apps-tab-btn-updates" onclick="switchApplicationsTab('updates')">
-            <svg class="icon icon-sm"><use href="#icon-download"></use></svg> Repositorio y Actualizaciones
+            <svg class="icon icon-sm"><use href="#icon-download"></use></svg> Actualización del Sistema
           </button>
           <button type="button" class="chip-btn" id="apps-tab-btn-security" onclick="switchApplicationsTab('security')">
-            <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Hardening & Ciberseguridad Kernel
+            <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Seguridad y Diagnóstico Avanzado
           </button>
         </div>
 
@@ -1599,79 +1599,85 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="card-grid-2">
             <div class="panel-card" id="app-card-samba">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Samba 4 & VFS</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-share"></use></svg> Servicio de Archivos (SMB)</h3>
                 <span class="badge badge-gray" id="app-badge-samba">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-samba">Módulos <code>acl_xattr</code> y <code>streams_xattr</code> para prevención de cuellos de botella en Excel/Office con +100 equipos.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+              <div class="panel-card-body" id="app-body-samba">Compartición de archivos en red de alto rendimiento para clientes Windows, Mac y Linux.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="switchView('shares')">
+                  <svg class="icon icon-sm"><use href="#icon-folder"></use></svg> Carpetas Compartidas
+                </button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-view-samba-sessions" onclick="openSambaSessionsModal()">
-                  <svg class="icon icon-sm"><use href="#icon-users"></use></svg> Ver sesiones (<span id="app-samba-session-count">0</span>)
+                  <svg class="icon icon-sm"><use href="#icon-users"></use></svg> Sesiones (<span id="app-samba-session-count">0</span>)
                 </button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-samba" onclick="reloadSambaService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar smbd
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar
                 </button>
               </div>
             </div>
             <div class="panel-card" id="app-card-web">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Nginx-light & nas-web (Rust)</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-globe"></use></svg> File Station & Portal Web</h3>
                 <span class="badge badge-gray" id="app-badge-web">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero Nginx con backend nativo Rust (axum / tokio), consumo ~0 MB RAM en reposo.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+              <div class="panel-card-body" id="app-body-web">Portal administrativo y gestor de archivos web de alto rendimiento.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="switchView('files')">
+                  <svg class="icon icon-sm"><use href="#icon-folder"></use></svg> Abrir Archivos
+                </button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar servicio nas-web
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar
                 </button>
               </div>
             </div>
             <div class="panel-card" id="app-card-btrfs">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>BTRFS con Zstandard</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-storage"></use></svg> Administrador de Almacenamiento</h3>
                 <span class="badge badge-gray" id="app-badge-btrfs">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-btrfs">Compresión transparente Zstd:3, sumas de comprobación criptográficas y auditoría mensual contra Bit Rot.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="switchView('storage')">
-                  <svg class="icon icon-sm"><use href="#icon-storage"></use></svg> Ver almacenamiento
+              <div class="panel-card-body" id="app-body-btrfs">Gestión de volúmenes, integridad de datos y protección contra Bit Rot.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="switchView('storage')">
+                  <svg class="icon icon-sm"><use href="#icon-storage"></use></svg> Administrar Discos
                 </button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-scrub-btrfs" onclick="triggerBtrfsScrub(this)">
-                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Ejecutar Scrub Bit Rot
+                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Comprobar Integridad
                 </button>
               </div>
             </div>
             <div class="panel-card" id="app-card-rsync">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Rsync Multiplataforma</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-backup"></use></svg> Active Backup & Replicación</h3>
                 <span class="badge badge-gray" id="app-badge-rsync">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-rsync">Motor diferencial con preservación de inodos (hardlinks), staging atómico <code>.inprogress_*</code> y CIFS 3.1.1 / SSH.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="switchView('backups')">
-                  <svg class="icon icon-sm"><use href="#icon-backup"></use></svg> Gestionar respaldos
+              <div class="panel-card-body" id="app-body-rsync">Copias diferenciales programadas, snapshots deduplicados y réplicas seguras.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="switchView('backups')">
+                  <svg class="icon icon-sm"><use href="#icon-backup"></use></svg> Abrir Respaldos
                 </button>
               </div>
             </div>
             <div class="panel-card" id="app-card-wsdd2">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>WSDD2 & NetBIOS</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-network"></use></svg> Descubrimiento de Red (WSD)</h3>
                 <span class="badge badge-gray" id="app-badge-wsdd2">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-wsdd2">Descubrimiento nativo de red en Windows 10/11 sin protocolos obsoletos ni broadcasts inseguros.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+              <div class="panel-card-body" id="app-body-wsdd2">Detección automática e instantánea del NAS en el explorador de red de Windows 10/11.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-restart-wsdd" onclick="restartWsddService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar WSDD2
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar servicio
                 </button>
               </div>
             </div>
             <div class="panel-card" id="app-card-security">
               <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>Seguridad Activa (AIDE & auditd)</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Consejero de Seguridad</h3>
                 <span class="badge badge-gray" id="app-badge-security">Consultando...</span>
               </div>
-              <div class="panel-card-body" id="app-body-security">Auditoría en tiempo real del kernel para sudoers, credenciales y monitoreo de integridad criptográfica offline.</div>
-              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
+              <div class="panel-card-body" id="app-body-security">Protección en tiempo real del kernel, auditoría de credenciales y prevención de intrusiones.</div>
+              <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap;">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="switchApplicationsTab('security')">
-                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Ver hardening y auditoría
+                  <svg class="icon icon-sm"><use href="#icon-shield"></use></svg> Ver detalles de seguridad
                 </button>
               </div>
             </div>
