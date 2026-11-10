@@ -140,16 +140,26 @@ git branch -d dev1-mi-tarea
 ```
 
 ### 3.3 Desplegar en vivo en el servidor NAS
-Este es el paso final que **instala el código nuevo en el servidor real**:
+Este es el paso final que **compila e instala el código nuevo en el servidor real**:
+
 ```bash
-sudo ./packaging/install.sh
+# Opción recomendada para desarrollo (rápido, compila y reinicia nas-web):
+sudo ./scripts/deploy_local.sh
+
+# O si modificaste todos los crates del workspace:
+sudo ./scripts/deploy_local.sh --all
 ```
 
-### ¿Qué hace este comando de despliegue?
-1. Compila todo el código nuevo en modo optimizado de producción.
+> [!TIP]
+> **Caché del navegador:** Si modificaste la interfaz web (`app.js`, HTML o CSS), recarga la página en tu navegador con **`Ctrl + Shift + R`** (o **`Ctrl + F5`**) para invalidar la caché HTTP (`max-age=300`) y ver los cambios al instante.
+
+*(Para aprovisionamiento general de infraestructura o actualizar plantillas de Nginx/sudoers, se utiliza `sudo ./packaging/install.sh`).*
+
+### ¿Qué hace `deploy_local.sh`?
+1. Compila el código modificado en modo optimizado de producción (`--release`).
 2. Actualiza los ejecutables en el sistema (`/usr/local/bin/nas-web`, etc.).
-3. Reinicia el servicio web en 2 segundos.
-4. **Listo:** Al abrir `https://10.10.1.222` en el navegador, tu cambio ya está funcionando en vivo.
+3. Reinicia el servicio demonio `nas-web.service` de forma automática.
+4. **Listo:** Al abrir `https://10.10.1.222` (o la IP del servidor) y refrescar la caché, tu cambio ya está funcionando en vivo.
 
 ---
 
@@ -172,5 +182,5 @@ git add <archivo>
 git commit -m "feat: descripcion"
 git push origin dev1-tarea
 git checkout main && git pull && git merge dev1-tarea && git push origin main
-sudo ./packaging/install.sh
+sudo ./scripts/deploy_local.sh
 ```
