@@ -1063,10 +1063,13 @@ function renderBackupsTable() {
           ? 'Cancelada · Lista para ejecutar'
           : (isErr ? 'Error · Reintentar' : 'Pendiente')));
 
-    const taskSize = t.size_formatted || t.task_size_formatted || '0 B';
+    const taskSize = t.full_size_formatted || t.size_formatted || t.task_size_formatted || '0 B';
+    const diskUsage = (t.disk_usage_formatted && t.disk_usage_formatted !== '0 B')
+      ? `Ocupación en disco: ${escapeHtml(t.disk_usage_formatted)}`
+      : null;
     const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
-      ? `Disco: ${escapeHtml(t.disk_used_formatted)} / ${escapeHtml(t.disk_total_formatted)} (${Math.round(t.disk_used_percent || 0)}%)`
-      : (t.disk_summary ? escapeHtml(t.disk_summary) : 'Disco: N/A');
+      ? `Volumen: ${escapeHtml(t.disk_used_formatted)} / ${escapeHtml(t.disk_total_formatted)} (${Math.round(t.disk_used_percent || 0)}%)`
+      : (t.disk_summary ? escapeHtml(t.disk_summary) : 'Volumen: N/A');
 
     return `
     <tr>
@@ -1076,8 +1079,9 @@ function renderBackupsTable() {
       <td>${escapeHtml(t.cron_desc)}</td>
       <td>${t.retention} snapshots</td>
       <td>
-        <div><strong>${escapeHtml(taskSize)}</strong></div>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">
+        <div><strong>${escapeHtml(taskSize)}</strong> <span style="font-size:11px; color:var(--text-muted);">(Respaldo)</span></div>
+        ${diskUsage ? `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${diskUsage}</div>` : ''}
+        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
           ${diskText}
         </div>
       </td>
