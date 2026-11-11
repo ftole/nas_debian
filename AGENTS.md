@@ -323,3 +323,16 @@ sudo nas uninstall
 ls -la /etc/cron.d/backup_*
 tail -f /srv/nas/LOGS_BACKUP/backup_*.log
 ```
+
+
+---
+
+## 7. Gestión de Almacenamiento (`/dashboard#storage`) y Despliegue Seguro
+
+* **No RAID en esta fase:** El "pool" de almacenamiento es un volumen montado (`/srv/nas`, ext4/Btrfs/LVM). No se promete redundancia, hot-spare ni reconstrucción automática. Toda mejora de RAID requiere validación aparte.
+* **Confirmaciones destructivas obligatorias:** Toda operación de formateo/extensión/creación de unidad exige confirmación textual (`SI-FORMATEAR` o `SI-DESTRUIR-DATOS` si hay datos) y mantiene la protección del disco del SO (`is_os_disk`/`protected`). No se puede relajar ni omitir.
+* **Backup previo del binario activo:** Antes de ejecutar `scripts/deploy_local.sh`, copiar `/usr/local/bin/nas-web` a `/usr/local/bin/nas-web.prev`. Si el deploy falla, restaurar desde `.prev` y reiniciar el servicio.
+* **Rollback documentado:** Si `nas-web` no queda `active` tras el deploy o `healthz` falla, restaurar el binario anterior (`.prev`) y reiniciar; no reinstalar con `install.sh` salvo emergencia.
+* **Smoke test post-deploy obligatorio:** Tras cada deploy que toque la web, verificar `systemctl is-active nas-web`, `curl -fsS http://127.0.0.1:8080/healthz` y abrir `/dashboard#storage` (cargar discos, abrir modal, cancelar sin ejecutar).
+* **Paridad de hash:** Todo cambio en `crates/nas-web/assets/js/app.js` o `layout.html` debe regenerar `tests/parity/assets.sha256` con `python3 scripts/parity_extract.py` y commitearse en un commit `ci:` separado y atómico.
+* **No prometer funcionalidades no implementadas:** La UI no debe mostrar opciones de RAID/hot-spare ni acciones destructivas sin confirmación. Los textos de la vista de almacenamiento deben dejar claro que "pool = volumen".
