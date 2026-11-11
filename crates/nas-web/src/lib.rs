@@ -135,6 +135,10 @@ pub fn router(state: AppState) -> Router {
             "/api/storage/extend-pool",
             post(routes::storage_extend_pool),
         )
+        .route(
+            "/api/storage/extend-pool-multi",
+            post(routes::storage_extend_pool_multi),
+        )
         .route("/api/domain", get(routes::domain_status))
         .route("/api/domain/join", post(routes::domain_join))
         .route("/api/domain/leave", post(routes::domain_leave))
