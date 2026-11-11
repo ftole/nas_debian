@@ -533,3 +533,94 @@ pub async fn storage_extend_pool(
     })
     .await
 }
+
+/// Cuerpo para ampliar el pool con varios discos a la vez.
+#[derive(Debug, Deserialize)]
+pub struct StorageMultiBody {
+    #[serde(default)]
+    pub devices: Vec<String>,
+    #[serde(default)]
+    pub confirm: String,
+}
+
+/// Amplía el pool LVM que contiene `/srv/nas` usando varios discos.
+pub async fn storage_extend_pool_multi(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<StorageMultiBody>,
+) -> Response {
+    let actor = match require_auth(&state, &headers) {
+        Ok(user) => user,
+        Err(response) => return *response,
+    };
+    if !is_admin(&state, &actor) {
+        return forbidden("se requieren privilegios de administrador");
+    }
+
+    let devices = body.devices.clone();
+    let confirm = body.confirm.clone();
+    let target = devices.join(", ");
+    let outcome = tokio::task::spawn_blocking(move || {
+        let runner = Runner::new();
+        let mut results: Vec<serde_json::Value> = Vec::new();
+        let mut failed = false;
+        for device in &devices {
+            match nas_engine::storage_ops::extend_pool(&runner, device, &confirm) {
+                Ok(message) => results.push(serde_json::json!({
+                    "device": device,
+                    "success": true,
+                    "message": message,
+                })),
+                Err(error) => {
+                    failed = true;
+                    results.push(serde_json::json!({
+                        "device": device,
+                        "success": false,
+                        "message": error,
+                    }));
+                    break;
+                }
+            }
+        }
+        Ok::<_, String>((results, failed))
+    })
+    .await
+    .unwrap_or_else(|_| Err("operación interrumpida".to_string()));
+
+    match outcome {
+        Ok((results, failed)) => {
+            let status = if failed { "FAILED" } else { "SUCCESS" };
+            audit_storage(
+                &state,
+                &headers,
+                &actor,
+                "storage_extend_pool_multi",
+                &target,
+                status,
+                &format!("{:?}", results),
+            );
+            let message = if failed {
+                "Ampliación parcial: revisa los resultados por disco."
+            } else {
+                "Pool ampliado correctamente con todos los discos seleccionados."
+            };
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "message": message, "results": results, "failed": failed }),
+                message,
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            audit_storage(
+                &state,
+                &headers,
+                &actor,
+                "storage_extend_pool_multi",
+                &target,
+                "FAILED",
+                &error,
+            );
+            error_response(NasError::Invalid(error))
+        }
+    }
+}
