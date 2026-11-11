@@ -630,7 +630,8 @@
         </div>
 
         <details style="margin-bottom:20px;">
-          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Mantenimiento (avanzado)</summary>
+          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Mantenimiento (opcional)</summary>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">Verifica el disco y libera espacio en SSD. No suele ser necesario usarlo a diario.</p>
           <div style="display:flex; gap:8px; margin-bottom:10px;">
             <button class="btn btn-secondary btn-sm" id="btn-scrub-storage" onclick="runStorageScrub()">
               <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
@@ -675,7 +676,8 @@
         </details>
 
         <details style="margin-bottom:20px;">
-          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Avanzado (discos, unidades, subvolúmenes)</summary>
+          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Detalles técnicos (opcional)</summary>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">Lista de discos y unidades. Solo para usuarios avanzados. Los discos del sistema operativo no se muestran.</p>
         <!-- Unidades y Volúmenes Montados -->
         <div class="panel-card" style="margin-bottom:20px;">
           <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
