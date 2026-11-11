@@ -2370,6 +2370,138 @@ async function openStorageManage(preselectedDevice = null) {
   }
 }
 
+let _createPoolSelected = [];
+let _createPoolDisks = [];
+
+function createPoolNext(step) {
+  const steps = document.querySelectorAll('.cp-step');
+  steps.forEach((el, idx) => { el.style.display = (idx + 1 === step) ? '' : 'none'; });
+  const inds = document.querySelectorAll('[id^="cp-step-ind-"]');
+  inds.forEach((ind, idx) => {
+    const i = idx + 1;
+    ind.className = i === step ? 'badge badge-primary' : (i < step ? 'badge badge-ok' : 'badge badge-gray');
+  });
+  if (step === 2) {
+    loadCreatePoolDisks();
+  }
+  if (step === 3) {
+    const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
+    const ext = document.getElementById('cp-options-extend');
+    const cre = document.getElementById('cp-options-create');
+    if (ext) ext.style.display = action === 'extend' ? '' : 'none';
+    if (cre) cre.style.display = action === 'create' ? '' : 'none';
+  }
+  if (step === 4) {
+    renderCreatePoolSummary();
+  }
+}
+
+async function loadCreatePoolDisks() {
+  const container = document.getElementById('cp-disks-list');
+  if (!container) return;
+  container.innerHTML = 'Cargando discos...';
+  try {
+    const res = await apiFetch('/api/storage/disks', { silentToast: true });
+    const disks = res.data?.disks || res.disks || [];
+    _createPoolDisks = disks.filter(d => !d.protected);
+    container.innerHTML = _createPoolDisks.map(d => {
+      const dev = d.device || ('/dev/' + d.name);
+      const size = d.size || '';
+      const disabled = d.in_use ? 'disabled' : '';
+      const label = d.in_use ? ' (en uso)' : '';
+      return `<label style="display:block; padding:6px; border-bottom:1px solid var(--border-color);">
+        <input type="checkbox" class="cp-disk-check" value="${escapeHtml(dev)}" data-size="${escapeHtml(size)}" ${disabled} onchange="updateCreatePoolCapacity()">
+        <strong>${escapeHtml(dev)}</strong> — ${escapeHtml(size)} ${escapeHtml(d.model || '')}${label}
+      </label>`;
+    }).join('') || '<div style="color:var(--text-muted);">No hay discos disponibles.</div>';
+    updateCreatePoolCapacity();
+  } catch (e) {
+    container.innerHTML = `<div style="color:var(--accent-danger);">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function updateCreatePoolCapacity() {
+  const checks = document.querySelectorAll('.cp-disk-check:checked');
+  let total = 0;
+  checks.forEach(c => {
+    const sizeStr = c.getAttribute('data-size') || '';
+    const num = parseFloat(sizeStr);
+    if (!isNaN(num)) total += num;
+  });
+  const el = document.getElementById('cp-selected-capacity');
+  if (el) el.textContent = total ? total.toFixed(1) + ' GB (aprox.)' : '0 GB';
+  _createPoolSelected = Array.from(checks).map(c => c.value);
+}
+
+function renderCreatePoolSummary() {
+  const summary = document.getElementById('cp-summary');
+  if (!summary) return;
+  const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
+  const selected = _createPoolSelected || [];
+  if (action === 'extend') {
+    summary.innerHTML = `<strong>Ampliar espacio principal</strong><br>Se añadirán ${selected.length} disco(s) al pool /srv/nas: ${selected.map(escapeHtml).join(', ')}.`;
+  } else {
+    const id = document.getElementById('cp-unit-id')?.value || 'disco2';
+    const fs = document.getElementById('cp-fstype')?.value || 'ext4';
+    summary.innerHTML = `<strong>Crear espacio nuevo</strong><br>Se creará la unidad "${escapeHtml(id)}" (${escapeHtml(fs)}) con ${selected.length} disco(s): ${selected.map(escapeHtml).join(', ')}.`;
+  }
+}
+
+async function submitCreatePool() {
+  const confirmVal = document.getElementById('cp-confirm')?.value || '';
+  if (confirmVal !== 'SI-FORMATEAR') {
+    showToast('Escribe SI-FORMATEAR para confirmar.', 'error');
+    return;
+  }
+  const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
+  const selected = _createPoolSelected || [];
+  if (selected.length === 0) {
+    showToast('Selecciona al menos un disco.', 'error');
+    return;
+  }
+  const btn = document.getElementById('btn-cp-apply');
+  if (btn) { btn.disabled = true; btn.textContent = 'Aplicando...'; }
+  try {
+    if (action === 'extend') {
+      const res = await apiFetch('/api/storage/extend-pool-multi', {
+        method: 'POST',
+        body: JSON.stringify({ devices: selected, confirm: confirmVal }),
+      });
+      const data = res.data || res;
+      if (data.failed) {
+        showToast('Ampliación parcial. Revisa resultados.', 'warning');
+      } else {
+        showToast('Pool ampliado correctamente.', 'success');
+      }
+    } else {
+      const id = document.getElementById('cp-unit-id')?.value || 'disco2';
+      const fs = document.getElementById('cp-fstype')?.value || 'ext4';
+      for (const dev of selected) {
+        await apiFetch('/api/storage/add-unit', {
+          method: 'POST',
+          body: JSON.stringify({ device: dev, unit_id: id, fstype: fs, confirm: confirmVal }),
+        });
+      }
+      showToast('Espacio(s) creado(s) correctamente.', 'success');
+    }
+    closeModal('modal-create-pool');
+    loadStorage();
+    loadStorageUnits();
+  } catch (e) {
+    showToast(e.message || 'Error al aplicar cambios.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Aplicar'; }
+  }
+}
+
+function openCreatePoolWizard() {
+  openModal('modal-create-pool');
+  createPoolNext(1);
+  const checks = document.querySelectorAll('.cp-disk-check');
+  checks.forEach(c => c.checked = false);
+  updateCreatePoolCapacity();
+}
+
 function openFormatDisk(dev) {
   openStorageManage(dev);
 }
@@ -8268,6 +8400,10 @@ window.toggleTheme = toggleTheme;
 
 // Almacenamiento
 window.openStorageManage = openStorageManage;
+window.openCreatePoolWizard = openCreatePoolWizard;
+window.createPoolNext = createPoolNext;
+window.updateCreatePoolCapacity = updateCreatePoolCapacity;
+window.submitCreatePool = submitCreatePool;
 window.storageWizardNext = storageWizardNext;
 window.openFormatDisk = openFormatDisk;
 window.runStorageScrub = runStorageScrub;
