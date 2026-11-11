@@ -11,6 +11,19 @@
 * **Host:** `nasdeb`.
 * **Estado inicial:** Servidor con pruebas previas que se restablece a estado base limpio.
 
+### Regla Crítica: Instalador Oficial (`install.sh`) vs Despliegue de Desarrollo (`deploy_local.sh`)
+
+> [!WARNING]
+> **NUNCA ejecutes `./scripts/deploy_local.sh` en un servidor virgen.**  
+> `deploy_local.sh` NO instala infraestructura (no instala paquetes del sistema, ni Nginx, ni Samba, ni el servicio systemd, ni variables de entorno). Su único propósito es **recompilar binarios durante el desarrollo en un servidor que YA TIENE la plataforma instalada**.
+
+| Escenario | Comando Oficial | ¿Qué hace? |
+| :--- | :--- | :--- |
+| **Servidor limpio (recién instalado Debian)** | `curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh \| sudo bash` | **Instalador Oficial 1-Paso:** Instala dependencias con apt, descarga release oficial precompilado, crea el servicio systemd, Nginx y arranca la web en 30 segundos. |
+| **Servidor limpio (compilando desde código)** | `git clone ... && cd nas_debian && sudo bash install.sh --build-from-source` | Instala dependencias apt, instala toolchain de Rust, compila todo el workspace y aprovisiona el servicio. |
+| **Servidor tras reseteo / fábrica** | `cd /opt/dev/nas_debian && ./scripts/deploy_local.sh --all && sudo bash packaging/install.sh` | Compila los binarios y aprovisiona el servicio systemd y proxy Nginx. |
+| **Desarrollo diario (código ya modificado)** | `./scripts/deploy_local.sh` | Solo recompila el binario modificado, lo copia a `/usr/local/bin` y reinicia el servicio activo en 2 segundos. |
+
 ---
 
 ## FASE 0: Restauración del Sistema a Estado Base ("De Fábrica")
@@ -135,8 +148,17 @@ sudo apt update && sudo apt install -y \
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# 3. Comprobación de versión
+# 3. Enlazar cargo, rustc y rustup globalmente a /usr/local/bin
+sudo ln -sf /home/frank/.cargo/bin/cargo /usr/local/bin/cargo
+sudo ln -sf /home/frank/.cargo/bin/rustc /usr/local/bin/rustc
+sudo ln -sf /home/frank/.cargo/bin/rustup /usr/local/bin/rustup
+
+# 4. Asignar la toolchain stable por defecto para root (para ejecuciones con sudo)
+sudo rustup default stable
+
+# 5. Comprobación de versión
 rustc --version && cargo --version
+sudo cargo --version
 ```
 
 ### Paso 1.3: Clonar Repositorio Principal y Habilitar Modo Colaborativo Git
@@ -159,6 +181,27 @@ Comprueba que el compilador, las cabeceras del kernel y las bibliotecas C/Rust (
 cd /opt/dev/nas_debian
 cargo check --workspace --all-targets
 ```
+
+### Paso 1.4.1: Instalación Oficial y Puesta en Marcha del Servidor (`install.sh`)
+Una vez clonado el repositorio y configurada la toolchain de Rust tanto para el usuario `frank` como para `root`, se ejecuta el instalador oficial con compilación desde código fuente. Este comando compila todo el workspace, instala los binarios en `/usr/local/bin`, crea el servicio `nas-web.service` en systemd, aprovisiona Nginx con proxy inverso SSL en los puertos 80/443 y arranca el panel web.
+
+**Comandos ejecutados:**
+```bash
+cd /opt/dev/nas_debian
+
+# 1. Configurar safe.directory para permitir operaciones Git de root sobre el repositorio
+sudo git config --system --add safe.directory "*"
+
+# 2. Ejecutar la instalación oficial desde fuentes
+sudo bash install.sh --build-from-source
+```
+
+**Resultado verificado:**
+* Servicio activo: `systemctl status nas-web` en estado `active (running)`.
+* Proxy web: Nginx escuchando en puertos 80 y 443 con proxy a `127.0.0.1:8080`.
+* Panel web accesible inmediatamente en el navegador: `https://<IP_DEL_SERVIDOR>/`.
+
+> **Nota para desarrollo posterior:** Una vez que el servidor ya tiene la infraestructura instalada con este paso, para actualizar cambios de código futuros durante el desarrollo solo se ejecuta `./scripts/deploy_local.sh`.
 
 ### Paso 1.5: Creación de los Árboles de Trabajo Aislados (Git Worktrees)
 Crea las carpetas de trabajo físicas independientes en `/opt/dev/workspaces/` asociadas a sus respectivas ramas temáticas. Esto permite que múltiples agentes (OpenCode CLI, Antigravity CLI) o desarrolladores trabajen en paralelo sin colisiones ni bloqueos de Git.
@@ -259,3 +302,18 @@ source "$HOME/.cargo/env" 2>/dev/null || true
 source ~/.bashrc 2>/dev/null || true
 opencode --version && kimi --version && cargo --version
 ```
+
+---
+
+## 3. Comprobación y Operación del Servidor en Vivo
+
+Una vez completada la instalación, el servidor se opera y verifica con los siguientes comandos estándar:
+
+| Acción | Comando en la Terminal | Resultado esperado |
+| :--- | :--- | :--- |
+| **Comprobar servicio web** | `sudo systemctl status nas-web --no-pager` | `Active: active (running)` en puerto `127.0.0.1:8080` |
+| **Comprobar Nginx** | `sudo systemctl status nginx --no-pager` | `Active: active (running)` en puertos `80` y `443` |
+| **Ver puertos de red** | `sudo ss -tulpn \| grep -E '80\|443\|8080'` | Nginx y nas-web en estado `LISTEN` |
+| **Ver IP del servidor** | `hostname -I \| awk '{print $1}'` | Muestra la dirección IP para ingresar desde el navegador |
+| **Acceso al Panel Web** | Abrir navegador en `https://<IP>/` | Slate UI 100% interactiva y offline |
+| **Despliegue tras cambios** | `./scripts/deploy_local.sh` | Recompila e instala la nueva versión en 2 segundos |

@@ -113,12 +113,19 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
         build-essential pkg-config acl openssl btrfs-progs lvm2 samba samba-vfs-modules cifs-utils rsync \
         nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
 
-    if ! command -v cargo >/dev/null 2>&1; then
-        echo -e "  Instalando toolchain de Rust..."
-        curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
-        sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable >/dev/null 2>&1
-        rm -f /tmp/rustup-init.sh
-        export PATH="$CARGO_HOME/bin:$PATH"
+    if ! cargo --version >/dev/null 2>&1; then
+        if [ -n "${SUDO_USER:-}" ] && [ -d "/home/$SUDO_USER/.rustup" ]; then
+            ln -sf "/home/$SUDO_USER/.rustup" /root/.rustup 2>/dev/null || true
+            ln -sf "/home/$SUDO_USER/.cargo" /root/.cargo 2>/dev/null || true
+            export PATH="/root/.cargo/bin:$PATH"
+        fi
+        if ! cargo --version >/dev/null 2>&1; then
+            echo -e "  Instalando toolchain de Rust..."
+            curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable >/dev/null 2>&1
+            rm -f /tmp/rustup-init.sh
+            export PATH="$CARGO_HOME/bin:$PATH"
+        fi
     fi
     cargo --version
 

@@ -144,16 +144,26 @@ Este es el paso final que **compila e instala el código nuevo en el servidor re
 
 ```bash
 # Opción recomendada para desarrollo (rápido, compila y reinicia nas-web):
-sudo ./scripts/deploy_local.sh
+# Ejecútalo como usuario normal (sin sudo al inicio; el script pedirá sudo solo para instalar):
+./scripts/deploy_local.sh
 
 # O si modificaste todos los crates del workspace:
-sudo ./scripts/deploy_local.sh --all
+./scripts/deploy_local.sh --all
 ```
+
+### Regla de Oro: ¿Cuándo usar `install.sh` y cuándo `deploy_local.sh`?
+
+> [!WARNING]
+> * **En un servidor nuevo (virgen, recién instalado Debian):**  
+>   **NUNCA uses `deploy_local.sh`**. Ese script no instala paquetes apt, ni Samba, ni Nginx, ni el servicio systemd.  
+>   Usa el instalador oficial:  
+>   `curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`  
+>   *(o `sudo bash install.sh --build-from-source` si quieres compilarlo desde código).*
+> * **En el servidor de desarrollo activo (cuando ya está funcionando):**  
+>   Usa **`./scripts/deploy_local.sh`** cada vez que modifiques código para recompilar y reiniciar el servicio en 2 segundos.
 
 > [!TIP]
 > **Caché del navegador:** Si modificaste la interfaz web (`app.js`, HTML o CSS), recarga la página en tu navegador con **`Ctrl + Shift + R`** (o **`Ctrl + F5`**) para invalidar la caché HTTP (`max-age=300`) y ver los cambios al instante.
-
-*(Para aprovisionamiento general de infraestructura o actualizar plantillas de Nginx/sudoers, se utiliza `sudo ./packaging/install.sh`).*
 
 ### ¿Qué hace `deploy_local.sh`?
 1. Compila el código modificado en modo optimizado de producción (`--release`).
@@ -182,5 +192,5 @@ git add <archivo>
 git commit -m "feat: descripcion"
 git push origin dev1-tarea
 git checkout main && git pull && git merge dev1-tarea && git push origin main
-sudo ./scripts/deploy_local.sh
+./scripts/deploy_local.sh
 ```
