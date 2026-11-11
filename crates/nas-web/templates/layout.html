@@ -619,6 +619,19 @@
           </div>
         </div>
 
+        <!-- Pools y volúmenes (estilo Synology) -->
+        <div class="panel-card" style="margin-bottom:20px;" id="stg-pools-card">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Pools y volúmenes de almacenamiento</h3>
+            <span class="text-muted" style="font-size:12px;">Pool = volumen montado (ext4/Btrfs/LVM). Sin RAID en esta fase.</span>
+          </div>
+          <div class="panel-card-body">
+            <div id="storage-pools-grid" class="card-grid-2">
+              <div style="text-align:center; color:var(--text-muted); padding:12px;">Cargando pools y volúmenes...</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tarjetas de Mantenimiento Inteligente (BTRFS Scrub & SSD TRIM) -->
         <div class="card-grid-2" style="margin-bottom:20px;">
           <div class="panel-card">
@@ -2296,7 +2309,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
           <span>Operación de almacenamiento. El disco del sistema operativo está protegido y no se lista. Si el disco contiene datos existentes, se requerirá escribir <code>SI-DESTRUIR-DATOS</code>. Si el disco o <code>/srv/nas</code> está montado, se solicitará confirmación previa.</span>
         </div>
+        <div style="display:flex; gap:8px; margin-bottom:12px; font-size:12px;">
+          <span id="stg-step-ind-1" class="badge badge-primary">1. Operación</span>
+          <span id="stg-step-ind-2" class="badge badge-gray">2. Disco y opciones</span>
+          <span id="stg-step-ind-3" class="badge badge-gray">3. Confirmación</span>
+        </div>
         <form id="form-storage-manage" onsubmit="submitStorageManage(event)">
+          <div id="stg-step-1" class="storage-wizard-step">
           <div class="form-group">
             <label for="stg-op">Operación:</label>
             <select id="stg-op" onchange="toggleStorageOp()">
@@ -2307,6 +2326,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <option value="subvolume">Crear subvolumen Btrfs</option>
             </select>
           </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="storageWizardNext(2)">Siguiente</button>
+          </div>
+          </div>
+          <div id="stg-step-2" class="storage-wizard-step" style="display:none;">
           <div class="form-group">
             <label for="stg-device">Disco / partición (/dev/...):</label>
             <select id="stg-device" onchange="onStorageDeviceChange()"></select>
@@ -2336,14 +2360,24 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <label for="stg-subvol">Nombre del subvolumen:</label>
             <input type="text" id="stg-subvol" value="datos" pattern="[a-zA-Z0-9_\-\.]+">
           </div>
+          <div style="display:flex; justify-content:space-between; margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="storageWizardNext(1)">Atrás</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="storageWizardNext(3)">Siguiente</button>
+          </div>
+          </div>
+          <div id="stg-step-3" class="storage-wizard-step" style="display:none;">
           <div class="form-group">
             <label for="stg-confirm" id="stg-confirm-label">Confirmación (escribe SI-FORMATEAR):</label>
             <input type="text" id="stg-confirm" placeholder="SI-FORMATEAR" autocomplete="off">
             <small id="stg-confirm-hint" style="display:block; color:var(--text-muted); margin-top:4px;"></small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-manage')">Cancelar</button>
-            <button type="submit" class="btn btn-danger" id="btn-submit-storage">Ejecutar</button>
+          <div style="display:flex; justify-content:space-between; margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="storageWizardNext(2)">Atrás</button>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-manage')">Cancelar</button>
+              <button type="submit" class="btn btn-danger" id="btn-submit-storage">Ejecutar</button>
+            </div>
+          </div>
           </div>
         </form>
       </div>

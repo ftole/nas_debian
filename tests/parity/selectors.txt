@@ -21,9 +21,11 @@
 .role-card
 .sidebar
 .sidebar-nav .nav-item
+.storage-wizard-step
 .user-groups-extra
 .view-section
 [data-view=
+[id^=
 button[type=
 form
 input[name=
@@ -355,6 +357,7 @@ stg-unit-id
 stg-unit-wrap
 stg-vg
 storage-disks-body
+storage-pools-grid
 storage-subvols-body
 storage-units-body
 system-banners

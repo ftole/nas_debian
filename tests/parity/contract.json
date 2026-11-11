@@ -1148,6 +1148,7 @@
       "stg-unit-wrap",
       "stg-vg",
       "storage-disks-body",
+      "storage-pools-grid",
       "storage-subvols-body",
       "storage-units-body",
       "system-banners",
@@ -1231,9 +1232,11 @@
       ".role-card",
       ".sidebar",
       ".sidebar-nav .nav-item",
+      ".storage-wizard-step",
       ".user-groups-extra",
       ".view-section",
       "[data-view=",
+      "[id^=",
       "button[type=",
       "form",
       "input[name=",
@@ -1369,8 +1372,8 @@
   "counts": {
     "layout_ids": 547,
     "layout_classes": 159,
-    "app_ids": 382,
-    "app_selectors": 33,
+    "app_ids": 383,
+    "app_selectors": 35,
     "app_endpoints": 77,
     "inline_handlers": 42
   }
