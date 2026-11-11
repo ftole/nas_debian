@@ -8,6 +8,9 @@
 #users-filter-chips .chip-btn
 #users-table-body tr[data-username]
 .btn-secondary
+.cp-disk-check
+.cp-disk-check:checked
+.cp-step
 .file-card.selected
 .member-name
 .modal-backdrop, .modal-overlay
@@ -79,6 +82,7 @@ btn-confirm-stop-backup
 btn-confirm-trim-ssd
 btn-confirm-unmount-storage
 btn-confirm-zip-download
+btn-cp-apply
 btn-discover-domain
 btn-download-zip
 btn-folder-up
@@ -137,6 +141,14 @@ confirm-stop-backup-elapsed
 confirm-stop-backup-id
 confirm-stop-backup-progress
 confirm-stop-backup-speed
+cp-confirm
+cp-disks-list
+cp-fstype
+cp-options-create
+cp-options-extend
+cp-selected-capacity
+cp-summary
+cp-unit-id
 dashboard-activity-feed
 del-mode-permanent
 del-mode-trash

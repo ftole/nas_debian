@@ -51,6 +51,7 @@
 /api/storage/add-unit
 /api/storage/disks
 /api/storage/extend-pool
+/api/storage/extend-pool-multi
 /api/storage/format
 /api/storage/inspect
 /api/storage/lvm

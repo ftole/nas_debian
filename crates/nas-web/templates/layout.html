@@ -556,21 +556,18 @@
       <section id="view-storage" class="view-section %%active_storage%%">
         <div class="page-head">
           <div>
-            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Almacenamiento y discos físicos</h2>
-            <p>Monitoreo de particiones, unidades montadas, subvolúmenes Btrfs y mantenimiento de integridad</p>
+            <h2><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-hard-drive"></use></svg> Almacenamiento</h2>
+            <p>Gestiona el espacio donde se guardan los archivos. Pool = espacio de almacenamiento (sin RAID en esta fase).</p>
           </div>
           <div class="page-head-actions">
             <button class="btn btn-secondary" id="btn-refresh-storage" onclick="loadStorage()">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Refrescar
             </button>
-            <button class="btn btn-primary" id="btn-format-disk" onclick="openStorageManage()">
-              <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión de disco
+            <button class="btn btn-primary" id="btn-create-pool" onclick="openCreatePoolWizard()">
+              <svg class="icon"><use href="#icon-plus"></use></svg> Crear o ampliar espacio
             </button>
-            <button class="btn btn-secondary" id="btn-scrub-storage" onclick="runStorageScrub()">
-              <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
-            </button>
-            <button class="btn btn-secondary" id="btn-trim-storage" onclick="runStorageTrim()">
-              <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar TRIM SSD
+            <button class="btn btn-secondary" id="btn-format-disk" onclick="openStorageManage()">
+              <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión avanzada
             </button>
           </div>
         </div>
@@ -632,6 +629,16 @@
           </div>
         </div>
 
+        <details style="margin-bottom:20px;">
+          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Mantenimiento (avanzado)</summary>
+          <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <button class="btn btn-secondary btn-sm" id="btn-scrub-storage" onclick="runStorageScrub()">
+              <svg class="icon"><use href="#icon-shield"></use></svg> Iniciar Scrub BTRFS
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-trim-storage" onclick="runStorageTrim()">
+              <svg class="icon"><use href="#icon-wrench"></use></svg> Ejecutar TRIM SSD
+            </button>
+          </div>
         <!-- Tarjetas de Mantenimiento Inteligente (BTRFS Scrub & SSD TRIM) -->
         <div class="card-grid-2" style="margin-bottom:20px;">
           <div class="panel-card">
@@ -665,6 +672,10 @@
           </div>
         </div>
 
+        </details>
+
+        <details style="margin-bottom:20px;">
+          <summary style="cursor:pointer; font-weight:600; margin-bottom:10px;">Avanzado (discos, unidades, subvolúmenes)</summary>
         <!-- Unidades y Volúmenes Montados -->
         <div class="panel-card" style="margin-bottom:20px;">
           <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
@@ -738,6 +749,7 @@
             </table>
           </div>
         </div>
+        </details>
       </section>
 <!--ENDIF-->
 
@@ -2380,6 +2392,83 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </div>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Crear o ampliar espacio (multi-disco) -->
+  <div class="modal-backdrop modal-static" id="modal-create-pool">
+    <div class="modal-dialog" style="max-width:720px;">
+      <div class="modal-header">
+        <h3>Crear o ampliar espacio</h3>
+        <button class="modal-close" onclick="closeModal('modal-create-pool')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex; gap:8px; margin-bottom:12px; font-size:12px;">
+          <span id="cp-step-ind-1" class="badge badge-primary">1. Acción</span>
+          <span id="cp-step-ind-2" class="badge badge-gray">2. Discos</span>
+          <span id="cp-step-ind-3" class="badge badge-gray">3. Opciones</span>
+          <span id="cp-step-ind-4" class="badge badge-gray">4. Confirmar</span>
+        </div>
+
+        <div id="cp-step-1" class="cp-step">
+          <p style="font-size:13px; color:var(--text-secondary);">Elige qué quieres hacer con el espacio de almacenamiento.</p>
+          <div class="form-group">
+            <label><input type="radio" name="cp-action" value="extend" checked> Ampliar el espacio principal (sumar discos a /srv/nas)</label>
+          </div>
+          <div class="form-group">
+            <label><input type="radio" name="cp-action" value="create"> Crear un espacio nuevo e independiente</label>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="createPoolNext(2)">Siguiente</button>
+          </div>
+        </div>
+
+        <div id="cp-step-2" class="cp-step" style="display:none;">
+          <p style="font-size:13px; color:var(--text-secondary);">Selecciona los discos que quieres usar. Los discos del sistema o en uso no se pueden seleccionar.</p>
+          <div id="cp-disks-list" style="max-height:260px; overflow:auto; border:1px solid var(--border-color); border-radius:6px; padding:8px;"></div>
+          <div style="margin-top:10px; font-weight:600;">Capacidad seleccionada: <span id="cp-selected-capacity">0 GB</span></div>
+          <div style="display:flex; justify-content:space-between; margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="createPoolNext(1)">Atrás</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="createPoolNext(3)">Siguiente</button>
+          </div>
+        </div>
+
+        <div id="cp-step-3" class="cp-step" style="display:none;">
+          <div id="cp-options-extend" style="display:none;">
+            <p style="font-size:13px; color:var(--text-secondary);">Se añadirá el espacio de los discos seleccionados al pool principal. Esta operación no borra datos existentes.</p>
+          </div>
+          <div id="cp-options-create" style="display:none;">
+            <div class="form-group">
+              <label for="cp-unit-id">Nombre del espacio (ej. disco2, multimedia):</label>
+              <input type="text" id="cp-unit-id" placeholder="disco2" pattern="[a-zA-Z0-9_\-]+" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label for="cp-fstype">Sistema de archivos:</label>
+              <select id="cp-fstype"><option value="ext4">ext4</option><option value="btrfs">Btrfs</option></select>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="createPoolNext(2)">Atrás</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="createPoolNext(4)">Siguiente</button>
+          </div>
+        </div>
+
+        <div id="cp-step-4" class="cp-step" style="display:none;">
+          <div id="cp-summary" style="background:var(--bg-body); padding:10px; border-radius:6px; font-size:13px; margin-bottom:10px;"></div>
+          <div class="form-group">
+            <label for="cp-confirm">Confirmación (escribe SI-FORMATEAR):</label>
+            <input type="text" id="cp-confirm" placeholder="SI-FORMATEAR" autocomplete="off">
+            <small style="display:block; color:var(--text-muted); margin-top:4px;">Esta acción puede borrar datos del disco seleccionado.</small>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:12px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="createPoolNext(3)">Atrás</button>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal('modal-create-pool')">Cancelar</button>
+              <button type="button" class="btn btn-danger" id="btn-cp-apply" onclick="submitCreatePool()">Aplicar</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

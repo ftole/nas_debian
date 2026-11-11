@@ -870,6 +870,7 @@
       "btn-confirm-trim-ssd",
       "btn-confirm-unmount-storage",
       "btn-confirm-zip-download",
+      "btn-cp-apply",
       "btn-discover-domain",
       "btn-download-zip",
       "btn-folder-up",
@@ -928,6 +929,14 @@
       "confirm-stop-backup-id",
       "confirm-stop-backup-progress",
       "confirm-stop-backup-speed",
+      "cp-confirm",
+      "cp-disks-list",
+      "cp-fstype",
+      "cp-options-create",
+      "cp-options-extend",
+      "cp-selected-capacity",
+      "cp-summary",
+      "cp-unit-id",
       "dashboard-activity-feed",
       "del-mode-permanent",
       "del-mode-trash",
@@ -1219,6 +1228,9 @@
       "#users-filter-chips .chip-btn",
       "#users-table-body tr[data-username]",
       ".btn-secondary",
+      ".cp-disk-check",
+      ".cp-disk-check:checked",
+      ".cp-step",
       ".file-card.selected",
       ".member-name",
       ".modal-backdrop, .modal-overlay",
@@ -1299,6 +1311,7 @@
       "/api/storage/add-unit",
       "/api/storage/disks",
       "/api/storage/extend-pool",
+      "/api/storage/extend-pool-multi",
       "/api/storage/format",
       "/api/storage/inspect",
       "/api/storage/lvm",
@@ -1365,6 +1378,7 @@
       "stopService",
       "toggleUser",
       "toggleUserGroupsExpand",
+      "updateCreatePoolCapacity",
       "updateEffectiveAccessPreview",
       "viewBackupLogs"
     ]
@@ -1372,9 +1386,9 @@
   "counts": {
     "layout_ids": 547,
     "layout_classes": 159,
-    "app_ids": 383,
-    "app_selectors": 35,
-    "app_endpoints": 77,
-    "inline_handlers": 42
+    "app_ids": 392,
+    "app_selectors": 38,
+    "app_endpoints": 78,
+    "inline_handlers": 43
   }
 }
