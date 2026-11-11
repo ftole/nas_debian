@@ -1962,12 +1962,15 @@ async function loadStorage() {
     loadStorageUnits();
     loadStorageSubvolumes(overview);
 
-    if (disks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No se detectaron discos de bloque adicionales.</td></tr>';
+    // Ocultar discos protegidos por el sistema operativo
+    const visibleDisks = disks.filter(d => !d.protected);
+
+    if (visibleDisks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay discos de datos disponibles (los discos del sistema operativo están ocultos).</td></tr>';
       return;
     }
 
-    tbody.innerHTML = disks.map(d => {
+    tbody.innerHTML = visibleDisks.map(d => {
       const devPath = d.device || ('/dev/' + d.name);
       const isPart = d.type === 'part';
       const nameHtml = isPart
