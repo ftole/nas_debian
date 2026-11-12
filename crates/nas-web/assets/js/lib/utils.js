@@ -29,23 +29,6 @@ function cleanErrorMessage(raw) {
   // Quitar prefijo de error interno si existe
   str = str.replace(/^operación denegada:\s*/i, '');
 
-  // Mapear errores comunes de CIFS/mount a descripciones en español claro
-  if (str.includes('mount error(13)') || (str.toLowerCase().includes('permission denied') && (str.toLowerCase().includes('cifs') || str.toLowerCase().includes('mount')))) {
-    return 'Fallo de autenticación CIFS: Acceso denegado (usuario o contraseña incorrectos, o permisos insuficientes en el recurso compartido).';
-  }
-  if (str.includes('mount error(112)') || str.includes('mount error(113)') || str.toLowerCase().includes('host is down') || str.toLowerCase().includes('no route to host')) {
-    return 'Fallo de conexión CIFS: El servidor remoto no responde o está apagado/fuera de red.';
-  }
-  if (str.includes('mount error(111)') || str.toLowerCase().includes('connection refused')) {
-    return 'Fallo de conexión CIFS: Conexión rechazada (puerto CIFS/SMB 445 no disponible en el host).';
-  }
-  if (str.includes('mount error(6)') || str.includes('mount error(2)') || str.toLowerCase().includes('no such device')) {
-    return 'Fallo de conexión CIFS: Recurso compartido no encontrado en el servidor remoto.';
-  }
-  if (str.includes('mount error(115)')) {
-    return 'Fallo de conexión CIFS: Tiempo de espera agotado al conectar con el servidor remoto.';
-  }
-
   return str;
 }
 
