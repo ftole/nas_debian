@@ -92,10 +92,11 @@ impl FileRoot {
 
         // Canonicaliza el ancestro existente más cercano y recompone el resto,
         // de modo que se puedan crear rutas anidadas sin escapar de la raíz.
+        // Usamos `symlink_metadata` para no saltar sobre enlaces simbólicos rotos.
         let mut existing = joined.clone();
         let mut remaining: Vec<std::ffi::OsString> = Vec::new();
 
-        while !existing.exists() {
+        while std::fs::symlink_metadata(&existing).is_err() {
             let Some(name) = existing.file_name().map(|name| name.to_os_string()) else {
                 break;
             };
@@ -106,10 +107,19 @@ impl FileRoot {
             existing = parent.to_path_buf();
         }
 
-        let base = if existing.exists() {
-            std::fs::canonicalize(&existing).map_err(|e| NasError::io(&existing, e))?
-        } else {
-            self.root.clone()
+        let base = match std::fs::symlink_metadata(&existing) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    std::fs::canonicalize(&existing).map_err(|_| {
+                        NasError::Denied(
+                            "la ruta contiene un enlace simbólico roto o inaccesible".to_string(),
+                        )
+                    })?
+                } else {
+                    std::fs::canonicalize(&existing).map_err(|e| NasError::io(&existing, e))?
+                }
+            }
+            Err(_) => self.root.clone(),
         };
 
         let mut resolved = base;
@@ -444,6 +454,32 @@ mod tests {
         let body = axum::body::Body::from_stream(stream);
         let collected = body.collect().await.expect("collect").to_bytes();
         assert_eq!(&collected[..], b"contenido de video de prueba");
+
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rechaza_enlaces_simbolicos_rotos_o_externos() {
+        let root = unique_root("symlinks");
+        let dangling = root.root().join("roto");
+        std::os::unix::fs::symlink("/tmp/destino_inexistente_nas_test", &dangling)
+            .expect("symlink");
+        assert!(
+            root.resolve("roto").is_err(),
+            "symlink roto debe rechazarse"
+        );
+        assert!(
+            root.resolve("roto/subarchivo.txt").is_err(),
+            "ruta bajo symlink roto debe rechazarse"
+        );
+
+        let external = root.root().join("externo");
+        std::os::unix::fs::symlink("/etc", &external).expect("symlink externo");
+        assert!(
+            root.resolve("externo/passwd").is_err(),
+            "symlink fuera de la raíz debe rechazarse"
+        );
 
         let _ = std::fs::remove_dir_all(root.root());
     }
