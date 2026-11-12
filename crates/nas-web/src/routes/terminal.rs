@@ -74,8 +74,7 @@ fn resolve_terminal_posix_user(web_user: &str) -> Result<String, String> {
         return Ok(found.name.clone());
     }
 
-    if let Ok(designated) = std::fs::read_to_string("/etc/nas/superadmin") {
-        let designated = designated.trim();
+    if let Some(designated) = crate::routes::common::configured_superadmin() {
         if let Some(found) = users
             .iter()
             .find(|u| u.name == designated && is_interactive_posix_user(u))
