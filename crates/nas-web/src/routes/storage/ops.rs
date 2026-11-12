@@ -9,7 +9,8 @@ use serde::Deserialize;
 
 use super::StorageActionBody;
 use crate::{
-    routes::common::{audit_ip, error_response, forbidden, is_admin, require_auth, ApiResponse},
+    extractors::AdminUser,
+    routes::common::{audit_ip, error_response, ApiResponse},
     AppState,
 };
 
@@ -36,6 +37,7 @@ fn audit_storage(
 
 async fn storage_operation<F>(
     state: AppState,
+    admin: AdminUser,
     headers: HeaderMap,
     action: &'static str,
     target: String,
@@ -44,13 +46,7 @@ async fn storage_operation<F>(
 where
     F: FnOnce() -> Result<String, String> + Send + 'static,
 {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
 
     let audited_target = target.clone();
     let outcome = tokio::task::spawn_blocking(operation)
@@ -92,6 +88,7 @@ where
 /// Formatea y monta un dispositivo en `/srv/nas`.
 pub async fn storage_format(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageActionBody>,
 ) -> Response {
@@ -104,7 +101,7 @@ pub async fn storage_format(
     };
     let confirm = body.confirm;
     let unmount = body.unmount;
-    storage_operation(state, headers, "storage_format", target, move || {
+    storage_operation(state, admin, headers, "storage_format", target, move || {
         nas_engine::storage_ops::format_device(&Runner::new(), &device, &fstype, &confirm, unmount)
     })
     .await
@@ -113,11 +110,12 @@ pub async fn storage_format(
 /// Crea un volumen LVM y lo monta en `/srv/nas`.
 pub async fn storage_lvm(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageActionBody>,
 ) -> Response {
     let target = body.disk.clone();
-    storage_operation(state, headers, "storage_lvm", target, move || {
+    storage_operation(state, admin, headers, "storage_lvm", target, move || {
         nas_engine::storage_ops::lvm_create(
             &Runner::new(),
             &body.disk,
@@ -135,24 +133,33 @@ pub async fn storage_lvm(
 /// Crea un subvolumen Btrfs.
 pub async fn storage_subvolume(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageActionBody>,
 ) -> Response {
     let target = body.subvolume.clone();
-    storage_operation(state, headers, "storage_subvolume", target, move || {
-        nas_engine::storage_ops::create_subvolume(
-            &Runner::new(),
-            &body.device,
-            &body.subvolume,
-            &body.confirm,
-        )
-    })
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_subvolume",
+        target,
+        move || {
+            nas_engine::storage_ops::create_subvolume(
+                &Runner::new(),
+                &body.device,
+                &body.subvolume,
+                &body.confirm,
+            )
+        },
+    )
     .await
 }
 
 /// Añade una unidad adicional montada en `/srv/nas/unidades/<id>`.
 pub async fn storage_add_unit(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageActionBody>,
 ) -> Response {
@@ -162,44 +169,52 @@ pub async fn storage_add_unit(
     } else {
         body.fstype
     };
-    storage_operation(state, headers, "storage_add_unit", target, move || {
-        nas_engine::storage_ops::add_unit(
-            &Runner::new(),
-            &body.device,
-            &body.unit_id,
-            &fstype,
-            &body.confirm,
-        )
-    })
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_add_unit",
+        target,
+        move || {
+            nas_engine::storage_ops::add_unit(
+                &Runner::new(),
+                &body.device,
+                &body.unit_id,
+                &fstype,
+                &body.confirm,
+            )
+        },
+    )
     .await
 }
 
 /// Extiende el pool LVM que contiene `/srv/nas`.
 pub async fn storage_extend_pool(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageActionBody>,
 ) -> Response {
     let target = body.device.clone();
-    storage_operation(state, headers, "storage_extend_pool", target, move || {
-        nas_engine::storage_ops::extend_pool(&Runner::new(), &body.device, &body.confirm)
-    })
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_extend_pool",
+        target,
+        move || nas_engine::storage_ops::extend_pool(&Runner::new(), &body.device, &body.confirm),
+    )
     .await
 }
 
 /// Amplía el pool LVM que contiene `/srv/nas` usando varios discos.
 pub async fn storage_extend_pool_multi(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<StorageMultiBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
 
     let devices = body.devices.clone();
     let confirm = body.confirm.clone();
