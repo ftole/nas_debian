@@ -13,10 +13,10 @@
 * **Identificadores NetBIOS por Defecto:**
   * Servidor NAS de Archivos: `SRV-NAS`
   * Servidor Central de Backup: `SRV-BKP`
-* **Dirección IP de Red Local de Prueba:** `10.10.1.2` (Subred `10.10.1.0/24`).
+* **Dirección IP de Red Local de Prueba:** `<host>` (Subred `<red>`).
 * **Credenciales Administrativas de Entorno:**
-  * Usuario: `usuario asignado` / `root`
-  * Contraseña predeterminada: `la que se asigne`
+  * Usuario: `<usuario>` / `root`
+  * Contraseña predeterminada: `<contraseña>`
 * **Convención de Commits de Git:**
   * **REGLA ESTRICTA:** Los commits deben ser atómicos y granulares. **Debe existir un commit independiente por cada archivo modificado.** Si se alteran 3 archivos, se deben registrar 3 commits por separado.
   * Todos los mensajes de commit deben redactarse en **español** siguiendo el estándar convencional:
@@ -71,10 +71,15 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `crates/nas-ssh` | Rust Lib | Transporte OpenSSH para ejecución remota con claves dedicadas y verificación de huellas. |
 | `crates/nas-engine` | Rust Lib | Lógica de sistema: almacenamiento, Samba, usuarios, respaldos, dominio, actualizaciones firmadas y diagnósticos. |
 | `crates/nas-cli` | Rust CLI | **CLI Unificado `nas`** modularizado en subcomandos (`src/commands/`) con salida ANSI y `--json`. |
-| `crates/nas-web` | Rust (axum) | **Panel web**: modularizado por dominios (`src/routes/`), assets embebidos byte a byte, API completa y helpers acotados. |
+| `crates/nas-web` | Rust (axum) | **Panel web**: modularizado por dominios (`src/routes/`) y por módulos JS (`lib/` + `modules/`), assets embebidos byte a byte, API completa, routers por dominio con `.merge()` y helpers acotados. |
 | `crates/nas-tui` | Rust (ratatui) | **Asistente visual de terminal** con dashboard, servicios, respaldos y diagnóstico. |
+| `crates/nas-engine/src/deploy/` | Rust Mod | Subsistemas del motor de despliegue (env, storage, samba, web, users, helpers) portados desde `deploy.sh` (ola B). |
+| `crates/nas-web/assets/js/lib/` | JS | Helpers compartidos del panel (api, modal, utils, toast). |
+| `crates/nas-web/assets/js/modules/` | JS | Módulos por dominio del panel (storage, users, files, backups, etc.). |
+| `docs/owners.md` | Markdown | Tabla de owners por crate/módulo. |
+| `docs/modularizacion_web.md` | Markdown | Inventario y ownership para modularización web. |
 | `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
-| `src/core/deploy.sh` | Script Bash CLI | **Motor de Despliegue Automatizado** (ola B pendiente de portar): detección de entorno, protección de partición raíz, roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), formateo, Samba, Nginx y parches de Debian 13. |
+| `src/core/deploy.sh` | Script Bash CLI | **Shim de retrocompatibilidad** hacia `nas deploy apply` (Rust). Contiene bloques de referencia para auditoría y suites BATS. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
 | `src/core/updater.sh` | Script Bash CLI | **Motor de actualización remota desde GitHub** para entornos simplificados. |
 | `scripts/deploy_local.sh` | Script Bash CLI | **Despliegue Local Rápido** para compilar, instalar en `/usr/local/bin` y reiniciar servicios en desarrollo sin reinstalar el servidor. |
@@ -112,6 +117,8 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | **Protección udev del Disco del SO (`80-udisks2-hide-os.rules`)** | Aislamiento de Almacenamiento | Asignación de la bandera `UDISKS_IGNORE="1"` al disco base del sistema operativo. | Protege el disco del sistema ante manipulación inadvertida y lo aísla en herramientas de almacenamiento UDisks2. |
 | **Reutilización de Almacenamiento (`--keep-data`)** | Motor de Despliegue | Detección de particiones preexistentes y montaje sin formateo en `/srv/nas`. | Facilita reinstalaciones y migraciones de servidor sin requerir volcado externo ni poner en riesgo datos ya almacenados. |
 | **Rust + axum (`nas-web`) + Nginx `proxy_pass`** | Interfaz Web | Panel administrativo con las mismas 14 vistas y el mismo `app.js` del panel original, servido desde un binario único en `127.0.0.1:8080`. | Consumo despreciable en reposo (~0 MB), Slate UI 100% offline, assets embebidos con hash verificado y despliegue atómico de un solo binario. |
+| **Modularización Rust (routers por dominio)** | Backend Web | Cada dominio expone `router()` y se compone con `.merge()` en `lib.rs`. | Reduce conflictos, facilita tests por dominio. |
+| **Modularización JS (`lib/` + `modules/`)** | Frontend Web | Helpers y dominios separados en archivos independientes, cargados antes de `app.js`. | Trabajo paralelo real, archivos pequeños. |
 | **Base de Datos SQLite Nativa (rusqlite)** | Almacenamiento Estructurado | SQLite en modo WAL (`/var/lib/nas/nas.sqlite`) con sesiones, auditoría, rate limiting e historial. | 0 MB de consumo en reposo; lecturas concurrentes y respaldo por copia del archivo. |
 | **Explorador de Archivos Drag-and-Drop** | Gestión de Almacenamiento Web | Módulo para explorar `/srv/nas` con subida interactiva y descarga ZIP al vuelo. | Transferencia bidireccional ágil entre equipos clientes Windows y el NAS directamente en el navegador, con permisos `0660` y pertenencia a `grp_samba`. |
 | **Visores de Ofimática 100% Offline (SheetJS + docx-preview + JSZip)** | Gestión de Archivos Web | Visualización en cliente de hojas de cálculo (`.xlsx`, `.xls`, `.ods`, `.csv`), documentos Word (`.docx`) y presentaciones PowerPoint (`.pptx`). | Cero consumo de CPU/RAM en el servidor, 100% privado y offline (sin conexión a internet, CDNs ni nubes externas), carga perezosa de librerías locales solo al previsualizar. |
@@ -245,7 +252,7 @@ Carpetas Visibles:            Grupos:  Recursos Visibles + Ocultos ($)  Grupos: 
 
 ## 5. Parches Críticos y Soluciones de Debian 13 Integradas
 
-Si se reinstala el servidor desde cero o en otra máquina, estos parches están incluidos en `src/core/deploy.sh`:
+Si se reinstala el servidor desde cero o en otra máquina, estos parches están incluidos en el motor Rust (`crates/nas-engine/src/deploy/`) y en `packaging/`:
 
 1. **Visibilidad en Red Windows (WSDD2):**
    * *Problema:* `wsdd2` en Debian 13 usa `DynamicUser=true` y falla al ejecutar `testparm` para leer `smb.conf`.
@@ -297,6 +304,8 @@ printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb EAD-COL SR
 printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL EAD-COL SRV-EAD-SRV admin - ARCHIVOS_BACKUP
 ```
 
+> Los comandos `deploy.sh` delegan en `nas deploy apply` (Rust).
+
 ### Administración Remota desde Windows / Linux:
 ```powershell
 # Estado remoto por inventario (ver inventory.example.yaml)
@@ -306,7 +315,7 @@ nasctl --inventory inventory.yaml status
 nasctl --inventory inventory.yaml exec -- nas status
 
 # Panel web
-start https://10.10.1.222/
+start https://<host>/
 ```
 
 > `nas_admin.bat`, `nas_admin.py` y `test_remote.*` fueron retirados en F7; su
