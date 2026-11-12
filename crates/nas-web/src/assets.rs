@@ -2,6 +2,14 @@
 
 /// Comportamiento del panel (sin modificar).
 pub const APP_JS: &[u8] = include_bytes!("../assets/js/app.js");
+/// Helpers compartidos (lib): API.
+pub const LIB_API_JS: &[u8] = include_bytes!("../assets/js/lib/api.js");
+/// Helpers compartidos (lib): modales.
+pub const LIB_MODAL_JS: &[u8] = include_bytes!("../assets/js/lib/modal.js");
+/// Helpers compartidos (lib): utilidades.
+pub const LIB_UTILS_JS: &[u8] = include_bytes!("../assets/js/lib/utils.js");
+/// Helpers compartidos (lib): toasts.
+pub const LIB_TOAST_JS: &[u8] = include_bytes!("../assets/js/lib/toast.js");
 /// Visor de hojas de cálculo.
 pub const XLSX_JS: &[u8] = include_bytes!("../assets/js/vendor/xlsx.full.min.js");
 /// Compresión en el navegador.

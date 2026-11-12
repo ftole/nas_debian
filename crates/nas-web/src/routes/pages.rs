@@ -128,6 +128,20 @@ pub async fn app_js() -> Response {
     js_response(crate::assets::APP_JS)
 }
 
+/// Helpers compartidos (lib).
+pub async fn lib_api_js() -> Response {
+    js_response(crate::assets::LIB_API_JS)
+}
+pub async fn lib_modal_js() -> Response {
+    js_response(crate::assets::LIB_MODAL_JS)
+}
+pub async fn lib_utils_js() -> Response {
+    js_response(crate::assets::LIB_UTILS_JS)
+}
+pub async fn lib_toast_js() -> Response {
+    js_response(crate::assets::LIB_TOAST_JS)
+}
+
 /// Visor de hojas de cálculo.
 pub async fn vendor_xlsx() -> Response {
     js_response(crate::assets::XLSX_JS)
