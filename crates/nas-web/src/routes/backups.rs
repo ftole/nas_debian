@@ -19,7 +19,7 @@ pub use actions::{
 };
 pub use helpers::{
     backup_action_id, clean_helper_error, last_snapshot, last_snapshot_path, run_backup_helper,
-    sanitize_error_message, stage_backup_files,
+    sanitize_error_message,
 };
 
 #[derive(Debug, Deserialize)]
@@ -66,19 +66,17 @@ async fn install_backup(
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
 
-    let proto = match body.validate() {
-        Ok(proto) => proto,
-        Err(error) => return error_response(error),
-    };
-    let id = body.id.trim().to_string();
-
-    if let Err(error) = stage_backup_files(&body, proto) {
-        return server_error(&error);
+    if let Err(error) = body.validate() {
+        return error_response(error);
     }
+    let id = body.id.trim().to_string();
+    let spec_json = match serde_json::to_string(&body) {
+        Ok(json) => json,
+        Err(error) => return server_error(&error.to_string()),
+    };
 
-    let helper_id = id.clone();
     let result =
-        tokio::task::spawn_blocking(move || run_backup_helper(&["install", &helper_id], None))
+        tokio::task::spawn_blocking(move || run_backup_helper(&["install-spec"], Some(&spec_json)))
             .await
             .unwrap_or_else(|_| Err("instalación interrumpida".to_string()));
 
