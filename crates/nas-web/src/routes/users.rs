@@ -104,27 +104,7 @@ pub fn is_target_superadmin(state: &AppState, username: &str) -> bool {
 }
 
 pub fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String> {
-    let mut cmd_args = vec!["helper", "accounts"];
-    cmd_args.extend_from_slice(args);
-    let mut spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
-        .args(cmd_args)
-        .sudo(nas_exec::SudoMode::Passwordless)
-        .timeout(std::time::Duration::from_secs(60));
-    if let Some(password) = password {
-        spec = spec.stdin_secret(nas_exec::SecretInput::new(password));
-    }
-    let output = Runner::new()
-        .run(&spec)
-        .map_err(|error| error.to_string())?;
-    if output.is_success() {
-        Ok(output.stdout)
-    } else {
-        Err(if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        })
-    }
+    super::common::run_nas_helper("accounts", args, password, 60)
 }
 
 /// Usuarios administrables (formato que consume `app.js`).
