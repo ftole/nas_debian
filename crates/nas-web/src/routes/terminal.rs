@@ -8,9 +8,8 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use crate::{
-    routes::common::{
-        audit_ip, bad_request, forbidden, is_superadmin, require_auth, server_error, ApiResponse,
-    },
+    extractors::{AuthenticatedUser, SuperAdminUser},
+    routes::common::{audit_ip, bad_request, server_error, ApiResponse},
     AppState,
 };
 
@@ -107,20 +106,15 @@ fn resolve_terminal_posix_user(web_user: &str) -> Result<String, String> {
 /// Inicia (o reutiliza) la sesión de terminal del usuario.
 pub async fn terminal_session(
     State(state): State<AppState>,
+    superadmin: SuperAdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<TerminalSessionBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_superadmin(&state, &user) {
-        return forbidden("el terminal está reservado al superadministrador");
-    }
     if !nas_engine::terminal::is_valid_geometry(body.cols, body.rows) {
         return bad_request("geometría del terminal fuera de rango");
     }
 
+    let user = superadmin.user().username().to_string();
     let web_user = user.clone();
     let cols = body.cols;
     let rows = body.rows;
@@ -161,22 +155,14 @@ pub async fn terminal_session(
 
 /// Envía texto o teclas especiales a la sesión del usuario.
 pub async fn terminal_send(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    superadmin: SuperAdminUser,
     axum::Json(body): axum::Json<TerminalSendBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_superadmin(&state, &user) {
-        return forbidden("el terminal está reservado al superadministrador");
-    }
     if !nas_engine::terminal::is_valid_input(&body.data) {
         return bad_request("entrada inválida para el terminal");
     }
 
-    let web_user = user.clone();
+    let web_user = superadmin.user().username().to_string();
     let data = body.data;
     let enter = body.enter && !body.raw;
     let raw = body.raw;
@@ -203,16 +189,8 @@ pub async fn terminal_send(
 }
 
 /// Captura el panel visible del terminal.
-pub async fn terminal_capture(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_superadmin(&state, &user) {
-        return forbidden("el terminal está reservado al superadministrador");
-    }
-
-    let web_user = user.clone();
+pub async fn terminal_capture(superadmin: SuperAdminUser) -> Response {
+    let web_user = superadmin.user().username().to_string();
     let outcome = tokio::task::spawn_blocking(move || {
         let posix_user = resolve_terminal_posix_user(&web_user)?;
         let name = nas_engine::terminal::session_name(&posix_user);
@@ -240,22 +218,14 @@ pub async fn terminal_capture(State(state): State<AppState>, headers: HeaderMap)
 
 /// Redimensiona el terminal.
 pub async fn terminal_resize(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    superadmin: SuperAdminUser,
     axum::Json(body): axum::Json<TerminalResizeBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_superadmin(&state, &user) {
-        return forbidden("el terminal está reservado al superadministrador");
-    }
     if !nas_engine::terminal::is_valid_geometry(body.cols, body.rows) {
         return bad_request("geometría del terminal fuera de rango");
     }
 
-    let web_user = user.clone();
+    let web_user = superadmin.user().username().to_string();
     let cols = body.cols;
     let rows = body.rows;
     let outcome = tokio::task::spawn_blocking(move || {
@@ -276,15 +246,12 @@ pub async fn terminal_resize(
 }
 
 /// Termina la sesión de terminal del usuario.
-pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_superadmin(&state, &user) {
-        return forbidden("el terminal está reservado al superadministrador");
-    }
-
+pub async fn terminal_kill(
+    State(state): State<AppState>,
+    superadmin: SuperAdminUser,
+    headers: HeaderMap,
+) -> Response {
+    let user = superadmin.user().username().to_string();
     let web_user = user.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let posix_user = resolve_terminal_posix_user(&web_user)?;
@@ -313,10 +280,7 @@ pub async fn terminal_kill(State(state): State<AppState>, headers: HeaderMap) ->
 }
 
 /// Historial de comandos del terminal (aún sin persistencia propia).
-pub async fn terminal_history(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+pub async fn terminal_history(_user: AuthenticatedUser) -> Response {
     axum::Json(ApiResponse::ok(
         Vec::<String>::new(),
         "Historial de terminal",
