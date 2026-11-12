@@ -7,7 +7,9 @@ use chrono::Utc;
 use nas_core::ApiResponse;
 use serde::Deserialize;
 
-use super::common::{audit_ip, cached_host_ip, cookie_header, extract_client_ip, server_error};
+use super::common::{
+    audit_ip, cached_host_ip, configured_superadmin, cookie_header, extract_client_ip, server_error,
+};
 use crate::extractors::AuthenticatedUser;
 use crate::views;
 use crate::AppState;
@@ -82,7 +84,18 @@ pub async fn login_submit(
         )
             .into_response();
     }
-    let session = match state.auth.login(&form.username, &form.password, now) {
+    let auth = state.auth.clone();
+    let login_user = form.username.clone();
+    let login_pass = form.password.clone();
+    let login_res = match tokio::task::spawn_blocking(move || {
+        auth.login(&login_user, &login_pass, now)
+    })
+    .await
+    {
+        Ok(res) => res,
+        Err(_) => return server_error("autenticación interrumpida"),
+    };
+    let session = match login_res {
         Ok(Some(session)) => {
             audit_ip(
                 &state,
@@ -184,7 +197,18 @@ pub async fn api_login(
         )
             .into_response();
     }
-    match state.auth.login(&form.username, &form.password, now) {
+    let auth = state.auth.clone();
+    let login_user = form.username.clone();
+    let login_pass = form.password.clone();
+    let login_res = match tokio::task::spawn_blocking(move || {
+        auth.login(&login_user, &login_pass, now)
+    })
+    .await
+    {
+        Ok(res) => res,
+        Err(_) => return server_error("autenticación interrumpida"),
+    };
+    match login_res {
         Ok(Some(session)) => {
             audit_ip(
                 &state,
@@ -195,13 +219,17 @@ pub async fn api_login(
                 "SUCCESS",
                 "",
             );
-            let role = state
-                .auth
-                .db()
-                .user_role(&form.username)
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "admin".into());
+            let role = if configured_superadmin().as_deref() == Some(form.username.as_str()) {
+                "superadmin".to_string()
+            } else {
+                state
+                    .auth
+                    .db()
+                    .user_role(&form.username)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "admin".into())
+            };
             let csrf = state.auth.csrf_for_session(&session);
             let mut response = axum::Json(ApiResponse::ok(
                 serde_json::json!({
