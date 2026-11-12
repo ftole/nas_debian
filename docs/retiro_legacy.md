@@ -89,7 +89,7 @@ web/public/js/vendor/*.js                → crates/nas-web/assets/js/vendor/
 Los hashes de `tests/parity/assets.sha256` no cambiaron: los archivos son
 idénticos byte a byte.
 
-Servidor `10.10.1.222`:
+Servidor `<host>`:
 
 ```text
 respaldo: /root/nas-deploy-backup/retire-<fecha>/
