@@ -54,36 +54,21 @@
     .login-brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+      justify-content: center;
     }
     /* Logotipo iintec monocromo: la máscara toma la silueta del SVG y el
-       color lo aporta el tema (claro/oscuro). Sin soporte de mask se ve a color. */
+       color lo aporta el tema (azul en claro, blanco puro en oscuro).
+       Sin soporte de mask se ve a color. */
     .login-brand-logo {
-      height: 26px;
-      width: 177px;
+      height: 40px;
+      width: 273px;
       flex-shrink: 0;
-      background-color: var(--text-main);
+      background-color: var(--accent-primary);
       -webkit-mask: url("/img/logo-iintec.svg") no-repeat center / contain;
       mask: url("/img/logo-iintec.svg") no-repeat center / contain;
     }
-    .login-title-group {
-      flex: 1;
-      min-width: 180px;
-    }
-    .login-title-group h1 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-main);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .login-subtitle {
-      margin: 4px 0 0;
-      font-size: 12px;
-      color: var(--text-secondary);
+    [data-theme="dark"] .login-brand-logo {
+      background-color: #ffffff;
     }
     .login-body {
       padding: 28px;
@@ -180,15 +165,7 @@
     <div class="login-card">
       <div class="login-header">
         <div class="login-brand">
-          <img class="login-brand-logo" src="/img/logo-iintec.svg?v=%%asset_version%%" alt="iintec" width="177" height="26">
-          <div class="login-title-group">
-            <h1>
-              <span>NAS</span>
-              <span style="opacity:0.4; font-weight:300;">|</span>
-              <span style="color:var(--accent-primary);">%%safeHostname%%</span>
-            </h1>
-            <p class="login-subtitle">Servidor NAS Departamental & Central de Respaldos</p>
-          </div>
+          <img class="login-brand-logo" src="/img/logo-iintec.svg?v=%%asset_version%%" alt="iintec" width="273" height="40">
         </div>
       </div>
 
