@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use nas_core::shell::quote_all;
-use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
+use nas_core::{ApiResponse, NasError, NasPaths, NasResult};
 use nas_engine::deploy::{DeployParams, FileSystem};
 use nas_exec::{CommandSpec, Runner};
 
@@ -197,7 +197,7 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
         ));
     }
 
-    let role = ServerRole::parse(&request.role)
+    let role = nas_engine::deploy::env::normalize_role(&request.role)
         .ok_or_else(|| NasError::Invalid(format!("rol inválido: {}", request.role)))?;
 
     let mut params = DeployParams::new(
@@ -209,6 +209,14 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     );
     params.keep_data = request.keep_data;
     params.rotational = !request.ssd;
+
+    // Validación de disco delegada al motor Rust (env).
+    nas_engine::deploy::env::validate_keep_data(&params.disk, params.keep_data)?;
+    let disk_problems =
+        nas_engine::deploy::env::validate_disk(&params.disk, params.keep_data, false);
+    if !disk_problems.is_empty() {
+        return Err(NasError::Invalid(disk_problems.join("; ")));
+    }
     if request.ext4 {
         params.filesystem = FileSystem::Ext4;
     } else if request.btrfs {
@@ -509,6 +517,27 @@ pub fn deploy_apply(
         if let Err(error) = nas_engine::deploy::apply_hardening(&runner, options.sudo) {
             failure = Some(error);
         }
+    }
+
+    if failure.is_none() {
+        if let Err(error) = nas_engine::deploy::samba::create_base_groups(&runner) {
+            failure = Some(NasError::Denied(error.to_string()));
+        }
+    }
+
+    if failure.is_none() {
+        if let Err(error) = nas_engine::deploy::web::apply_web(&runner, options.sudo) {
+            failure = Some(NasError::Denied(error.to_string()));
+        }
+    }
+
+    if failure.is_none() {
+        let _ = nas_engine::deploy::users::provision_superadmin(
+            &runner,
+            &params.admin_user,
+            params.admin_password.as_deref(),
+            "",
+        );
     }
 
     if failure.is_none() {
