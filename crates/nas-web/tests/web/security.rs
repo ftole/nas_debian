@@ -410,3 +410,44 @@ async fn borrado_permanente_exige_privilegios_admin() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn logout_exige_csrf_cuando_esta_autenticado() {
+    let dir = temp_dir("logout-csrf");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("admin");
+    let auth = Auth::with_csrf_secret(db, 3600, false, [0x42u8; 32]);
+    let session = auth
+        .login("admin", "Secreta123", chrono::Utc::now().timestamp())
+        .expect("login")
+        .expect("sesion");
+    let cookie = format!("nas_session={session}");
+    let csrf = auth.csrf_for_session(&session);
+    let app = router(AppState::new(auth, paths_for(&dir), ServerRole::Arquivos));
+
+    let req_sin_csrf = Request::builder()
+        .method("POST")
+        .uri("/logout")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .expect("req");
+    let resp_sin_csrf = app.clone().oneshot(req_sin_csrf).await.expect("resp");
+    assert_eq!(resp_sin_csrf.status(), StatusCode::FORBIDDEN);
+
+    let req_con_csrf = Request::builder()
+        .method("POST")
+        .uri("/logout")
+        .header("cookie", &cookie)
+        .header("x-csrf-token", csrf)
+        .body(Body::empty())
+        .expect("req");
+    let resp_con_csrf = app.oneshot(req_con_csrf).await.expect("resp");
+    assert!(
+        resp_con_csrf.status().is_redirection(),
+        "logout con CSRF debe redirigir, devolvió {}",
+        resp_con_csrf.status()
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
