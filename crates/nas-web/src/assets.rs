@@ -20,3 +20,33 @@ pub const XLSX_JS: &[u8] = include_bytes!("../assets/js/vendor/xlsx.full.min.js"
 pub const JSZIP_JS: &[u8] = include_bytes!("../assets/js/vendor/jszip.min.js");
 /// Vista previa de documentos Word.
 pub const DOCX_JS: &[u8] = include_bytes!("../assets/js/vendor/docx-preview.min.js");
+
+/// Módulos por dominio: backups.
+pub const MODULE_BACKUPS_JS: &[u8] = include_bytes!("../assets/js/modules/backups.js");
+
+/// Módulos por dominio: dashboard.
+pub const MODULE_DASHBOARD_JS: &[u8] = include_bytes!("../assets/js/modules/dashboard.js");
+
+/// Módulos por dominio: domain.
+pub const MODULE_DOMAIN_JS: &[u8] = include_bytes!("../assets/js/modules/domain.js");
+
+/// Módulos por dominio: files.
+pub const MODULE_FILES_JS: &[u8] = include_bytes!("../assets/js/modules/files.js");
+
+/// Módulos por dominio: logs.
+pub const MODULE_LOGS_JS: &[u8] = include_bytes!("../assets/js/modules/logs.js");
+
+/// Módulos por dominio: misc.
+pub const MODULE_MISC_JS: &[u8] = include_bytes!("../assets/js/modules/misc.js");
+
+/// Módulos por dominio: services.
+pub const MODULE_SERVICES_JS: &[u8] = include_bytes!("../assets/js/modules/services.js");
+
+/// Módulos por dominio: shares.
+pub const MODULE_SHARES_JS: &[u8] = include_bytes!("../assets/js/modules/shares.js");
+
+/// Módulos por dominio: system.
+pub const MODULE_SYSTEM_JS: &[u8] = include_bytes!("../assets/js/modules/system.js");
+
+/// Módulos por dominio: terminal.
+pub const MODULE_TERMINAL_JS: &[u8] = include_bytes!("../assets/js/modules/terminal.js");

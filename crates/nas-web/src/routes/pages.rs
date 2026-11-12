@@ -268,3 +268,53 @@ pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Re
         Err(_) => login_redirect(),
     }
 }
+
+/// Módulos por dominio: backups.
+pub async fn module_backups_js() -> Response {
+    js_response(crate::assets::MODULE_BACKUPS_JS)
+}
+
+/// Módulos por dominio: dashboard.
+pub async fn module_dashboard_js() -> Response {
+    js_response(crate::assets::MODULE_DASHBOARD_JS)
+}
+
+/// Módulos por dominio: domain.
+pub async fn module_domain_js() -> Response {
+    js_response(crate::assets::MODULE_DOMAIN_JS)
+}
+
+/// Módulos por dominio: files.
+pub async fn module_files_js() -> Response {
+    js_response(crate::assets::MODULE_FILES_JS)
+}
+
+/// Módulos por dominio: logs.
+pub async fn module_logs_js() -> Response {
+    js_response(crate::assets::MODULE_LOGS_JS)
+}
+
+/// Módulos por dominio: misc.
+pub async fn module_misc_js() -> Response {
+    js_response(crate::assets::MODULE_MISC_JS)
+}
+
+/// Módulos por dominio: services.
+pub async fn module_services_js() -> Response {
+    js_response(crate::assets::MODULE_SERVICES_JS)
+}
+
+/// Módulos por dominio: shares.
+pub async fn module_shares_js() -> Response {
+    js_response(crate::assets::MODULE_SHARES_JS)
+}
+
+/// Módulos por dominio: system.
+pub async fn module_system_js() -> Response {
+    js_response(crate::assets::MODULE_SYSTEM_JS)
+}
+
+/// Módulos por dominio: terminal.
+pub async fn module_terminal_js() -> Response {
+    js_response(crate::assets::MODULE_TERMINAL_JS)
+}
