@@ -147,6 +147,11 @@ pub async fn module_storage_js() -> Response {
     js_response(crate::assets::MODULE_STORAGE_JS)
 }
 
+/// Módulos por dominio: usuarios.
+pub async fn module_users_js() -> Response {
+    js_response(crate::assets::MODULE_USERS_JS)
+}
+
 /// Visor de hojas de cálculo.
 pub async fn vendor_xlsx() -> Response {
     js_response(crate::assets::XLSX_JS)
