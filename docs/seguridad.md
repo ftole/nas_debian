@@ -15,7 +15,7 @@ La plataforma no confía en un único perímetro defensivo. Implementa un modelo
 | Nivel | Ámbito / Capa | Tecnologías Clave | Propósito Principal |
 | :--- | :--- | :--- | :--- |
 | **Nivel 1** | **Núcleo y Kernel** | `sysctl`, udev, ext4 `commit=2`, Btrfs `scrub`, LVM/RAID lock | Endurecimiento del stack de red IP, aislamiento de memoria/punteros, protección física de disco y mitigación de DoS. |
-| **Nivel 2** | **Integridad y Auditoría** | `auditd`, AIDE (FIM), Samba `full_audit`, rsyslog, logrotate | Registro de eventos del kernel en tiempo real, verificación criptográfica offline de archivos y trazabilidad de operaciones SMB. |
+| **Nivel 2** | **Integridad y Auditoría** | `auditd`, AIDE (FIM), Samba `recycle`, rsyslog, logrotate | Registro de eventos del kernel en tiempo real, verificación criptográfica offline de archivos y trazabilidad de operaciones SMB. |
 | **Nivel 3** | **Perímetro y Red** | UFW Firewall, OpenSSH TOFU (`accept-new`), fail2ban, WSDD2 | Denegación por defecto de puertos, autenticación SSH sin root, bloqueo de fuerza bruta y descubrimiento seguro sin NetBIOS broadcast. |
 | **Nivel 4** | **Aplicación y Datos** | `nas-web` (Rust/axum), `nas-exec`, CSRF, Rate Limiting, RBAC tripartito, Staging Atómico, Hardlinks | Privilegios mínimos en entorno web, prevención total de inyección de comandos, control de acceso granular y respaldos inmunes a apagones. |
 
@@ -31,7 +31,7 @@ El nivel más bajo de la arquitectura blinda los parámetros del kernel Linux me
   net.ipv4.conf.all.rp_filter = 1
   net.ipv4.conf.default.rp_filter = 1
   ```
-  Activa el filtrado de ruta inversa estricto (*Strict Reverse Path Forwarding*). El kernel descarta automáticamente cualquier paquete entrante cuya dirección IP de origen no coincida con la ruta de retorno correspondiente en la tabla de enrutamiento local, mitigando ataques de falsificación de IP y amplificación DDoS.
+  Activa el filtrado de ruta inversa estricto (*Strict Reverse Path Forwarding*). El kernel descarta automáticamente cualquier paquete entrante cuya dirección IP de origen no coincida con la ruta de retorno correspondiente en la tabla de enrutamiento local, mitigando ataques de falsificación de IP y amplificación DDoS, evitando que un atacante finja ser otro equipo en la red.
 - **Mitigación de SYN Flood (Agotamiento de Conexiones TCP):**
   ```ini
   net.ipv4.tcp_syncookies = 1
@@ -93,6 +93,7 @@ El nivel más bajo de la arquitectura blinda los parámetros del kernel Linux me
 - **Sincronización contra Apagones y Bit Rot:**
   - En discos mecánicos ext4 (`rotational=1`): directiva `commit=2` que vacía transacciones del *journal* cada 2 segundos.
   - En Central de Backup con Btrfs: compresión `zstd:3` y auditoría mensual programada en `/etc/cron.d/nas-btrfs-scrub` (`btrfs scrub start -B /srv/nas`) para verificar y autoreparar sumas de comprobación frente a corrupción silenciosa (*Bit Rot*).
+- **Hardening aplicado via Rust:** `apply_hardening()` en `nas-engine` ejecuta sysctl, udev y auditd de forma tipada durante el despliegue.
 
 ---
 
@@ -128,19 +129,20 @@ La plataforma incluye `aide` preconfigurado e inicializado de manera no bloquean
 - **Línea Base Criptográfica:** Genera la base de datos `/var/lib/aide/aide.db` con hashes criptográficos (SHA-256, SHA-512) de todos los binarios esenciales (`/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`) y librerías del sistema.
 - **Detección de Rootkits y Modificaciones Silenciosas:** Permite auditar en frío si algún binario del sistema operativo fue reemplazado o adulterado mediante `aide --check`.
 
-### 3.3 Auditoría Forense de Archivos Samba con VFS `full_audit`
-Cada recurso compartido de Samba incorpora en su definición el módulo VFS `full_audit`:
+### 3.3 Papelera de Reciclaje Integrada con VFS `recycle`
+Cada recurso compartido de Samba incorpora en su definición el módulo VFS `recycle`:
 ```ini
-vfs objects = acl_xattr streams_xattr full_audit
-full_audit:prefix = %u|%I|%m|%S
-full_audit:success = connect disconnect mkdirat renameat unlinkat openat open
-full_audit:failure = connect openat open unlinkat renameat
-full_audit:facility = LOCAL5
-full_audit:priority = NOTICE
+vfs objects = acl_xattr streams_xattr recycle
+recycle:repository = .recycle
+recycle:keeptree = yes
+recycle:versions = yes
+recycle:touch = yes
+recycle:directory_mode = 0770
 ```
-- **Captura Granular de Eventos:** En Samba 4.22 (Debian 13), registra aperturas (`openat`, `open`), creaciones (`mkdirat`), renombrados (`renameat`) y eliminaciones (`unlinkat`).
-- **Enrutamiento Dedicado en Rsyslog:** La directiva `local5.notice` se canaliza mediante `/etc/rsyslog.d/50-samba-audit.conf` hacia `/var/log/samba/audit.log`, aislando la auditoría de los registros generales del sistema.
-- **Visualización en Tiempo Real:** El panel web (módulo Registros) parsea este archivo proporcionando auditoría interactiva con filtros por usuario, equipo cliente, recurso y operación.
+- **Recuperación de Archivos Borrados:** Los archivos eliminados se mueven a una papelera oculta (`.recycle`) por recurso, permitiendo restauración sin herramientas externas.
+- **Preservación de Estructura:** `keeptree = yes` mantiene la ruta original dentro de la papelera.
+- **Versionado:** `versions = yes` conserva copias anteriores si se sobrescribe un archivo.
+- **Visualización en Tiempo Real:** El panel web (módulo Papelera) permite listar, restaurar y vaciar la papelera por recurso. 
 
 ### 3.4 Rotación Segura de Bitácoras (`logrotate`)
 Las bitácoras críticas (`/var/log/nas-admin.log`, `/var/log/samba/audit.log`, `/srv/nas/LOGS_BACKUP/backups_master.log`) cuentan con configuración de rotación en `/etc/logrotate.d/` con `copytruncate` y compresión gzip semanal/mensual, evitando el agotamiento de espacio en disco.
@@ -187,6 +189,7 @@ El nivel superior protege la interfaz de administración web, el motor de ejecuc
 - **Usuario de Servicio sin Login:** `nas-web.service` corre como la cuenta de sistema `nas-web` (shell `nologin`), sin escritura fuera de `/var/lib/nas` y `/srv/nas`.
 - **Endurecimiento systemd:** `ProtectSystem=yes`, `PrivateTmp=yes`, `NoNewPrivileges`, `RestrictAddressFamilies` y `CapabilityBoundingSet` acotado; `ReadWritePaths` limita la escritura a `/var/lib/nas`, `/srv/nas`, `/usr/local/bin`, `/etc/cron.d`, `/etc/backup-credentials` y `/etc/samba`.
 - **Escucha local:** El binario atiende en `127.0.0.1:8080`; solo Nginx publica el puerto 80/443.
+- **Despliegue (ola B portada):** El motor de aprovisionamiento está portado a Rust (`crates/nas-engine/src/deploy/`), con subsistemas para entorno, almacenamiento, Samba, web, usuarios y helpers. `deploy.sh` es un shim hacia `nas deploy apply`.
 - **Consumo en reposo:** Al ser un binario compilado sin intérprete, no hay procesos ociosos que calentar ni memoria de runtime que liberar.
 - **Cifrado TLS y Cabeceras HTTP:** Certificado autofirmado con longitud de clave segura (o certificado corporativo) en `/etc/ssl/certs/nas-web.crt`, forzando cabeceras:
   - `X-Content-Type-Options: nosniff`
@@ -205,6 +208,8 @@ Runner::new().run(
 ```
 
 No existe ninguna ruta de código que construya una línea de shell con datos del usuario. Esto erradica **Command Injection** por `;`, `&&`, `|`, backticks o `$()`.
+
+- **Modularización (ola B):** El backend web expone routers por dominio (`.merge()`) y el frontend se divide en `lib/` + `modules/`, reduciendo conflictos entre desarrolladores.
 
 ### 5.3 Escalada Acotada con Sudoers (`nas-web-rust`)
 `/etc/sudoers.d/nas-web-rust` autoriza únicamente binarios y argumentos canónicos:
@@ -284,7 +289,7 @@ La siguiente tabla resume cómo interactúan los 4 niveles defensivos ante vecto
 | **Formateo Inadvertido del Disco del SO** | Nivel 1 | Regla udev `80-udisks2-hide-os.rules` | Disco del sistema ignorado y protegido en UDisks2. |
 | **Modificación Silenciosa de Sudoers/SMB** | Nivel 2 | Reglas `nas.rules` en `auditd` | Generación instantánea de eventos de auditoría forense en el kernel. |
 | **Alteración de Binarios del SO (Rootkits)** | Nivel 2 | Línea base criptográfica en `aide.db` | Detección de modificaciones no autorizadas mediante `aide --check`. |
-| **Manipulación Indebida de Archivos SMB** | Nivel 2 | VFS `full_audit` + rsyslog dedicado | Trazabilidad completa de accesos, modificaciones y borrados en red. |
+| **Manipulación Indebida de Archivos SMB** | Nivel 2 | VFS `recycle` + papelera por recurso | Los archivos borrados se recuperan desde la papelera integrada por recurso. |
 | **Acceso no Autorizado a Puertos de Red** | Nivel 3 | Firewall UFW (política de denegación por defecto) | Solo puertos autorizados responden; el resto queda en silencio. |
 | **Fuerza Bruta en Acceso SSH** | Nivel 3 | `fail2ban` + `PermitRootLogin no` | Bloqueo automático de IP y prohibición de inicio directo como root. |
 | **Ataque Man-in-the-Middle en Respaldos** | Nivel 3 | OpenSSH con `StrictHostKeyChecking=accept-new` | Cancelación inmediata de la copia si la firma remota fue alterada. |
