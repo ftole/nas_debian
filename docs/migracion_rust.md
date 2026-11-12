@@ -16,7 +16,7 @@
 | **F4** | TUI (`ratatui`) con navegación, acciones y explorador | ✅ **Completado** |
 | **F5** | `nasctl` con ejecución remota sobre releases firmados | ✅ **Completado** |
 | **F6** | Empaquetado, systemd endurecido, Nginx `proxy_pass`, cutover y rollback | ✅ **Completado** |
-| **F7** | Retirada escalonada del stack anterior | 🟡 **Ola A completada** (panel PHP, CLI PHP, whiptail y Python retirados del servidor). **Ola B pendiente**: `deploy.sh`, `uninstall.sh`, `updater.sh` y BATS asociados |
+| **F7** | Retirada escalonada del stack anterior | 🟡 **Ola A completada** (panel PHP, CLI PHP, whiptail y Python retirados del servidor). **Ola B portada**: subsistemas en `crates/nas-engine/src/deploy/` (env, storage, samba, web, users, helpers). `deploy.sh` es shim. |
 
 El sistema en producción (`<host>`) ejecuta **la plataforma Rust** desde el
 cutover de F6 y el retiro de F7 (ola A): `nas-web.service` sirve el panel con
