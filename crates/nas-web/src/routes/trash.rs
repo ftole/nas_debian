@@ -46,6 +46,9 @@ pub async fn files_delete(
         Ok(user) => user,
         Err(response) => return *response,
     };
+    if body.permanent && !is_admin(&state, &user) {
+        return forbidden("se requieren privilegios de administrador");
+    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
