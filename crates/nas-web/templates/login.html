@@ -37,11 +37,58 @@
       box-sizing: border-box;
     }
     .login-card {
+      /* Efecto cursor spotlight + glowing border (antigravity style). */
+      --spot-color: rgba(56, 189, 248, 0.10);
+      --spot-border: rgba(14, 165, 233, 0.40);
+      --spot-active: 0;
+      position: relative;
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: 6px;
       box-shadow: 0 8px 30px rgba(0,0,0,0.35);
       overflow: hidden;
+    }
+    [data-theme="dark"] .login-card {
+      --spot-color: rgba(255, 255, 255, 0.08);
+      --spot-border: rgba(255, 255, 255, 0.35);
+    }
+    /* Spotlight interior: halo radial que sigue la posicion exacta del cursor. */
+    .login-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background: radial-gradient(circle 240px at var(--mx, 50%) var(--my, 50%), var(--spot-color), transparent 70%);
+      opacity: var(--spot-active);
+      transition: opacity 350ms ease;
+      pointer-events: none;
+    }
+    /* Glowing border: anillo de 1.5 px cuyo punto brillante sigue al cursor. */
+    .login-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      border-radius: 6px;
+      padding: 1.5px;
+      background: radial-gradient(circle 200px at var(--mx, 50%) var(--my, 50%), var(--spot-border), transparent 70%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask-composite: exclude;
+      opacity: var(--spot-active);
+      transition: opacity 350ms ease;
+      pointer-events: none;
+    }
+    .login-card > * {
+      position: relative;
+      z-index: 1;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .login-card::before,
+      .login-card::after {
+        transition: none;
+      }
     }
     .login-header {
       padding: 24px 28px 20px;
@@ -220,6 +267,23 @@
         icon.innerHTML = '<use href="#icon-eye"></use>';
       }
     }
+
+    /* Efecto cursor spotlight + glowing border sobre la tarjeta de acceso. */
+    (function() {
+      const card = document.querySelector('.login-card');
+      if (!card || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      card.addEventListener('pointermove', function(e) {
+        const rect = card.getBoundingClientRect();
+        card.style.setProperty('--mx', (e.clientX - rect.left) + 'px');
+        card.style.setProperty('--my', (e.clientY - rect.top) + 'px');
+      }, { passive: true });
+      card.addEventListener('pointerenter', function() {
+        card.style.setProperty('--spot-active', '1');
+      });
+      card.addEventListener('pointerleave', function() {
+        card.style.setProperty('--spot-active', '0');
+      });
+    })();
 
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();
