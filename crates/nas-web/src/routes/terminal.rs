@@ -2,6 +2,7 @@ use axum::{
     extract::State,
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -321,4 +322,16 @@ pub async fn terminal_history(State(state): State<AppState>, headers: HeaderMap)
         "Historial de terminal",
     ))
     .into_response()
+}
+
+/// Router del dominio de terminal.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/terminal/session", post(terminal_session))
+        .route("/api/terminal/send", post(terminal_send))
+        .route("/api/terminal/capture", get(terminal_capture))
+        .route("/api/terminal/resize", post(terminal_resize))
+        .route("/api/terminal/kill", post(terminal_kill))
+        .route("/api/terminal/history", get(terminal_history))
 }

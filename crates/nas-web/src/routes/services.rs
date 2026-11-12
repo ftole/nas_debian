@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::ApiResponse;
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -87,4 +88,12 @@ pub async fn service_manage(
             server_error(&error)
         }
     }
+}
+
+/// Router del dominio de servicios.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/services", get(services))
+        .route("/api/services/manage", post(service_manage))
 }

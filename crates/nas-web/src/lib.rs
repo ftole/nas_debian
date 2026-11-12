@@ -116,64 +116,23 @@ pub fn router(state: AppState) -> Router {
         .route("/networking", get(routes::page_networking))
         .route("/applications", get(routes::page_applications))
         .route("/updates", get(routes::page_updates))
-        .route("/api/metrics", get(routes::metrics))
-        .route("/api/network", get(routes::network))
+        .merge(routes::system::router())
         .merge(routes::shares::router())
         .merge(routes::users::router())
-        .route("/api/services", get(routes::services))
-        .route("/api/services/manage", post(routes::service_manage))
-        .route("/api/diagnostics", get(routes::diagnostics))
+        .merge(routes::services::router())
+        .merge(routes::diagnostics::router())
         .merge(routes::backups::router())
-        .route("/api/audit", get(routes::audit))
-        .route(
-            "/api/system/audit/verify",
-            get(routes::audit_verify).post(routes::audit_verify),
-        )
-        .route(
-            "/api/audit/verify",
-            get(routes::audit_verify).post(routes::audit_verify),
-        )
+        .merge(routes::audit::router())
         .merge(routes::storage::router())
-        .route("/api/domain", get(routes::domain_status))
-        .route("/api/domain/join", post(routes::domain_join))
-        .route("/api/domain/leave", post(routes::domain_leave))
-        .route("/api/terminal/session", post(routes::terminal_session))
-        .route("/api/terminal/send", post(routes::terminal_send))
-        .route("/api/terminal/capture", get(routes::terminal_capture))
-        .route("/api/terminal/resize", post(routes::terminal_resize))
-        .route("/api/terminal/kill", post(routes::terminal_kill))
-        .route("/api/files", get(routes::files_list))
-        .route("/api/files/download", get(routes::files_download))
-        .route("/api/files/zip", get(routes::files_zip))
-        .route("/api/files/list", get(routes::files_list_rooted))
-        .route("/api/files/raw", get(routes::files_raw))
-        .route("/api/logs", get(routes::logs))
-        .route("/api/system/updates", get(routes::system_updates))
-        .route("/api/system/applications", get(routes::system_applications))
-        .route("/api/system/reboot", post(routes::system_reboot))
-        .route("/api/system/update/run", post(routes::system_update_run))
-        .route("/api/domain/status", get(routes::domain_status))
-        .route("/api/domain/discover", post(routes::domain_discover))
-        .route("/api/diagnostics/run", post(routes::diagnostics_run))
-        .route("/api/terminal/history", get(routes::terminal_history))
-        .route("/api/files/content", get(routes::files_content))
-        .route("/api/files/create", post(routes::files_create))
-        .route("/api/files/move", post(routes::files_move))
-        .route("/api/files/save", post(routes::files_save))
-        .route("/api/files/trash", get(routes::files_trash))
-        .route("/api/files/trash/restore", post(routes::trash_restore))
-        .route(
-            "/api/files/trash/restore-all",
-            post(routes::trash_restore_all),
-        )
-        .route("/api/files/trash/delete", post(routes::trash_delete))
-        .route("/api/files/trash/empty", post(routes::trash_empty))
-        .route("/api/files/mkdir", post(routes::files_mkdir))
-        .route("/api/files/rename", post(routes::files_rename))
-        .route("/api/files/delete", post(routes::files_delete))
+        .merge(routes::domain::router())
+        .merge(routes::terminal::router())
+        .merge(routes::files::router())
+        .merge(routes::preview::router())
+        .merge(routes::trash::router())
+        .merge(routes::logs::router())
         .route(
             "/api/files/upload",
-            post(routes::files_upload).layer(DefaultBodyLimit::max(
+            post(routes::files::files_upload).layer(DefaultBodyLimit::max(
                 usize::try_from(50u64 * 1024 * 1024 * 1024).unwrap_or(usize::MAX),
             )),
         )
