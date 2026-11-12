@@ -44,7 +44,11 @@ pub fn detect_rotational(runner: &Runner, device: &str) -> NasResult<bool> {
         .trim_start_matches("/dev/")
         .trim_end_matches(|c: char| !c.is_alphanumeric());
     let path = format!("/sys/block/{name}/queue/rotational");
-    match runner.run(&CommandSpec::new("cat").arg(&path).timeout(Duration::from_secs(5))) {
+    match runner.run(
+        &CommandSpec::new("cat")
+            .arg(&path)
+            .timeout(Duration::from_secs(5)),
+    ) {
         Ok(out) if out.is_success() => Ok(out.stdout.trim() == "1"),
         _ => Ok(true),
     }
@@ -68,14 +72,20 @@ pub fn mount_options(fs: FileSystem, rotational: bool) -> String {
     match (fs, rotational) {
         (FileSystem::Ext4, true) => "rw,noatime,commit=2".to_string(),
         (FileSystem::Ext4, false) => "rw,noatime,commit=5".to_string(),
-        (FileSystem::Btrfs, true) => "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string(),
-        (FileSystem::Btrfs, false) => "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string(),
+        (FileSystem::Btrfs, true) => {
+            "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string()
+        }
+        (FileSystem::Btrfs, false) => {
+            "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string()
+        }
     }
 }
 
 /// Opciones de montaje a partir de cadenas.
 pub fn mount_options_str(fs: &str, rotational: bool) -> String {
-    FileSystem::parse(fs).map(|f| mount_options(f, rotational)).unwrap_or_else(|| "rw,noatime".to_string())
+    FileSystem::parse(fs)
+        .map(|f| mount_options(f, rotational))
+        .unwrap_or_else(|| "rw,noatime".to_string())
 }
 
 /// Valida que el disco no sea el del sistema operativo (salvo reutilización).
@@ -94,8 +104,12 @@ pub fn ensure_not_os_disk(runner: &Runner, device: &str, keep_data: bool) -> Nas
 
 /// Valida un dispositivo de bloque.
 pub fn valid_device(device: &str) -> bool {
-    device.starts_with("/dev/") && device.len() <= 64 && !device.contains("..")
-        && device.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+    device.starts_with("/dev/")
+        && device.len() <= 64
+        && !device.contains("..")
+        && device
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
 }
 
 fn run_checked(runner: &Runner, spec: CommandSpec) -> NasResult<()> {
@@ -124,12 +138,22 @@ pub fn format_ext4(runner: &Runner, device: &str, keep_data: bool) -> NasResult<
     run_checked(
         runner,
         CommandSpec::new("parted")
-            .args(["-s", device, "mklabel", "gpt", "mkpart", "primary", "ext4", "0%", "100%"])
+            .args([
+                "-s", device, "mklabel", "gpt", "mkpart", "primary", "ext4", "0%", "100%",
+            ])
             .sudo(nas_exec::SudoMode::Passwordless)
             .timeout(Duration::from_secs(120)),
     )?;
-    let _ = runner.run(&CommandSpec::new("partprobe").arg(device).timeout(Duration::from_secs(30)));
-    let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]).timeout(Duration::from_secs(30)));
+    let _ = runner.run(
+        &CommandSpec::new("partprobe")
+            .arg(device)
+            .timeout(Duration::from_secs(30)),
+    );
+    let _ = runner.run(
+        &CommandSpec::new("udevadm")
+            .args(["settle"])
+            .timeout(Duration::from_secs(30)),
+    );
     run_checked(
         runner,
         CommandSpec::new("mkfs.ext4")
@@ -152,12 +176,22 @@ pub fn format_btrfs(runner: &Runner, device: &str, keep_data: bool) -> NasResult
     run_checked(
         runner,
         CommandSpec::new("parted")
-            .args(["-s", device, "mklabel", "gpt", "mkpart", "primary", "btrfs", "0%", "100%"])
+            .args([
+                "-s", device, "mklabel", "gpt", "mkpart", "primary", "btrfs", "0%", "100%",
+            ])
             .sudo(nas_exec::SudoMode::Passwordless)
             .timeout(Duration::from_secs(120)),
     )?;
-    let _ = runner.run(&CommandSpec::new("partprobe").arg(device).timeout(Duration::from_secs(30)));
-    let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]).timeout(Duration::from_secs(30)));
+    let _ = runner.run(
+        &CommandSpec::new("partprobe")
+            .arg(device)
+            .timeout(Duration::from_secs(30)),
+    );
+    let _ = runner.run(
+        &CommandSpec::new("udevadm")
+            .args(["settle"])
+            .timeout(Duration::from_secs(30)),
+    );
     run_checked(
         runner,
         CommandSpec::new("mkfs.btrfs")
@@ -169,7 +203,12 @@ pub fn format_btrfs(runner: &Runner, device: &str, keep_data: bool) -> NasResult
 }
 
 /// Formatea según el sistema de archivos indicado.
-pub fn format_disk(runner: &Runner, device: &str, fs: FileSystem, keep_data: bool) -> NasResult<()> {
+pub fn format_disk(
+    runner: &Runner,
+    device: &str,
+    fs: FileSystem,
+    keep_data: bool,
+) -> NasResult<()> {
     match fs {
         FileSystem::Ext4 => format_ext4(runner, device, keep_data),
         FileSystem::Btrfs => format_btrfs(runner, device, keep_data),
@@ -241,7 +280,11 @@ pub fn lvm_lv_extend(runner: &Runner, vg: &str, lv: &str, size: &str) -> NasResu
 
 /// Monta un dispositivo en un punto de montaje con las opciones indicadas.
 pub fn mount(runner: &Runner, source: &str, target: &str, options: &str) -> NasResult<()> {
-    let _ = runner.run(&CommandSpec::new("mkdir").args(["-p", target]).timeout(Duration::from_secs(10)));
+    let _ = runner.run(
+        &CommandSpec::new("mkdir")
+            .args(["-p", target])
+            .timeout(Duration::from_secs(10)),
+    );
     run_checked(
         runner,
         CommandSpec::new("mount")
@@ -300,7 +343,9 @@ pub fn update_fstab(runner: &Runner, source: &str, target: &str, options: &str) 
     if std::fs::write(fstab_path, &final_content).is_err() {
         let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
         std::fs::write(&staged, &final_content).map_err(|e| {
-            NasError::Denied(format!("no se pudo preparar archivo temporal de fstab: {e}"))
+            NasError::Denied(format!(
+                "no se pudo preparar archivo temporal de fstab: {e}"
+            ))
         })?;
         let res = runner.run(
             &CommandSpec::new("install")
@@ -326,7 +371,9 @@ pub fn update_fstab(runner: &Runner, source: &str, target: &str, options: &str) 
                 )));
             }
             Err(e) => {
-                return Err(NasError::Denied(format!("no se pudo actualizar /etc/fstab: {e}")));
+                return Err(NasError::Denied(format!(
+                    "no se pudo actualizar /etc/fstab: {e}"
+                )));
             }
             _ => {}
         }
@@ -349,9 +396,8 @@ pub fn enable_fstrim(runner: &Runner) -> NasResult<()> {
 pub fn install_btrfs_scrub_cron(_runner: &Runner) -> NasResult<()> {
     let content = "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1\n";
     let path = "/etc/cron.d/nas-btrfs-scrub";
-    std::fs::write(path, content).map_err(|e| {
-        NasError::Denied(format!("no se pudo escribir {path}: {e}"))
-    })?;
+    std::fs::write(path, content)
+        .map_err(|e| NasError::Denied(format!("no se pudo escribir {path}: {e}")))?;
     Ok(())
 }
 
@@ -391,7 +437,10 @@ mod tests {
 
     #[test]
     fn mount_options_ext4_ssd() {
-        assert_eq!(mount_options(FileSystem::Ext4, false), "rw,noatime,commit=5");
+        assert_eq!(
+            mount_options(FileSystem::Ext4, false),
+            "rw,noatime,commit=5"
+        );
     }
 
     #[test]
@@ -409,7 +458,10 @@ mod tests {
 
     #[test]
     fn partition_path_nvme() {
-        assert_eq!(partition_path("/dev/nvme0n1"), Some("/dev/nvme0n1p1".into()));
+        assert_eq!(
+            partition_path("/dev/nvme0n1"),
+            Some("/dev/nvme0n1p1".into())
+        );
     }
 
     #[test]
