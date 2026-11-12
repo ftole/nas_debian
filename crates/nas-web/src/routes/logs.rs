@@ -2,25 +2,22 @@ use std::path::PathBuf;
 
 use axum::{
     extract::{Query, State},
-    http::HeaderMap,
     response::{IntoResponse, Response},
     Router,
 };
 
 use crate::{
-    routes::common::{require_auth, run_json, server_error, ApiResponse, ExtQuery},
+    extractors::AuthenticatedUser,
+    routes::common::{run_json, server_error, ApiResponse, ExtQuery},
     AppState,
 };
 
 /// Logs recientes y legibles: Samba, auditoría del panel, respaldos y journald.
 pub async fn logs(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
     // Por defecto: SOLO eventos del panel web, respaldos y auditoría de Samba.
     // El ruido interno del kernel (`system`) se muestra sólo si el usuario pide
