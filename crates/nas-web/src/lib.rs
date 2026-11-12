@@ -80,6 +80,7 @@ pub fn router(state: AppState) -> Router {
         .route("/js/lib/utils.js", get(routes::lib_utils_js))
         .route("/js/lib/toast.js", get(routes::lib_toast_js))
         .route("/js/modules/storage.js", get(routes::module_storage_js))
+        .route("/js/modules/users.js", get(routes::module_users_js))
         .route("/js/vendor/xlsx.full.min.js", get(routes::vendor_xlsx))
         .route("/js/vendor/jszip.min.js", get(routes::vendor_jszip))
         .route("/js/vendor/docx-preview.min.js", get(routes::vendor_docx))
