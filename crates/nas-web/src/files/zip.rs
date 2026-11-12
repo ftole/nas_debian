@@ -21,7 +21,11 @@ fn clean_stale_staging_files(staging: &Path) {
     let now = std::time::SystemTime::now();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("tmp") {
+        let is_zip_tmp = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|name| name.starts_with("zip_") && name.ends_with(".tmp"));
+        if is_zip_tmp {
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(age) = now.duration_since(modified) {
@@ -384,5 +388,33 @@ mod ziptests {
         drop(temp);
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn limpia_solo_temporales_con_prefijo_zip() {
+        let root = root("clean-staging");
+        let dir = root.root();
+        let old_time = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+
+        let zip_old = dir.join("zip_20260101_123.tmp");
+        let other_old = dir.join("ajeno_123.tmp");
+        let zip_fresh = dir.join("zip_20260101_fresh.tmp");
+
+        for file_path in [&zip_old, &other_old] {
+            let f = std::fs::File::create(file_path).expect("create");
+            f.set_modified(old_time).expect("mtime");
+        }
+        std::fs::write(&zip_fresh, b"ok").expect("fresh");
+
+        super::clean_stale_staging_files(dir);
+
+        assert!(!zip_old.exists(), "zip_ antiguo debe eliminarse");
+        assert!(
+            other_old.exists(),
+            "archivo .tmp sin prefijo zip_ debe conservarse"
+        );
+        assert!(zip_fresh.exists(), "zip_ reciente debe conservarse");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
