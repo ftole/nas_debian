@@ -363,3 +363,70 @@ async fn contrato_de_paridad_completo() {
         &missing[..missing.len().min(15)]
     );
 }
+
+#[tokio::test]
+async fn modulos_js_compuestos_se_sirven_completos() {
+    let (app, _dir) = app_with_fixtures(ServerRole::ArquivosBackup, None);
+    let cookie = cookie_for(&app).await;
+
+    let cases: [(&str, usize, &[&str]); 5] = [
+        (
+            "/js/modules/storage.js",
+            41365,
+            &[
+                "renderStorageOverview",
+                "onStorageDeviceChange",
+                "loadStorageUnits",
+            ],
+        ),
+        (
+            "/js/modules/users.js",
+            51912,
+            &[
+                "renderUsersTableBody",
+                "loadUsersAndGroups",
+                "loadAccessMatrix",
+            ],
+        ),
+        (
+            "/js/modules/backups.js",
+            30901,
+            &[
+                "renderBackupsTable",
+                "runBackupTask",
+                "loadPermanentBackups",
+            ],
+        ),
+        (
+            "/js/modules/system.js",
+            23339,
+            &["loadUpdates", "loadApplications", "confirmRebootServer"],
+        ),
+        (
+            "/js/modules/files.js",
+            88786,
+            &[
+                "getFileTypeMeta",
+                "loadFiles",
+                "uploadFiles",
+                "loadTrash",
+                "previewFile",
+                "saveCurrentPreviewFile",
+            ],
+        ),
+    ];
+
+    for (uri, expected_len, symbols) in cases {
+        let response = app
+            .clone()
+            .oneshot(get(uri, &cookie))
+            .await
+            .expect("respuesta js");
+        assert_eq!(response.status(), StatusCode::OK, "fallo en {uri}");
+        let body = body_text(response).await;
+        assert_eq!(body.len(), expected_len, "tamaño inesperado en {uri}");
+        for symbol in symbols {
+            assert!(body.contains(symbol), "{uri} no contiene {symbol}");
+        }
+    }
+}
