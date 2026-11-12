@@ -38,6 +38,7 @@ ASSET_FILES = [
     "icons.svg",
     "favicon.svg",
     "favicon.ico",
+    "logo-iintec.svg",
     "js/app.js",
     "js/vendor/xlsx.full.min.js",
     "js/vendor/jszip.min.js",
