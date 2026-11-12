@@ -2,7 +2,6 @@ mod ops;
 
 use axum::{
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
     Router,
 };
@@ -11,9 +10,8 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use crate::{
-    routes::common::{
-        error_response, forbidden, is_admin, require_auth, run_json, server_error, ApiResponse,
-    },
+    extractors::{AdminUser, AuthenticatedUser},
+    routes::common::{error_response, run_json, server_error, ApiResponse},
     AppState,
 };
 
@@ -91,11 +89,7 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
 }
 
 /// Resumen del volumen de datos.
-pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn storage(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
         Ok(Ok(payload)) => axum::Json(ApiResponse::ok(payload, "Almacenamiento")).into_response(),
@@ -105,11 +99,7 @@ pub async fn storage(State(state): State<AppState>, headers: HeaderMap) -> Respo
 }
 
 /// Discos físicos detectados y resumen de capacidad (contrato consumido por `loadStorage()`).
-pub async fn storage_disks(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn storage_disks(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
         Ok(Ok(payload)) => {
@@ -122,18 +112,9 @@ pub async fn storage_disks(State(state): State<AppState>, headers: HeaderMap) ->
 
 /// Inspección de un dispositivo concreto.
 pub async fn storage_inspect(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     axum::Json(body): axum::Json<DeviceBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
-
     let device = body.device;
     match tokio::task::spawn_blocking(move || nas_engine::storage::inspect(&Runner::new(), &device))
         .await
@@ -146,10 +127,7 @@ pub async fn storage_inspect(
     }
 }
 
-pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
@@ -215,10 +193,10 @@ pub async fn storage_units(State(state): State<AppState>, headers: HeaderMap) ->
 }
 
 /// Subvolúmenes Btrfs (vacío si el filesystem no es Btrfs).
-pub async fn storage_subvolumes(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+pub async fn storage_subvolumes(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
@@ -266,11 +244,7 @@ pub async fn storage_subvolumes(State(state): State<AppState>, headers: HeaderMa
 }
 
 /// Estado del scrub Btrfs (responde `200` degradado si `/srv/nas` no es Btrfs).
-pub async fn storage_scrub(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
@@ -317,14 +291,7 @@ pub async fn storage_scrub(State(state): State<AppState>, headers: HeaderMap) ->
 }
 
 /// Inicia el scrub Btrfs.
-pub async fn storage_scrub_start(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn storage_scrub_start(State(state): State<AppState>, _admin: AdminUser) -> Response {
     let target = state.paths.data_root.to_string_lossy().to_string();
     match tokio::task::spawn_blocking(move || {
         run_json(
@@ -347,14 +314,7 @@ pub async fn storage_scrub_start(State(state): State<AppState>, headers: HeaderM
 }
 
 /// Ejecuta fstrim sobre el volumen.
-pub async fn storage_trim(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn storage_trim(State(state): State<AppState>, _admin: AdminUser) -> Response {
     let target = state.paths.data_root.to_string_lossy().to_string();
     match tokio::task::spawn_blocking(move || {
         run_json(
