@@ -214,15 +214,21 @@ pub async fn user_create(
                 &groups,
             ],
             Some(&password),
-        )
+        )?;
+        let hash = if can_web {
+            crate::Auth::hash_password(&password).ok()
+        } else {
+            None
+        };
+        Ok::<_, String>(hash)
     })
     .await
     .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
 
     match result {
-        Ok(_) => {
+        Ok(maybe_hash) => {
             if can_web {
-                if let Ok(hash) = crate::Auth::hash_password(&body.password) {
+                if let Some(hash) = maybe_hash {
                     let role = if body.is_superadmin {
                         "superadmin"
                     } else if body.is_admin {
@@ -278,6 +284,12 @@ pub async fn user_update(
     let grant_admin = target_is_super || body.is_superadmin || body.is_admin;
     let can_web = target_is_super || body.can_web || grant_admin;
 
+    let hash_password = if can_web && !body.password.is_empty() {
+        Some(body.password.clone())
+    } else {
+        None
+    };
+
     let result = tokio::task::spawn_blocking(move || {
         let pass_mode = if password.is_empty() {
             "--keep-password"
@@ -301,13 +313,15 @@ pub async fn user_update(
                 &groups,
             ],
             secret,
-        )
+        )?;
+        let web_hash = hash_password.and_then(|pw| crate::Auth::hash_password(&pw).ok());
+        Ok::<_, String>(web_hash)
     })
     .await
     .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
 
     match result {
-        Ok(_) => {
+        Ok(web_hash) => {
             let role = if target_is_super || body.is_superadmin {
                 "superadmin"
             } else if body.is_admin {
@@ -317,7 +331,7 @@ pub async fn user_update(
             };
             if can_web {
                 if !body.password.is_empty() {
-                    if let Ok(hash) = crate::Auth::hash_password(&body.password) {
+                    if let Some(hash) = web_hash {
                         let _ = state.auth.db().upsert_user(&body.username, &hash, role);
                     }
                 } else if let Ok(Some(existing_hash)) = state.auth.db().user_hash(&body.username) {
