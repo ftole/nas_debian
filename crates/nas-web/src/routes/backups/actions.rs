@@ -6,9 +6,9 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use super::backup_action_id;
+use crate::extractors::{AdminUser, AuthenticatedUser};
 use crate::routes::common::{
-    audit_ip, bad_request, error_response, forbidden, is_admin, require_auth, server_error,
-    ExtQuery,
+    audit_ip, bad_request, error_response, forbidden, server_error, ExtQuery,
 };
 use crate::AppState;
 
@@ -42,16 +42,11 @@ pub struct DeletePermanentBody {
 /// Ejecuta una tarea de respaldo en segundo plano.
 pub async fn backup_run_id(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -99,16 +94,11 @@ pub async fn backup_run_id(
 /// Detiene la ejecución de una tarea de respaldo.
 pub async fn backup_stop_id(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -156,14 +146,10 @@ pub async fn backup_stop_id(
 
 /// Devuelve las últimas líneas de la bitácora de una tarea.
 pub async fn backup_logs_id(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let Some(id) = backup_action_id(&id) else {
         return bad_request("identificador de tarea inválido");
     };
@@ -188,12 +174,9 @@ pub async fn backup_logs_id(
 /// Lista los respaldos permanentes inmutables (Golden Snapshots).
 pub async fn backups_permanent(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<BackupPermanentQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone respaldos permanentes");
     }
@@ -212,17 +195,12 @@ pub async fn backups_permanent(
 /// Congela el último snapshot de una tarea como respaldo permanente (por ID en URL).
 pub async fn backup_freeze_id(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
     axum::Json(body): axum::Json<FreezeBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -268,16 +246,11 @@ pub async fn backup_freeze_id(
 /// Congela el último snapshot de una tarea como respaldo permanente (por cuerpo JSON).
 pub async fn backup_freeze(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<FreezeBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -323,16 +296,11 @@ pub async fn backup_freeze(
 /// Restaura un snapshot o respaldo permanente hacia el origen de red o destino local.
 pub async fn backup_restore(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<RestoreBackupBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -379,16 +347,11 @@ pub async fn backup_restore(
 /// Elimina un respaldo permanente inmutable.
 pub async fn backup_permanent_delete(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<DeletePermanentBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
