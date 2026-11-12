@@ -141,21 +141,7 @@ pub fn router(state: AppState) -> Router {
             "/api/audit/verify",
             get(routes::audit_verify).post(routes::audit_verify),
         )
-        .route("/api/storage", get(routes::storage))
-        .route("/api/storage/disks", get(routes::storage_disks))
-        .route("/api/storage/inspect", post(routes::storage_inspect))
-        .route("/api/storage/format", post(routes::storage_format))
-        .route("/api/storage/lvm", post(routes::storage_lvm))
-        .route("/api/storage/subvolume", post(routes::storage_subvolume))
-        .route("/api/storage/add-unit", post(routes::storage_add_unit))
-        .route(
-            "/api/storage/extend-pool",
-            post(routes::storage_extend_pool),
-        )
-        .route(
-            "/api/storage/extend-pool-multi",
-            post(routes::storage_extend_pool_multi),
-        )
+        .merge(routes::storage::router())
         .route("/api/domain", get(routes::domain_status))
         .route("/api/domain/join", post(routes::domain_join))
         .route("/api/domain/leave", post(routes::domain_leave))
@@ -207,13 +193,6 @@ pub fn router(state: AppState) -> Router {
             post(routes::backup_permanent_delete),
         )
         .route("/api/backups/", post(routes::backup_create))
-        .route("/api/storage/units", get(routes::storage_units))
-        .route("/api/storage/subvolumes", get(routes::storage_subvolumes))
-        .route(
-            "/api/storage/scrub",
-            get(routes::storage_scrub).post(routes::storage_scrub_start),
-        )
-        .route("/api/storage/trim", post(routes::storage_trim))
         .route("/api/system/updates", get(routes::system_updates))
         .route("/api/system/applications", get(routes::system_applications))
         .route("/api/system/reboot", post(routes::system_reboot))

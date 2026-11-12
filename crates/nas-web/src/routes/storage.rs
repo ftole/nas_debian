@@ -2,6 +2,7 @@ use axum::{
     extract::State,
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 use nas_core::NasError;
 use nas_exec::Runner;
@@ -532,6 +533,31 @@ pub async fn storage_extend_pool(
         nas_engine::storage_ops::extend_pool(&Runner::new(), &body.device, &body.confirm)
     })
     .await
+}
+
+/// Router del dominio de almacenamiento.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/storage", get(storage))
+        .route("/api/storage/disks", get(storage_disks))
+        .route("/api/storage/inspect", post(storage_inspect))
+        .route("/api/storage/format", post(storage_format))
+        .route("/api/storage/lvm", post(storage_lvm))
+        .route("/api/storage/subvolume", post(storage_subvolume))
+        .route("/api/storage/add-unit", post(storage_add_unit))
+        .route("/api/storage/extend-pool", post(storage_extend_pool))
+        .route(
+            "/api/storage/extend-pool-multi",
+            post(storage_extend_pool_multi),
+        )
+        .route("/api/storage/units", get(storage_units))
+        .route("/api/storage/subvolumes", get(storage_subvolumes))
+        .route(
+            "/api/storage/scrub",
+            get(storage_scrub).post(storage_scrub_start),
+        )
+        .route("/api/storage/trim", post(storage_trim))
 }
 
 /// Cuerpo para ampliar el pool con varios discos a la vez.
