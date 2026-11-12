@@ -18,6 +18,8 @@ pub const ICONS_SVG: &str = include_str!("../assets/icons.svg");
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.svg");
 /// Favicon binario ICO multi-resolución (16x16, 32x32, 48x48).
 pub const FAVICON_ICO: &[u8] = include_bytes!("../assets/favicon.ico");
+/// Logotipo iintec (vectorial a color; en el login se recolorea vía CSS mask).
+pub const LOGO_IINTEC: &[u8] = include_bytes!("../assets/logo-iintec.svg");
 
 /// Contexto de sesión para renderizar el panel.
 #[derive(Debug)]
