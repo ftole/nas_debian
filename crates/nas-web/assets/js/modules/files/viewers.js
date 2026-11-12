@@ -22,6 +22,48 @@ function renderSpreadsheetWorkbook(workbook, fileName) {
   renderActiveSheet(workbook, AppState.files.currentSheetName);
 }
 
+const ALLOWED_SHEET_TAGS = new Set([
+  'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'CAPTION', 'COLGROUP', 'COL', 'SPAN', 'BR',
+]);
+const ALLOWED_SHEET_ATTRS = new Set(['id', 'colspan', 'rowspan', 'scope']);
+
+function sanitizeSheetNode(node, doc) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return doc.createTextNode(node.textContent || '');
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return null;
+  }
+  const tag = node.tagName.toUpperCase();
+  if (!ALLOWED_SHEET_TAGS.has(tag)) {
+    return null;
+  }
+  const clean = doc.createElement(tag.toLowerCase());
+  for (const attr of node.attributes) {
+    const name = attr.name.toLowerCase();
+    if (ALLOWED_SHEET_ATTRS.has(name)) {
+      if (name === 'id' && !/^[A-Za-z0-9_-]+$/.test(attr.value)) continue;
+      clean.setAttribute(name, attr.value);
+    }
+  }
+  for (const child of node.childNodes) {
+    const sanitizedChild = sanitizeSheetNode(child, doc);
+    if (sanitizedChild) clean.appendChild(sanitizedChild);
+  }
+  return clean;
+}
+
+function sanitizeSheetFragment(rawHtml) {
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(String(rawHtml || ''), 'text/html');
+  const fragment = document.createDocumentFragment();
+  for (const child of parsed.body.childNodes) {
+    const sanitized = sanitizeSheetNode(child, document);
+    if (sanitized) fragment.appendChild(sanitized);
+  }
+  return fragment;
+}
+
 function renderActiveSheet(workbook, sheetName) {
   const tableContainer = document.getElementById('preview-spreadsheet-table-container');
   const statsEl = document.getElementById('preview-spreadsheet-stats');
@@ -34,7 +76,7 @@ function renderActiveSheet(workbook, sheetName) {
   }
 
   const html = XLSX.utils.sheet_to_html(sheet, { id: 'preview-sheet-table', editable: false });
-  tableContainer.innerHTML = html;
+  tableContainer.replaceChildren(sanitizeSheetFragment(html));
 
   const ref = sheet['!ref'] || '';
   if (statsEl) {
