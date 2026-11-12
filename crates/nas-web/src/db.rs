@@ -164,9 +164,15 @@ impl Db {
         &self.path
     }
 
+    fn lock_conn(&self) -> NasResult<std::sync::MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|_| NasError::Database("mutex de base de datos envenenado".to_string()))
+    }
+
     /// Inserta o actualiza un usuario web.
     pub fn upsert_user(&self, username: &str, password_sha256: &str, role: &str) -> NasResult<()> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO web_users (username, password_sha256, role, created_at)
              VALUES (?1, ?2, ?3, ?4)
@@ -179,7 +185,7 @@ impl Db {
 
     /// Hash almacenado de un usuario.
     pub fn user_hash(&self, username: &str) -> NasResult<Option<String>> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let hash = conn
             .query_row(
                 "SELECT password_sha256 FROM web_users WHERE username = ?1",
@@ -193,7 +199,7 @@ impl Db {
 
     /// Rol almacenado de un usuario.
     pub fn user_role(&self, username: &str) -> NasResult<Option<String>> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let role = conn
             .query_row(
                 "SELECT role FROM web_users WHERE username = ?1",
@@ -207,7 +213,7 @@ impl Db {
 
     /// Crea una sesión persistente.
     pub fn create_session(&self, id: &str, username: &str, expires_at: i64) -> NasResult<()> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO web_sessions (id, username, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
             params![id, username, now_ts(), expires_at],
@@ -218,7 +224,7 @@ impl Db {
 
     /// Devuelve el usuario de una sesión válida, purgando la expirada.
     pub fn session_user(&self, id: &str, now: i64) -> NasResult<Option<String>> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let row: Option<(String, i64)> = conn
             .query_row(
                 "SELECT username, expires_at FROM web_sessions WHERE id = ?1",
@@ -241,7 +247,7 @@ impl Db {
 
     /// Elimina una sesión (logout).
     pub fn delete_session(&self, id: &str) -> NasResult<()> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute("DELETE FROM web_sessions WHERE id = ?1", params![id])
             .map_err(db_error)?;
         Ok(())
@@ -269,7 +275,7 @@ impl Db {
         detail: &str,
         origin_ip: Option<&str>,
     ) -> NasResult<()> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO web_audit (ts, username, action, target, result, detail, origin_ip)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -289,7 +295,7 @@ impl Db {
 
     /// Últimas entradas de auditoría (más recientes primero).
     pub fn recent_audit(&self, limit: usize) -> NasResult<Vec<AuditRow>> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let mut statement = conn
             .prepare(
                 "SELECT id, ts, username, action, target, result, detail,
@@ -322,7 +328,7 @@ impl Db {
 
     /// Revoca todas las sesiones activas de un usuario concreto.
     pub fn delete_user_sessions(&self, username: &str) -> NasResult<usize> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute(
             "DELETE FROM web_sessions WHERE username = ?1",
             params![username],
@@ -332,7 +338,7 @@ impl Db {
 
     /// Elimina un usuario web y revoca sus sesiones activas.
     pub fn delete_user(&self, username: &str) -> NasResult<()> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         conn.execute(
             "DELETE FROM web_sessions WHERE username = ?1",
             params![username],
@@ -346,6 +352,28 @@ impl Db {
         Ok(())
     }
 
+    /// Consulta si `key` alcanzó o superó `max_hits` en la ventana actual sin incrementar el contador.
+    pub fn is_rate_limited(
+        &self,
+        key: &str,
+        now: i64,
+        window_secs: i64,
+        max_hits: i64,
+    ) -> NasResult<bool> {
+        let span = window_secs.max(1);
+        let window_start = now - now.rem_euclid(span);
+        let conn = self.lock_conn()?;
+        let hits: Option<i64> = conn
+            .query_row(
+                "SELECT hits FROM api_rate_limits WHERE key = ?1 AND window_start = ?2",
+                params![key, window_start],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db_error)?;
+        Ok(hits.is_some_and(|count| count >= max_hits))
+    }
+
     /// Registra un intento sobre `key` y devuelve `true` si sigue dentro del umbral.
     pub fn check_rate_limit(
         &self,
@@ -356,7 +384,7 @@ impl Db {
     ) -> NasResult<bool> {
         let span = window_secs.max(1);
         let window_start = now - now.rem_euclid(span);
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let _ = conn.execute(
             "DELETE FROM api_rate_limits WHERE window_start < ?1",
             params![now.saturating_sub(span * 4)],
@@ -380,7 +408,7 @@ impl Db {
 
     /// Purga sesiones expiradas y ventanas antiguas, devolviendo cuántas sesiones eliminó.
     pub fn purge_expired(&self, now: i64) -> NasResult<usize> {
-        let conn = self.conn.lock().expect("mutex de base de datos");
+        let conn = self.lock_conn()?;
         let _ = conn.execute(
             "DELETE FROM api_rate_limits WHERE window_start < ?1",
             params![now.saturating_sub(3600)],
@@ -466,6 +494,12 @@ mod tests {
         assert!(!db
             .check_rate_limit("login:admin", 1_010, 60, 3)
             .expect("bloqueado"));
+        assert!(db
+            .is_rate_limited("login:admin", 1_015, 60, 3)
+            .expect("limitado sin incrementar"));
+        assert!(!db
+            .is_rate_limited("login:admin", 1_070, 60, 3)
+            .expect("nueva ventana libre"));
         assert!(db
             .check_rate_limit("login:admin", 1_070, 60, 3)
             .expect("nueva ventana"));
