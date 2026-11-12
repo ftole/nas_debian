@@ -43,6 +43,8 @@ function sanitizeSheetNode(node, doc) {
     const name = attr.name.toLowerCase();
     if (ALLOWED_SHEET_ATTRS.has(name)) {
       if (name === 'id' && !/^[A-Za-z0-9_-]+$/.test(attr.value)) continue;
+      if ((name === 'colspan' || name === 'rowspan') && !/^\d+$/.test(attr.value)) continue;
+      if (name === 'scope' && !/^(col|row|colgroup|rowgroup)$/i.test(attr.value)) continue;
       clean.setAttribute(name, attr.value);
     }
   }
