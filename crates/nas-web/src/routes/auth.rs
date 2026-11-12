@@ -7,9 +7,8 @@ use chrono::Utc;
 use nas_core::ApiResponse;
 use serde::Deserialize;
 
-use super::common::{
-    audit_ip, cookie_header, extract_client_ip, hostname, require_auth, server_error, server_ip,
-};
+use super::common::{audit_ip, cached_host_ip, cookie_header, extract_client_ip, server_error};
+use crate::extractors::AuthenticatedUser;
 use crate::views;
 use crate::AppState;
 
@@ -26,12 +25,8 @@ pub struct LoginForm {
 pub async fn login_form(State(state): State<AppState>) -> Html<String> {
     let now = Utc::now().timestamp();
     let csrf = state.auth.issue_login_csrf(now);
-    Html(views::login_with_context(
-        &hostname(),
-        &server_ip(),
-        &csrf,
-        None,
-    ))
+    let (host, ip) = cached_host_ip().await;
+    Html(views::login_with_context(&host, &ip, &csrf, None))
 }
 
 // Procesa el acceso y emite la cookie de sesión.
@@ -48,11 +43,12 @@ pub async fn login_submit(
         .verify_login_csrf(form.csrf_token.as_deref(), now)
     {
         let csrf = state.auth.issue_login_csrf(now);
+        let (host, ip) = cached_host_ip().await;
         return (
             StatusCode::FORBIDDEN,
             Html(views::login_with_context(
-                &hostname(),
-                &server_ip(),
+                &host,
+                &ip,
                 &csrf,
                 Some("Token CSRF inválido o expirado."),
             )),
@@ -74,11 +70,12 @@ pub async fn login_submit(
             "rate_limit",
         );
         let csrf = state.auth.issue_login_csrf(now);
+        let (host, ip) = cached_host_ip().await;
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Html(views::login_with_context(
-                &hostname(),
-                &server_ip(),
+                &host,
+                &ip,
                 &csrf,
                 Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
             )),
@@ -111,12 +108,13 @@ pub async fn login_submit(
             );
             let blocked = matches!(hits, Ok(false));
             let csrf = state.auth.issue_login_csrf(now);
+            let (host, ip) = cached_host_ip().await;
             if blocked {
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
                     Html(views::login_with_context(
-                        &hostname(),
-                        &server_ip(),
+                        &host,
+                        &ip,
                         &csrf,
                         Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
                     )),
@@ -126,8 +124,8 @@ pub async fn login_submit(
             return (
                 StatusCode::UNAUTHORIZED,
                 Html(views::login_with_context(
-                    &hostname(),
-                    &server_ip(),
+                    &host,
+                    &ip,
                     &csrf,
                     Some("Usuario o contraseña incorrectos."),
                 )),
@@ -254,7 +252,11 @@ pub async fn api_login(
 }
 
 /// Cierra la sesión eliminando la cookie y el registro en la base de datos.
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn logout(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Response {
     let _ = state.auth.logout(cookie_header(&headers));
 
     let mut response = Redirect::to("/login").into_response();
@@ -265,9 +267,6 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 /// Raíz: redirige al dashboard autenticado.
-pub async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match require_auth(&state, &headers) {
-        Ok(_) => Redirect::to("/dashboard").into_response(),
-        Err(_) => Redirect::to("/login").into_response(),
-    }
+pub async fn dashboard(_user: AuthenticatedUser) -> Response {
+    Redirect::to("/dashboard").into_response()
 }
