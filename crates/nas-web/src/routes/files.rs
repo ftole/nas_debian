@@ -187,18 +187,30 @@ pub async fn files_download(
         .as_deref()
         .map(|value| !value.is_empty() && value != "0")
         .unwrap_or(false);
-    if is_folder_flow
-        && std::fs::metadata(root.root().join(&path))
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
-    {
-        return files_zip(State(state), headers, Query(query)).await;
+    if is_folder_flow {
+        let check_root = root.clone();
+        let check_path = path.clone();
+        let is_dir = tokio::task::spawn_blocking(move || {
+            check_root
+                .resolve(&check_path)
+                .map(|resolved| resolved.is_dir())
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false);
+        if is_dir {
+            return files_zip(State(state), headers, Query(query)).await;
+        }
     }
 
-    let (file_path, file_size) = match root.resolve_file(&path) {
-        Ok(pair) => pair,
-        Err(error) => return error_response(error),
-    };
+    let resolve_root = root;
+    let resolve_path = path;
+    let (file_path, file_size) =
+        match tokio::task::spawn_blocking(move || resolve_root.resolve_file(&resolve_path)).await {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(error)) => return error_response(error),
+            Err(_) => return server_error("resolución de archivo interrumpida"),
+        };
 
     let mut file = match tokio::fs::File::open(&file_path).await {
         Ok(file) => file,
