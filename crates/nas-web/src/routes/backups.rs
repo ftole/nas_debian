@@ -9,9 +9,8 @@ use nas_core::ApiResponse;
 use nas_exec::Runner;
 use serde::Deserialize;
 
-use super::common::{
-    audit_ip, bad_request, error_response, forbidden, is_admin, require_auth, server_error,
-};
+use super::common::{audit_ip, bad_request, error_response, forbidden, server_error};
+use crate::extractors::{AdminUser, AuthenticatedUser};
 use crate::AppState;
 
 pub use actions::{
@@ -57,17 +56,12 @@ pub struct BackupIdBody {
 
 async fn install_backup(
     state: AppState,
+    admin: AdminUser,
     headers: HeaderMap,
     body: nas_engine::backup_spec::BackupSpec,
     actor_action: &'static str,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -101,15 +95,10 @@ async fn install_backup(
 }
 
 /// Lista las tareas de respaldo instaladas con su último snapshot.
-pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
+pub async fn backups(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
-    let _ = &user;
 
     let dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
@@ -146,13 +135,9 @@ pub async fn backups(State(state): State<AppState>, headers: HeaderMap) -> Respo
 /// Plan de ejecución de una tarea de respaldo.
 pub async fn backup_plan(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<crate::routes::files::PathBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
     let dir = state.backup_dir.clone();
     let id = body.path;
     match tokio::task::spawn_blocking(move || {
@@ -191,16 +176,11 @@ pub async fn backup_plan(
 /// Ejecuta una tarea de respaldo con las guardas del motor.
 pub async fn backup_run(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<BackupRunBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
 
     if !nas_engine::backup_control::valid_id(&body.path) {
         return bad_request("identificador de tarea inválido");
@@ -247,11 +227,7 @@ pub async fn backup_run(
     }
 }
 
-pub async fn backups_running(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn backups_running(_user: AuthenticatedUser) -> Response {
     match tokio::task::spawn_blocking(|| {
         let output = Runner::new().run(
             &nas_exec::CommandSpec::new("pgrep")
@@ -287,34 +263,31 @@ pub async fn backups_running(State(state): State<AppState>, headers: HeaderMap) 
 /// Crea una tarea de respaldo.
 pub async fn backup_create(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
 ) -> Response {
-    install_backup(state, headers, body, "backup_create").await
+    install_backup(state, admin, headers, body, "backup_create").await
 }
 
 /// Actualiza (reinstala) una tarea de respaldo.
 pub async fn backup_update(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
 ) -> Response {
-    install_backup(state, headers, body, "backup_update").await
+    install_backup(state, admin, headers, body, "backup_update").await
 }
 
 /// Elimina una tarea de respaldo (conserva los snapshots).
 pub async fn backup_delete(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<BackupIdBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
@@ -355,16 +328,9 @@ pub async fn backup_delete(
 /// Prueba la conectividad del origen de una tarea.
 pub async fn backup_test(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     axum::Json(body): axum::Json<BackupTestBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
     if !state.role.has_backups() {
         return forbidden("el rol ARCHIVOS no expone tareas de respaldo");
     }
