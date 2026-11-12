@@ -23,7 +23,8 @@ mod tests;
 
 pub use audit::*;
 pub use auth::*;
-pub use backups::*;
+#[allow(unused_imports)]
+pub use backups::{clean_helper_error, sanitize_error_message};
 pub use common::*;
 pub use diagnostics::*;
 pub use domain::*;
