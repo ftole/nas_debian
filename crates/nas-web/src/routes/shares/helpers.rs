@@ -1,5 +1,6 @@
 use nas_core::NasError;
-use nas_exec::Runner;
+
+use crate::routes::common::run_nas_helper;
 
 use super::ShareBody;
 
@@ -72,78 +73,33 @@ pub fn stage_and_apply(conf: &str) -> Result<(), String> {
     std::fs::write(&staged, conf).map_err(|error| error.to_string())?;
 
     let staged_str = staged.to_string_lossy().to_string();
-    let output = Runner::new()
-        .run(
-            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args(["helper", "samba-apply", &staged_str])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(60)),
-        )
-        .map_err(|error| error.to_string())?;
-
-    if output.is_success() {
-        Ok(())
-    } else {
-        let _ = std::fs::remove_file(&staged);
-        Err(if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        })
+    match run_nas_helper("samba-apply", &[&staged_str], None, 60) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let _ = std::fs::remove_file(&staged);
+            Err(err)
+        }
     }
 }
 
 pub fn apply_acl(path: &str, principal: &str, level: &str) -> Result<(), String> {
-    let output = Runner::new()
-        .run(
-            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args([
-                    "helper",
-                    "share-acl",
-                    path,
-                    principal.trim_start_matches('@'),
-                    level,
-                ])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(120)),
-        )
-        .map_err(|error| error.to_string())?;
-
-    if output.is_success() {
-        Ok(())
-    } else {
-        Err(if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        })
-    }
+    run_nas_helper(
+        "share-acl",
+        &[path, principal.trim_start_matches('@'), level],
+        None,
+        120,
+    )
+    .map(|_| ())
 }
 
 pub fn create_share_dir(name: &str, unit: &str) -> Result<(), String> {
-    let output = Runner::new()
-        .run(
-            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args([
-                    "helper",
-                    "share-dir",
-                    name,
-                    if unit.is_empty() { "principal" } else { unit },
-                ])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(30)),
-        )
-        .map_err(|error| error.to_string())?;
-
-    if output.is_success() {
-        Ok(())
-    } else {
-        Err(if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        })
-    }
+    run_nas_helper(
+        "share-dir",
+        &[name, if unit.is_empty() { "principal" } else { unit }],
+        None,
+        30,
+    )
+    .map(|_| ())
 }
 
 pub fn apply_spec_acls(spec: &nas_engine::samba::ShareSpec) {
