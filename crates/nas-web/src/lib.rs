@@ -126,12 +126,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/services", get(routes::services))
         .route("/api/services/manage", post(routes::service_manage))
         .route("/api/diagnostics", get(routes::diagnostics))
-        .route(
-            "/api/backups",
-            get(routes::backups).post(routes::backup_create),
-        )
-        .route("/api/backups/plan", post(routes::backup_plan))
-        .route("/api/backups/run", post(routes::backup_run))
+        .merge(routes::backups::router())
         .route("/api/audit", get(routes::audit))
         .route(
             "/api/system/audit/verify",
@@ -177,22 +172,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users/toggle", post(routes::user_toggle))
         .route("/api/users/groups", post(routes::user_groups))
         .route("/api/users/delete", post(routes::user_delete))
-        .route("/api/backups/running", get(routes::backups_running))
-        .route("/api/backups/{id}/run", post(routes::backup_run_id))
-        .route("/api/backups/{id}/stop", post(routes::backup_stop_id))
-        .route("/api/backups/{id}/logs", get(routes::backup_logs_id))
-        .route("/api/backups/test", post(routes::backup_test))
-        .route("/api/backups/update", post(routes::backup_update))
-        .route("/api/backups/delete", post(routes::backup_delete))
-        .route("/api/backups/permanent", get(routes::backups_permanent))
-        .route("/api/backups/{id}/freeze", post(routes::backup_freeze_id))
-        .route("/api/backups/freeze", post(routes::backup_freeze))
-        .route("/api/backups/restore", post(routes::backup_restore))
-        .route(
-            "/api/backups/permanent/delete",
-            post(routes::backup_permanent_delete),
-        )
-        .route("/api/backups/", post(routes::backup_create))
         .route("/api/system/updates", get(routes::system_updates))
         .route("/api/system/applications", get(routes::system_applications))
         .route("/api/system/reboot", post(routes::system_reboot))
