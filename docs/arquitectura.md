@@ -78,7 +78,7 @@ Todo el almacenamiento gestionado se centraliza en el punto de montaje `/srv/nas
 
 #### Samba 4 (SMB/CIFS) y Módulos VFS
 Para soportar más de 100 usuarios simultáneos en Microsoft Office y Excel sin bloqueos de red:
-- **`vfs objects = acl_xattr streams_xattr full_audit`:** Guarda los permisos de Windows en atributos extendidos de Linux (`xattr`), emula los flujos de datos alternativos de NTFS (*Alternate Data Streams*) y audita forensemente las operaciones de archivos (`openat`, `renameat`, `unlinkat`, `mkdirat`) hacia `/var/log/samba/audit.log`. Esto permite que archivos temporales como `~$Libro1.xlsx` o marcas `Zone.Identifier` se gestionen de forma nativa sin corromper el archivo principal.
+- **`vfs objects = acl_xattr streams_xattr recycle`:** Guarda los permisos de Windows en atributos extendidos de Linux (`xattr`), emula los flujos de datos alternativos de NTFS (*Alternate Data Streams*) y proporciona papelera de reciclaje integrada por recurso. Esto permite que archivos temporales como `~$Libro1.xlsx` o marcas `Zone.Identifier` se gestionen de forma nativa sin corromper el archivo principal.
 - **Rendimiento de red:** Directivas como `use sendfile = yes`, `aio read/write size = 16384` y `max open files = 65535` reducen las transferencias de contexto en el procesador y garantizan estabilidad bajo alta concurrencia.
 - **Descubrimiento Windows sin SMBv1:** Se usa `wsdd2` con un override de systemd para que los equipos Windows 10/11 vean el NAS de inmediato en su explorador de red sin recurrir a protocolos obsoletos ni a difusiones NetBIOS inseguras.
 
