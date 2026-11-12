@@ -1,5 +1,3 @@
-use nas_exec::Runner;
-
 pub fn last_snapshot(task: &nas_engine::tasks::BackupTask) -> Option<String> {
     last_snapshot_path(task).map(|path| path.display().to_string())
 }
@@ -20,29 +18,8 @@ pub fn last_snapshot_path(task: &nas_engine::tasks::BackupTask) -> Option<std::p
 }
 
 pub fn run_backup_helper(args: &[&str], password: Option<&str>) -> Result<String, String> {
-    let mut cmd_args = vec!["helper", "backup-manage"];
-    cmd_args.extend_from_slice(args);
-    let mut spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
-        .args(cmd_args)
-        .sudo(nas_exec::SudoMode::Passwordless)
-        .timeout(std::time::Duration::from_secs(60));
-    if let Some(password) = password {
-        spec = spec.stdin_secret(nas_exec::SecretInput::new(password));
-    }
-
-    let output = Runner::new()
-        .run(&spec)
-        .map_err(|error| error.to_string())?;
-    if output.is_success() {
-        Ok(output.stdout)
-    } else {
-        let raw = if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        };
-        Err(clean_helper_error(&raw))
-    }
+    crate::routes::common::run_nas_helper("backup-manage", args, password, 60)
+        .map_err(|raw| clean_helper_error(&raw))
 }
 
 pub fn clean_helper_error(raw: &str) -> String {
