@@ -70,40 +70,6 @@ pub fn sanitize_error_message(msg: &str) -> String {
     }
 }
 
-pub fn stage_backup_files(
-    spec: &nas_engine::backup_spec::BackupSpec,
-    proto: nas_engine::backup_spec::Proto,
-) -> Result<(), String> {
-    let dir = std::path::Path::new("/var/lib/nas/staging");
-    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-    let id = spec.id.trim();
-
-    std::fs::write(
-        dir.join(format!("nas_backup_{id}.sh")),
-        spec.render_runner(proto),
-    )
-    .map_err(|error| error.to_string())?;
-    std::fs::write(
-        dir.join(format!("nas_backup_{id}.cron")),
-        spec.render_cron(),
-    )
-    .map_err(|error| error.to_string())?;
-    let cred = spec.render_cred(proto);
-    if !cred.is_empty() {
-        std::fs::write(dir.join(format!("nas_backup_{id}.cred")), cred)
-            .map_err(|error| error.to_string())?;
-    } else {
-        let _ = std::fs::remove_file(dir.join(format!("nas_backup_{id}.cred")));
-    }
-    if let Some(key_content) = spec.render_key(proto) {
-        std::fs::write(dir.join(format!("nas_backup_{id}.id_ed25519")), key_content)
-            .map_err(|error| error.to_string())?;
-    } else {
-        let _ = std::fs::remove_file(dir.join(format!("nas_backup_{id}.id_ed25519")));
-    }
-    Ok(())
-}
-
 pub fn backup_action_id(id: &str) -> Option<String> {
     nas_engine::backup_control::valid_id(id).then(|| id.trim().to_string())
 }
