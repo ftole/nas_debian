@@ -59,6 +59,32 @@ pub async fn login_submit(
         )
             .into_response();
     }
+    let rate_key = format!("login_fail:{client_ip}");
+    if matches!(
+        state.auth.db().is_rate_limited(&rate_key, now, 60, 5),
+        Ok(true)
+    ) {
+        audit_ip(
+            &state,
+            &headers,
+            &form.username,
+            "login",
+            "web",
+            "DENIED",
+            "rate_limit",
+        );
+        let csrf = state.auth.issue_login_csrf(now);
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Html(views::login_with_context(
+                &hostname(),
+                &server_ip(),
+                &csrf,
+                Some("Demasiados intentos fallidos. Intente de nuevo más tarde."),
+            )),
+        )
+            .into_response();
+    }
     let session = match state.auth.login(&form.username, &form.password, now) {
         Ok(Some(session)) => {
             audit_ip(
@@ -73,11 +99,7 @@ pub async fn login_submit(
             session
         }
         Ok(None) => {
-            let hits =
-                state
-                    .auth
-                    .db()
-                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
+            let hits = state.auth.db().check_rate_limit(&rate_key, now, 60, 5);
             audit_ip(
                 &state,
                 &headers,
@@ -142,6 +164,28 @@ pub async fn api_login(
         )
             .into_response();
     }
+    let rate_key = format!("login_fail:{client_ip}");
+    if matches!(
+        state.auth.db().is_rate_limited(&rate_key, now, 60, 5),
+        Ok(true)
+    ) {
+        audit_ip(
+            &state,
+            &headers,
+            &form.username,
+            "login",
+            "api",
+            "DENIED",
+            "rate_limit",
+        );
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "Demasiados intentos de acceso. Espere un momento e intente de nuevo.",
+            )),
+        )
+            .into_response();
+    }
     match state.auth.login(&form.username, &form.password, now) {
         Ok(Some(session)) => {
             audit_ip(
@@ -177,11 +221,7 @@ pub async fn api_login(
             response
         }
         Ok(None) => {
-            let hits =
-                state
-                    .auth
-                    .db()
-                    .check_rate_limit(&format!("login_fail:{client_ip}"), now, 60, 5);
+            let hits = state.auth.db().check_rate_limit(&rate_key, now, 60, 5);
             audit_ip(
                 &state,
                 &headers,
