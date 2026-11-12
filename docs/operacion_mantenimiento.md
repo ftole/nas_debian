@@ -76,7 +76,7 @@ Se administra desde el Panel Web (pestaña **Redes compartidas**) o mediante los
 
 ### 3.2 Conectar Equipos Clientes desde Windows
 1. Abre el Explorador de Archivos de Windows.
-2. En la barra de direcciones escribe: `\\<IP_DEL_NAS>\<RECURSO>` (ejemplo: `\\10.10.1.2\CONTABILIDAD`).
+2. En la barra de direcciones escribe: `\\<IP_DEL_NAS>\<RECURSO>` (ejemplo: `\\<host>\CONTABILIDAD`).
 3. Introduce el usuario y contraseña creados en el NAS.
 4. Para mayor comodidad, haz clic derecho sobre la carpeta y elige **"Conectar a unidad de red..."** para asignarle una letra (ej. `Z:`).
 
