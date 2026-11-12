@@ -8,10 +8,8 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use crate::{
-    routes::common::{
-        audit_ip, bad_request, forbidden, is_admin, require_auth, run_json, server_error,
-        ApiResponse,
-    },
+    extractors::{AdminUser, AuthenticatedUser},
+    routes::common::{audit_ip, bad_request, run_json, server_error, ApiResponse},
     AppState,
 };
 
@@ -30,11 +28,7 @@ pub struct DomainDiscoverBody {
 }
 
 /// Estado de la integración con Active Directory.
-pub async fn domain_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn domain_status(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let samba_conf = state.paths.samba_conf.clone();
     match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
         Ok(status) => {
@@ -68,16 +62,11 @@ pub async fn domain_status(State(state): State<AppState>, headers: HeaderMap) ->
 /// Une el servidor al dominio (requiere administrador).
 pub async fn domain_join(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<DomainJoinBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !nas_engine::domain::is_valid_domain(&body.domain)
         || !nas_engine::domain::is_valid_user(&body.user)
     {
@@ -134,14 +123,12 @@ pub async fn domain_join(
 }
 
 /// Saca el servidor del dominio (requiere administrador).
-pub async fn domain_leave(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn domain_leave(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+) -> Response {
+    let user = admin.user().username().to_string();
 
     let outcome = tokio::task::spawn_blocking(|| nas_engine::domain::leave(&Runner::new()))
         .await
@@ -179,17 +166,9 @@ pub async fn domain_leave(State(state): State<AppState>, headers: HeaderMap) -> 
 }
 
 pub async fn domain_discover(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     axum::Json(body): axum::Json<DomainDiscoverBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
     if !nas_engine::domain::is_valid_domain(&body.domain) {
         return bad_request("dominio inválido");
     }
