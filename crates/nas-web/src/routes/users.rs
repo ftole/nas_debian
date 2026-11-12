@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::ApiResponse;
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -685,4 +686,18 @@ pub async fn group_delete(
         }
         Err(error) => server_error(&error),
     }
+}
+
+/// Router del dominio de usuarios e identidad.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/users", get(users).post(user_create))
+        .route("/api/users/update", post(user_update))
+        .route("/api/users/toggle", post(user_toggle))
+        .route("/api/users/groups", post(user_groups))
+        .route("/api/users/delete", post(user_delete))
+        .route("/api/groups", get(groups).post(group_create))
+        .route("/api/groups/rename", post(group_rename))
+        .route("/api/groups/delete", post(group_delete))
 }
