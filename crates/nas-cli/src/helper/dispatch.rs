@@ -202,6 +202,12 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
         },
         HelperAction::BackupManage { action } => match action {
             BackupManageAction::Install { id } => backup::install_backup_task(&runner, &id)?,
+            BackupManageAction::InstallSpec => {
+                let raw = read_stdin_line();
+                let spec: nas_engine::backup_spec::BackupSpec = serde_json::from_str(&raw)
+                    .map_err(|e| NasError::Invalid(format!("especificación JSON inválida: {e}")))?;
+                backup::install_backup_spec(&runner, &spec)?
+            }
             BackupManageAction::WriteCron {
                 id,
                 file,
