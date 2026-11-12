@@ -18,7 +18,7 @@
 | **F6** | Empaquetado, systemd endurecido, Nginx `proxy_pass`, cutover y rollback | ✅ **Completado** |
 | **F7** | Retirada escalonada del stack anterior | 🟡 **Ola A completada** (panel PHP, CLI PHP, whiptail y Python retirados del servidor). **Ola B pendiente**: `deploy.sh`, `uninstall.sh`, `updater.sh` y BATS asociados |
 
-El sistema en producción (`10.10.1.222`) ejecuta **la plataforma Rust** desde el
+El sistema en producción (`<host>`) ejecuta **la plataforma Rust** desde el
 cutover de F6 y el retiro de F7 (ola A): `nas-web.service` sirve el panel con
 `proxy_pass`, los binarios `nas`/`nas-tui` están instalados y el material anterior
 fue completamente retirado del proyecto y del servidor. El motor Bash (`src/core/deploy.sh`, `uninstall.sh`, `updater.sh`)
