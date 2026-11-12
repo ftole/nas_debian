@@ -7,10 +7,11 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
+    extractors::{AdminUser, AuthenticatedUser},
     routes::{
         common::{
-            audit_ip, deserialize_string_or_int, error_response, forbidden, is_admin, require_auth,
-            server_error, ApiResponse, ExtQuery,
+            audit_ip, deserialize_string_or_int, error_response, forbidden, server_error,
+            ApiResponse, ExtQuery,
         },
         files::file_root_for,
     },
@@ -39,14 +40,11 @@ pub struct TrashBody {
 /// Envía un elemento a la papelera interna o lo borra definitivamente.
 pub async fn files_delete(
     State(state): State<AppState>,
+    user: AuthenticatedUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<DeleteBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if body.permanent && !is_admin(&state, &user) {
+    if body.permanent && !user.is_admin() {
         return forbidden("se requieren privilegios de administrador");
     }
     let root = match file_root_for(&state, body.root.as_deref()) {
@@ -75,7 +73,15 @@ pub async fn files_delete(
             } else {
                 "file_delete"
             };
-            audit_ip(&state, &headers, &user, action, &audit_path, "SUCCESS", "");
+            audit_ip(
+                &state,
+                &headers,
+                user.username(),
+                action,
+                &audit_path,
+                "SUCCESS",
+                "",
+            );
             let msg = if permanent {
                 "Elemento eliminado definitivamente"
             } else {
@@ -98,12 +104,9 @@ pub async fn files_delete(
 /// Lista la papelera interna.
 pub async fn files_trash(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -123,12 +126,9 @@ pub async fn files_trash(
 /// Restaura un elemento de la papelera.
 pub async fn trash_restore(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<TrashBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -147,16 +147,9 @@ pub async fn trash_restore(
 /// Elimina definitivamente un elemento de la papelera.
 pub async fn trash_delete(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     axum::Json(body): axum::Json<TrashBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -174,16 +167,9 @@ pub async fn trash_delete(
 /// Vacía la papelera.
 pub async fn trash_empty(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     body: axum::body::Bytes,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
     let trash_body: Option<TrashBody> = if body.is_empty() {
         None
     } else {
@@ -208,12 +194,9 @@ pub async fn trash_empty(
 /// Restaura todos los elementos de la papelera.
 pub async fn trash_restore_all(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     body: axum::body::Bytes,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let trash_body: Option<TrashBody> = if body.is_empty() {
         None
     } else {
