@@ -9,9 +9,8 @@ use nas_core::ApiResponse;
 use nas_engine::parsers::smb::parse_shares;
 use serde::Deserialize;
 
-use super::common::{
-    audit_ip, bad_request, error_response, forbidden, is_admin, require_auth, server_error,
-};
+use super::common::{audit_ip, bad_request, error_response, forbidden, server_error};
+use crate::extractors::{AdminUser, AuthenticatedUser};
 use crate::AppState;
 
 pub use access::{share_access_repair, share_access_update, shares_access, shares_access_audit};
@@ -43,11 +42,7 @@ pub struct ShareNameBody {
 }
 
 /// Recursos compartidos declarados en `smb.conf`.
-pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn shares(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     if !state.role.has_shares() {
         return (
             StatusCode::FORBIDDEN,
@@ -98,16 +93,11 @@ pub async fn shares(State(state): State<AppState>, headers: HeaderMap) -> Respon
 /// Crea un recurso compartido.
 pub async fn share_create(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<ShareBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
@@ -167,16 +157,11 @@ pub async fn share_create(
 /// Actualiza un recurso compartido existente.
 pub async fn share_update(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<ShareBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
@@ -246,16 +231,11 @@ pub async fn share_update(
 /// Elimina un recurso compartido (conserva los archivos).
 pub async fn share_delete(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<ShareNameBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
