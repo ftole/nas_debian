@@ -35,10 +35,9 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# /usr/local/bin y /usr/local/sbin: los helpers acotados instalan runners
-# de respaldo y staging (nas-backup-manage vía nas helper). /etc/cron.d y
-# /etc/backup-credentials admiten el ciclo completo de tareas.
-ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin /usr/local/sbin -/etc/cron.d -/etc/backup-credentials -/etc/samba
+# /usr/local/bin: el helper acotado instala runners de respaldo;
+# /etc/cron.d, /etc/backup-credentials y /etc/samba admiten tareas y SMB.
+ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin -/etc/cron.d -/etc/backup-credentials -/etc/samba
 UMask=0007
 CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_MKNOD CAP_AUDIT_WRITE CAP_KILL CAP_LINUX_IMMUTABLE
 AmbientCapabilities=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
