@@ -102,7 +102,7 @@ Para que el script [`updater.sh`](../src/core/updater.sh) y el comando `sudo nas
    ```
 2. **Transferir el archivo al servidor:**
    ```powershell
-   scp clave_autor_nas.asc sistemas@10.10.1.222:/tmp/
+   scp clave_autor_nas.asc <usuario>@<host>:/tmp/
    ```
 3. **Importar en el keyring de root en Debian:**
    ```bash
