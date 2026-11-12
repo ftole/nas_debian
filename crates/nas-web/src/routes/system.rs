@@ -420,11 +420,11 @@ pub async fn system_update_run(
                 "/opt/nas_debian",
                 "--yes",
             ])
+            .env_clear()
             .env(
                 "PATH",
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             )
-            .env_clear()
             .output()
             .map_err(|error| format!("no se pudo ejecutar nas update apply: {error}"))?;
 
