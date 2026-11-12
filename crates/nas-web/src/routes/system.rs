@@ -6,7 +6,8 @@ use nas_core::ApiResponse;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
 
-use super::common::{audit_ip, forbidden, is_admin, require_auth, run_json, server_error};
+use super::common::{audit_ip, run_json, server_error};
+use crate::extractors::{AdminUser, AuthenticatedUser};
 use crate::AppState;
 
 /// Extrae números de una versión tipo `v1.0.2` → `[1, 0, 2]`.
@@ -104,14 +105,12 @@ pub fn process_rss_mb() -> u64 {
         .unwrap_or(0)
 }
 
-pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn system_reboot(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+) -> Response {
+    let user = admin.user().username().to_string();
     audit_ip(
         &state,
         &headers,
@@ -159,10 +158,7 @@ pub async fn system_reboot(State(state): State<AppState>, headers: HeaderMap) ->
 }
 
 /// Información de versión y actualizaciones.
-pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let candidates = [
         state.paths.repo.join("version.json"),
         std::path::PathBuf::from("/etc/nas/version.json"),
@@ -231,11 +227,10 @@ pub async fn system_updates(State(state): State<AppState>, headers: HeaderMap) -
 }
 
 /// Estado de las aplicaciones y tecnologías.
-pub async fn system_applications(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn system_applications(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+) -> Response {
     let paths = state.paths.clone();
     let backup_dir = state.backup_dir.clone();
     match tokio::task::spawn_blocking(move || {
