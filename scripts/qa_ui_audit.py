@@ -28,6 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_JS = ROOT / "crates" / "nas-web" / "assets" / "js" / "app.js"
+JS_ROOT = ROOT / "crates" / "nas-web" / "assets" / "js"
 TEMPLATE = ROOT / "crates" / "nas-web" / "templates" / "layout.html"
 
 CTX = ssl._create_unverified_context()
@@ -156,7 +157,8 @@ def login(host: str) -> tuple[urllib.request.OpenerDirector, str]:
 
 
 def main() -> int:
-    js = APP_JS.read_text(encoding="utf-8", errors="replace")
+    js_files = sorted(JS_ROOT.rglob("*.js"))
+    js = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in js_files)
 
     if "--static" in sys.argv:
         html = TEMPLATE.read_text(encoding="utf-8")
