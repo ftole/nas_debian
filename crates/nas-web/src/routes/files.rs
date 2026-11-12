@@ -10,10 +10,10 @@ use nas_core::NasError;
 use serde::Deserialize;
 
 use crate::{
+    extractors::AuthenticatedUser,
     files::FileRoot,
     routes::common::{
-        bad_request, error_response, forbidden, require_auth, safe_content_disposition,
-        server_error, ApiResponse,
+        bad_request, error_response, forbidden, safe_content_disposition, server_error, ApiResponse,
     },
     AppState,
 };
@@ -132,12 +132,9 @@ pub fn not_found_response(message: &str) -> Response {
 /// Lista el contenido de un directorio.
 pub async fn files_list(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -161,12 +158,10 @@ pub async fn files_list(
 /// Descarga un archivo con cabeceras seguras mediante streaming asíncrono O(1).
 pub async fn files_download(
     State(state): State<AppState>,
+    user: AuthenticatedUser,
     headers: HeaderMap,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -199,7 +194,7 @@ pub async fn files_download(
         .await
         .unwrap_or(false);
         if is_dir {
-            return files_zip(State(state), headers, Query(query)).await;
+            return files_zip(State(state), user, Query(query)).await;
         }
     }
 
@@ -291,12 +286,9 @@ pub async fn files_download(
 /// Descarga una carpeta (o archivo) como ZIP en streaming asíncrono con archivo temporal seguro.
 pub async fn files_zip(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -349,12 +341,9 @@ pub async fn files_zip(
 /// Listado del explorador con selección de unidad (`/api/files/list`).
 pub async fn files_list_rooted(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
