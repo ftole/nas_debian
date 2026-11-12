@@ -193,15 +193,7 @@ $safeServerIp = htmlspecialchars((string) ($serverIp ?? '10.10.1.2'), ENT_QUOTES
     <div class="login-card">
       <div class="login-header">
         <div class="login-brand">
-          <img class="login-brand-logo" src="/img/logo-iintec.svg" alt="iintec" width="177" height="26">
-          <div class="login-title-group">
-            <h1>
-              <span>NAS</span>
-              <span style="opacity:0.4; font-weight:300;">|</span>
-              <span style="color:var(--accent-primary);"><?= $safeHostname ?></span>
-            </h1>
-            <p class="login-subtitle">Servidor NAS Departamental & Central de Respaldos</p>
-          </div>
+          <img class="login-brand-logo" src="/img/logo-iintec.svg" alt="iintec" width="273" height="40">
         </div>
       </div>
 
