@@ -1,6 +1,7 @@
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::{ApiResponse, NasError};
 use nas_engine::parsers::smb::parse_shares;
 use nas_exec::Runner;
@@ -943,4 +944,19 @@ pub async fn shares_access_audit(
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Auditoría de ACL")).into_response(),
         Err(_) => server_error("auditoría de ACL interrumpida"),
     }
+}
+
+/// Router del dominio de recursos compartidos.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/shares", get(shares).post(share_create))
+        .route("/api/shares/update", post(share_update))
+        .route("/api/shares/delete", post(share_delete))
+        .route(
+            "/api/shares/access",
+            get(shares_access).post(share_access_update),
+        )
+        .route("/api/shares/access/repair", post(share_access_repair))
+        .route("/api/shares/access/audit", get(shares_access_audit))
 }

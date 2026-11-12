@@ -118,10 +118,7 @@ pub fn router(state: AppState) -> Router {
         .route("/updates", get(routes::page_updates))
         .route("/api/metrics", get(routes::metrics))
         .route("/api/network", get(routes::network))
-        .route(
-            "/api/shares",
-            get(routes::shares).post(routes::share_create),
-        )
+        .merge(routes::shares::router())
         .merge(routes::users::router())
         .route("/api/services", get(routes::services))
         .route("/api/services/manage", post(routes::service_manage))
@@ -151,17 +148,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/list", get(routes::files_list_rooted))
         .route("/api/files/raw", get(routes::files_raw))
         .route("/api/logs", get(routes::logs))
-        .route("/api/shares/update", post(routes::share_update))
-        .route("/api/shares/delete", post(routes::share_delete))
-        .route(
-            "/api/shares/access",
-            get(routes::shares_access).post(routes::share_access_update),
-        )
-        .route(
-            "/api/shares/access/repair",
-            post(routes::share_access_repair),
-        )
-        .route("/api/shares/access/audit", get(routes::shares_access_audit))
         .route("/api/system/updates", get(routes::system_updates))
         .route("/api/system/applications", get(routes::system_applications))
         .route("/api/system/reboot", post(routes::system_reboot))

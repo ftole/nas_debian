@@ -33,7 +33,7 @@ pub use logs::*;
 pub use pages::*;
 pub use preview::*;
 pub use services::*;
-pub use shares::*;
+
 pub use system::*;
 pub use terminal::*;
 pub use trash::*;
