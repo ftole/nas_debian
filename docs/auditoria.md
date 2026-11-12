@@ -1,7 +1,7 @@
 # Auditoría de Preparación para Producción — Servidor NAS Debian 13
 
-> **Nota:** Este documento es un snapshot histórico de la auditoría realizada el 2026-10-09 sobre el servidor `10.10.1.222` (rol `ARCHIVOS`). Puede no reflejar el estado actual del repositorio; verificar contra el código antes de tomar decisiones.
-**Objetivo:** Evaluar si el proyecto/servidor (`10.10.1.222`, rol `ARCHIVOS`) está listo para producción en una **LAN corporativa**.
+> **Nota:** Este documento es un snapshot histórico de la auditoría realizada el 2026-10-09 sobre el servidor `<host>` (rol `ARCHIVOS`). Puede no reflejar el estado actual del repositorio; verificar contra el código antes de tomar decisiones.
+**Objetivo:** Evaluar si el proyecto/servidor (`<host>`, rol `ARCHIVOS`) está listo para producción en una **LAN corporativa**.
 **Alcance:** Auditoría completa (7 ejes) ejecutada en el servidor con herramientas read-only/lastre: `lynis 3.1.4`, `smartctl 7.4`, `nmap 7.95`, `debsecan`, CPU/probing de red.
 **Método:** OWASP ASVS 5.0 Nivel 2 + WSTG, CIS Debian 13 (Nivel 1/2 vía Lynis), guías oficiales de Samba, regla de respaldo 3-2-1-1-0.
 
