@@ -31,6 +31,7 @@ ASSETS = ROOT / "crates" / "nas-web" / "assets"
 LAYOUT = FIXTURES / "layout.php"
 LOGIN = FIXTURES / "login.php"
 APP_JS = ASSETS / "js" / "app.js"
+JS_ROOT = ASSETS / "js"
 
 ASSET_FILES = [
     "app.css",
@@ -40,6 +41,12 @@ ASSET_FILES = [
     "favicon.ico",
     "logo-iintec.svg",
     "js/app.js",
+    "js/lib/api.js",
+    "js/lib/modal.js",
+    "js/lib/utils.js",
+    "js/lib/toast.js",
+    "js/modules/storage.js",
+    "js/modules/users.js",
     "js/vendor/xlsx.full.min.js",
     "js/vendor/jszip.min.js",
     "js/vendor/docx-preview.min.js",
@@ -140,7 +147,8 @@ def extract_endpoints(text: str) -> list[str]:
 def build_contract() -> dict:
     layout_text = read(LAYOUT)
     login_text = read(LOGIN)
-    app_text = read(APP_JS)
+    js_files = sorted(JS_ROOT.rglob("*.js"))
+    app_text = "\n".join(read(p) for p in js_files)
 
     layout = extract_layout(layout_text)
     login = extract_layout(login_text)
