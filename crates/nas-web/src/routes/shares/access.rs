@@ -7,9 +7,9 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use super::{apply_acl, normalize_group, share_path, stage_and_apply};
+use crate::extractors::{AdminUser, AuthenticatedUser};
 use crate::routes::common::{
-    audit_ip, bad_request, error_response, forbidden, is_admin, require_auth, server_error,
-    ExtQuery,
+    audit_ip, bad_request, error_response, forbidden, server_error, ExtQuery,
 };
 use crate::AppState;
 
@@ -59,10 +59,7 @@ pub fn acl_has(text: &str, entry: &str, is_group: bool, perms: &str, default: bo
     })
 }
 
-pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
+pub async fn shares_access(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
@@ -149,16 +146,11 @@ pub async fn shares_access(State(state): State<AppState>, headers: HeaderMap) ->
 /// Ajusta el nivel de acceso de un grupo o usuario sobre un recurso.
 pub async fn share_access_update(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<ShareAccessBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
@@ -274,16 +266,11 @@ pub async fn share_access_update(
 /// Reaplica las ACLs de todos los recursos según `smb.conf`.
 pub async fn share_access_repair(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<ShareRepairBody>,
 ) -> Response {
-    let user = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &user) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let user = admin.user().username().to_string();
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
@@ -362,12 +349,9 @@ pub async fn share_access_repair(
 /// Audita las ACL reales de cada recurso contra `smb.conf`.
 pub async fn shares_access_audit(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
