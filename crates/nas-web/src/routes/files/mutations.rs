@@ -2,29 +2,25 @@ use std::path::PathBuf;
 
 use axum::{
     extract::{Multipart, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use tokio::io::AsyncWriteExt;
 
 use super::{file_root_for, CreateFileBody, MoveBody, PathBody, RenameBody, MAX_UPLOAD_FILE_SIZE};
 use crate::{
+    extractors::AuthenticatedUser,
     files::sanitize_filename,
-    routes::common::{
-        bad_request, error_response, random_hex, require_auth, server_error, ApiResponse,
-    },
+    routes::common::{bad_request, error_response, random_hex, server_error, ApiResponse},
     AppState,
 };
 
 /// Crea un directorio.
 pub async fn files_mkdir(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<PathBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -64,12 +60,9 @@ pub async fn files_mkdir(
 /// Renombra o mueve un elemento.
 pub async fn files_rename(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<RenameBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -114,14 +107,10 @@ pub async fn files_rename(
 /// Sube uno o varios archivos a un directorio, escribiendo por streaming.
 pub async fn files_upload(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<std::collections::HashMap<String, String>>,
     mut multipart: Multipart,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
     let mut root_name: Option<String> = query.get("root").cloned();
     let mut directory: Option<String> = query.get("path").cloned();
     let mut staged_files: Vec<(PathBuf, String)> = Vec::new();
@@ -326,12 +315,9 @@ pub async fn files_upload(
 /// Crea un archivo vacío/inicial o carpeta según el payload del explorador.
 pub async fn files_create(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<CreateFileBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -386,12 +372,9 @@ pub async fn files_create(
 /// Mueve un elemento entre directorios del explorador.
 pub async fn files_move(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<MoveBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
