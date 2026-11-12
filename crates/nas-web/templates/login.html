@@ -90,6 +90,15 @@
         transition: none;
       }
     }
+    /* Capa de particulas (polvo estelar) que sigue al puntero. */
+    .login-card > canvas.login-fx {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
     .login-header {
       padding: 24px 28px 20px;
       background: var(--bg-card-header);
@@ -209,8 +218,9 @@
   </svg>
 
   <div class="login-container">
-    <div class="login-card">
-      <div class="login-header">
+      <div class="login-card">
+        <canvas class="login-fx" aria-hidden="true"></canvas>
+        <div class="login-header">
         <div class="login-brand">
           <img class="login-brand-logo" src="/img/logo-iintec.svg?v=%%asset_version%%" alt="iintec" width="273" height="40">
         </div>
@@ -282,6 +292,92 @@
       });
       card.addEventListener('pointerleave', function() {
         card.style.setProperty('--spot-active', '0');
+      });
+    })();
+
+    /* Polvo estelar: particulas que siguen al puntero sobre la tarjeta. */
+    (function() {
+      const canvas = document.querySelector('.login-fx');
+      const cardFx = document.querySelector('.login-card');
+      if (!canvas || !cardFx || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const MAX_PARTICLES = 90;
+      let particles = [];
+      let rafId = null;
+      let lastTs = 0;
+      let lastX = null;
+      let lastY = null;
+
+      function resize() {
+        canvas.width = Math.round(cardFx.clientWidth * dpr);
+        canvas.height = Math.round(cardFx.clientHeight * dpr);
+      }
+      resize();
+      new ResizeObserver(resize).observe(cardFx);
+
+      function spawn(x, y) {
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const rgb = dark ? '255,255,255' : '56,189,248';
+        const n = 1 + (Math.random() < 0.35 ? 1 : 0);
+        for (let i = 0; i < n; i++) {
+          if (particles.length >= MAX_PARTICLES) particles.shift();
+          particles.push({
+            x: (x + (Math.random() * 6 - 3)) * dpr,
+            y: (y + (Math.random() * 6 - 3)) * dpr,
+            vx: (Math.random() * 0.3 - 0.15) * dpr,
+            vy: (Math.random() * 0.2 - 0.25) * dpr,
+            r: (0.8 + Math.random() * 1.2) * dpr,
+            life: 500 + Math.random() * 400,
+            age: 0,
+            alpha: 0.5 + Math.random() * 0.35,
+            rgb: rgb
+          });
+        }
+        if (rafId === null) {
+          lastTs = performance.now();
+          rafId = requestAnimationFrame(tick);
+        }
+      }
+
+      function tick(ts) {
+        const dt = Math.min(ts - lastTs, 50);
+        lastTs = ts;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles = particles.filter(function(p) {
+          p.age += dt;
+          if (p.age >= p.life) return false;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          const t = p.age / p.life;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r * (1 - t * 0.4), 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(' + p.rgb + ',' + (p.alpha * (1 - t)).toFixed(3) + ')';
+          ctx.fill();
+          return true;
+        });
+        if (particles.length > 0) {
+          rafId = requestAnimationFrame(tick);
+        } else {
+          rafId = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      cardFx.addEventListener('pointermove', function(e) {
+        const rect = cardFx.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        /* Umbral por distancia: evita amontonar particulas en movimientos lentos. */
+        if (lastX === null || Math.hypot(x - lastX, y - lastY) > 6) {
+          lastX = x;
+          lastY = y;
+          spawn(x, y);
+        }
+      }, { passive: true });
+      cardFx.addEventListener('pointerleave', function() {
+        lastX = null;
+        lastY = null;
       });
     })();
 
