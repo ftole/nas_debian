@@ -19,18 +19,18 @@ pub mod views;
 
 pub use auth::Auth;
 pub use db::Db;
-pub use extractors::{AdminUser, AuthenticatedUser};
+pub use extractors::{AdminUser, AuthenticatedUser, SuperAdminUser};
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::http::{header::HeaderName, header::COOKIE, HeaderValue, Method, StatusCode};
+use axum::extract::{DefaultBodyLimit, Request};
+use axum::http::{header::HeaderName, HeaderValue};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
-use nas_core::{ApiResponse, NasPaths, ServerRole};
+use nas_core::{NasPaths, ServerRole};
 
 /// Estado compartido por los manejadores.
 #[derive(Clone, Debug)]
@@ -69,7 +69,6 @@ impl AppState {
 
 /// Construye el enrutador con todas las rutas y las cabeceras de seguridad.
 pub fn router(state: AppState) -> Router {
-    let csrf_state = state.clone();
     Router::new()
         .route("/healthz", get(routes::healthz))
         .route("/css/app.css", get(routes::css))
@@ -136,41 +135,8 @@ pub fn router(state: AppState) -> Router {
                 usize::try_from(50u64 * 1024 * 1024 * 1024).unwrap_or(usize::MAX),
             )),
         )
-        .layer(axum::middleware::from_fn_with_state(csrf_state, csrf_guard))
         .layer(axum::middleware::from_fn(security_headers))
         .with_state(state)
-}
-
-async fn csrf_guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let is_mutating = matches!(
-        *request.method(),
-        Method::POST | Method::PUT | Method::DELETE | Method::PATCH
-    );
-    let path = request.uri().path();
-    if is_mutating && path != "/login" && path != "/api/auth/login" {
-        let cookies = request
-            .headers()
-            .get(COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        let now = chrono::Utc::now().timestamp();
-        if let Ok(Some(_)) = state.auth.authenticate(cookies, now) {
-            let csrf = request
-                .headers()
-                .get("x-csrf-token")
-                .and_then(|value| value.to_str().ok());
-            if !state.auth.verify_session_csrf(cookies, csrf) {
-                return (
-                    StatusCode::FORBIDDEN,
-                    axum::Json(ApiResponse::<serde_json::Value>::error(
-                        "token CSRF inválido o ausente",
-                    )),
-                )
-                    .into_response();
-            }
-        }
-    }
-    next.run(request).await
 }
 
 async fn security_headers(request: Request, next: Next) -> Response {
