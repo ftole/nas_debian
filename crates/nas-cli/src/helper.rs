@@ -157,6 +157,9 @@ pub enum AccountsAction {
 pub enum BackupManageAction {
     /// Instala una tarea preparada desde /var/lib/nas/staging.
     Install { id: String },
+    /// Valida e instala una tarea a partir de su especificación JSON por entrada estándar.
+    #[command(alias = "install_spec")]
+    InstallSpec,
     /// Escribe o actualiza el cron de una tarea.
     #[command(alias = "write_cron")]
     WriteCron {
