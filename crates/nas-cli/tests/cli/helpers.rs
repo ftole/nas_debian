@@ -1,5 +1,6 @@
 use super::nas;
 
+#[test]
 fn helper_samba_apply_rechaza_rutas_invalidas() {
     let output = nas()
         .args(["--json", "helper", "samba-apply", "/etc/passwd"])
