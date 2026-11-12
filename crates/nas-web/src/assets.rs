@@ -10,6 +10,8 @@ pub const LIB_MODAL_JS: &[u8] = include_bytes!("../assets/js/lib/modal.js");
 pub const LIB_UTILS_JS: &[u8] = include_bytes!("../assets/js/lib/utils.js");
 /// Helpers compartidos (lib): toasts.
 pub const LIB_TOAST_JS: &[u8] = include_bytes!("../assets/js/lib/toast.js");
+/// Módulos por dominio.
+pub const MODULE_STORAGE_JS: &[u8] = include_bytes!("../assets/js/modules/storage.js");
 /// Visor de hojas de cálculo.
 pub const XLSX_JS: &[u8] = include_bytes!("../assets/js/vendor/xlsx.full.min.js");
 /// Compresión en el navegador.
