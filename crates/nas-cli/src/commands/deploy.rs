@@ -506,6 +506,12 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
+        if let Err(error) = nas_engine::deploy::apply_hardening(&runner, options.sudo) {
+            failure = Some(error);
+        }
+    }
+
+    if failure.is_none() {
         let user_check = runner.run(&CommandSpec::new("id").args(["-u", &params.admin_user]));
         if !user_check.is_ok_and(|out| out.is_success()) {
             let useradd_cmd = vec![
