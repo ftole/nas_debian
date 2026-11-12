@@ -4,14 +4,13 @@ use axum::{
     response::{IntoResponse, Response},
     Router,
 };
-use nas_core::NasError;
 use serde::Deserialize;
 
 use crate::{
     extractors::AuthenticatedUser,
     routes::{
-        common::{error_response, safe_content_disposition, server_error, ApiResponse, ExtQuery},
-        files::file_root_for,
+        common::{error_response, server_error, ApiResponse, ExtQuery},
+        files::{file_root_for_async, stream_resolved_file},
     },
     AppState,
 };
@@ -82,7 +81,7 @@ pub async fn files_content(
     _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -109,7 +108,7 @@ pub async fn files_save(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<SaveBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -139,7 +138,7 @@ pub async fn files_raw(
     headers: HeaderMap,
     Query(query): Query<crate::routes::files::FilesQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -150,16 +149,6 @@ pub async fn files_raw(
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| "archivo.bin".to_string());
-
-    let (file_path, file_size) = match root.resolve_file(&path) {
-        Ok(pair) => pair,
-        Err(error) => return error_response(error),
-    };
-
-    let mut file = match tokio::fs::File::open(&file_path).await {
-        Ok(file) => file,
-        Err(e) => return error_response(NasError::io(&file_path, e)),
-    };
 
     let force_attachment = is_active_web_payload(&name);
     let content_type = if force_attachment {
@@ -173,75 +162,7 @@ pub async fn files_raw(
         "inline"
     };
 
-    let range_header = headers
-        .get(axum::http::header::RANGE)
-        .and_then(|v| v.to_str().ok());
-
-    let byte_range = if let Some(raw_range) = range_header {
-        match crate::files::parse_range(raw_range, file_size) {
-            Ok(Some(range)) => Some(range),
-            Ok(None) => None,
-            Err(crate::files::RangeError::Malformed) => None,
-            Err(crate::files::RangeError::Unsatisfiable) => {
-                let resp = Response::builder()
-                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(
-                        axum::http::header::CONTENT_RANGE,
-                        format!("bytes */{file_size}"),
-                    )
-                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                    .body(axum::body::Body::empty())
-                    .unwrap_or_else(|_| server_error("error al responder 416"));
-                return resp;
-            }
-        }
-    } else {
-        None
-    };
-
-    let (status, content_length, content_range, body) = if let Some(range) = byte_range {
-        use std::io::SeekFrom;
-        use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        if let Err(e) = file.seek(SeekFrom::Start(range.start)).await {
-            return error_response(NasError::io(&file_path, e));
-        }
-        let length = range.length();
-        let stream = crate::files::ReaderStream::new(file.take(length));
-        (
-            axum::http::StatusCode::PARTIAL_CONTENT,
-            length,
-            Some(range.content_range_header()),
-            axum::body::Body::from_stream(stream),
-        )
-    } else {
-        let stream = crate::files::ReaderStream::new(file);
-        (
-            axum::http::StatusCode::OK,
-            file_size,
-            None,
-            axum::body::Body::from_stream(stream),
-        )
-    };
-
-    let mut builder = Response::builder()
-        .status(status)
-        .header(axum::http::header::CONTENT_TYPE, content_type)
-        .header(axum::http::header::CONTENT_LENGTH, content_length)
-        .header(axum::http::header::ACCEPT_RANGES, "bytes")
-        .header(
-            axum::http::header::CONTENT_DISPOSITION,
-            safe_content_disposition(disposition, &name),
-        )
-        .header("content-security-policy", "default-src 'none'; sandbox")
-        .header("x-content-type-options", "nosniff");
-
-    if let Some(cr) = content_range {
-        builder = builder.header(axum::http::header::CONTENT_RANGE, cr);
-    }
-
-    builder
-        .body(body)
-        .unwrap_or_else(|_| server_error("error al crear respuesta raw"))
+    stream_resolved_file(root, path, &headers, content_type, disposition, &name).await
 }
 
 /// Router del dominio de previsualización de archivos.
