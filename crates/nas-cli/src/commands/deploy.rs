@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use nas_core::shell::quote_all;
-use nas_core::{ApiResponse, NasError, NasPaths, NasResult};
+use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ServerRole};
 use nas_engine::deploy::{DeployParams, FileSystem};
 use nas_exec::{CommandSpec, Runner};
 
@@ -517,8 +517,8 @@ pub fn deploy_apply(
         ),
     ));
 
-    let plan = params.plan();
     let mut failure = None;
+    let mut steps_executed: usize = 0;
 
     if let Err(error) = write_artifacts(&runner, &params.all_artifacts(), options.sudo) {
         failure = Some(NasError::Denied(error));
@@ -582,10 +582,91 @@ pub fn deploy_apply(
             })?;
         }
 
-        for step in &plan {
-            if let Err(error) = run_step(&runner, step, options.sudo, 900) {
+        // Formateo del disco (si no se reutilizan datos).
+        if failure.is_none() && !params.keep_data && params.disk != "LOCAL" {
+            let fs = match params.filesystem {
+                nas_engine::deploy::FileSystem::Ext4 => nas_engine::deploy::storage::FileSystem::Ext4,
+                nas_engine::deploy::FileSystem::Btrfs => nas_engine::deploy::storage::FileSystem::Btrfs,
+            };
+            if let Err(error) = nas_engine::deploy::storage::format_disk(
+                &runner,
+                &params.disk,
+                fs,
+                params.keep_data,
+            ) {
                 failure = Some(error);
-                break;
+            } else {
+                steps_executed += 1;
+            }
+        }
+
+        // Directorio base.
+        if failure.is_none() {
+            let spec = CommandSpec::new("mkdir")
+                .args(["-p", "/srv/nas"])
+                .sudo(if options.sudo {
+                    nas_exec::SudoMode::Passwordless
+                } else {
+                    nas_exec::SudoMode::None
+                })
+                .timeout(std::time::Duration::from_secs(30));
+            if let Err(error) = runner
+                .run(&spec)
+                .map_err(|e| NasError::Denied(e.to_string()))
+            {
+                failure = Some(error);
+            } else {
+                steps_executed += 1;
+            }
+        }
+
+        // Montaje.
+        if failure.is_none() && params.disk != "LOCAL" {
+            let part = params.partition_path().unwrap_or_default();
+            let opts = params.mount_options();
+            if let Err(error) =
+                nas_engine::deploy::storage::mount(&runner, &part, "/srv/nas", &opts)
+            {
+                failure = Some(error);
+            } else {
+                steps_executed += 1;
+            }
+        }
+
+        // Directorios de datos.
+        if failure.is_none() {
+            let spec = CommandSpec::new("mkdir")
+                .args(["-p", "/srv/nas/SISTEMAS"])
+                .sudo(if options.sudo {
+                    nas_exec::SudoMode::Passwordless
+                } else {
+                    nas_exec::SudoMode::None
+                })
+                .timeout(std::time::Duration::from_secs(30));
+            let _ = runner.run(&spec);
+            steps_executed += 1;
+            if params.role != ServerRole::Arquivos {
+                for dir in ["BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES", "LOGS_BACKUP"] {
+                    let path = format!("/srv/nas/{dir}");
+                    let spec = CommandSpec::new("mkdir")
+                        .args(["-p", &path])
+                        .sudo(if options.sudo {
+                            nas_exec::SudoMode::Passwordless
+                        } else {
+                            nas_exec::SudoMode::None
+                        })
+                        .timeout(std::time::Duration::from_secs(30));
+                    let _ = runner.run(&spec);
+                }
+                let spec = CommandSpec::new("mkdir")
+                    .args(["-p", "/etc/backup-credentials"])
+                    .sudo(if options.sudo {
+                        nas_exec::SudoMode::Passwordless
+                    } else {
+                        nas_exec::SudoMode::None
+                    })
+                    .timeout(std::time::Duration::from_secs(30));
+                let _ = runner.run(&spec);
             }
         }
     }
@@ -634,7 +715,7 @@ pub fn deploy_apply(
                 "role": params.role.as_str(),
                 "filesystem": params.filesystem.as_str(),
                 "disk": params.disk,
-                "steps": plan.len(),
+                "steps": steps_executed,
             }),
             "Despliegue completado",
         ))?;
@@ -645,7 +726,7 @@ pub fn deploy_apply(
             params.role.as_str(),
             params.filesystem.label()
         );
-        println!("Pasos ejecutados: {}", plan.len());
+        println!("Pasos ejecutados: {}", steps_executed);
     }
 
     Ok(ExitCode::SUCCESS)
