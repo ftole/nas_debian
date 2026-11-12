@@ -103,6 +103,50 @@ fn helper_backup_manage_rechaza_id_invalido() {
 }
 
 #[test]
+fn helper_backup_manage_install_spec_rechaza_json_e_id_invalidos() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = nas()
+        .args(["--json", "helper", "backup-manage", "install-spec"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"{\"id\":\"../escape\",\"proto\":\"local\",\"path\":\"/tmp\",\"cron\":\"0 2 * * *\",\"retention\":5}\n")
+        .unwrap();
+    let output = child.wait_with_output().expect("wait");
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert_eq!(payload["success"], false);
+    assert!(payload["error"].as_str().unwrap().contains("identificador"));
+
+    let mut bad_json = nas()
+        .args(["--json", "helper", "backup-manage", "install-spec"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    bad_json
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"{no-es-json}\n")
+        .unwrap();
+    let bad_out = bad_json.wait_with_output().expect("wait");
+    assert!(!bad_out.status.success());
+    let bad_payload: serde_json::Value = serde_json::from_slice(&bad_out.stderr).expect("json");
+    assert_eq!(bad_payload["success"], false);
+    assert!(bad_payload["error"].as_str().unwrap().contains("JSON"));
+}
+
+#[test]
 fn helper_storage_apply_exige_confirmacion() {
     let output = nas()
         .args([
