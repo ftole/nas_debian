@@ -1,12 +1,31 @@
 # Manual de Publicación y Gestión de Releases • NAS Debian 13
 
-Este manual documenta el procedimiento estándar, seguro y repetible para preparar, firmar criptográficamente con GPG y publicar tanto el **primer release (versión inicial o beta)** como los **segundos y posteriores releases (actualizaciones, parches y mejoras continuas)** del Servidor NAS y Central de Respaldos.
+Este manual documenta el procedimiento estándar, seguro y repetible para preparar, firmar criptográficamente y publicar tanto el **primer release (versión inicial o beta)** como los **segundos y posteriores releases (actualizaciones, parches y mejoras continuas)** del Servidor NAS y Central de Respaldos.
+
+---
+
+## 0. Cadena de Confianza (GPG + Ed25519)
+
+El proyecto usa **dos sistemas criptográficos complementarios**:
+
+| Sistema | Qué firma | Dónde se verifica | Quién lo usa |
+|---|---|---|---|
+| **GPG (PGP)** | El **tag** de Git (`vX.Y.Z`) | `git tag -v` en el servidor (legacy `updater.sh`) | Mantenedor (clave personal) |
+| **Ed25519** | El **artefacto** (`nas-X.Y.Z.json`) | `nas update verify` en el servidor (Rust) | CI (secreto `NAS_RELEASE_KEY`) |
+
+**Flujo completo:**
+1. El mantenedor crea un tag GPG firmado (`git tag -s`).
+2. CI (GitHub Actions) firma el artefacto con Ed25519 usando `NAS_RELEASE_KEY`.
+3. El servidor verifica Ed25519 sobre el artefacto (no GPG).
+4. `updater.sh` (legacy, shim) aún verifica GPG tag para compatibilidad.
+
+> En resumen: GPG autentica el código; Ed25519 autentica el artefacto que se instala.
 
 ---
 
 ## 1. Fundamentos y Estándar de Versionado
 
-El proyecto se rige estrictamente por **Versionado Semántico (SemVer 2.0.0)** y **Cadenas de Confianza Criptográfica**:
+El proyecto se rige estrictamente por **Versionado Semántico (SemVer 2.0.0, es decir MAJOR.MINOR.PATCH)** y **Cadenas de Confianza Criptográfica** (GPG para tags, Ed25519 para artefactos):
 
 ```text
        v [MAJOR] . [MINOR] . [PATCH] - [PRE-RELEASE]
@@ -36,7 +55,7 @@ Este procedimiento se realiza una única vez en la estación de trabajo del mant
 
 Abre PowerShell o Git Bash en tu equipo de desarrollo:
 
-1. **Verificar si ya cuentas con claves GPG:**
+1. **Verificar si ya cuentas con claves GPG (GNU Privacy Guard, un sistema de firmas criptográficas):**
    ```powershell
    gpg --list-secret-keys --keyid-format=long
    ```
@@ -329,7 +348,7 @@ Los administradores pueden actualizar sus servidores de dos formas equivalentes:
    - Navega a la pestaña **Actualizaciones**.
    - Haz clic en **Buscar actualizaciones**.
    - El panel detectará el nuevo release firmado y habilitará el botón **Actualizar ahora**.
-   - Al confirmar, el helper [`nas-web-updater`](../src/core/deploy.sh) ejecutará la actualización con verificación de firma y recarga limpia de demonios.
+   - Al confirmar, el comando `nas update apply` ejecutará la actualización con verificación de firma y recarga limpia de demonios.
 
 ---
 
@@ -351,7 +370,7 @@ Antes de marcar un release como versión final de producción (`v1.0.0` o superi
 - [ ] Todas las pruebas de inyección de fallos pasan (`tests/failure_*.bats`).
 - [ ] Los permisos de directorios sensibles están confinados (`/etc/backup-credentials` en `0600 root:root`, `/srv/nas/.trash` y `/srv/nas/.tmp_zip` en `2770 root:grp_samba`).
 - [ ] No existen credenciales, contraseñas ni archivos `.env` versionados en Git.
-- [ ] El script [`updater.sh`](../src/core/updater.sh) preserva intactas las carpetas compartidas y las bases de datos de auditoría (`nas.sqlite`).
+- [ ] El comando `nas update apply` (Rust) preserva intactas las carpetas compartidas y las bases de datos de auditoría (`nas.sqlite`). (`updater.sh` es legacy/shim.)
 - [ ] La firma del tag es verificada exitosamente en una máquina limpia con `git tag -v`.
 
 ---
@@ -374,6 +393,8 @@ gh secret set NAS_RELEASE_KEY < release.key && rm -f release.key
 
 ### 7.2 Flujo del release con el tag GPG
 
+> **Ed25519** es un algoritmo de firma digital moderno y rápido, usado para firmar los artefactos del release.
+
 El tag GPG firmado con tu clave personal sigue siendo el origen (no se rompe).
 `release.yml` además:
 
@@ -386,12 +407,27 @@ El `dist/out/` resultante incluye:
 
 | Archivo | Contenido |
 |---|---|
-| `nas_debian-X.Y.Z.tar.gz` | Paquete binario binario comprimido |
+| `nas_debian-X.Y.Z.tar.gz` | Paquete binario comprimido |
 | `nas-X.Y.Z.json` | Manifiesto con `"signature": <hex firmado Ed25519>` |
 | `nas_debian-X.Y.Z.tar.gz.sha256` | Suma SHA-256 del paquete |
 | `release.pub` | Clave pública Ed25519 para verificación en cualquier servidor |
 
-### 7.3 Fulano update pipeline desde el panel
+### 7.4 Qué automatiza CI (release.yml)
+
+El workflow `release.yml` ejecuta automáticamente:
+
+1. Compila el workspace en modo release (`cargo build --workspace --release --locked`).
+2. Valida el empaquetado (`packaging/verify.sh`).
+3. Genera el paquete oficial (`scripts/package.sh`).
+4. Deriva la clave pública de `NAS_RELEASE_KEY` (secreto CI).
+5. Firma el manifiesto `nas-X.Y.Z.json` con Ed25519 (`nas update sign`).
+6. Verifica la firma cruzada (`nas update verify --pubkey release.pub`).
+7. Si la firma falla → **el job aborta** (no se publica el release).
+8. Publica en GitHub Releases con todos los artefactos.
+
+> No es necesario firmar manualmente; CI lo hace. El mantenedor solo crea el tag GPG y dispara el workflow.
+
+### 7.3 Flujo de actualización desde el panel
 
 El panel (`/dashboard#applications` → **Actualizar ahora**)
 
