@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use nas_core::ApiResponse;
@@ -7,7 +7,8 @@ use nas_engine::collect_status;
 use nas_exec::Runner;
 use serde::Deserialize;
 
-use super::common::{require_auth, run_json, server_error};
+use super::common::{run_json, server_error};
+use crate::extractors::AuthenticatedUser;
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -16,11 +17,7 @@ pub struct DiagBody {
     pub r#type: String,
 }
 
-pub async fn diagnostics(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn diagnostics(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
     match tokio::task::spawn_blocking(move || {
         let runner = Runner::new();
@@ -59,12 +56,9 @@ pub async fn diagnostics(State(state): State<AppState>, headers: HeaderMap) -> R
 
 pub async fn diagnostics_run(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<DiagBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let kind = if body.r#type.is_empty() {
         "services".to_string()
     } else {
