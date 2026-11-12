@@ -7,9 +7,8 @@ use serde::Deserialize;
 use super::{
     is_master_grp, is_protected_posix_account, run_accounts, valid_grp, valid_username, MemberBody,
 };
-use crate::routes::common::{
-    audit_ip, bad_request, forbidden, is_admin, require_auth, server_error,
-};
+use crate::extractors::{AdminUser, AuthenticatedUser};
+use crate::routes::common::{audit_ip, bad_request, forbidden, server_error};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -27,11 +26,7 @@ pub struct RenameGroupBody {
 }
 
 /// Grupos corporativos (formato que consume `app.js`).
-pub async fn groups(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
-
+pub async fn groups(_user: AuthenticatedUser) -> Response {
     match tokio::task::spawn_blocking(|| {
         let (_, groups) = nas_engine::users::load_local();
         let list: Vec<serde_json::Value> = groups
@@ -64,18 +59,7 @@ pub async fn groups(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 /// Añade o quita un miembro de un grupo.
-pub async fn user_groups(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::Json(body): axum::Json<MemberBody>,
-) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+pub async fn user_groups(_admin: AdminUser, axum::Json(body): axum::Json<MemberBody>) -> Response {
     if !valid_username(&body.username)
         || is_protected_posix_account(&body.username)
         || !valid_grp(&body.group)
@@ -110,16 +94,11 @@ pub async fn user_groups(
 /// Crea un grupo corporativo.
 pub async fn group_create(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<GroupBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     let raw = body.name.trim();
     let clean = raw.trim_start_matches("grp_");
     let name = format!("grp_{clean}");
@@ -157,17 +136,9 @@ pub async fn group_create(
 
 /// Renombra un grupo.
 pub async fn group_rename(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    _admin: AdminUser,
     axum::Json(body): axum::Json<RenameGroupBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
     let raw_new = if body.new.is_empty() {
         body.new_name.trim()
     } else {
@@ -203,16 +174,11 @@ pub async fn group_rename(
 /// Elimina un grupo corporativo.
 pub async fn group_delete(
     State(state): State<AppState>,
+    admin: AdminUser,
     headers: HeaderMap,
     axum::Json(body): axum::Json<GroupBody>,
 ) -> Response {
-    let actor = match require_auth(&state, &headers) {
-        Ok(user) => user,
-        Err(response) => return *response,
-    };
-    if !is_admin(&state, &actor) {
-        return forbidden("se requieren privilegios de administrador");
-    }
+    let actor = admin.user().username().to_string();
     let name = body.name.trim().to_string();
     if !valid_grp(&name) || is_master_grp(&name) {
         return bad_request("grupo inválido o grupo maestro protegido");
