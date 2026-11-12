@@ -8,9 +8,6 @@
 #users-filter-chips .chip-btn
 #users-table-body tr[data-username]
 .btn-secondary
-.cp-disk-check
-.cp-disk-check:checked
-.cp-step
 .file-card.selected
 .member-name
 .modal-backdrop, .modal-overlay
@@ -24,11 +21,9 @@
 .role-card
 .sidebar
 .sidebar-nav .nav-item
-.storage-wizard-step
 .user-groups-extra
 .view-section
 [data-view=
-[id^=
 button[type=
 form
 input[name=
@@ -71,17 +66,13 @@ bkp-retention
 bkp-share
 bkp-user
 btn-cancel-system-update
-btn-confirm-audit-btrfs
 btn-confirm-delete
 btn-confirm-empty-trash
 btn-confirm-reboot
 btn-confirm-restore-all
 btn-confirm-run-backup
 btn-confirm-stop-backup
-btn-confirm-trim-ssd
-btn-confirm-unmount-storage
 btn-confirm-zip-download
-btn-cp-apply
 btn-discover-domain
 btn-download-zip
 btn-folder-up
@@ -99,7 +90,6 @@ btn-reload-php
 btn-reload-samba
 btn-restart-wsdd
 btn-scrub-btrfs
-btn-scrub-storage
 btn-start-system-update
 btn-submit-edit-backup
 btn-submit-edit-share
@@ -115,10 +105,8 @@ btn-submit-new-user
 btn-submit-rename-file
 btn-submit-rename-group
 btn-submit-restore-backup
-btn-submit-storage
 btn-test-backup
 btn-test-edit-backup
-btn-trim-storage
 btn-upload-files
 btn-user-action-confirm-submit
 btn-view-grid
@@ -139,14 +127,6 @@ confirm-stop-backup-elapsed
 confirm-stop-backup-id
 confirm-stop-backup-progress
 confirm-stop-backup-speed
-cp-confirm
-cp-disks-list
-cp-fstype
-cp-options-create
-cp-options-extend
-cp-selected-capacity
-cp-summary
-cp-unit-id
 dashboard-activity-feed
 del-mode-permanent
 del-mode-trash
@@ -207,7 +187,6 @@ files-status-total
 files-table-body
 files-table-container
 files-trash-view
-files-units-optgroup
 form-new-backup
 form-new-group
 form-new-share
@@ -327,44 +306,6 @@ share-unit
 share-write-group
 shares-table-body
 sidebar-backdrop
-stg-confirm
-stg-confirm-hint
-stg-confirm-label
-stg-device
-stg-fs-wrap
-stg-fstype
-stg-inspect-box
-stg-inspect-details
-stg-lv
-stg-lvm-wrap
-stg-main-path
-stg-main-progress
-stg-op
-stg-overview-card
-stg-scrub-badge
-stg-scrub-info
-stg-size
-stg-stat-free
-stg-stat-fs
-stg-stat-percent
-stg-stat-total
-stg-stat-used
-stg-subvol
-stg-subvol-wrap
-stg-subvols-panel
-stg-subvols-path
-stg-threshold-alert
-stg-threshold-badge
-stg-threshold-text
-stg-trim-badge
-stg-trim-info
-stg-unit-id
-stg-unit-wrap
-stg-vg
-storage-disks-body
-storage-pools-grid
-storage-subvols-body
-storage-units-body
 system-banners
 system-update-footer
 system-update-log
@@ -384,7 +325,6 @@ terminal-output
 trash-filter-input
 trash-kpi-badge
 trash-table-body
-trim-modal-path
 updates-container
 upload-file-label
 upload-percent-label
