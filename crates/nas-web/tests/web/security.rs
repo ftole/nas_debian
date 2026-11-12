@@ -451,3 +451,45 @@ async fn logout_exige_csrf_cuando_esta_autenticado() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn api_login_devuelve_rol_y_csrf_en_spawn_blocking() {
+    let dir = temp_dir("api-login-role");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("operador", &sha256_hex("Clave123"), "operator")
+        .expect("operador");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("superadmin");
+    let auth = Auth::with_csrf_secret(db, 3600, false, [0x24u8; 32]);
+    let login_csrf = auth.issue_login_csrf(chrono::Utc::now().timestamp());
+    let app = router(AppState::new(auth, paths_for(&dir), ServerRole::Arquivos));
+
+    for (user, pass, expected_role) in [
+        ("operador", "Clave123", "operator"),
+        ("admin", "Secreta123", "superadmin"),
+    ] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/json")
+            .header("x-csrf-token", &login_csrf)
+            .header("x-real-ip", format!("198.51.100.{}", user.len()))
+            .body(Body::from(format!(
+                r#"{{"username":"{user}","password":"{pass}"}}"#
+            )))
+            .expect("req");
+        let resp = app.clone().oneshot(req).await.expect("resp");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let payload: serde_json::Value =
+            serde_json::from_str(&body_text(resp).await).expect("json");
+        assert_eq!(payload["data"]["username"], user);
+        assert_eq!(payload["data"]["role"], expected_role);
+        assert!(!payload["data"]["session"].as_str().unwrap_or("").is_empty());
+        assert!(!payload["data"]["csrf_token"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty());
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
