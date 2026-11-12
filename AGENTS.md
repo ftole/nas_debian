@@ -54,7 +54,9 @@
 > (`crates/*`). El panel PHP, el asistente `whiptail`, el CLI PHP y las utilidades
 > Python fueron retirados en su totalidad del proyecto y del servidor (pool PHP, sudoers y
 > `/var/www/nas-web`). Los assets del panel (`app.js`, CSS, vendor) viven ahora en
-> `crates/nas-web/assets/` y se sirven byte a byte desde el binario.
+> `crates/nas-web/assets/` y se sirven byte a byte desde el binario (incluido el
+> logotipo `logo-iintec.svg`, servido en `/img/logo-iintec.svg` y recoloreado por
+> tema vía CSS mask en la pantalla de acceso).
 
 
 Todos los archivos del proyecto son portables y se adaptan dinámicamente al directorio donde se alojen y al hardware del servidor:
