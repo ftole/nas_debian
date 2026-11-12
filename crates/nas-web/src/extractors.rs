@@ -228,6 +228,35 @@ where
     }
 }
 
+/// Extractor de usuario con privilegios de superadministrador.
+#[derive(Debug, Clone)]
+pub struct SuperAdminUser(pub AuthenticatedUser);
+
+impl SuperAdminUser {
+    /// Devuelve la referencia al usuario autenticado subyacente.
+    pub fn user(&self) -> &AuthenticatedUser {
+        &self.0
+    }
+}
+
+impl<S> FromRequestParts<S> for SuperAdminUser
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let user = AuthenticatedUser::from_request_parts(parts, state).await?;
+        if !user.is_superadmin() {
+            return Err(forbidden_response(
+                "se requieren privilegios de superadministrador",
+            ));
+        }
+        Ok(SuperAdminUser(user))
+    }
+}
+
 fn unauthorized_response() -> Response {
     (
         StatusCode::UNAUTHORIZED,
