@@ -511,6 +511,46 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\
     }
 }
 
+/// Aplica el hardening generado (sysctl, udev, auditd) en el sistema.
+pub fn apply_hardening(runner: &nas_exec::Runner, sudo: bool) -> NasResult<()> {
+    let configure = |spec: nas_exec::CommandSpec| nas_exec::CommandSpec {
+        sudo: if sudo {
+            nas_exec::SudoMode::Passwordless
+        } else {
+            nas_exec::SudoMode::None
+        },
+        ..spec
+    };
+
+    // sysctl
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("sysctl")
+            .args(["--system"])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
+
+    // udev
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("udevadm")
+            .args(["control", "--reload-rules"])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("udevadm")
+            .args(["trigger"])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
+
+    // auditd
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("systemctl")
+            .args(["restart", "auditd"])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
+
+    Ok(())
+}
+
 /// Persiste una entrada de montaje en `/etc/fstab` usando el UUID si está disponible.
 pub fn update_fstab(
     runner: &nas_exec::Runner,
