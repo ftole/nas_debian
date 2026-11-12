@@ -1,6 +1,7 @@
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::{ApiResponse, NasError};
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -939,4 +940,29 @@ pub async fn backup_permanent_delete(
             error_response(NasError::Invalid(err))
         }
     }
+}
+
+/// Router del dominio de respaldos.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/backups", get(backups).post(backup_create))
+        .route("/api/backups/plan", post(backup_plan))
+        .route("/api/backups/run", post(backup_run))
+        .route("/api/backups/running", get(backups_running))
+        .route("/api/backups/{id}/run", post(backup_run_id))
+        .route("/api/backups/{id}/stop", post(backup_stop_id))
+        .route("/api/backups/{id}/logs", get(backup_logs_id))
+        .route("/api/backups/test", post(backup_test))
+        .route("/api/backups/update", post(backup_update))
+        .route("/api/backups/delete", post(backup_delete))
+        .route("/api/backups/permanent", get(backups_permanent))
+        .route("/api/backups/{id}/freeze", post(backup_freeze_id))
+        .route("/api/backups/freeze", post(backup_freeze))
+        .route("/api/backups/restore", post(backup_restore))
+        .route(
+            "/api/backups/permanent/delete",
+            post(backup_permanent_delete),
+        )
+        .route("/api/backups/", post(backup_create))
 }
