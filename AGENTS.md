@@ -338,3 +338,23 @@ tail -f /srv/nas/LOGS_BACKUP/backup_*.log
 * **Smoke test post-deploy obligatorio:** Tras cada deploy que toque la web, verificar `systemctl is-active nas-web`, `curl -fsS http://127.0.0.1:8080/healthz` y abrir `/dashboard#storage` (cargar discos, abrir modal, cancelar sin ejecutar).
 * **Paridad de hash:** Todo cambio en `crates/nas-web/assets/js/app.js` o `layout.html` debe regenerar `tests/parity/assets.sha256` con `python3 scripts/parity_extract.py` y commitearse en un commit `ci:` separado y atómico.
 * **No prometer funcionalidades no implementadas:** La UI no debe mostrar opciones de RAID/hot-spare ni acciones destructivas sin confirmación. Los textos de la vista de almacenamiento deben dejar claro que "pool = volumen".
+
+
+---
+
+## 8. Owners por Crate / Módulo
+
+Ver `docs/owners.md`. Tabla resumen:
+
+| Crate / Módulo | Responsabilidad | Owner |
+|---|---|---|
+| `nas-web` | Panel web, assets, paridad | `@frontend` |
+| `nas-engine` (storage) | Discos, LVM, Btrfs, formatos | `@storage` |
+| `nas-engine` (backups) | rsync, snapshots, retención | `@backups` |
+| `nas-engine` (users/samba) | Usuarios, grupos, ACLs, AD | `@identity` |
+| `nas-engine` (deploy) | Aprovisionamiento (ola B) | `@infra` |
+| `nas-cli` | Comandos `nas` | `@cli` |
+| `nas-tui` | Asistente de terminal | `@tui` |
+| `nas-exec`, `nas-audit`, `nas-core` | Ejecución segura, auditoría, tipos | `@core` |
+| Bash legacy (`src/core/*.sh`) | Despliegue legacy (ola B) | `@infra` |
+| Paridad/CI (`scripts/`, `tests/parity/`) | Contrato PHP↔Rust | `@qa` |
