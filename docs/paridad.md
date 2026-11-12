@@ -116,7 +116,7 @@ Procedimiento (`scripts/php_parity_diff.py`, ejecutado en el servidor):
 3. Comparar por página IDs, clases, atributos `data-*`, recuentos y orden de secciones;
    después la forma de las respuestas JSON de 21 endpoints.
 
-Resultado en `10.10.1.222`:
+Resultado en `<host>`:
 
 ```text
 /dashboard, /files, /shares, /users, /backups, /storage, /terminal, /domain, /services
@@ -155,7 +155,7 @@ detecta Btrfs en `/proc/mounts` para mostrar los controles de scrub.
 | Estático (CI) | `python3 scripts/qa_ui_audit.py --static` | 382 IDs de `app.js`, 127 manejadores inline, 14 vistas frente a `layout.html` |
 | En vivo | `NAS_WEB_PANEL_PASSWORD=… python3 scripts/qa_ui_audit.py` | lo anterior + 24 endpoints GET de carga de vista |
 
-Resultados en `10.10.1.222`:
+Resultados en `<host>`:
 
 ```text
 [ids]      app.js consulta 382 IDs; faltan 0
