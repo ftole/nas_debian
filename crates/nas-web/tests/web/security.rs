@@ -318,3 +318,95 @@ async fn rate_limit_login_todas_las_fallos_tras_limite_con_ip_distintas() {
         );
     }
 }
+
+#[tokio::test]
+async fn rate_limit_bloquea_sexto_intento_desde_misma_ip_antes_de_autenticar() {
+    let (app, _dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let ip_header = "198.51.100.77";
+
+    for i in 1..=5 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/json")
+            .header("x-real-ip", ip_header)
+            .body(Body::from(
+                r#"{"username":"admin","password":"equivocada"}"#,
+            ))
+            .expect("req");
+        let resp = app.clone().oneshot(req).await.expect("resp");
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "intento fallido {i} debe ser 401"
+        );
+    }
+
+    // Al 6º intento, incluso con la contraseña correcta, debe bloquearse con 429 antes de autenticar.
+    let req_blocked = Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header("content-type", "application/json")
+        .header("x-real-ip", ip_header)
+        .body(Body::from(r#"{"username":"admin","password":"Clave123"}"#))
+        .expect("req");
+    let resp_blocked = app.oneshot(req_blocked).await.expect("resp");
+    assert_eq!(resp_blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn borrado_permanente_exige_privilegios_admin() {
+    let dir = temp_dir("perm-delete-op");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("operador", &sha256_hex("Clave123"), "operator")
+        .expect("operador");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.data_root = dir.join("data");
+    std::fs::create_dir_all(&paths.data_root).expect("data_root");
+    std::fs::write(paths.data_root.join("nota.txt"), b"hola").expect("archivo");
+    let state =
+        AppState::new(auth, paths, ServerRole::Arquivos).with_backup_dir(dir.join("runners"));
+    let app = router(state);
+
+    let login_resp = app
+        .clone()
+        .oneshot(login_request("operador", "Clave123"))
+        .await
+        .expect("login");
+    let cookie = login_resp
+        .headers()
+        .get(SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .expect("cookie")
+        .split(';')
+        .next()
+        .expect("par")
+        .to_string();
+
+    // Borrado permanente denegado para operador
+    let resp_perm = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/delete",
+            &cookie,
+            r#"{"path":"nota.txt","permanent":true}"#,
+        ))
+        .await
+        .expect("perm delete");
+    assert_eq!(resp_perm.status(), StatusCode::FORBIDDEN);
+    assert!(dir.join("data/nota.txt").exists());
+
+    // Mover a papelera sí permitido para operador
+    let resp_trash = app
+        .oneshot(post_json(
+            "/api/files/delete",
+            &cookie,
+            r#"{"path":"nota.txt","permanent":false}"#,
+        ))
+        .await
+        .expect("trash delete");
+    assert_eq!(resp_trash.status(), StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
