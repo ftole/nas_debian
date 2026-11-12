@@ -1,7 +1,7 @@
 //! Generación validada de tareas de respaldo (runner + cron + credenciales).
 
 use nas_core::{NasError, NasResult};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod render;
 
@@ -17,7 +17,7 @@ pub enum Proto {
 }
 
 /// Definición de una tarea de respaldo enviada por el panel.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupSpec {
     /// Identificador de la tarea.
     pub id: String,
