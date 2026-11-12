@@ -206,18 +206,7 @@ pub fn run_nas_helper(
     if let Some(secret) = stdin_secret {
         spec = spec.stdin_secret(nas_exec::SecretInput::new(secret));
     }
-    let output = Runner::new()
-        .run(&spec)
-        .map_err(|error| error.to_string())?;
-    if output.is_success() {
-        Ok(output.stdout)
-    } else {
-        Err(if output.stderr.is_empty() {
-            output.stdout
-        } else {
-            output.stderr
-        })
-    }
+    run_json(spec)
 }
 
 pub fn safe_content_disposition(disposition: &str, filename: &str) -> HeaderValue {
