@@ -232,12 +232,12 @@ Transfiere la clave de firma digital GPG (`B10B8F775202C0EA` de Francisco Toledo
 
 **1. En Windows (Git Bash):**
 ```bash
-gpg --armor --export B10B8F775202C0EA > /c/Users/Francisco/clave_publica.asc
-gpg --armor --export-secret-keys B10B8F775202C0EA > /c/Users/Francisco/clave_privada.asc
-scp /c/Users/Francisco/clave_*.asc frank@10.10.1.222:~
+gpg --armor --export B10B8F775202C0EA > <ruta_usuario>/clave_publica.asc
+gpg --armor --export-secret-keys B10B8F775202C0EA > <ruta_usuario>/clave_privada.asc
+scp <ruta_usuario>/clave_*.asc <usuario>@<host>:~
 ```
 
-**2. En Debian (`frank@nasdeb`):**
+**2. En Debian (`<usuario>@nasdeb`):**
 ```bash
 # Importar llaves pública y privada
 gpg --import ~/clave_publica.asc
@@ -272,7 +272,7 @@ Matriz de herramientas configuradas por perfil:
 
 ### Comandos ejecutados por perfil:
 
-**1. Perfil de Frank (`frank@nasdeb`):**
+**1. Perfil de Frank (`<usuario>@nasdeb`):**
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 curl -fsSL https://opencode.ai/install | bash
