@@ -13,7 +13,7 @@ use crate::{
             audit_ip, deserialize_string_or_int, error_response, forbidden, server_error,
             ApiResponse, ExtQuery,
         },
-        files::file_root_for,
+        files::file_root_for_async,
     },
     AppState,
 };
@@ -47,7 +47,7 @@ pub async fn files_delete(
     if body.permanent && !user.is_admin() {
         return forbidden("se requieren privilegios de administrador");
     }
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -107,7 +107,7 @@ pub async fn files_trash(
     _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -129,7 +129,7 @@ pub async fn trash_restore(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<TrashBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -150,7 +150,7 @@ pub async fn trash_delete(
     _admin: AdminUser,
     axum::Json(body): axum::Json<TrashBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -176,7 +176,7 @@ pub async fn trash_empty(
         serde_json::from_slice(&body).ok()
     };
     let root_param = trash_body.as_ref().and_then(|b| b.root.as_deref());
-    let root = match file_root_for(&state, root_param) {
+    let root = match file_root_for_async(&state, root_param).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -203,7 +203,7 @@ pub async fn trash_restore_all(
         serde_json::from_slice(&body).ok()
     };
     let root_param = trash_body.as_ref().and_then(|b| b.root.as_deref());
-    let root = match file_root_for(&state, root_param) {
+    let root = match file_root_for_async(&state, root_param).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
