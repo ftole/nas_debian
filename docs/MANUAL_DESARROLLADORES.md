@@ -169,7 +169,7 @@ Este es el paso final que **compila e instala el código nuevo en el servidor re
 1. Compila el código modificado en modo optimizado de producción (`--release`).
 2. Actualiza los ejecutables en el sistema (`/usr/local/bin/nas-web`, etc.).
 3. Reinicia el servicio demonio `nas-web.service` de forma automática.
-4. **Listo:** Al abrir `https://10.10.1.222` (o la IP del servidor) y refrescar la caché, tu cambio ya está funcionando en vivo.
+4. **Listo:** Al abrir `https://<host>` (o la IP del servidor) y refrescar la caché, tu cambio ya está funcionando en vivo.
 
 ---
 
