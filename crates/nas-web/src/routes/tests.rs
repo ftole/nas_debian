@@ -48,7 +48,7 @@ fn clean_helper_error_desempaqueta_json_y_humaniza_mount_cifs() {
 }
 
 mod semver_tests {
-    use crate::routes::parse_semver;
+    use crate::routes::system::parse_semver;
 
     #[test]
     fn parsea_versiones_comunes() {
@@ -64,7 +64,7 @@ mod semver_tests {
 }
 
 mod comparison_tests {
-    use crate::routes::is_newer_version;
+    use crate::routes::system::is_newer_version;
 
     #[test]
     fn detecta_versions_superiores() {
