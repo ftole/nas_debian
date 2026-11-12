@@ -7,7 +7,9 @@ use axum::{
 };
 use tokio::io::AsyncWriteExt;
 
-use super::{file_root_for, CreateFileBody, MoveBody, PathBody, RenameBody, MAX_UPLOAD_FILE_SIZE};
+use super::{
+    file_root_for_async, CreateFileBody, MoveBody, PathBody, RenameBody, MAX_UPLOAD_FILE_SIZE,
+};
 use crate::{
     extractors::AuthenticatedUser,
     files::sanitize_filename,
@@ -21,7 +23,7 @@ pub async fn files_mkdir(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<PathBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -63,7 +65,7 @@ pub async fn files_rename(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<RenameBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -237,7 +239,7 @@ pub async fn files_upload(
         staged_files.push((temporary, filename));
     }
 
-    let root = match file_root_for(&state, root_name.as_deref()) {
+    let root = match file_root_for_async(&state, root_name.as_deref()).await {
         Ok(root) => root,
         Err(response) => {
             for (temp, _) in &staged_files {
@@ -318,7 +320,7 @@ pub async fn files_create(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<CreateFileBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -375,7 +377,7 @@ pub async fn files_move(
     _user: AuthenticatedUser,
     axum::Json(body): axum::Json<MoveBody>,
 ) -> Response {
-    let root = match file_root_for(&state, body.root.as_deref()) {
+    let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
