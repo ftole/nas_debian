@@ -91,7 +91,7 @@ Este documento recopila las situaciones anómalas más comunes que pueden presen
 - **Síntoma:** El navegador no puede conectar al puerto 80/443 o muestra un error de pasarela de Nginx.
 - **Diagnóstico y solución:**
   ```bash
-  # Verificar el estado del servidor web y del procesador PHP
+  # Verificar el estado del servidor web
   sudo systemctl status nginx
   # Verificar el estado del panel Rust
   sudo systemctl status nas-web
@@ -147,7 +147,7 @@ El proyecto incluye pruebas automatizadas en GitHub Actions (`bats tests/`, `car
 
 ## 3. Principios de Validación del Proyecto
 
-1. **Se prueba el artefacto real:** Las pruebas unitarias y de estrés evalúan directamente los runners generados, los servicios PHP y los scripts Bash, no maquetas estáticas.
+1. **Se prueba el artefacto real:** Las pruebas unitarias y de estrés evalúan directamente los runners generados y los scripts Bash, no maquetas estáticas.
 2. **Las pruebas verifican el resultado del fallo:** No basta con comprobar que un script retorne código distinto de cero; se comprueba que el mensaje sea claro, que los descriptores temporales se hayan eliminado y que el sistema permanezca en un estado coherente.
 3. **Hermetismo:** Las pruebas automáticas de CI no requieren privilegios de `root` ni tocan servicios reales del equipo de desarrollo.
 
