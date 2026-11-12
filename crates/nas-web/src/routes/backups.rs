@@ -263,8 +263,9 @@ pub async fn backup_create(
     State(state): State<AppState>,
     admin: AdminUser,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
+    axum::Json(mut body): axum::Json<nas_engine::backup_spec::BackupSpec>,
 ) -> Response {
+    body.preserve_existing_auth = false;
     install_backup(state, admin, headers, body, "backup_create").await
 }
 
@@ -273,8 +274,9 @@ pub async fn backup_update(
     State(state): State<AppState>,
     admin: AdminUser,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<nas_engine::backup_spec::BackupSpec>,
+    axum::Json(mut body): axum::Json<nas_engine::backup_spec::BackupSpec>,
 ) -> Response {
+    body.preserve_existing_auth = true;
     install_backup(state, admin, headers, body, "backup_update").await
 }
 
