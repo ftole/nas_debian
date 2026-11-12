@@ -99,6 +99,18 @@ pub async fn favicon() -> Response {
         .into_response()
 }
 
+/// Logotipo iintec (se sirve a color; la pantalla de acceso lo tiñe con CSS mask).
+pub async fn logo_iintec() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/svg+xml"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        views::LOGO_IINTEC,
+    )
+        .into_response()
+}
+
 /// Favicon binario ICO multi-resolución.
 pub async fn favicon_ico() -> Response {
     (
