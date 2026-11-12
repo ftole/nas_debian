@@ -200,10 +200,21 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     let role = nas_engine::deploy::env::normalize_role(&request.role)
         .ok_or_else(|| NasError::Invalid(format!("rol inválido: {}", request.role)))?;
 
+    let netbios = if request.netbios.trim().is_empty() {
+        nas_engine::deploy::env::default_netbios(&Runner::new())
+    } else {
+        request.netbios.clone()
+    };
+    let workgroup = if request.workgroup.trim().is_empty() {
+        nas_engine::deploy::env::default_workgroup("/etc/samba/smb.conf")
+    } else {
+        request.workgroup.clone()
+    };
+
     let mut params = DeployParams::new(
         request.disk.clone(),
-        request.workgroup.clone(),
-        request.netbios.clone(),
+        workgroup,
+        netbios,
         request.admin.clone(),
         role,
     );
@@ -523,6 +534,11 @@ pub fn deploy_apply(
         if let Err(error) = nas_engine::deploy::samba::create_base_groups(&runner) {
             failure = Some(NasError::Denied(error.to_string()));
         }
+    }
+
+    if failure.is_none() {
+        let _ =
+            nas_engine::deploy::samba::configure_wsdd2(&runner, &params.netbios, &params.workgroup);
     }
 
     if failure.is_none() {
