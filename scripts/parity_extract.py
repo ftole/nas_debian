@@ -220,11 +220,11 @@ def normalize_route(path: str) -> str:
 
 def check_routes() -> list[str]:
     """Devuelve los endpoints de app.js sin ruta equivalente en lib.rs."""
-    lib = (ROOT / "crates" / "nas-web" / "src" / "lib.rs").read_text(encoding="utf-8")
-    registered = {
-        re.sub(r"\{[^}]+\}", "{x}", route)
-        for route in re.findall(r'\.route\(\s*"([^"]+)"', lib)
-    }
+    registered = set()
+    for path in (ROOT / "crates" / "nas-web" / "src").rglob("*.rs"):
+        text = path.read_text(encoding="utf-8")
+        for route in re.findall(r'\.route\(\s*"([^"]+)"', text):
+            registered.add(re.sub(r"\{[^}]+\}", "{x}", route))
     endpoints = [
         line.strip()
         for line in (PARITY / "endpoints.txt").read_text(encoding="utf-8").splitlines()
