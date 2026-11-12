@@ -2,7 +2,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
-use super::common::{cookie_header, is_admin, is_superadmin, require_auth, server_ip};
+use super::common::{cookie_header, hostname, server_ip};
+use crate::extractors::AuthenticatedUser;
 use crate::views;
 use crate::AppState;
 
@@ -11,38 +12,37 @@ pub async fn healthz() -> &'static str {
     "ok"
 }
 
-pub fn hostname_value() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .map(|value| value.trim().to_string())
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "SRV-NAS".to_string())
-}
-
-pub fn workgroup_value(state: &AppState) -> String {
-    std::fs::read_to_string(&state.paths.samba_conf)
-        .ok()
-        .and_then(|text| nas_core::config::parse_workgroup(&text))
-        .unwrap_or_else(|| "N/D".to_string())
-}
-
-pub fn render_shell(state: &AppState, headers: &HeaderMap, user: &str, active: &str) -> Response {
-    let role = state
-        .auth
-        .db()
-        .user_role(user)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let is_admin = matches!(role.as_str(), "admin" | "superadmin");
-    let is_super = role == "superadmin";
+pub async fn render_shell(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: &AuthenticatedUser,
+    active: &str,
+) -> Response {
+    let is_admin = user.is_admin();
+    let is_super = user.is_superadmin();
     let csrf = state.auth.csrf_for_cookies(cookie_header(headers));
+    let samba_conf = state.paths.samba_conf.clone();
+    let (host, workgroup, ip) = tokio::task::spawn_blocking(move || {
+        let workgroup = std::fs::read_to_string(&samba_conf)
+            .ok()
+            .and_then(|text| nas_core::config::parse_workgroup(&text))
+            .unwrap_or_else(|| "N/D".to_string());
+        (hostname(), workgroup, server_ip())
+    })
+    .await
+    .unwrap_or_else(|_| {
+        (
+            "SRV-NAS".to_string(),
+            "N/D".to_string(),
+            "127.0.0.1".to_string(),
+        )
+    });
 
     let shell = views::Shell {
         active,
-        user,
-        hostname: &hostname_value(),
-        workgroup: &workgroup_value(state),
+        user: user.username(),
+        hostname: &host,
+        workgroup: &workgroup,
         role_label: if is_super {
             "Superadministrador"
         } else if is_admin {
@@ -53,14 +53,10 @@ pub fn render_shell(state: &AppState, headers: &HeaderMap, user: &str, active: &
         server_role: state.role.as_str(),
         is_admin,
         is_super,
-        ip: &server_ip(),
+        ip: &ip,
     };
 
     Html(views::shell(&shell, &csrf)).into_response()
-}
-
-pub fn login_redirect() -> Response {
-    Redirect::to("/login").into_response()
 }
 
 /// Hoja de estilos del panel.
@@ -183,28 +179,28 @@ pub fn js_response(bytes: &'static [u8]) -> Response {
 
 macro_rules! page_handler {
     ($name:ident, $active:literal) => {
-        pub async fn $name(State(state): State<AppState>, headers: HeaderMap) -> Response {
-            match require_auth(&state, &headers) {
-                Ok(user) => render_shell(&state, &headers, &user, $active),
-                Err(_) => login_redirect(),
-            }
+        pub async fn $name(
+            State(state): State<AppState>,
+            user: AuthenticatedUser,
+            headers: HeaderMap,
+        ) -> Response {
+            render_shell(&state, &headers, &user, $active).await
         }
     };
 }
 
 macro_rules! admin_page_handler {
     ($name:ident, $active:literal) => {
-        pub async fn $name(State(state): State<AppState>, headers: HeaderMap) -> Response {
-            match require_auth(&state, &headers) {
-                Ok(user) if is_admin(&state, &user) => {
-                    render_shell(&state, &headers, &user, $active)
-                }
-                Ok(user) => (
-                    StatusCode::FORBIDDEN,
-                    render_shell(&state, &headers, &user, $active),
-                )
-                    .into_response(),
-                Err(_) => login_redirect(),
+        pub async fn $name(
+            State(state): State<AppState>,
+            user: AuthenticatedUser,
+            headers: HeaderMap,
+        ) -> Response {
+            let page = render_shell(&state, &headers, &user, $active).await;
+            if user.is_admin() {
+                page
+            } else {
+                (StatusCode::FORBIDDEN, page).into_response()
             }
         }
     };
@@ -224,48 +220,54 @@ admin_page_handler!(page_domain, "domain");
 admin_page_handler!(page_updates, "updates");
 
 /// Vista de recursos compartidos (oculta si el rol es exclusivamente `BACKUP`).
-pub async fn page_shares(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match require_auth(&state, &headers) {
-        Ok(_) if !state.role.has_shares() => Redirect::to("/dashboard").into_response(),
-        Ok(user) => render_shell(&state, &headers, &user, "shares"),
-        Err(_) => login_redirect(),
+pub async fn page_shares(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Response {
+    if !state.role.has_shares() {
+        return Redirect::to("/dashboard").into_response();
     }
+    render_shell(&state, &headers, &user, "shares").await
 }
 
 /// Vista de respaldos (oculta si el rol es exclusivamente `ARCHIVOS`).
-pub async fn page_backups(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match require_auth(&state, &headers) {
-        Ok(_) if !state.role.has_backups() => Redirect::to("/dashboard").into_response(),
-        Ok(user) => render_shell(&state, &headers, &user, "backups"),
-        Err(_) => login_redirect(),
+pub async fn page_backups(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Response {
+    if !state.role.has_backups() {
+        return Redirect::to("/dashboard").into_response();
     }
+    render_shell(&state, &headers, &user, "backups").await
 }
 
 /// Vista del terminal (solo superadministrador).
-pub async fn page_terminal(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match require_auth(&state, &headers) {
-        Ok(user) if is_superadmin(&state, &user) => {
-            render_shell(&state, &headers, &user, "terminal")
-        }
-        Ok(user) => (
-            StatusCode::FORBIDDEN,
-            render_shell(&state, &headers, &user, "terminal"),
-        )
-            .into_response(),
-        Err(_) => login_redirect(),
+pub async fn page_terminal(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Response {
+    let page = render_shell(&state, &headers, &user, "terminal").await;
+    if user.is_superadmin() {
+        page
+    } else {
+        (StatusCode::FORBIDDEN, page).into_response()
     }
 }
 
 /// Vista de auditoría (solo administradores).
-pub async fn page_audit(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match require_auth(&state, &headers) {
-        Ok(user) if is_admin(&state, &user) => render_shell(&state, &headers, &user, "logs"),
-        Ok(user) => (
-            StatusCode::FORBIDDEN,
-            render_shell(&state, &headers, &user, "logs"),
-        )
-            .into_response(),
-        Err(_) => login_redirect(),
+pub async fn page_audit(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    headers: HeaderMap,
+) -> Response {
+    let page = render_shell(&state, &headers, &user, "logs").await;
+    if user.is_admin() {
+        page
+    } else {
+        (StatusCode::FORBIDDEN, page).into_response()
     }
 }
 
