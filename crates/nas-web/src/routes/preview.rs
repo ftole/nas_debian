@@ -8,11 +8,9 @@ use nas_core::NasError;
 use serde::Deserialize;
 
 use crate::{
+    extractors::AuthenticatedUser,
     routes::{
-        common::{
-            error_response, require_auth, safe_content_disposition, server_error, ApiResponse,
-            ExtQuery,
-        },
+        common::{error_response, safe_content_disposition, server_error, ApiResponse, ExtQuery},
         files::file_root_for,
     },
     AppState,
@@ -81,12 +79,9 @@ pub fn inline_content_type(name: &str) -> &'static str {
 /// Contenido de un archivo de texto.
 pub async fn files_content(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     Query(query): Query<ExtQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -111,12 +106,9 @@ pub async fn files_content(
 /// Guarda el contenido de un archivo.
 pub async fn files_save(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _user: AuthenticatedUser,
     axum::Json(body): axum::Json<SaveBody>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, body.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
@@ -143,12 +135,10 @@ pub async fn files_save(
 /// Sirve un archivo para previsualización en línea (`/api/files/raw`) aislando vectores XSS mediante streaming O(1).
 pub async fn files_raw(
     State(state): State<AppState>,
+    _user: AuthenticatedUser,
     headers: HeaderMap,
     Query(query): Query<crate::routes::files::FilesQuery>,
 ) -> Response {
-    if let Err(response) = require_auth(&state, &headers) {
-        return *response;
-    }
     let root = match file_root_for(&state, query.root.as_deref()) {
         Ok(root) => root,
         Err(response) => return *response,
