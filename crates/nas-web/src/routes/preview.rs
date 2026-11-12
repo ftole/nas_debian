@@ -2,6 +2,7 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 use nas_core::NasError;
 use serde::Deserialize;
@@ -251,4 +252,13 @@ pub async fn files_raw(
     builder
         .body(body)
         .unwrap_or_else(|_| server_error("error al crear respuesta raw"))
+}
+
+/// Router del dominio de previsualización de archivos.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/files/raw", get(files_raw))
+        .route("/api/files/content", get(files_content))
+        .route("/api/files/save", post(files_save))
 }

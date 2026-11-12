@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::ApiResponse;
 use nas_engine::collect_status;
 use nas_exec::Runner;
@@ -122,4 +123,12 @@ pub async fn diagnostics_run(
             .into_response(),
         Err(_) => server_error("prueba interrumpida"),
     }
+}
+
+/// Router del dominio de diagnóstico.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/diagnostics", get(diagnostics))
+        .route("/api/diagnostics/run", post(diagnostics_run))
 }

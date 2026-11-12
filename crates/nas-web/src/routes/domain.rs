@@ -2,6 +2,7 @@ use axum::{
     extract::State,
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 use nas_exec::Runner;
 use serde::Deserialize;
@@ -224,4 +225,15 @@ pub async fn domain_discover(
         Ok(Err(error)) => server_error(&error),
         Err(_) => server_error("descubrimiento interrumpido"),
     }
+}
+
+/// Router del dominio de Active Directory.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/domain", get(domain_status))
+        .route("/api/domain/join", post(domain_join))
+        .route("/api/domain/leave", post(domain_leave))
+        .route("/api/domain/status", get(domain_status))
+        .route("/api/domain/discover", post(domain_discover))
 }

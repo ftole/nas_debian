@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use nas_core::ApiResponse;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
@@ -476,4 +477,16 @@ pub async fn system_update_run(
             server_error(&error)
         }
     }
+}
+
+/// Router del dominio de sistema y métricas.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/metrics", get(metrics))
+        .route("/api/network", get(network))
+        .route("/api/system/updates", get(system_updates))
+        .route("/api/system/applications", get(system_applications))
+        .route("/api/system/reboot", post(system_reboot))
+        .route("/api/system/update/run", post(system_update_run))
 }

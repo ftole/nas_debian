@@ -2,6 +2,7 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 use serde::Deserialize;
 
@@ -240,4 +241,16 @@ pub async fn trash_restore_all(
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("restauración interrumpida"),
     }
+}
+
+/// Router del dominio de papelera.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/files/trash", get(files_trash))
+        .route("/api/files/trash/restore", post(trash_restore))
+        .route("/api/files/trash/restore-all", post(trash_restore_all))
+        .route("/api/files/trash/delete", post(trash_delete))
+        .route("/api/files/trash/empty", post(trash_empty))
+        .route("/api/files/delete", post(files_delete))
 }

@@ -4,6 +4,7 @@ use axum::{
     extract::{Query, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
+    Router,
 };
 
 use crate::{
@@ -148,4 +149,10 @@ pub fn read_tail(path: &std::path::Path, max_lines: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let tail = lines.len().saturating_sub(max_lines.max(1));
     lines[tail..].join("\n")
+}
+
+/// Router del dominio de logs.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::get;
+    Router::new().route("/api/logs", get(logs))
 }

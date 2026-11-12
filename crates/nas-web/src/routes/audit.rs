@@ -2,6 +2,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
+    Router,
 };
 use serde::Deserialize;
 
@@ -91,4 +92,16 @@ pub async fn audit_verify(
             .into_response(),
         Err(_) => server_error("verificación de auditoría interrumpida"),
     }
+}
+
+/// Router del dominio de auditoría.
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::get;
+    Router::new()
+        .route("/api/audit", get(audit))
+        .route("/api/audit/verify", get(audit_verify).post(audit_verify))
+        .route(
+            "/api/system/audit/verify",
+            get(audit_verify).post(audit_verify),
+        )
 }

@@ -4,6 +4,7 @@ use axum::{
     extract::{Multipart, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
+    Router,
 };
 use nas_core::NasError;
 use serde::Deserialize;
@@ -782,4 +783,18 @@ pub async fn files_list_rooted(
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("listado interrumpido"),
     }
+}
+
+/// Router del dominio de archivos (parte 1).
+pub fn router() -> Router<crate::AppState> {
+    use axum::routing::{get, post};
+    Router::new()
+        .route("/api/files", get(files_list))
+        .route("/api/files/download", get(files_download))
+        .route("/api/files/zip", get(files_zip))
+        .route("/api/files/list", get(files_list_rooted))
+        .route("/api/files/create", post(files_create))
+        .route("/api/files/move", post(files_move))
+        .route("/api/files/mkdir", post(files_mkdir))
+        .route("/api/files/rename", post(files_rename))
 }
