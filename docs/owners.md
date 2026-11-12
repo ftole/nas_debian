@@ -11,4 +11,4 @@
 | `nas-tui` | Asistente de terminal | `@tui` |
 | `nas-exec`, `nas-audit`, `nas-core` | Ejecución segura, auditoría, tipos | `@core` |
 | Bash legacy (`src/core/*.sh`) | Despliegue legacy (ola B) | `@infra` |
-| Paridad/CI (`scripts/`, `tests/parity/`) | Contrato PHP↔Rust | `@qa` |
+| Paridad/CI (`scripts/`, `tests/parity/`) | Contrato de paridad | `@qa` |
