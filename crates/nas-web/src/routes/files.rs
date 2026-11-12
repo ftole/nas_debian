@@ -121,6 +121,108 @@ pub fn file_root_for(state: &AppState, root: Option<&str>) -> Result<FileRoot, B
     FileRoot::new(base).map_err(|error| Box::new(server_error(&error.to_string())))
 }
 
+pub async fn file_root_for_async(
+    state: &AppState,
+    root: Option<&str>,
+) -> Result<FileRoot, Box<Response>> {
+    let state = state.clone();
+    let root = root.map(str::to_string);
+    match tokio::task::spawn_blocking(move || file_root_for(&state, root.as_deref())).await {
+        Ok(res) => res,
+        Err(_) => Err(Box::new(server_error("resolución de raíz interrumpida"))),
+    }
+}
+
+pub async fn stream_resolved_file(
+    root: FileRoot,
+    path: String,
+    headers: &HeaderMap,
+    content_type: &str,
+    disposition: &str,
+    name: &str,
+) -> Response {
+    let (file_path, file_size) =
+        match tokio::task::spawn_blocking(move || root.resolve_file(&path)).await {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(error)) => return error_response(error),
+            Err(_) => return server_error("resolución de archivo interrumpida"),
+        };
+
+    let mut file = match tokio::fs::File::open(&file_path).await {
+        Ok(file) => file,
+        Err(e) => return error_response(NasError::io(&file_path, e)),
+    };
+
+    let range_header = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok());
+
+    let byte_range = if let Some(raw_range) = range_header {
+        match crate::files::parse_range(raw_range, file_size) {
+            Ok(Some(range)) => Some(range),
+            Ok(None) => None,
+            Err(crate::files::RangeError::Malformed) => None,
+            Err(crate::files::RangeError::Unsatisfiable) => {
+                return Response::builder()
+                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(
+                        axum::http::header::CONTENT_RANGE,
+                        format!("bytes */{file_size}"),
+                    )
+                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
+                    .body(axum::body::Body::empty())
+                    .unwrap_or_else(|_| server_error("error al responder 416"));
+            }
+        }
+    } else {
+        None
+    };
+
+    let (status, content_length, content_range, body) = if let Some(range) = byte_range {
+        use std::io::SeekFrom;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        if let Err(e) = file.seek(SeekFrom::Start(range.start)).await {
+            return error_response(NasError::io(&file_path, e));
+        }
+        let length = range.length();
+        let stream = crate::files::ReaderStream::new(file.take(length));
+        (
+            axum::http::StatusCode::PARTIAL_CONTENT,
+            length,
+            Some(range.content_range_header()),
+            axum::body::Body::from_stream(stream),
+        )
+    } else {
+        let stream = crate::files::ReaderStream::new(file);
+        (
+            axum::http::StatusCode::OK,
+            file_size,
+            None,
+            axum::body::Body::from_stream(stream),
+        )
+    };
+
+    let mut builder = Response::builder()
+        .status(status)
+        .header(axum::http::header::CONTENT_TYPE, content_type)
+        .header(axum::http::header::CONTENT_LENGTH, content_length)
+        .header(axum::http::header::ACCEPT_RANGES, "bytes")
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            safe_content_disposition(disposition, name),
+        )
+        .header("content-security-policy", "default-src 'none'; sandbox")
+        .header("x-content-type-options", "nosniff");
+
+    if let Some(cr) = content_range {
+        builder = builder.header(axum::http::header::CONTENT_RANGE, cr);
+    }
+
+    builder
+        .body(body)
+        .unwrap_or_else(|_| server_error("error al crear respuesta de archivo"))
+}
+
 pub fn not_found_response(message: &str) -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -135,7 +237,7 @@ pub async fn files_list(
     _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -162,7 +264,7 @@ pub async fn files_download(
     headers: HeaderMap,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -198,89 +300,15 @@ pub async fn files_download(
         }
     }
 
-    let resolve_root = root;
-    let resolve_path = path;
-    let (file_path, file_size) =
-        match tokio::task::spawn_blocking(move || resolve_root.resolve_file(&resolve_path)).await {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(error)) => return error_response(error),
-            Err(_) => return server_error("resolución de archivo interrumpida"),
-        };
-
-    let mut file = match tokio::fs::File::open(&file_path).await {
-        Ok(file) => file,
-        Err(e) => return error_response(NasError::io(&file_path, e)),
-    };
-
-    let range_header = headers
-        .get(axum::http::header::RANGE)
-        .and_then(|v| v.to_str().ok());
-
-    let byte_range = if let Some(raw_range) = range_header {
-        match crate::files::parse_range(raw_range, file_size) {
-            Ok(Some(range)) => Some(range),
-            Ok(None) => None,
-            Err(crate::files::RangeError::Malformed) => None,
-            Err(crate::files::RangeError::Unsatisfiable) => {
-                let resp = Response::builder()
-                    .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                    .header(
-                        axum::http::header::CONTENT_RANGE,
-                        format!("bytes */{file_size}"),
-                    )
-                    .header(axum::http::header::ACCEPT_RANGES, "bytes")
-                    .body(axum::body::Body::empty())
-                    .unwrap_or_else(|_| server_error("error al responder 416"));
-                return resp;
-            }
-        }
-    } else {
-        None
-    };
-
-    let (status, content_length, content_range, body) = if let Some(range) = byte_range {
-        use std::io::SeekFrom;
-        use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        if let Err(e) = file.seek(SeekFrom::Start(range.start)).await {
-            return error_response(NasError::io(&file_path, e));
-        }
-        let length = range.length();
-        let stream = crate::files::ReaderStream::new(file.take(length));
-        (
-            axum::http::StatusCode::PARTIAL_CONTENT,
-            length,
-            Some(range.content_range_header()),
-            axum::body::Body::from_stream(stream),
-        )
-    } else {
-        let stream = crate::files::ReaderStream::new(file);
-        (
-            axum::http::StatusCode::OK,
-            file_size,
-            None,
-            axum::body::Body::from_stream(stream),
-        )
-    };
-
-    let mut builder = Response::builder()
-        .status(status)
-        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
-        .header(axum::http::header::CONTENT_LENGTH, content_length)
-        .header(axum::http::header::ACCEPT_RANGES, "bytes")
-        .header(
-            axum::http::header::CONTENT_DISPOSITION,
-            safe_content_disposition("attachment", &name),
-        )
-        .header("content-security-policy", "default-src 'none'; sandbox")
-        .header("x-content-type-options", "nosniff");
-
-    if let Some(cr) = content_range {
-        builder = builder.header(axum::http::header::CONTENT_RANGE, cr);
-    }
-
-    builder
-        .body(body)
-        .unwrap_or_else(|_| server_error("error al crear respuesta de descarga"))
+    stream_resolved_file(
+        root,
+        path,
+        &headers,
+        "application/octet-stream",
+        "attachment",
+        &name,
+    )
+    .await
 }
 
 /// Descarga una carpeta (o archivo) como ZIP en streaming asíncrono con archivo temporal seguro.
@@ -289,7 +317,7 @@ pub async fn files_zip(
     _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
@@ -344,7 +372,7 @@ pub async fn files_list_rooted(
     _user: AuthenticatedUser,
     Query(query): Query<FilesQuery>,
 ) -> Response {
-    let root = match file_root_for(&state, query.root.as_deref()) {
+    let root = match file_root_for_async(&state, query.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
