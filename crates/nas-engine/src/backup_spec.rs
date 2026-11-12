@@ -54,6 +54,9 @@ pub struct BackupSpec {
     /// Generar respaldo permanente inicial y mensual automático (Golden Snapshot).
     #[serde(default = "default_true")]
     pub auto_permanent: bool,
+    /// Conservar credenciales o clave SSH previas si se omiten durante una actualización.
+    #[serde(default)]
+    pub preserve_existing_auth: bool,
 }
 
 fn default_true() -> bool {
@@ -261,6 +264,7 @@ mod tests {
             port: None,
             ssh_key: None,
             auto_permanent: true,
+            preserve_existing_auth: false,
         }
     }
 
