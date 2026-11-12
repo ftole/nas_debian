@@ -404,7 +404,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/files.js",
-            88786,
+            90218,
             &[
                 "getFileTypeMeta",
                 "loadFiles",
@@ -412,6 +412,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
                 "loadTrash",
                 "previewFile",
                 "saveCurrentPreviewFile",
+                "sanitizeSheetFragment",
             ],
         ),
     ];
