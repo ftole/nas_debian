@@ -532,6 +532,14 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
+        let source_dir = std::env::var("NAS_HELPERS_DIR")
+            .unwrap_or_else(|_| "/opt/nas_debian/packaging".to_string());
+        if let Err(error) = nas_engine::deploy::helpers::install_all_helpers(&runner, &source_dir) {
+            failure = Some(NasError::Denied(error.to_string()));
+        }
+    }
+
+    if failure.is_none() {
         let _ = nas_engine::deploy::users::provision_superadmin(
             &runner,
             &params.admin_user,
@@ -569,6 +577,15 @@ pub fn deploy_apply(
     if failure.is_none() {
         if let Err(error) = params.update_fstab(&runner) {
             failure = Some(error);
+        }
+    }
+
+    if failure.is_none() && params.disk != "LOCAL" {
+        if params.filesystem == nas_engine::deploy::FileSystem::Ext4 && !params.rotational {
+            let _ = nas_engine::deploy::storage::enable_fstrim(&runner);
+        }
+        if params.filesystem == nas_engine::deploy::FileSystem::Btrfs {
+            let _ = nas_engine::deploy::storage::install_btrfs_scrub_cron(&runner);
         }
     }
 
