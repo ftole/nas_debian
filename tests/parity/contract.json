@@ -806,9 +806,7 @@
       "login-container",
       "login-footer",
       "login-header",
-      "login-page",
-      "login-subtitle",
-      "login-title-group"
+      "login-page"
     ],
     "data_attributes": {
       "data-theme": [
