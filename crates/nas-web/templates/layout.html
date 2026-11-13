@@ -1652,7 +1652,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 <button type="button" class="btn btn-primary btn-sm" onclick="switchView('files')">
                   <svg class="icon icon-sm"><use href="#icon-folder"></use></svg> Abrir Archivos
                 </button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-web" onclick="reloadWebService(this)">
                   <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Reiniciar
                 </button>
               </div>
@@ -3263,7 +3263,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
-  <!-- Modal: Actualización del Sistema desde GitHub -->
+  <!-- Modal: Actualización del Sistema desde GitHub Releases -->
   <div class="modal-backdrop modal-static" id="modal-system-update">
     <div class="modal-dialog" style="max-width:650px;">
       <div class="modal-header">
@@ -3273,19 +3273,19 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-body" id="system-update-body">
         <div id="system-update-uptodate-notice" style="display:none; background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.3); border-radius:8px; padding:10px 14px; margin-bottom:14px; color:#22c55e; font-size:13px; display:flex; align-items:center; gap:8px;">
           <svg class="icon" style="width:18px;height:18px;flex-shrink:0;"><use href="#icon-check"></use></svg>
-          <span>El servidor ya se encuentra en la versión más reciente. Ejecutar la actualización resincronizará los archivos y permisos del panel web de forma segura.</span>
+          <span>El servidor ya se encuentra en la versión más reciente. Ejecutar la actualización resincronizará la release oficial más reciente de forma segura.</span>
         </div>
         <p style="color:var(--text-secondary); margin-bottom:14px;">
-          Esta operación sincronizará la versión oficial más reciente desde el repositorio GitHub (rama <code>main</code>), validará la autenticidad criptográfica mediante firmas GPG, comprobará la sintaxis de todos los scripts y módulos, y sincronizará la interfaz web y reglas sudoers en caliente sin interrumpir el almacenamiento.
+          Esta operación descargará la release oficial más reciente desde GitHub Releases, validará la suma <code>SHA-256</code> y la firma criptográfica <code>Ed25519</code> del manifiesto, desplegará los binarios y helpers mediante ranuras atómicas A/B (<code>current</code>) con reversión automática, y recargará el servicio web sin interrumpir el almacenamiento.
         </p>
         <div id="system-update-phases" style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:8px; padding:12px 16px; margin-bottom:16px;">
-          <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:8px;">Fases del proceso de actualización en caliente:</div>
+          <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:8px;">Fases del proceso de actualización verificada:</div>
           <ol style="margin:0; padding-left:20px; font-size:12.5px; color:var(--text-secondary); line-height:1.6;">
-            <li>Respaldo preventivo del estado actual en <code>/tmp/backup_nas_*</code></li>
-            <li>Avance rápido (Fast-Forward) y verificación de firma GPG del tag de release</li>
-            <li>Validación estricta de sintaxis de scripts Bash y código Rust</li>
-            <li>Sincronización segura de binarios y reglas sudoers</li>
-            <li>Recarga no disruptiva de demonios (Nginx, nas-web, Samba)</li>
+            <li>Consulta de la última release y descarga en caché (<code>/var/cache/nas/updates</code>)</li>
+            <li>Verificación de integridad <code>SHA-256</code> y firma criptográfica <code>Ed25519</code></li>
+            <li>Extracción del paquete y cambio atómico de enlace A/B (<code>/opt/nas_debian/current</code>)</li>
+            <li>Instalación de binarios, helpers privilegiados y <code>version.json</code> activo</li>
+            <li>Validación de Nginx, recarga de <code>nginx</code> / <code>nas-web</code> y comprobación de arranque</li>
           </ol>
         </div>
         <div id="system-update-progress" style="display:none; margin-top:16px;">
