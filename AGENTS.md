@@ -257,7 +257,7 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
    * *Solución:* Override en `/etc/default/wsdd2` y `/etc/systemd/system/wsdd2.service.d/override.conf` con `WSDD2_OPTS="-N <NETBIOS> -G <WORKGROUP> -H <NETBIOS>"`.
 2. **Panel Web en Rust (`nas-web` + axum + Slate UI):**
    * *Arquitectura:* Binario único servido por `nas-web.service` en `127.0.0.1:8080` y publicado por Nginx con `proxy_pass`. Las vistas se generaron desde `layout.php`/`login.php` y los assets (`app.js`, CSS, vendor) se sirven embebidos byte a byte.
-   * *Estilos:* 100% Offline con Slate UI, tipografía nativa del sistema (`system-ui`), 36 iconos SVG incrustados; cero CDNs.
+   * *Estilos:* 100% Offline con Slate UI, tipografía nativa del sistema (`system-ui`), 52 iconos SVG incrustados; cero CDNs.
    * *Seguridad:* `nas-exec` con argv tipado/timeout, helpers root acotados y `/etc/sudoers.d/nas-web-rust` validado con `visudo -cf`; unidad systemd endurecida (`ProtectSystem`, `PrivateTmp`, `CapabilityBoundingSet`, `ReadWritePaths`).
    * *Paridad:* contrato en `tests/parity/`, pruebas `crates/nas-web/tests/parity.rs` y comparación en vivo PHP vs Rust previa al retiro.
 3. **Optimización y Hardening del Kernel sysctl (`/etc/sysctl.d/99-nas-tuning.conf`):**
@@ -268,12 +268,12 @@ Si se reinstala el servidor desde cero o en otra máquina, estos parches están 
    * Inicialización no bloqueante de base de datos criptográfica AIDE (`/var/lib/aide/aide.db`) para detección de modificaciones no autorizadas y rootkits.
 5. **Readahead Tuning por udev (`/etc/udev/rules.d/60-nas-readahead.rules`):**
    * Reglas udev persistentes que asignan `1024 KB` en unidades SSD y `4096 KB` en discos mecánicos HDD.
-6. **Protección udev del Disco del SO (`/etc/udev/rules.d/80-udisks2-hide-os.rules`):**
-   * Inyección de `UDISKS_IGNORE="1"` para proteger la unidad del sistema operativo y aislarla de formateos involuntarios en UDisks2.
+6. **Protección del Disco del SO (`is_os_disk()` en Rust):**
+   * Verificación en código (`storage.rs`, `storage_ops.rs`, `deploy/storage.rs`) que protege la unidad raíz y `/boot` frente a formateos o reparticionados; la antigua regla `80-udisks2-hide-os.rules` ya no se instala.
 7. **Prevención de Corrupción Silenciosa (*Bit Rot*):**
    * Tarea cron mensual en `/etc/cron.d/nas-btrfs-scrub` (`0 2 1 * *`) para auditar la integridad criptográfica de los datos en Btrfs.
 8. **Mantenimiento SSD y Rotación de Logs:**
-   * Habilitación de `fstrim.timer` para optimización de bloques flash y rotación programada con compresión mediante `logrotate` en `/etc/logrotate.d/nas-backups` y `nas-deploy`.
+   * Habilitación de `fstrim.timer` para optimización de bloques flash y rotación programada con compresión mediante `logrotate` en `/etc/logrotate.d/nas-backups`.
 
 > [!NOTE]
 > Las directivas globales `set -e` se mantienen fuera de los módulos importables (`source`) como `updater.sh` para evitar abortos abruptos del motor al integrarse con otros scripts.
