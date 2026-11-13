@@ -399,7 +399,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/system.js",
-            23339,
+            23379,
             &["loadUpdates", "loadApplications", "confirmRebootServer"],
         ),
         (
@@ -430,4 +430,44 @@ async fn modulos_js_compuestos_se_sirven_completos() {
             assert!(body.contains(symbol), "{uri} no contiene {symbol}");
         }
     }
+}
+
+#[tokio::test]
+async fn system_updates_y_applications_usan_metadatos_ed25519_y_rust() {
+    let dir = temp_dir("sys-meta");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.repo = dir.clone();
+    std::fs::write(
+        dir.join("version.json"),
+        r#"{"version":"0.1.10","commit":"abc123","date":"2026-11-13","channel":"stable","ed25519_verified":true}"#,
+    )
+    .expect("version.json");
+    let app = router(AppState::new(auth, paths, ServerRole::Arquivos));
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(get("/api/system/updates", &cookie))
+        .await
+        .expect("updates");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["data"]["ed25519_verified"], true);
+    assert_eq!(payload["data"]["signature_scheme"], "Ed25519");
+    assert!(payload["data"].get("gpg_verified").is_none());
+
+    let response = app
+        .oneshot(get("/api/system/applications", &cookie))
+        .await
+        .expect("applications");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert!(payload["data"]["web"]["rust_version"].is_string());
+    assert!(payload["data"]["web"].get("php_version").is_none());
 }
