@@ -174,8 +174,9 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
   "commit": "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "local")",
   "date": "$(date -u +"%Y-%m-%d")",
   "channel": "stable",
-  "notes": "Compilación oficial de la plataforma NAS",
-  "gpg_verified": true
+  "signature_scheme": "Ed25519",
+  "ed25519_verified": true,
+  "notes": "Compilación oficial de la plataforma NAS"
 }
 EOF
     mkdir -p /etc/nas 2>/dev/null || true
@@ -274,8 +275,9 @@ else
   "commit": "${TARGET_TAG}",
   "date": "$(date -u +"%Y-%m-%d")",
   "channel": "stable",
-  "notes": "Release oficial ${TARGET_TAG} verificado e instalado",
-  "gpg_verified": true
+  "signature_scheme": "Ed25519",
+  "ed25519_verified": true,
+  "notes": "Release oficial ${TARGET_TAG} verificado e instalado"
 }
 EOF
     fi
