@@ -89,7 +89,7 @@ PATH="$PATH:/usr/sbin" bats --print-output-on-failure tests/*.bats
 find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
 bash -n install.sh
 
-# 3. Sintaxis JavaScript (28 módulos propios)
+# 3. Sintaxis JavaScript (28 módulos propios + 3 vendor)
 find crates/nas-web/assets/js -type f -name "*.js" -print0 | xargs -0 -n1 node --check
 
 # 4. Suite Rust completa (formato, clippy estricto y tests con Cargo.lock bloqueado)
@@ -111,30 +111,29 @@ python3 scripts/qa_ui_audit.py --static
 
 ### 5.1 Empaquetado (`scripts/package.sh`) y Pipeline `.github/workflows/release.yml`
 
-Al crear y subir un tag `vX.Y.Z`, GitHub Actions ejecuta `.github/workflows/release.yml`:
-1. Compila en modo `--release --locked` los **5 binarios** (`nas`, `nas-web`, `nas-tui`, `nasctl`, `nas-dev`).
-2. `scripts/package.sh` construye el tarball `nas-debian-vX.Y.Z-linux-x86_64.tar.gz` incluyendo `bin/*`, `packaging/*`, `version.json`, los 7 helpers root y genera `SHA256SUMS`.
-3. Mediante el secreto de repositorio `NAS_RELEASE_KEY`, deriva la clave pública y firma con **`Ed25519`** (`nas-cli update sign`) el manifiesto canónico con formato:
+Al crear y subir un tag `vX.Y.Z` (o ejecutar `workflow_dispatch`), GitHub Actions ejecuta `.github/workflows/release.yml`:
+1. Compila en modo `--release --locked` los **5 binarios** (`nas`, `nas-web`, `nas-tui`, `nasctl`, `nas-dev`) y valida `packaging/verify.sh`.
+2. `scripts/package.sh` construye el tarball `nas_debian-X.Y.Z.tar.gz` (incluyendo `bin/*`, `packaging/*`, `src/*`, `scripts/*`, `install.sh`, `version.json` y metadatos), genera `nas_debian-X.Y.Z.tar.gz.sha256` y emite el manifiesto `nas-X.Y.Z.json`.
+3. Mediante el secreto de repositorio `NAS_RELEASE_KEY`, deriva `release.pub` (`cargo run --quiet -p nas-cli -- update pubkey`) y firma con **`Ed25519`** (`update sign`) el manifiesto `nas-X.Y.Z.json` en sitio (incrustando el campo `"signature"` sobre el payload canónico):
    ```text
    version|commit|artifact|sha256|published_at
    ```
-   produciendo `manifest.json` y `manifest.sig`.
-4. Publica en GitHub Releases el tarball, `SHA256SUMS`, `manifest.json` y `manifest.sig`.
+4. Verifica localmente con `update verify` y publica en GitHub Releases `nas_debian-X.Y.Z.tar.gz`, `nas_debian-X.Y.Z.tar.gz.sha256`, `nas-X.Y.Z.json` y `release.pub`.
 
 ### 5.2 Verificación Criptográfica y Actualización Atómica A/B en Servidor
 
-En los servidores desplegados, la clave pública oficial vive embebida/empaquetada en `packaging/release.pub`.
+En los servidores desplegados, la clave pública oficial vive en `/etc/nas/release.pub` o `packaging/release.pub`.
 
 ```bash
 # Consultar si existe nueva versión oficial
 sudo nas update check
 
-# Verificar un artefacto descargado manualmente antes de aplicarlo
-nas update verify --artifact <ruta.tar.gz> --manifest <manifest.json> --signature <manifest.sig>
+# Verificar un artefacto y manifiesto descargados manualmente
+nas update verify <nas-X.Y.Z.json> --artifact <nas_debian-X.Y.Z.tar.gz> --pubkey "$(cat packaging/release.pub)"
 
 # Aplicar actualización verificada por SHA-256 + Ed25519 en el siguiente slot A/B
-sudo nas update apply
+sudo nas update apply --previous <version_actual> --yes
 ```
 
-- **Slots A/B:** `nas update apply` extrae la nueva versión en `/opt/nas_debian/releases/<version>/`, verifica integridad y firma, instala binarios y helpers, actualiza el enlace simbólico atómico `/opt/nas_debian/current` y recarga `nas-web` y `nginx`, preservando intactos `/srv/nas`, `/etc/nas/` y `/var/lib/nas/nas.sqlite`.
-- **Rollback instantáneo:** si una actualización presenta incidencias, `sudo nas update rollback` revierte el symlink `/opt/nas_debian/current` al slot previo y restaura el servicio en segundos.
+- **Slots A/B:** `nas update apply` extrae la nueva versión en `/opt/nas_debian/releases/<version>/`, verifica `SHA-256` y firma `Ed25519`, actualiza de forma atómica el symlink `/opt/nas_debian/current` (`ln -sfn` + `mv -T`), instala los 5 binarios en `/usr/local/bin/` y recarga `nginx` y `nas-web`, preservando intactos `/srv/nas`, `/etc/nas/` y `/var/lib/nas/nas.sqlite`.
+- **Rollback automático y recuperación manual:** si cualquier paso o el *healthcheck* (`https://127.0.0.1/login`) falla durante `nas update apply --previous <version_actual>`, el plan ejecuta el rollback automático hacia `/opt/nas_debian/releases/<version_actual>/`; si fuese necesario revertir manualmente después de terminar, basta con reenlazar `/opt/nas_debian/current` al slot previo (`ln -sfn` + `mv -T`), reinstalar `/opt/nas_debian/current/bin/*` en `/usr/local/bin/` y reiniciar `nas-web` + `nginx`.
