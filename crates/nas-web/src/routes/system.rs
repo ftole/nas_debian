@@ -1,10 +1,11 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use nas_core::ApiResponse;
 use nas_engine::{collect_network, collect_status};
 use nas_exec::Runner;
+use serde::Deserialize;
 
 use super::common::{audit_ip, run_json, server_error};
 use crate::extractors::{AdminUser, AuthenticatedUser};
@@ -190,8 +191,42 @@ pub fn system_update_command_spec() -> nas_exec::CommandSpec {
         .timeout(std::time::Duration::from_secs(30))
 }
 
+/// Parámetros opcionales para `/api/system/updates`.
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdatesQuery {
+    /// Si es `1` o `true`, omite la consulta remota a GitHub (usado en sondeo).
+    #[serde(default)]
+    pub local: Option<String>,
+}
+
+fn latest_update_audit_entry(audit_path: &std::path::Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(audit_path).ok()?;
+    for line in text.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(entry) = serde_json::from_str::<nas_audit::AuditEntry>(trimmed) {
+            if entry.action == "update-apply" {
+                return Some(serde_json::json!({
+                    "ts": entry.ts,
+                    "result": entry.result,
+                    "target": entry.target,
+                    "detail": entry.detail,
+                }));
+            }
+        }
+    }
+    None
+}
+
 /// Información de versión y actualizaciones.
-pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
+pub async fn system_updates(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Query(query): Query<UpdatesQuery>,
+) -> Response {
+    let local_only = matches!(query.local.as_deref(), Some("1" | "true" | "yes"));
     let candidates = [
         state.paths.repo.join("current/version.json"),
         state.paths.repo.join("version.json"),
@@ -227,40 +262,60 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
     let commit_str = version
         .get("commit")
         .and_then(|v| v.as_str())
-        .unwrap_or("release");
+        .unwrap_or("release")
+        .to_string();
     let channel_str = version
         .get("channel")
         .and_then(|v| v.as_str())
-        .unwrap_or("stable");
+        .unwrap_or("stable")
+        .to_string();
     let signature_scheme = version
         .get("signature_scheme")
         .and_then(|v| v.as_str())
-        .unwrap_or("Ed25519");
-
-    let (latest_version, has_updates) = match query_github_latest() {
-        Some(release) => {
-            let latest = release.tag_name.trim_start_matches('v').to_string();
-            let newer = is_newer_version(&latest, &version_str);
-            (latest, newer)
-        }
-        None => (version_str.clone(), false),
-    };
+        .unwrap_or("Ed25519")
+        .to_string();
+    let commit_date = version
+        .get("date")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let notes_str = version
         .get("notes")
         .and_then(|v| v.as_str())
-        .unwrap_or("Release oficial verificado con firma Ed25519");
-    let update_in_progress = tokio::task::spawn_blocking(is_system_update_active)
+        .unwrap_or("Release oficial verificado con firma Ed25519")
+        .to_string();
+
+    let audit_path = state.paths.audit_log();
+    let version_for_remote = version_str.clone();
+    let (latest_version, has_updates, update_in_progress, last_update) =
+        tokio::task::spawn_blocking(move || {
+            let (latest_version, has_updates) = if local_only {
+                (version_for_remote.clone(), false)
+            } else {
+                match query_github_latest() {
+                    Some(release) => {
+                        let latest = release.tag_name.trim_start_matches('v').to_string();
+                        let newer = is_newer_version(&latest, &version_for_remote);
+                        (latest, newer)
+                    }
+                    None => (version_for_remote.clone(), false),
+                }
+            };
+            let in_progress = is_system_update_active();
+            let last_update = latest_update_audit_entry(&audit_path);
+            (latest_version, has_updates, in_progress, last_update)
+        })
         .await
-        .unwrap_or(false);
+        .unwrap_or_else(|_| (version_str.clone(), false, false, None));
 
     axum::Json(ApiResponse::ok(
         serde_json::json!({
             "version": version_str,
             "latest_version": latest_version,
             "installed_commit": commit_str,
-            "commit_date": version.get("date").and_then(|v| v.as_str()),
+            "commit_date": commit_date,
             "has_updates": has_updates,
             "update_in_progress": update_in_progress,
+            "last_update": last_update,
             "channel": channel_str,
             "signature_scheme": signature_scheme,
             "ed25519_verified": ed25519_verified,
