@@ -399,7 +399,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/system.js",
-            23379,
+            25536,
             &["loadUpdates", "loadApplications", "confirmRebootServer"],
         ),
         (
@@ -459,6 +459,7 @@ async fn system_updates_y_applications_usan_metadatos_ed25519_y_rust() {
         serde_json::from_str(&body_text(response).await).expect("json");
     assert_eq!(payload["data"]["ed25519_verified"], true);
     assert_eq!(payload["data"]["signature_scheme"], "Ed25519");
+    assert!(payload["data"]["update_in_progress"].is_boolean());
     assert!(payload["data"].get("gpg_verified").is_none());
 
     let response = app
@@ -470,4 +471,39 @@ async fn system_updates_y_applications_usan_metadatos_ed25519_y_rust() {
         serde_json::from_str(&body_text(response).await).expect("json");
     assert!(payload["data"]["web"]["rust_version"].is_string());
     assert!(payload["data"]["web"].get("php_version").is_none());
+}
+
+#[tokio::test]
+async fn system_updates_prioriza_current_version_json() {
+    let dir = temp_dir("sys-current-ver");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.repo = dir.clone();
+    std::fs::write(
+        dir.join("version.json"),
+        r#"{"version":"0.1.9","commit":"old123","ed25519_verified":true}"#,
+    )
+    .expect("root version.json");
+    std::fs::create_dir_all(dir.join("current")).expect("mkdir current");
+    std::fs::write(
+        dir.join("current/version.json"),
+        r#"{"version":"0.2.0","commit":"new456","ed25519_verified":true}"#,
+    )
+    .expect("current version.json");
+
+    let app = router(AppState::new(auth, paths, ServerRole::Arquivos));
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(get("/api/system/updates", &cookie))
+        .await
+        .expect("updates");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["data"]["version"], "0.2.0");
+    assert_eq!(payload["data"]["commit"], "new456");
 }
