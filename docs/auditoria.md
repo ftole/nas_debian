@@ -19,6 +19,7 @@ Tras completar la migración de PHP/Bash hacia Rust (`0.1.10`), la documentació
 | **A-06** | Doc-comment y mensaje de error obsoletos de `256 MiB` en descarga ZIP | **Persiste** | **Baja** | `crates/nas-web/src/files/zip.rs:15, 89, 277` |
 | **A-07** | Textos y campos residuales PHP / Git / GPG en UI, API, CLI y lista blanca | **Persiste** | **Baja / Media** | `layout.html:1655,3279,3285`, `system.js:18-23,172`, `system.rs:334`, `services.rs:31`, `update.rs:48` |
 | **A-08** | Regla inexistente `80-udisks2-hide-os.rules` aún referenciada en `uninstall.rs` | **Nuevo / Confirmado** | **Baja** | `crates/nas-engine/src/uninstall.rs:124` |
+| **A-09** | `nas update apply` no actualiza `version.json` activo ni helpers `/usr/local/sbin` | **Nuevo / Confirmado** | **Media** | `crates/nas-engine/src/update.rs:152-216`, `routes/system.rs:162-167`, `commands/update.rs:24` |
 
 ---
 
@@ -107,6 +108,15 @@ Tras completar la migración de PHP/Bash hacia Rust (`0.1.10`), la documentació
 
 - **Evidencia en código:** `crates/nas-engine/src/uninstall.rs:124`.
 - **Diagnóstico:** Ni `packaging/` ni `crates/nas-engine/src/deploy/` crean `/etc/udev/rules.d/80-udisks2-hide-os.rules` (la protección real del disco del sistema operativo se implementa en `is_os_disk()` en Rust). Sin embargo, `uninstall.rs` aún incluye esa ruta en su paso de limpieza y la documentación antigua la describía como mecanismo activo.
+
+---
+
+### A-09 • `nas update apply` no sincroniza `version.json` activo ni helpers `/usr/local/sbin`
+
+- **Evidencia en código:** `crates/nas-engine/src/update.rs:152-216`, `crates/nas-web/src/routes/system.rs:162-167`, `crates/nas-cli/src/commands/update.rs:24`.
+- **Diagnóstico:** `build_plan()` extrae el tarball en `/opt/nas_debian/releases/<version>/`, enlaza `/opt/nas_debian/current`, copia únicamente los 5 binarios a `/usr/local/bin/`, valida Nginx y reinicia `nginx` + `nas-web`. Sin embargo, no copia `version.json` hacia `/etc/nas/version.json` ni `/opt/nas_debian/version.json`, ni reinstala los 7 helpers en `/usr/local/sbin/`. Además, ni `system_updates` (`system.rs:162-167`) ni `nas update status` (`commands/update.rs:24`) leen `/opt/nas_debian/current/version.json`.
+- **Impacto:** Tras actualizar vía `nas update apply`, el panel puede seguir mostrando el `version.json` antiguo (commit y notas previos) y las actualizaciones que añadan cambios en `packaging/nas-*` no actualizarán los helpers root.
+- **Remediación recomendada:** Añadir `/opt/nas_debian/current/version.json` como primera ruta candidata en `system.rs` y `commands/update.rs`, e incluir la instalación segura de los 7 helpers y `version.json` dentro de `build_plan()` (y su reversión en `rollback`).
 
 ---
 
