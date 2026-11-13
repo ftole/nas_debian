@@ -327,6 +327,7 @@ fn resolve_pubkey(specified: Option<&str>) -> NasResult<String> {
     }
     for candidate in [
         "/etc/nas/release.pub",
+        "/opt/nas_debian/current/packaging/release.pub",
         "/opt/nas_debian/packaging/release.pub",
     ] {
         let p = Path::new(candidate);
@@ -344,8 +345,29 @@ fn resolve_pubkey(specified: Option<&str>) -> NasResult<String> {
     ))
 }
 
+fn record_update_audit(target: &str, result: &str, detail: &str) {
+    let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
+    let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let _ = audit.append(nas_audit::AuditEntry::new(
+        &actor,
+        "local",
+        "update-apply",
+        target,
+        result,
+        detail,
+    ));
+}
+
 pub fn update_apply_dispatch(args: UpdateDispatchArgs, json: bool) -> NasResult<ExitCode> {
-    let resolved_key = resolve_pubkey(args.pubkey.as_deref())?;
+    let resolved_key = match resolve_pubkey(args.pubkey.as_deref()) {
+        Ok(key) => key,
+        Err(error) => {
+            if args.yes {
+                record_update_audit(&args.repo, "FAILED", &error.to_string());
+            }
+            return Err(error);
+        }
+    };
 
     let (manifest_path, artifact_path) = match (args.manifest, args.artifact) {
         (Some(m), Some(a)) => (m, a),
@@ -358,19 +380,35 @@ pub fn update_apply_dispatch(args: UpdateDispatchArgs, json: bool) -> NasResult<
                     args.repo
                 );
             }
-            let release_info = nas_engine::fetch_latest_release(&runner, &args.repo)?;
+            let release_info = match nas_engine::fetch_latest_release(&runner, &args.repo) {
+                Ok(info) => info,
+                Err(error) => {
+                    if args.yes {
+                        record_update_audit(&args.repo, "FAILED", &error.to_string());
+                    }
+                    return Err(error);
+                }
+            };
             if !json {
                 println!(
                     "Descargando y verificando release {} ...",
                     release_info.tag_name
                 );
             }
-            let (_manifest, m_path, a_path) = nas_engine::download_and_verify_release(
+            let (_manifest, m_path, a_path) = match nas_engine::download_and_verify_release(
                 &runner,
                 &release_info,
                 cache_dir,
                 &resolved_key,
-            )?;
+            ) {
+                Ok(res) => res,
+                Err(error) => {
+                    if args.yes {
+                        record_update_audit(&release_info.tag_name, "FAILED", &error.to_string());
+                    }
+                    return Err(error);
+                }
+            };
             (m_path, a_path)
         }
     };
@@ -410,9 +448,28 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         sudo,
     } = options;
 
-    let manifest = ReleaseManifest::load(manifest_path)?;
-    manifest.verify_artifact(artifact)?;
-    manifest.verify_signature(public_key)?;
+    let manifest = match ReleaseManifest::load(manifest_path) {
+        Ok(m) => m,
+        Err(error) => {
+            if confirmed {
+                record_update_audit(
+                    &manifest_path.display().to_string(),
+                    "FAILED",
+                    &error.to_string(),
+                );
+            }
+            return Err(error);
+        }
+    };
+    if let Err(error) = manifest
+        .verify_artifact(artifact)
+        .and_then(|()| manifest.verify_signature(public_key))
+    {
+        if confirmed {
+            record_update_audit(&manifest.version, "FAILED", &error.to_string());
+        }
+        return Err(error);
+    }
 
     if !confirmed {
         return Err(NasError::Denied(
@@ -433,7 +490,13 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         &artifact.to_string_lossy(),
         effective_previous,
     );
-    let _lock = nas_engine::TaskLock::acquire("/var/lock/nas-update.lock")?;
+    let _lock = match nas_engine::TaskLock::acquire("/var/lock/nas-update.lock") {
+        Ok(lock) => lock,
+        Err(error) => {
+            record_update_audit(&manifest.version, "FAILED", &error.to_string());
+            return Err(error);
+        }
+    };
 
     let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
     let actor = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
@@ -451,16 +514,41 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
 
     for step in &plan.steps {
         let is_health = step.first().is_some_and(|arg| arg == "curl");
-        match run_step(&runner, step, sudo, 900) {
-            Ok(output) if is_health => {
-                let code = output.stdout.trim();
-                if code != "200" && code != "302" {
-                    failure = Some(NasError::Denied(format!(
-                        "healthcheck devolvió {code}; se revierte la release"
-                    )));
-                    break;
+        if is_health {
+            let mut last_code = String::new();
+            let mut last_err: Option<NasError> = None;
+            let mut healthy = false;
+            for attempt in 0..6 {
+                match run_step(&runner, step, sudo, 30) {
+                    Ok(output) => {
+                        let code = output.stdout.trim().to_string();
+                        if code == "200" || code == "302" {
+                            healthy = true;
+                            break;
+                        }
+                        last_code = code;
+                        last_err = None;
+                    }
+                    Err(error) => {
+                        last_err = Some(error);
+                    }
+                }
+                if attempt < 5 {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
+            if !healthy {
+                failure = Some(last_err.unwrap_or_else(|| {
+                    NasError::Denied(format!(
+                        "healthcheck devolvió {last_code}; se revierte la release"
+                    ))
+                }));
+                break;
+            }
+            continue;
+        }
+
+        match run_step(&runner, step, sudo, 900) {
             Ok(_) => {}
             Err(error) => {
                 failure = Some(error);
