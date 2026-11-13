@@ -1,146 +1,117 @@
-# Auditoría de Preparación para Producción — Servidor NAS Debian 13
+# Auditoría Técnica: Código Real vs. Documentación (`main` `0f7a272`)
 
-> **Nota:** Este documento es un snapshot histórico de la auditoría realizada el 2026-10-09 sobre el servidor `<host>` (rol `ARCHIVOS`). Puede no reflejar el estado actual del repositorio; verificar contra el código antes de tomar decisiones.
-**Objetivo:** Evaluar si el proyecto/servidor (`<host>`, rol `ARCHIVOS`) está listo para producción en una **LAN corporativa**.
-**Alcance:** Auditoría completa (7 ejes) ejecutada en el servidor con herramientas read-only/lastre: `lynis 3.1.4`, `smartctl 7.4`, `nmap 7.95`, `debsecan`, CPU/probing de red.
-**Método:** OWASP ASVS 5.0 Nivel 2 + WSTG, CIS Debian 13 (Nivel 1/2 vía Lynis), guías oficiales de Samba, regla de respaldo 3-2-1-1-0.
+> [!IMPORTANT]
+> **Alcance estrictamente diagnóstico:** Esta auditoría refleja la inspección directa del código fuente en `main` (`0f7a272`) frente a la documentación histórica del proyecto. **No se modificó código Rust, Bash ni JavaScript** para corregir ni maquillar los hallazgos aquí registrados.
 
 ---
 
-## 1. Veredicto
+## 1. Resumen Ejecutivo de la Auditoría
 
-> **GO CONDICIONADO** — aprobado para producción LAN **si se corrigen 2 hallazgos Altos** (H1 logrotate, H2 off-site) **y se cierran/planifican los Medios** priorizados (sección 4).
+Tras completar la migración de PHP/Bash hacia Rust (`0.1.10`), la documentación anterior describía una fotografía obsoleta (panel PHP, 36 iconos SVG, 2 roles, `SMB2_02`, regla `udisks2`) y ocultaba divergencias reales introducidas durante la transición. Al verificar directamente en `0f7a272` los **6 hallazgos previos** reportados y revisar commits recientes (como `9802002` y `e258d56`), se confirma que **todos los hallazgos centrales siguen presentes en `main`**, además de residuos de textos PHP/Git y reglas no instaladas.
 
-No se detectaron vulnerabilidades **Críticas**. Los controles de seguridad críticos de la aplicación están correctamente implementados y fueron verificados de forma dinámica.
-
-| Criterio de salida | Estado |
-|---|---|
-| Críticos abiertos | **0** |
-| Altos (Ejes A–C) | 0 (los Altos son Eje D/E: logrotate, off-site) |
-| Restauración de respaldo | **Verificada** (hashes idénticos) |
-| Monitoreo de discos (SMART) | **Activo** (smartd/timers) |
-| RTO/RPO documentados | **Pendiente** (recomendado) |
-| Medios | Plan fechado (abajo) |
-
----
-
-## 2. Controles positivos verificados (con evidencia)
-
-| Control | Resultado |
-|---|---|
-| Ejecución de comandos sin shell (`nas-exec` con `CommandSpec` tipado; nota histórica de auditoría PHP) | ✔ Sin superficie de inyección de comandos |
-| Path traversal en `/api/files/*` (`resolveSubpath` elimina `..` y `\`) | ✔ Probado: `../../etc/passwd` y `%2e%2e%2f` → 400/404, **sin fuga** |
-| CSRF en operaciones mutantes | ✔ POST sin token → **403** |
-| Validación de nombres de recurso (regex alfanumérica) | ✔ `prueba;id`, `x<script>`, `a b` rechazados |
-| Aislamiento de rol **operator** (`grp_web`) | ✔ 403 en `/api/storage`, `/api/terminal/exec`, `/api/domain`, `/api/system/reboot`, `/api/system/updates`, `/api/backups` |
-| Cabeceras de seguridad HTTP | ✔ CSP, X-Frame-Options SAMEORIGIN, nosniff, X-XSS, Referrer-Policy, Permissions-Policy — **✘ HSTS ausente** (ver M2) |
-| TLS | ✔ Solo TLSv1.2/1.3, cifrados `HIGH:!aNULL:!MD5` |
-| Integridad/cadena | ✔ CI (ShellCheck+BATS+paridad Rust), tags GPG firmadas en `install/updater`, assets con SHA-256 fijado en `tests/parity/assets.sha256`, `.env` en `.gitignore` |
-| Auditoría del kernel | ✔ Reglas auditd (sudoers, smb.conf, credenciales, nas-terminal) y AIDE con revisión diaria (`dailyaidecheck.timer`) |
-| Respaldo | ✔ Snapshot inmutable (`chattr +i`), deduplicación por hardlinks (inodo compartido, `links=2`), **restauración verificada con hashes IGUALES** |
-| Host base | ✔ `PermitRootLogin no`, AppArmor activo, fail2ban activo, unattended-upgrades, journald persistente |
+| ID | Hallazgo | Estado en `0f7a272` | Severidad | Archivo / Líneas Verificadas |
+| :--- | :--- | :--- | :--- | :--- |
+| **A-01** | `system_update_run` ejecuta `nas update apply` sin `sudo` y bajo `ProtectSystem=yes` | **Persiste** | **Crítica** | `crates/nas-web/src/routes/system.rs:387-424` |
+| **A-02** | Deriva severa entre `packaging/` y `crates/nas-engine/src/deploy/` | **Persiste** | **Crítica** | `deploy/web.rs:9-15`, `deploy/helpers.rs:20-27`, `deploy/artifacts.rs:54-60`, `deploy/samba.rs:50-84` |
+| **A-03** | `LOGROTATE_BACKUPS` omite `su root grp_samba` sobre directorio `2770` (`H1`) | **Persiste** | **Alta** | `crates/nas-engine/src/deploy/artifacts.rs:44-52`, `packaging/install.sh:83` |
+| **A-04** | SQL `UPDATE users SET password_hash=...` falla silenciosamente en BD SQLite real | **Persiste** | **Alta** | `packaging/install.sh:141-143` vs `crates/nas-web/src/db.rs:127-132` |
+| **A-05** | Lectura muerta de `gpg_verified` vs verificación real `Ed25519` | **Persiste** | **Media** | `crates/nas-web/src/routes/system.rs:179-220` vs `scripts/package.sh:58-70` |
+| **A-06** | Doc-comment y mensaje de error obsoletos de `256 MiB` en descarga ZIP | **Persiste** | **Baja** | `crates/nas-web/src/files/zip.rs:15, 89, 277` |
+| **A-07** | Textos y campos residuales PHP / Git / GPG en UI, API, CLI y lista blanca | **Persiste** | **Baja / Media** | `layout.html:1655,3279,3285`, `system.js:18-23,172`, `system.rs:334`, `services.rs:31`, `update.rs:48` |
+| **A-08** | Regla inexistente `80-udisks2-hide-os.rules` aún referenciada en `uninstall.rs` | **Nuevo / Confirmado** | **Baja** | `crates/nas-engine/src/uninstall.rs:124` |
 
 ---
 
-## 3. Hallazgos clasificados
+## 2. Detalle Técnico de Hallazgos Verificados en `main` (`0f7a272`)
 
-### Críticos
-Ninguno.
+### A-01 • `system_update_run` falla en producción por falta de privilegios y ausencia de unidad `nas-system-update`
 
-### Altos
-
-**H1 — `logrotate` de logs de backup falla cada noche (no rotan).**
-- Evidencia: `systemctl status logrotate` → `error: skipping "/srv/nas/LOGS_BACKUP/*.log" because parent directory has insecure permissions ... Set "su" directive`.
-- Causa: `/srv/nas/LOGS_BACKUP` es `2770 root:grp_samba` (gravable por grupo) y el perfil no declara `su`.
-- Impacto: los logs del backup **nunca se rotan**; riesgo de llenar el disco a largo plazo. Contradice la documentación del proyecto.
-- Mitigación: añadir `su root grp_samba` (o `su www-data grp_samba`) a `/etc/logrotate.d/nas-backups` (revisar `nas-admin`/`nas-deploy`). **Corregir en `deploy.sh` + aplicar en producción.**
-
-**H2 — Sin copia off-site / regla 3-2-1 (todo reside en un mismo host/disco).**
-- Evidencia: `/srv/nas` es el único destino; no hay réplica remota ni medio alterno.
-- Impacto: fallo del disco o ransomware destruye datos **y** respaldos a la vez (los snapshots, aunque inmutables, viven en el mismo dispositivo).
-- Mitigación: programar réplica incremental a otro host/medio (rsync/SSH) con retención, o copia a nube in‑mutable; verificar restauración mensualmente.
-
-### Medios
-
-**M1 — SSH por contraseña habilitado + X11Forwarding + sin timeout idle.**
-- `passwordauthentication yes`, `X11Forwarding yes`, `ClientAliveInterval 0`, sin `AllowUsers`.
-- LAN mitigado, pero conviene: solo clave pública, `AllowUsers`/`AllowGroups` restringido, `ClientAliveInterval 300`, `X11Forwarding no`.
-
-**M2 — HSTS ausente pese a estar documentado; certificado autofirmado (10 años).**
-- No existe `add_header Strict-Transport-Security` en el bloque SSL de nginx (AGENTS.md lo afirma).
-- Corregir en `deploy.sh`; el autofirmado es aceptable en LAN, pero rompe HSTS real y genera avisos en clientes.
-
-**M3 — Servicios/NFS y exim4 activos sin necesidad + regla UFW fantasma 9090.**
-- `nfs-server/nfs-mountd/rpcbind` (111, 2049) y `exim4` (25) escuchando en `0.0.0.0`; **NFS y 9090 no alcanzables desde LAN** por UFW (verificado), pero amplían superficie.
-- UFW permite `9090/tcp` (Cockpit) a *Anywhere* sin que haya servicio → regla muerta.
-- Mitigación: `systemctl disable --now nfs-server rpcbind rpcbind.socket exim4` y eliminar la regla 9090.
-
-**M4 — Política de contraseñas y GRUB.**
-- `login.defs` sin `PASS_MAX_DAYS/PASS_MIN_DAYS` (cuentas sin caducidad) y sin `UMASK` explícito (022). Sin contraseña de GRUB (acceso físico).
-- Mitigación: aplicar caducidad a cuentas de red administradas y `umask 027`; proteger GRUB si hay riesgo físico.
-
-**M5 — Backups deshabilitados en rol `ARCHIVOS` (por diseño).**
-- El middleware bloquea `/api/backups` en rol ARCHIVOS. Para usar la central de respaldo en producción, desplegar con rol `ARCHIVOS_BACKUP` o `BACKUP`.
-- Nota de **configuración**, no falla; confirmar el rol objetivo antes de producción.
-
-**M6 — PHP `allow_url_fopen = On` y sin `disable_functions` (histórico).**
-- Aplicaba al panel PHP retirado en F7. El panel Rust no usa `allow_url_fopen` ni intérprete; el pool del panel fue eliminado del servidor.
-
-### Bajos
-
-- **B1** `version.json` desplegado con `"commit": "dev"` (stale). Generar versión real en deploy.
-- **B2** Dependencias Python con rango `>=` (paramiko, keyring); fijar versiones (`==`) y correr `pip-audit`.
-- **B3** `vm.swappiness=60`; sin banner legal (`/etc/issue`); sin syslog externo; sin escáner de malware (recomendación Lynis). Instalar `debsums`/`apt-listbugs`.
-- **B4** Residuos de pruebas en el servidor: recurso `[asesor]`, usuarios `juan/asesor/web`, **debsecan reporta CVEs en librerías trixie sin fix aún** (busybox/acl/…; `apt` tiene **0** actualizaciones pendientes — monitorear point releases).
+- **Evidencia en código:** `crates/nas-web/src/routes/system.rs:387-424`.
+- **Contexto histórico:** El commit `9802002` (*"fix: limpia variables de entorno antes de fijar PATH al actualizar"*) limpió el entorno de `Command::new(nas_executable)`, pero no corrigió el modelo de ejecución.
+- **Diagnóstico actual:**
+  1. `nas-web` corre como usuario sin privilegios `nas-web` dentro de `packaging/nas-web.service` con `ProtectSystem=yes`.
+  2. La línea `407` ejecuta directamente `/usr/local/bin/nas --json update apply --repo ftole/nas_debian --root /opt/nas_debian --yes` **sin `sudo`**, mientras `/etc/sudoers.d/nas-web-rust` (`packaging/install.sh:223,234`) solo autoriza `systemd-run ... --unit=nas-system-update /bin/bash /opt/nas_debian/src/core/updater.sh --yes` o dicho script directamente.
+  3. Además, `system_update_run` comprueba `systemctl is-active nas-system-update` (línea `389`), unidad que nunca se crea al invocar directamente el binario `nas`, y prioriza `paths.repo.join("target/release/nas")` (líneas `400-405`), pudiendo ejecutar un binario de compilación distinto al instalado.
+- **Impacto:** El botón **"Actualizar ahora"** del panel web no puede actualizar `/opt/nas_debian` ni `/usr/local/bin/` en producción.
+- **Remediación recomendada:** Añadir una regla `sudoers` acotada para `/usr/local/bin/nas --json update apply --repo ftole/nas_debian --root /opt/nas_debian --yes` (o lanzar vía `systemd-run --unit=nas-system-update`) e invocarlo con `sudo -n`.
 
 ---
 
-## 4. Backlog de remediación priorizado
+### A-02 • Deriva severa entre `packaging/` y `crates/nas-engine/src/deploy/`
 
-| # | Acción | Severidad | Archivo / recurso |
-|---|---|---|---|
-| 1 | Añadir `su root grp_samba` a logrotate nas-backups | Alto | `deploy.sh`, `/etc/logrotate.d/nas-backups` |
-| 2 | Réplica off-site + prueba de restauración mensual | Alto | plan operativo |
-| 3 | HSTS en nginx SSL + firmado SMB (`server signing = required`, subir `server min protocol`) | Medio | `deploy.sh`, `smb.conf` |
-| 4 | SSH solo claves + `AllowUsers` + timeout + X11 off | Medio | `deploy.sh` (sshd_config.d) |
-| 5 | Desactivar nfs-server/rpcbind/exim4; quitar regla 9090 | Medio | `deploy.sh` (apt/systemd/ufw) |
-| 6 | Caducidad de contraseñas + umask 027 + GRUB | Medio | `login.defs` / `deploy.sh` |
-| 7 | ~~`allow_url_fopen = Off` para fpm~~ (histórico: panel PHP retirado) | Medio | — |
-| 8 | Versión real en release/manifiesto; deps Python legacy retiradas | Bajo | `Cargo.toml`, manifiesto de release |
-| 9 | Documentar RTO/RPO y runbook de restauración; limpiar residuos de prueba | Bajo | `docs/` |
-
----
-
-## 5. Comandos/evidencia clave
-
-```bash
-# Herramientas instaladas (auditoría)
-apt-get install -y lynis smartmontools nmap debsecan
-lynis audit system --quick --no-colors          # Hardening index: 73/100 (284 tests)
-
-# Web dinámico (verificaciones, todos superados salvo HSTS)
-curl -skI https://$IP | grep -i strict        # HSTS ausente
-# traversal, CSRF, rol operator, inyección → 400/403 (ver sección 2)
-
-# SMB
-nmap -p139,445 127.0.0.1 --script smb-protocols,smb2-security-mode
-# -> dialectos 2.0.2/3.1.1; "Message signing enabled but not required" (M)
-
-# Respaldo (DR drill superado)
-# snapshot inmutable (chattr +i), dedup por hardlinks, restore con hashes idénticos.
-
-# Red desde LAN (solo estos abiertos): 22, 80, 443, 139, 445, 5355
-#   NFS(111/2049), 9090, 5357 → closed/filtered (contenidos por UFW)
-```
+- **Evidencia en código:** `crates/nas-engine/src/deploy/web.rs:9-15`, `deploy/helpers.rs:20-27`, `deploy/artifacts.rs:54-60`, `deploy/samba.rs:50-84` frente a `packaging/nas-web.service`, `packaging/install.sh`, `packaging/nginx-nas-web.conf` y `packaging/nas.rules`.
+- **Contexto histórico:** El commit `e258d56` (*"fix: elimina /usr/local/sbin de ReadWritePaths en la unidad systemd embebida"*) tocó `deploy/web.rs`, pero dejó intacta la deriva de fondo.
+- **Diferencias verificadas en `0f7a272`:**
+  1. **`SYSTEMD_UNIT` (`deploy/web.rs:9`) vs `packaging/nas-web.service`:** la plantilla embebida carece de `NoNewPrivileges=no`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`, `RestrictAddressFamilies`, `RestrictNamespaces`, `LockPersonality`, `MemoryDenyWriteExecute`, `SystemCallFilter=@system-service`, `CapabilityBoundingSet`, `AmbientCapabilities` y omite `-/etc/cron.d -/etc/backup-credentials -/etc/samba` de `ReadWritePaths`.
+  2. **`SUDOERS` (`deploy/web.rs:15`) vs `packaging/install.sh:209-235`:** la constante embebida solo incluye **5 reglas** (`systemctl restart nas-web`, `nas helper *`, `nas-samba-apply`, `nas-storage-apply`, `/usr/bin/true`). Omite todas las reglas de `smbd`, `nmbd`, `wsdd2`, `nginx`, `sssd`, `cron`, `reboot`, `smbstatus`, `testparm`, `realm`, `btrfs`, `fstrim`, `nas-share-dir`, `nas-share-acl`, `nas-accounts`, `pdbedit`, `passwd`, `nas-backup-manage`, `nas-terminal`.
+  3. **`ROOT_HELPERS` (`deploy/helpers.rs:20-27`):** lista solo **6 helpers**, omitiendo **`nas-share-dir`** que sí instala `packaging/install.sh:154`.
+  4. **`NGINX_CONF` (`deploy/web.rs:12`):** carece de las directivas `gzip` presentes en `packaging/nginx-nas-web.conf:25-28`.
+  5. **`AUDIT_RULES` (`deploy/artifacts.rs:54-60`) vs `packaging/nas.rules`:** omite `-D`, `-b 8192`, `-f 1`, usa clave `samba_config` en lugar de `samba_conf_changes` y añade `/usr/local/bin/nas -p x -k nas_cli`.
+  6. **`global_smb_conf` (`deploy/samba.rs:50-84`):** omite `recycle:exclude` y `recycle:excludedir` presentes en `deploy/artifacts.rs:85-86`.
+- **Impacto:** Ejecutar `nas deploy apply` después de `install.sh` sobrescribe `/etc/sudoers.d/nas-web-rust` y `/etc/systemd/system/nas-web.service`, degradando el endurecimiento y rompiendo la gestión de servicios, AD, usuarios, terminal PTY y backups desde la web.
+- **Remediación recomendada:** Unificar una única fuente de verdad (preferiblemente embebiendo o compartiendo las plantillas de `packaging/`) y añadir un test de paridad en CI entre `packaging/` y `deploy/`.
 
 ---
 
-## 6. Condiciones de salida de producción
+### A-03 • Hallazgo `H1`: `logrotate` de respaldos sin directiva `su root grp_samba`
 
-1. H1 logrotate corregido y validado (`logrotate -d` sin errores; `logrotate.service` OK).
-2. Plan fechado de off-site (H2) + restauración de prueba mensual documentada.
-3. M1–M6 aplicados o con fecha acordada (rodar en entorno de pruebas 2 semanas).
-4. RTO/RPO definidos y runbook de restauración publicado.
-5. Despliegue final con rol adecuado (`ARCHIVOS_BACKUP` si se usará la central de respaldos).
+- **Evidencia en código:** `crates/nas-engine/src/deploy/artifacts.rs:44-52` frente a `packaging/install.sh:83`.
+- **Diagnóstico:** `/srv/nas/LOGS_BACKUP` se crea con permisos `2770 root:grp_samba` (escribible por el grupo `grp_samba`). Sin embargo, `LOGROTATE_BACKUPS` en `deploy/artifacts.rs` define la rotación sobre `/srv/nas/LOGS_BACKUP/*.log` sin especificar `su root grp_samba`.
+- **Impacto:** `logrotate` en Debian rechaza rotar logs alojados en directorios escribibles por grupo cuando falta la directiva `su`, dejando crecer los registros indefinidamente.
+- **Remediación recomendada:** Añadir `su root grp_samba` dentro de `LOGROTATE_BACKUPS` en `crates/nas-engine/src/deploy/artifacts.rs`.
 
-Con estos puntos cerrados, el proyecto puede certificarse **producción apta** en su contexto LAN.
+---
+
+### A-04 • SQL `UPDATE users` silenciosamente roto en `packaging/install.sh`
+
+- **Evidencia en código:** `packaging/install.sh:141-143` frente a `crates/nas-web/src/db.rs:127-132`.
+- **Diagnóstico:** La línea `142` de `packaging/install.sh` ejecuta:
+  ```bash
+  sqlite3 "$STATE_DIR/nas.sqlite" "UPDATE users SET password_hash='$hash' WHERE username='admin';" 2>/dev/null || true
+  ```
+  Sin embargo, la tabla real en `db.rs` se llama **`web_users`** y la columna **`password_sha256`**. Al ocultar stderr con `2>/dev/null || true`, la consulta falla en silencio cada vez que existe una base SQLite previa.
+- **Impacto:** Reinstalar o reconfigurar con `NAS_WEB_PASSWORD=...` sobre un servidor ya inicializado no actualiza la contraseña de `admin` y deja un mensaje engañoso de éxito.
+- **Remediación recomendada:** Corregir la sentencia a `UPDATE web_users SET password_sha256=... WHERE username='admin';` (o derivar el hash PBKDF2 vía CLI) y eliminar la supresión silenciosa de error SQL.
+
+---
+
+### A-05 • Lectura muerta de `gpg_verified` frente a firma real `Ed25519`
+
+- **Evidencia en código:** `crates/nas-web/src/routes/system.rs:179-220` y `crates/nas-web/assets/js/modules/system.js:18-23` frente a `scripts/package.sh:58-70` y `install.sh`.
+- **Diagnóstico:** El endpoint `/api/system/updates` lee la clave `"gpg_verified"` de `version.json` con valor por defecto `false`. Solo `install.sh` escribe `"gpg_verified": true` en `version.json`; `scripts/package.sh` (usado para los tarballs oficiales firmados con `Ed25519`) **no escribe `gpg_verified`**. En consecuencia, un servidor actualizado o instalado desde tarball reporta `"Sin firma GPG"` en la UI aunque haya sido verificado con `Ed25519` (`packaging/release.pub`).
+- **Remediación recomendada:** Reemplazar el campo y badge `gpg_verified` por metadatos explícitos de verificación `Ed25519` (`ed25519_verified` / presencia de firma validada en el manifiesto).
+
+---
+
+### A-06 • Comentario y mensaje de error obsoletos de `256 MiB` en descarga ZIP
+
+- **Evidencia en código:** `crates/nas-web/src/files/zip.rs:15, 89, 277`.
+- **Diagnóstico:** La constante real `ZIP_MAX_BYTES` en la línea `15` fija el límite en `50 * 1024 * 1024 * 1024` (**50 GiB**). Sin embargo, el comentario doc de la línea `89` y el mensaje de error en tiempo de ejecución de la línea `277` aún indican `"256 MiB"`.
+- **Remediación recomendada:** Actualizar ambos textos en `files/zip.rs` para usar `ZIP_MAX_BYTES` dinámicamente (tal como ya hace la línea `261`).
+
+---
+
+### A-07 • Textos y campos residuales de la etapa PHP / Git / GPG
+
+- **Evidencia verificada en `0f7a272`:**
+  1. `crates/nas-web/templates/layout.html:1655`: botón con `id="btn-reload-php" onclick="reloadPhpService(this)"`.
+  2. `crates/nas-web/templates/layout.html:3279, 3285`: el modal de actualización sigue describiendo *"Avance rápido (Fast-Forward) y verificación de firma GPG del tag de release"* y *"sintaxis de todos los scripts y módulos"* en lugar de la descarga de artefacto tarball, hash `SHA-256`, firma `Ed25519` y slots A/B.
+  3. `crates/nas-web/assets/js/modules/system.js:18-23, 172`: badges `"Sin firma GPG"` / `"Tag criptográficamente firmado y verificado con GPG"` y fase *"Avance rápido y verificación de firmas criptográficas GPG"*.
+  4. `crates/nas-web/src/routes/system.rs:334`: mantiene la clave JSON `"php_version"` junto a `"rust_version"`.
+  5. `crates/nas-engine/src/services.rs:31`: `is_allowed_service()` sigue aceptando `php*-fpm` en su lista blanca pese a haberse retirado el stack PHP.
+  6. `crates/nas-cli/src/commands/update.rs:48`: imprime `"Requisito de firma: Ed25519 / GPG obligatorio"`.
+
+---
+
+### A-08 • Referencia huérfana a `80-udisks2-hide-os.rules`
+
+- **Evidencia en código:** `crates/nas-engine/src/uninstall.rs:124`.
+- **Diagnóstico:** Ni `packaging/` ni `crates/nas-engine/src/deploy/` crean `/etc/udev/rules.d/80-udisks2-hide-os.rules` (la protección real del disco del sistema operativo se implementa en `is_os_disk()` en Rust). Sin embargo, `uninstall.rs` aún incluye esa ruta en su paso de limpieza y la documentación antigua la describía como mecanismo activo.
+
+---
+
+## 3. Verificación de Documentación Consolidada
+
+Como parte de este trabajo de auditoría y reorganización documental sobre `0f7a272`:
+- Se retiraron los 13 documentos redundantes u obsoletos que arrastraban datos de la era PHP/Bash o fragmentaban guías operativas y de desarrollo.
+- Se consolidó la documentación técnica en **7 documentos en `docs/`** (`arquitectura.md`, `tecnologias.md`, `seguridad.md`, `manual.md`, `lab_y_desarrollo.md`, `auditoria.md` y `propuesta_ux_usuarios.md`) junto con `README.md` y 7 diagramas SVG actualizados en `docs/assets/`.
