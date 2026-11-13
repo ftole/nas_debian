@@ -29,11 +29,11 @@
 
     <rect x="12" y="40" width="181" height="52" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="59" fill="#f8fafc" font-size="11" font-weight="600">Bash: BATS + ShellCheck</text>
-    <text x="20" y="76" fill="#94a3b8" font-size="9.5">tests/*.bats + bash -n install.sh</text>
+    <text x="20" y="76" fill="#94a3b8" font-size="9.5">tests/*.bats + bash -n</text>
 
     <rect x="12" y="102" width="181" height="52" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="121" fill="#f8fafc" font-size="11" font-weight="600">JS: node --check</text>
-    <text x="20" y="138" fill="#94a3b8" font-size="9.5">28 JS propios (lib + modules)</text>
+    <text x="20" y="138" fill="#94a3b8" font-size="9.5">31 JS (28 propios + 3 vendor)</text>
 
     <rect x="12" y="164" width="181" height="62" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="183" fill="#f8fafc" font-size="11" font-weight="600">Rust Workspace</text>
@@ -62,19 +62,19 @@
     <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">scripts/package.sh</text>
     <text x="20" y="77" fill="#94a3b8" font-size="9.5">• 5 binarios release (--locked)</text>
     <text x="20" y="93" fill="#94a3b8" font-size="9.5">• packaging/* + version.json</text>
-    <text x="20" y="109" fill="#a78bfa" font-size="9.5">• Tarball .tar.gz + SHA256SUMS</text>
+    <text x="20" y="109" fill="#a78bfa" font-size="9">• nas_debian-*.tar.gz + .sha256</text>
 
     <rect x="12" y="140" width="181" height="106" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="160" fill="#f8fafc" font-size="11" font-weight="600">Firma Criptográfica Ed25519</text>
     <text x="20" y="177" fill="#94a3b8" font-size="9.5">• Secreto CI: NAS_RELEASE_KEY</text>
     <text x="20" y="193" fill="#94a3b8" font-size="9.5">• Mensaje: version|commit|</text>
     <text x="20" y="207" fill="#94a3b8" font-size="9.5">  artifact|sha256|published_at</text>
-    <text x="20" y="226" fill="#34d399" font-size="9.5">• Salida: manifest.sig</text>
+    <text x="20" y="226" fill="#34d399" font-size="9.5">• Firma en nas-X.Y.Z.json</text>
 
     <rect x="12" y="260" width="181" height="94" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="280" fill="#f8fafc" font-size="11" font-weight="600">Publicación GitHub Release</text>
-    <text x="20" y="297" fill="#94a3b8" font-size="9.5">• Adjunta tarball + SHA256SUMS</text>
-    <text x="20" y="313" fill="#94a3b8" font-size="9.5">  + manifest.json + manifest.sig</text>
+    <text x="20" y="297" fill="#94a3b8" font-size="9.5">• Adjunta tarball, .sha256,</text>
+    <text x="20" y="313" fill="#94a3b8" font-size="9.5">  nas-X.Y.Z.json y release.pub</text>
     <text x="20" y="335" fill="#38bdf8" font-size="9.5">• Clave pública en el repo:</text>
     <text x="20" y="348" fill="#cbd5e1" font-size="9">  packaging/release.pub</text>
   </g>
@@ -90,21 +90,21 @@
     <rect x="12" y="40" width="181" height="92" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">nas update check / apply</text>
     <text x="20" y="77" fill="#94a3b8" font-size="9.5">• Consulta release en GitHub</text>
-    <text x="20" y="93" fill="#94a3b8" font-size="9.5">• Descarga artefacto y firmas</text>
-    <text x="20" y="109" fill="#94a3b8" font-size="9.5">  a directorio temporal seguro</text>
+    <text x="20" y="93" fill="#94a3b8" font-size="9.5">• Descarga artefacto y json</text>
+    <text x="20" y="109" fill="#94a3b8" font-size="9.5">  a /var/cache/nas/updates</text>
 
     <rect x="12" y="146" width="181" height="106" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="166" fill="#f8fafc" font-size="11" font-weight="600">Validación Pre-Instalación</text>
     <text x="20" y="184" fill="#34d399" font-size="9.5">1. Verifica SHA-256 del tarball</text>
     <text x="20" y="201" fill="#34d399" font-size="9.5">2. Verifica firma Ed25519 con</text>
-    <text x="20" y="215" fill="#34d399" font-size="9.5">   packaging/release.pub</text>
-    <text x="20" y="236" fill="#ef4444" font-size="9.5">• Si falla: aborta sin tocar prod</text>
+    <text x="20" y="215" fill="#34d399" font-size="9.5">   release.pub / --pubkey</text>
+    <text x="20" y="236" fill="#ef4444" font-size="9.5">• Si falla: aborta sin cambios</text>
 
     <rect x="12" y="266" width="181" height="88" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="286" fill="#f8fafc" font-size="11" font-weight="600">Auditoría y Bitácora</text>
-    <text x="20" y="303" fill="#94a3b8" font-size="9.5">• Registra versión, commit y</text>
-    <text x="20" y="318" fill="#94a3b8" font-size="9.5">  estado en nas-audit /</text>
-    <text x="20" y="333" fill="#94a3b8" font-size="9.5">  /etc/nas/version.json</text>
+    <text x="20" y="303" fill="#94a3b8" font-size="9.5">• Registra inicio y resultado</text>
+    <text x="20" y="318" fill="#94a3b8" font-size="9.5">  en cadena SHA-256 de</text>
+    <text x="20" y="333" fill="#94a3b8" font-size="9.5">  nas-audit (START/SUCCESS)</text>
   </g>
 
   <line x1="714" y1="280" x2="739" y2="280" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
@@ -124,14 +124,14 @@
 
     <rect x="12" y="158" width="162" height="92" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="178" fill="#f8fafc" font-size="11" font-weight="600">Activación y Health</text>
-    <text x="20" y="196" fill="#94a3b8" font-size="9.5">• Instala binarios /usr/local/bin</text>
+    <text x="20" y="196" fill="#94a3b8" font-size="9">• Instala en /usr/local/bin</text>
     <text x="20" y="212" fill="#94a3b8" font-size="9.5">• Reinicia nas-web + nginx</text>
-    <text x="20" y="228" fill="#94a3b8" font-size="9.5">• Conserva /srv/nas y SQLite</text>
+    <text x="20" y="228" fill="#94a3b8" font-size="9.5">• Valida /login (200/302)</text>
 
     <rect x="12" y="264" width="162" height="90" rx="5" fill="#0f172a" stroke="#f59e0b" stroke-width="1"/>
-    <text x="20" y="284" fill="#fbbf24" font-size="11" font-weight="600">Rollback Instantáneo</text>
-    <text x="20" y="302" fill="#94a3b8" font-size="9.5">sudo nas update rollback</text>
-    <text x="20" y="319" fill="#94a3b8" font-size="9.5">• Revierte symlink al slot</text>
-    <text x="20" y="335" fill="#94a3b8" font-size="9.5">  previo y restaura binarios</text>
+    <text x="20" y="284" fill="#fbbf24" font-size="11" font-weight="600">Rollback Automático</text>
+    <text x="20" y="302" fill="#94a3b8" font-size="9">• Con --previous &lt;ver&gt;:</text>
+    <text x="20" y="319" fill="#94a3b8" font-size="9">  si falla healthcheck, revierte</text>
+    <text x="20" y="335" fill="#94a3b8" font-size="9">  symlink y restaura binarios</text>
   </g>
 </svg>
