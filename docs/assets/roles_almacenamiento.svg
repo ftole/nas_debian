@@ -54,7 +54,7 @@
     <text x="24" y="278" fill="#f8fafc" font-size="11" font-weight="700">Ajustes de Bloque y Cron</text>
     <text x="24" y="295" fill="#94a3b8" font-size="10">• udev readahead: 4096 KB HDD / 1024 SSD</text>
     <text x="24" y="311" fill="#94a3b8" font-size="10">• Sin btrfs scrub programado</text>
-    <text x="24" y="327" fill="#38bdf8" font-size="10">• Purga diaria de .recycle (&gt;30 días)</text>
+    <text x="24" y="327" fill="#38bdf8" font-size="10">• Purga diaria de .recycle (&gt;15 días)</text>
   </g>
 
   <!-- Columna 2: BACKUP -->
@@ -71,10 +71,10 @@
     <text x="24" y="129" fill="#10b981" font-size="10">• Ahorro de espacio ~20% a 40%</text>
 
     <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Recursos Administrativos ($)</text>
-    <text x="24" y="193" fill="#94a3b8" font-size="10">• /srv/nas/BACKUPS -&gt; BACKUPS$</text>
-    <text x="24" y="209" fill="#94a3b8" font-size="10">• /srv/nas/LOGS_BACKUP (2770 grp_samba)</text>
-    <text x="24" y="225" fill="#94a3b8" font-size="10">• Acceso restringido grp_backups/admins</text>
+    <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Directorios de Respaldo (2770)</text>
+    <text x="24" y="193" fill="#94a3b8" font-size="10">• /srv/nas/BACKUPS_HISTORICOS</text>
+    <text x="24" y="209" fill="#94a3b8" font-size="10">• /srv/nas/BACKUPS_PERMANENTES</text>
+    <text x="24" y="225" fill="#94a3b8" font-size="10">• LOGS_BACKUP + recursos $ Samba</text>
 
     <rect x="14" y="258" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="24" y="278" fill="#f8fafc" font-size="11" font-weight="700">Integridad y Snapshots</text>
@@ -99,7 +99,7 @@
     <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Recursos Combinados</text>
     <text x="24" y="193" fill="#94a3b8" font-size="10">• Carpetas departamentales visibles</text>
-    <text x="24" y="209" fill="#94a3b8" font-size="10">• + Recurso oculto BACKUPS$</text>
+    <text x="24" y="209" fill="#94a3b8" font-size="10">• + BACKUPS_HISTORICOS / LOGS</text>
     <text x="24" y="225" fill="#94a3b8" font-size="10">• + Gestión LVM / subvolúmenes Btrfs</text>
 
     <rect x="14" y="258" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
