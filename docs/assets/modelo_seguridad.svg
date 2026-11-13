@@ -74,7 +74,7 @@
 
     <rect x="602" y="34" width="278" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="614" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">nas-audit, auditd &amp; Ed25519</text>
-    <text x="614" y="67" fill="#94a3b8" font-size="9.5">Cadena SHA-256 + auditd (/etc/audit/rules.d/nas.rules)</text>
+    <text x="614" y="67" fill="#94a3b8" font-size="9.5">Cadena SHA-256 + auditd (nas.rules)</text>
     <text x="614" y="79" fill="#a78bfa" font-size="9">Releases firmados Ed25519 (packaging/release.pub)</text>
   </g>
 
