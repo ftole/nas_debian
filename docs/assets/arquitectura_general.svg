@@ -1,20 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <defs>
-    <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e293b"/>
-      <stop offset="100%" stop-color="#0f172a"/>
-    </linearGradient>
     <linearGradient id="accent-blue" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#3b82f6"/>
       <stop offset="100%" stop-color="#60a5fa"/>
     </linearGradient>
-    <linearGradient id="accent-green" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#34d399"/>
-    </linearGradient>
     <linearGradient id="accent-purple" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#8b5cf6"/>
       <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="accent-green" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
     </linearGradient>
     <linearGradient id="accent-amber" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#f59e0b"/>
@@ -26,112 +22,109 @@
   </defs>
 
   <!-- Header -->
-  <rect x="30" y="24" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
-  <circle cx="65" cy="54" r="14" fill="#3b82f6"/>
-  <path d="M59 54 L63 58 L71 50" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="92" y="48" fill="#f8fafc" font-size="18" font-weight="700">Arquitectura General del Sistema • NAS &amp; Central de Respaldos</text>
-  <text x="92" y="68" fill="#94a3b8" font-size="12">Plataforma Debian 13 Trixie x86_64 con Arquitectura Modular Híbrida (CLI + Web MVC)</text>
+  <rect x="30" y="20" width="900" height="62" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="51" r="14" fill="#3b82f6"/>
+  <path d="M59 51 L63 55 L71 47" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Arquitectura General del Sistema • NAS &amp; Central de Respaldos</text>
+  <text x="92" y="65" fill="#94a3b8" font-size="12">Debian 13 Trixie x86_64 • Workspace Rust (11 crates) + Panel Web Axum/Slate UI + 7 Helpers Root</text>
 
-  <!-- Capa 1: Clientes y Acceso -->
-  <g transform="translate(30, 104)">
-    <rect width="900" height="85" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+  <!-- Capa 1: Clientes y Acceso de Red -->
+  <g transform="translate(30, 100)">
+    <rect width="900" height="86" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
     <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-blue)"/>
-    <text x="24" y="28" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">CAPA 1: CLIENTES Y ACCESO DE RED</text>
+    <text x="22" y="26" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">CAPA 1: CLIENTES Y ACCESO DE RED</text>
 
-    <!-- Caja 1.1 -->
-    <rect x="20" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="34" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Equipos Windows (SMB 3.1.1)</text>
-    <text x="278" y="60" text-anchor="end" fill="#94a3b8" font-size="10">+100 puestos</text>
+    <rect x="20" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="54" fill="#f8fafc" font-size="12" font-weight="600">Equipos Windows (SMB2_10..SMB3_11)</text>
+    <text x="32" y="68" fill="#94a3b8" font-size="10">CIFS/SMB con firma obligatoria y cifrado</text>
 
-    <!-- Caja 1.2 -->
-    <rect x="315" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="329" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Servidores Linux (SSH / rsync)</text>
-    <text x="573" y="60" text-anchor="end" fill="#94a3b8" font-size="10">Llaves/TOFU</text>
+    <rect x="314" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Orígenes Remotos (SMB / SSH / Local)</text>
+    <text x="326" y="68" fill="#94a3b8" font-size="10">CIFS v3.1.1, SSH Ed25519/sshpass y rutas locales</text>
 
-    <!-- Caja 1.3 -->
-    <rect x="610" y="38" width="270" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="624" y="60" fill="#e2e8f0" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
-    <text x="868" y="60" text-anchor="end" fill="#94a3b8" font-size="10">HTTPS / CLI</text>
+    <rect x="608" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="620" y="54" fill="#f8fafc" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
+    <text x="620" y="68" fill="#94a3b8" font-size="10">HTTPS Nginx proxy_pass + CLI/TUI/nasctl</text>
   </g>
 
-  <!-- Capa 2: Interfaces de Gestión -->
-  <g transform="translate(30, 209)">
-    <rect width="900" height="95" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+  <!-- Capa 2: Interfaces de Administración y Control -->
+  <g transform="translate(30, 204)">
+    <rect width="900" height="106" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
     <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-purple)"/>
-    <text x="24" y="26" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1">CAPA 2: INTERFACES DE ADMINISTRACIÓN Y CONTROL</text>
+    <text x="22" y="26" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1">CAPA 2: INTERFACES DE ADMINISTRACIÓN Y PRESENTACIÓN</text>
 
-    <!-- Interfaz CLI -->
-    <rect x="20" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="600">CLI 'nas' y asistente 'nas-tui'</text>
-    <text x="32" y="71" fill="#94a3b8" font-size="10.5">Rust: nas (CLI) + nas-tui (ratatui)</text>
+    <rect x="20" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="54" fill="#f8fafc" font-size="12" font-weight="600">CLI 'nas', 'nas-tui' y 'nasctl'</text>
+    <text x="32" y="69" fill="#94a3b8" font-size="10">nas (--json) • nas-tui (12 secciones ratatui)</text>
+    <text x="32" y="83" fill="#a78bfa" font-size="10">nasctl + nas-ssh para inventarios YAML</text>
 
-    <!-- Web Backend MVC -->
-    <rect x="315" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="600">Panel Web (Rust + axum + Nginx)</text>
-    <text x="327" y="71" fill="#94a3b8" font-size="10.5">nas-web.service + proxy_pass (~0MB en reposo)</text>
+    <rect x="314" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Backend Web (nas-web + Nginx TLS)</text>
+    <text x="326" y="69" fill="#94a3b8" font-size="10">Axum 0.8 en 127.0.0.1:8080 • Routers por dominio</text>
+    <text x="326" y="83" fill="#38bdf8" font-size="10">SQLite WAL (sesiones, auditoría, rate limit)</text>
 
-    <!-- Web Frontend Slate UI -->
-    <rect x="610" y="36" width="270" height="46" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="622" y="55" fill="#f8fafc" font-size="12" font-weight="600">Slate UI 100% Offline</text>
-    <text x="622" y="71" fill="#94a3b8" font-size="10.5">0% dependencias • 36 SVG • Drag&amp;Drop</text>
+    <rect x="608" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="620" y="54" fill="#f8fafc" font-size="12" font-weight="600">Slate UI 100% Offline Embebida</text>
+    <text x="620" y="69" fill="#94a3b8" font-size="10">14 vistas nav • 28 JS modulares + 3 vendor</text>
+    <text x="620" y="83" fill="#10b981" font-size="10">52 iconos SVG • Visores Office • PTY tmux</text>
   </g>
 
-  <!-- Capa 3: Servicios y Lógica de Negocio -->
-  <g transform="translate(30, 324)">
-    <rect width="900" height="115" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+  <!-- Capa 3: Motor Rust y Servicios -->
+  <g transform="translate(30, 328)">
+    <rect width="900" height="126" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
     <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-green)"/>
-    <text x="24" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">CAPA 3: SERVICIOS Y SUBSISTEMAS DE DEBIAN 13</text>
+    <text x="22" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">CAPA 3: MOTOR DE SISTEMA (nas-engine), HELPERS Y AUDITORÍA</text>
 
-    <!-- Samba + VFS -->
-    <rect x="20" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <rect x="20" y="36" width="205" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="30" y="54" fill="#f8fafc" font-size="12" font-weight="600">Samba 4 + VFS</text>
-    <text x="30" y="70" fill="#94a3b8" font-size="10">acl_xattr / streams_xattr</text>
-    <text x="30" y="85" fill="#10b981" font-size="9.5">+100 puestos Excel sin lock</text>
+    <text x="30" y="70" fill="#94a3b8" font-size="10">acl_xattr, streams_xattr, recycle</text>
+    <text x="30" y="85" fill="#94a3b8" font-size="10">smb.conf + ACLs POSIX (2770)</text>
+    <text x="30" y="100" fill="#10b981" font-size="9.5">WSDD2 + realmd / sssd / adcli</text>
 
-    <!-- Motor de Backups -->
-    <rect x="240" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="250" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
-    <text x="250" y="70" fill="#94a3b8" font-size="10">rsync --link-dest (Hardlinks)</text>
-    <text x="250" y="85" fill="#38bdf8" font-size="9.5">Staging atómico .inprogress</text>
+    <rect x="238" y="36" width="205" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="248" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
+    <text x="248" y="70" fill="#94a3b8" font-size="10">rsync -aAXH --link-dest</text>
+    <text x="248" y="85" fill="#94a3b8" font-size="10">Staging .inprogress_* + flock</text>
+    <text x="248" y="100" fill="#38bdf8" font-size="9.5">Golden Snapshot (auto_permanent)</text>
 
-    <!-- Active Directory & Red -->
-    <rect x="460" y="36" width="205" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="470" y="54" fill="#f8fafc" font-size="12" font-weight="600">AD &amp; Descubrimiento</text>
-    <text x="470" y="70" fill="#94a3b8" font-size="10">realmd / sssd / adcli</text>
-    <text x="470" y="85" fill="#f59e0b" font-size="9.5">WSDD2 con override systemd</text>
+    <rect x="456" y="36" width="212" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="466" y="54" fill="#f8fafc" font-size="12" font-weight="600">7 Helpers Root Acotados</text>
+    <text x="466" y="70" fill="#94a3b8" font-size="10">samba-apply, share-dir, share-acl</text>
+    <text x="466" y="85" fill="#94a3b8" font-size="10">accounts, backup-manage (stdin)</text>
+    <text x="466" y="100" fill="#fbbf24" font-size="9.5">nas-terminal, nas-storage-apply</text>
 
-    <!-- SQLite WAL & Seguridad -->
-    <rect x="680" y="36" width="200" height="64" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="692" y="54" fill="#f8fafc" font-size="12" font-weight="600">SQLite WAL &amp; Aud</text>
-    <text x="692" y="70" fill="#94a3b8" font-size="10">nas.sqlite (~0MB reposo)</text>
-    <text x="692" y="85" fill="#a78bfa" font-size="9.5">sudoers acotado + argv tipado</text>
+    <rect x="681" y="36" width="199" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="691" y="54" fill="#f8fafc" font-size="12" font-weight="600">nas-exec &amp; nas-audit</text>
+    <text x="691" y="70" fill="#94a3b8" font-size="10">Argv sin shell, timeouts, env_clear</text>
+    <text x="691" y="85" fill="#94a3b8" font-size="10">Cadena SHA-256 append-only</text>
+    <text x="691" y="100" fill="#a78bfa" font-size="9.5">Ed25519 en updates A/B</text>
   </g>
 
-  <!-- Capa 4: Kernel y Almacenamiento -->
-  <g transform="translate(30, 459)">
-    <rect width="900" height="135" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+  <!-- Capa 4: Almacenamiento, 3 Roles y Kernel -->
+  <g transform="translate(30, 472)">
+    <rect width="900" height="162" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
     <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-amber)"/>
-    <text x="24" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">CAPA 4: ALMACENAMIENTO, FILESYSTEMS Y KERNEL TUNING</text>
+    <text x="22" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">CAPA 4: ROLES DE SERVIDOR, ALMACENAMIENTO Y KERNEL LINUX</text>
 
-    <!-- Rol ARCHIVOS -->
-    <rect x="20" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="55" fill="#f8fafc" font-size="12" font-weight="700">Rol ARCHIVOS (NAS)</text>
-    <text x="32" y="72" fill="#94a3b8" font-size="10.5">• HDD: ext4 (commit=2 anti-apagón)</text>
-    <text x="32" y="88" fill="#94a3b8" font-size="10.5">• SSD: ext4 (commit=5 + fstrim)</text>
-    <text x="32" y="104" fill="#10b981" font-size="10">tune2fs -m 1 • readahead 4096KB</text>
+    <rect x="20" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="58" fill="#60a5fa" font-size="12" font-weight="700">Rol ARCHIVOS (NAS)</text>
+    <text x="32" y="76" fill="#cbd5e1" font-size="10.5">• Carpetas departamentales visibles</text>
+    <text x="32" y="93" fill="#94a3b8" font-size="10">• ext4 por defecto (commit=2 HDD / 5 SSD)</text>
+    <text x="32" y="110" fill="#94a3b8" font-size="10">• tune2fs -m 1 • fstrim.timer en SSD</text>
+    <text x="32" y="127" fill="#10b981" font-size="10">• ACLs mixtas (RW/RO/Publico)</text>
 
-    <!-- Rol BACKUP -->
-    <rect x="315" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="327" y="55" fill="#f8fafc" font-size="12" font-weight="700">Rol BACKUP (Central)</text>
-    <text x="327" y="72" fill="#94a3b8" font-size="10.5">• Btrfs con compress=zstd:3</text>
-    <text x="327" y="88" fill="#94a3b8" font-size="10.5">• Btrfs Scrub mensual (anti Bit Rot)</text>
-    <text x="327" y="104" fill="#38bdf8" font-size="10">space_cache=v2 • autodefrag / discard</text>
+    <rect x="314" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="326" y="58" fill="#34d399" font-size="12" font-weight="700">Rol BACKUP (Central)</text>
+    <text x="326" y="76" fill="#cbd5e1" font-size="10.5">• Recursos ocultos (BACKUPS$, LOGS)</text>
+    <text x="326" y="93" fill="#94a3b8" font-size="10">• Btrfs (compress=zstd:3, space_cache=v2)</text>
+    <text x="326" y="110" fill="#94a3b8" font-size="10">• btrfs scrub mensual (día 1, 02:00)</text>
+    <text x="326" y="127" fill="#38bdf8" font-size="10">• Deduplicación &gt;85% con hardlinks</text>
 
-    <!-- Kernel Tuning & Protección -->
-    <rect x="610" y="36" width="270" height="82" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="622" y="55" fill="#f8fafc" font-size="12" font-weight="700">Tuning &amp; Protección de Disco</text>
-    <text x="622" y="72" fill="#94a3b8" font-size="10.5">• sysctl: vm.dirty_bytes=256MB</text>
-    <text x="622" y="88" fill="#94a3b8" font-size="10.5">• udev: UDISKS_IGNORE=1 (disco SO)</text>
-    <text x="622" y="104" fill="#f59e0b" font-size="10">Soporte --keep-data (sin formateo)</text>
+    <rect x="608" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="620" y="58" fill="#fbbf24" font-size="12" font-weight="700">Rol ARCHIVOS_BACKUP &amp; Kernel</text>
+    <text x="620" y="76" fill="#cbd5e1" font-size="10.5">• Unifica NAS + Central (Btrfs defecto)</text>
+    <text x="620" y="93" fill="#94a3b8" font-size="10">• Guardián is_os_disk() + --keep-data</text>
+    <text x="620" y="110" fill="#94a3b8" font-size="10">• sysctl 99-nas-tuning + readahead udev</text>
+    <text x="620" y="127" fill="#f59e0b" font-size="10">• auditd (/etc/audit/rules.d/nas.rules)</text>
   </g>
 </svg>
