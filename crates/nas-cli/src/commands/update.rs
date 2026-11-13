@@ -19,18 +19,52 @@ pub struct UpdateDispatchArgs {
     pub sudo: bool,
 }
 
+fn read_deployed_version(candidates: &[&Path], fallback: &str) -> String {
+    for path in candidates {
+        if path.is_file() {
+            if let Some(version) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
+                .and_then(|v| v.get("version").and_then(|s| s.as_str().map(String::from)))
+                .filter(|s| !s.trim().is_empty())
+            {
+                return version;
+            }
+        }
+    }
+    fallback.to_string()
+}
+
+fn detect_previous_version(root: &str, target_version: &str) -> Option<String> {
+    let base = Path::new(root.trim_end_matches('/'));
+    let link = base.join("current");
+    let target = std::fs::read_link(link).ok()?;
+    let name = target.file_name()?.to_str()?.trim();
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name == target_version
+    {
+        return None;
+    }
+    if base.join("releases").join(name).is_dir() {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn update_status(json: bool) -> NasResult<ExitCode> {
     let pkg_version = env!("CARGO_PKG_VERSION");
-    let version_path = Path::new("/opt/nas_debian/version.json");
-    let deployed_version = if version_path.is_file() {
-        std::fs::read_to_string(version_path)
-            .ok()
-            .and_then(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
-            .and_then(|v| v.get("version").and_then(|s| s.as_str().map(String::from)))
-            .unwrap_or_else(|| pkg_version.to_string())
-    } else {
-        pkg_version.to_string()
-    };
+    let deployed_version = read_deployed_version(
+        &[
+            Path::new("/opt/nas_debian/current/version.json"),
+            Path::new("/etc/nas/version.json"),
+            Path::new("/opt/nas_debian/version.json"),
+        ],
+        pkg_version,
+    );
 
     if json {
         print_json(&ApiResponse::ok(
@@ -386,8 +420,19 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         ));
     }
 
-    let plan =
-        nas_engine::build_update_plan(&manifest, root, &artifact.to_string_lossy(), previous);
+    let detected_previous = if previous.is_none() {
+        detect_previous_version(root, &manifest.version)
+    } else {
+        None
+    };
+    let effective_previous = previous.or(detected_previous.as_deref());
+
+    let plan = nas_engine::build_update_plan(
+        &manifest,
+        root,
+        &artifact.to_string_lossy(),
+        effective_previous,
+    );
     let _lock = nas_engine::TaskLock::acquire("/var/lock/nas-update.lock")?;
 
     let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
@@ -470,4 +515,69 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{detect_previous_version, read_deployed_version};
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn read_deployed_version_respeta_precedencia_y_respaldo() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_cli_ver_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(dir.join("current")).expect("mkdir current");
+        let p_current = dir.join("current/version.json");
+        let p_etc = dir.join("etc_version.json");
+        let p_root = dir.join("root_version.json");
+        std::fs::write(&p_etc, r#"{"version":"1.0.0"}"#).expect("write etc");
+        std::fs::write(&p_root, r#"{"version":"0.9.0"}"#).expect("write root");
+
+        assert_eq!(
+            read_deployed_version(&[&p_current, &p_etc, &p_root], "0.0.0"),
+            "1.0.0"
+        );
+
+        std::fs::write(&p_current, r#"{"version":"1.2.3"}"#).expect("write current");
+        assert_eq!(
+            read_deployed_version(&[&p_current, &p_etc, &p_root], "0.0.0"),
+            "1.2.3"
+        );
+
+        assert_eq!(
+            read_deployed_version(&[&dir.join("missing.json")], "9.9.9"),
+            "9.9.9"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detect_previous_version_resuelve_enlace_current() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_cli_prev_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let prev = dir.join("releases/1.2.2");
+        std::fs::create_dir_all(&prev).expect("mkdir prev");
+        symlink(&prev, dir.join("current")).expect("symlink current");
+
+        let root_str = dir.to_string_lossy();
+        assert_eq!(
+            detect_previous_version(&root_str, "1.2.3"),
+            Some("1.2.2".to_string())
+        );
+        assert_eq!(detect_previous_version(&root_str, "1.2.2"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
