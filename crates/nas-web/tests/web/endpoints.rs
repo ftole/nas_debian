@@ -399,7 +399,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/system.js",
-            25536,
+            26462,
             &["loadUpdates", "loadApplications", "confirmRebootServer"],
         ),
         (
@@ -506,4 +506,51 @@ async fn system_updates_prioriza_current_version_json() {
         serde_json::from_str(&body_text(response).await).expect("json");
     assert_eq!(payload["data"]["version"], "0.2.0");
     assert_eq!(payload["data"]["commit"], "new456");
+}
+
+#[tokio::test]
+async fn system_updates_local_expone_ultimo_resultado_de_auditoria() {
+    let dir = temp_dir("sys-audit-upd");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.repo = dir.clone();
+    std::fs::write(
+        dir.join("version.json"),
+        r#"{"version":"0.1.10","commit":"abc123","ed25519_verified":true}"#,
+    )
+    .expect("version.json");
+
+    let audit = nas_audit::AuditLog::new(paths.audit_log());
+    audit
+        .append(nas_audit::AuditEntry::new(
+            "root",
+            "local",
+            "update-apply",
+            "0.1.11",
+            "FAILED",
+            "firma Ed25519 del manifiesto inválida",
+        ))
+        .expect("append audit");
+
+    let app = router(AppState::new(auth, paths, ServerRole::Arquivos));
+    let cookie = cookie_for(&app).await;
+
+    let response = app
+        .oneshot(get("/api/system/updates?local=1", &cookie))
+        .await
+        .expect("updates local");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["data"]["version"], "0.1.10");
+    assert_eq!(payload["data"]["has_updates"], false);
+    assert_eq!(payload["data"]["last_update"]["result"], "FAILED");
+    assert_eq!(payload["data"]["last_update"]["target"], "0.1.11");
+    assert!(payload["data"]["last_update"]["detail"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Ed25519"));
 }
