@@ -1673,8 +1673,8 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               </div>
               <div class="panel-card-body" id="app-body-web">Servidor HTTP ultraligero con PHP 8 y gestor bajo demanda (<code>pm = ondemand</code>), consumo ~0 MB RAM en reposo.</div>
               <div class="panel-card-foot" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-color); display:flex; gap:8px; justify-content:flex-end;">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-php" onclick="reloadPhpService(this)">
-                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar PHP-FPM
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-reload-web" onclick="reloadWebService(this)">
+                  <svg class="icon icon-sm"><use href="#icon-refresh"></use></svg> Recargar servicio web
                 </button>
               </div>
             </div>
