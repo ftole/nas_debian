@@ -229,8 +229,13 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
-        let source_dir = std::env::var("NAS_HELPERS_DIR")
-            .unwrap_or_else(|_| "/opt/nas_debian/packaging".to_string());
+        let source_dir = std::env::var("NAS_HELPERS_DIR").unwrap_or_else(|_| {
+            if std::path::Path::new("/opt/nas_debian/current/packaging").is_dir() {
+                "/opt/nas_debian/current/packaging".to_string()
+            } else {
+                "/opt/nas_debian/packaging".to_string()
+            }
+        });
         if let Err(error) = nas_engine::deploy::helpers::install_all_helpers(&runner, &source_dir) {
             failure = Some(NasError::Denied(error.to_string()));
         }
