@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <rect x="30" y="20" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="50" r="14" fill="#3b82f6"/>
+  <path d="M58 46 L63 50 L58 54 M66 54 L72 54" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Entorno de Laboratorio Multi-Agente con Git Worktrees</text>
+  <text x="92" y="64" fill="#94a3b8" font-size="12">Trabajo paralelo seguro en /opt/dev sin bloqueos de Cargo ni conflictos en producción</text>
+
+  <!-- Bloque Superior: Servidor /opt/dev compartido -->
+  <g transform="translate(30, 96)">
+    <rect width="900" height="90" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="#38bdf8"/>
+    <text x="20" y="26" fill="#38bdf8" font-size="11" font-weight="700" letter-spacing="1">INFRAESTRUCTURA BASE DE DESARROLLO (DEBIAN 13)</text>
+
+    <rect x="20" y="38" width="275" height="40" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="32" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Repositorio Principal (/opt/dev/nas_debian)</text>
+    <text x="32" y="70" fill="#94a3b8" font-size="9.5">Grupo devs • git core.sharedRepository=group</text>
+
+    <rect x="312" y="38" width="275" height="40" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="324" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Toolchain Rust y Herramientas CI</text>
+    <text x="324" y="70" fill="#94a3b8" font-size="9.5">rustup 1.80+ • clippy • bats • shellcheck • node</text>
+
+    <rect x="604" y="38" width="276" height="40" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="616" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Regla de Producción Activa</text>
+    <text x="616" y="70" fill="#fbbf24" font-size="9.5">Tests en paralelo jamás reinician nas-web / smbd</text>
+  </g>
+
+  <!-- Bloque Medio: Aislamiento de Worktrees -->
+  <g transform="translate(30, 202)">
+    <rect width="435" height="176" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="435" height="4" rx="2" fill="#a78bfa"/>
+    <text x="18" y="26" fill="#a78bfa" font-size="11" font-weight="700">AISLAMIENTO POR WORKTREE Y TARGET</text>
+
+    <rect x="16" y="40" width="194" height="118" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="26" y="60" fill="#f8fafc" font-size="11.5" font-weight="700">Agente / Desarrollador A</text>
+    <text x="26" y="78" fill="#a78bfa" font-size="9.5">/opt/dev/nas_debian-featA</text>
+    <text x="26" y="95" fill="#94a3b8" font-size="9.5">Rama: feat/storage-ext</text>
+    <text x="26" y="112" fill="#38bdf8" font-size="9.5">CARGO_TARGET_DIR=</text>
+    <text x="26" y="127" fill="#38bdf8" font-size="9.5">  /opt/dev/target-featA</text>
+    <text x="26" y="146" fill="#10b981" font-size="9">Sin bloqueo .cargo-lock</text>
+
+    <rect x="225" y="40" width="194" height="118" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="235" y="60" fill="#f8fafc" font-size="11.5" font-weight="700">Agente / Desarrollador B</text>
+    <text x="235" y="78" fill="#a78bfa" font-size="9.5">/opt/dev/nas_debian-docs</text>
+    <text x="235" y="95" fill="#94a3b8" font-size="9.5">Rama: docs/auditoria</text>
+    <text x="235" y="112" fill="#38bdf8" font-size="9.5">CARGO_TARGET_DIR=</text>
+    <text x="235" y="127" fill="#38bdf8" font-size="9.5">  /opt/dev/target-docs</text>
+    <text x="235" y="146" fill="#10b981" font-size="9">Cero colisiones en target/</text>
+  </g>
+
+  <line x1="468" y1="290" x2="493" y2="290" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Bloque Medio Derecho: Despliegue y Validación -->
+  <g transform="translate(498, 202)">
+    <rect width="432" height="176" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="432" height="4" rx="2" fill="#10b981"/>
+    <text x="18" y="26" fill="#34d399" font-size="11" font-weight="700">DESPLIEGUE LOCAL Y ADMINISTRACIÓN REMOTA</text>
+
+    <rect x="16" y="40" width="194" height="118" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="26" y="60" fill="#f8fafc" font-size="11.5" font-weight="700">scripts/deploy_local.sh</text>
+    <text x="26" y="78" fill="#94a3b8" font-size="9.5">• Assets embebidos en binario</text>
+    <text x="26" y="95" fill="#94a3b8" font-size="9.5">  (include_bytes!/include_str!)</text>
+    <text x="26" y="112" fill="#94a3b8" font-size="9.5">• Compila, instala en /usr/local/bin</text>
+    <text x="26" y="128" fill="#94a3b8" font-size="9.5">  y reinicia nas-web.service</text>
+    <text x="26" y="146" fill="#fbbf24" font-size="9">• Recargar UI: Ctrl + Shift + R</text>
+
+    <rect x="222" y="40" width="194" height="118" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="232" y="60" fill="#f8fafc" font-size="11.5" font-weight="700">nasctl &amp; nas-dev</text>
+    <text x="232" y="78" fill="#94a3b8" font-size="9.5">• nasctl lee inventory.yaml</text>
+    <text x="232" y="95" fill="#94a3b8" font-size="9.5">• Transporte OpenSSH (nas-ssh)</text>
+    <text x="232" y="112" fill="#94a3b8" font-size="9.5">• Sincronización multi-host en</text>
+    <text x="232" y="128" fill="#94a3b8" font-size="9.5">  nodos de prueba (dev/prod)</text>
+    <text x="232" y="146" fill="#38bdf8" font-size="9">• Sin dependencias Python/Ansible</text>
+  </g>
+
+  <!-- Barra Inferior: Flujo Git Atómico -->
+  <g transform="translate(30, 394)">
+    <rect width="900" height="82" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="900" height="4" rx="2" fill="#f59e0b"/>
+    <text x="20" y="25" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">DISCIPLINA DE INTEGRACIÓN Y COMMITS ATÓMICOS</text>
+    <text x="20" y="46" fill="#cbd5e1" font-size="10.5">1. Evitar edición simultánea en archivos de alto tráfico (Cargo.lock, AGENTS.md, app.js, layout.html, routes/mod.rs, main.rs).</text>
+    <text x="20" y="64" fill="#cbd5e1" font-size="10.5">2. Regla estricta: 1 archivo modificado = 1 commit independiente en español • git pull --rebase • Validar 5 puertas CI antes de push.</text>
+  </g>
+</svg>
