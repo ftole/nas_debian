@@ -15,31 +15,9 @@ pub struct Artifact {
     pub mode: u32,
 }
 
-const SYSCTL_TUNING: &str = "# Ajustes NAS (generado por nas deploy)
-fs.inotify.max_user_instances = 2048
-fs.inotify.max_user_watches = 524288
-net.ipv4.tcp_keepalive_time = 120
-net.ipv4.tcp_keepalive_intvl = 15
-net.ipv4.tcp_keepalive_probes = 4
-vm.vfs_cache_pressure = 30
-vm.dirty_background_bytes = 67108864
-vm.dirty_bytes = 268435456
-vm.dirty_expire_centisecs = 300
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.tcp_syncookies = 1
-kernel.kptr_restrict = 2
-kernel.dmesg_restrict = 1
-kernel.yama.ptrace_scope = 2
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-";
+const SYSCTL_TUNING: &str = include_str!("../../../../packaging/99-nas-tuning.conf");
 
-const UDEV_READAHEAD: &str = "# Readahead por tipo de medio (generado por nas deploy)
-ACTION==\"add|change\", KERNEL==\"sd[a-z]|nvme[0-9]n[0-9]\", ATTR{queue/rotational}==\"1\", ATTR{queue/read_ahead_kb}=\"4096\"
-ACTION==\"add|change\", KERNEL==\"sd[a-z]|nvme[0-9]n[0-9]\", ATTR{queue/rotational}==\"0\", ATTR{queue/read_ahead_kb}=\"1024\"
-";
+const UDEV_READAHEAD: &str = include_str!("../../../../packaging/60-nas-readahead.rules");
 
 const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
     su root grp_samba
@@ -52,53 +30,12 @@ const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
 }
 ";
 
-const AUDIT_RULES: &str = "-w /etc/sudoers -p wa -k sudoers_changes
--w /etc/sudoers.d/ -p wa -k sudoers_changes
--w /etc/samba/smb.conf -p wa -k samba_config
--w /etc/backup-credentials/ -p rwa -k backup_credentials
--w /usr/local/bin/nas -p x -k nas_cli
--w /usr/local/sbin/nas-terminal -p x -k nas_terminal
-";
+const AUDIT_RULES: &str = include_str!("../../../../packaging/nas.rules");
 
 impl DeployParams {
     /// Configuración base limpia `[global]` de Samba optimizada para Debian 13.
     pub fn base_smb_conf(&self) -> String {
-        format!(
-            "[global]\n\
-   workgroup = {}\n\
-   netbios name = {}\n\
-   server string = Servidor NAS Debian 13\n\
-   server role = standalone server\n\
-   security = user\n\
-   map to guest = Bad User\n\
-   server min protocol = SMB2_10\n\
-   server max protocol = SMB3_11\n\
-   server signing = mandatory\n\
-   smb encrypt = desired\n\
-   smb3 directory leases = auto\n\
-   kernel change notify = yes\n\
-   change notify = yes\n\
-   vfs objects = acl_xattr streams_xattr recycle\n\
-   recycle:repository = .recycle\n\
-   recycle:keeptree = yes\n\
-   recycle:versions = yes\n\
-   recycle:touch = yes\n\
-   recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*\n\
-   recycle:excludedir = /.recycle/\n\
-   map acl inherit = yes\n\
-   store dos attributes = yes\n\
-   inherit permissions = yes\n\
-   strict sync = yes\n\
-   use sendfile = yes\n\
-   aio read size = 16384\n\
-   aio write size = 16384\n\
-   max open files = 65535\n\
-   load printers = no\n\
-   printing = bsd\n\
-   printcap name = /dev/null\n\
-   disable spoolss = yes\n",
-            self.workgroup, self.netbios
-        )
+        super::samba::global_smb_conf(&self.workgroup, &self.netbios)
     }
 
     /// Archivos de configuración del sistema que escribe el despliegue nativo.
@@ -359,10 +296,16 @@ mod artifact_tests {
             .expect("audit");
         assert_eq!(audit.mode, 0o640);
         assert_eq!(artifacts.len(), 7);
+        assert!(audit.content.contains("-D"));
+        assert!(audit.content.contains("-b 8192"));
+        assert!(audit.content.contains("-f 1"));
+        assert!(audit
+            .content
+            .contains("-w /etc/samba/smb.conf -p wa -k samba_conf_changes"));
         assert!(audit.content.contains("-w /etc/backup-credentials/ -p rwa"));
         assert!(audit
             .content
-            .contains("-w /usr/local/bin/nas -p x -k nas_cli"));
+            .contains("-w /usr/local/sbin/nas-terminal -p x -k nas_terminal"));
     }
 
     #[test]
@@ -400,6 +343,36 @@ mod artifact_tests {
     fn base_smb_conf_configura_directory_leases_auto() {
         let conf = params(ServerRole::Arquivos).base_smb_conf();
         assert!(conf.contains("smb3 directory leases = auto"));
+    }
+
+    #[test]
+    fn base_smb_conf_coincide_con_global_smb_conf() {
+        let p = params(ServerRole::Arquivos);
+        assert_eq!(
+            p.base_smb_conf(),
+            super::super::samba::global_smb_conf(&p.workgroup, &p.netbios)
+        );
+    }
+
+    #[test]
+    fn artefactos_coinciden_con_packaging() {
+        let artifacts = params(ServerRole::ArquivosBackup).artifacts();
+        let sysctl = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/sysctl.d/99-nas-tuning.conf")
+            .expect("sysctl");
+        assert_eq!(
+            sysctl.content,
+            include_str!("../../../../packaging/99-nas-tuning.conf")
+        );
+        let udev = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/udev/rules.d/60-nas-readahead.rules")
+            .expect("udev");
+        assert_eq!(
+            udev.content,
+            include_str!("../../../../packaging/60-nas-readahead.rules")
+        );
     }
 
     #[test]
