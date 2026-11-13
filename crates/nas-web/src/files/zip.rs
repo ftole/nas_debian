@@ -86,7 +86,8 @@ fn create_secure_temp_file(path: &Path) -> NasResult<std::fs::File> {
 
 impl FileRoot {
     /// Comprime una carpeta (o archivo) hacia un archivo temporal seguro en disco
-    /// con cuota máxima de 256 MiB, retornando la guarda para borrado automático y el tamaño.
+    /// con cuota máxima definida por `ZIP_MAX_BYTES` (50 GiB), retornando la guarda
+    /// para borrado automático y el tamaño.
     pub fn zip_temp(&self, relative: &str) -> NasResult<(TempFile, u64)> {
         use std::io::BufWriter;
         use zip::write::SimpleFileOptions;
@@ -273,9 +274,10 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     let copied = std::io::copy(&mut limited, writer).map_err(|e| NasError::io(path, e))?;
     *total = total.saturating_add(copied);
     if *total > ZIP_MAX_BYTES {
-        return Err(NasError::Denied(
-            "el contenido supera el límite de 256 MiB para descarga ZIP".into(),
-        ));
+        return Err(NasError::Denied(format!(
+            "el contenido supera el límite de descarga ZIP ({})",
+            human_bytes_lossy(ZIP_MAX_BYTES)
+        )));
     }
 
     Ok(())
@@ -370,8 +372,8 @@ mod ziptests {
         root.mkdir("datos").expect("mkdir");
 
         // Creamos dos archivos de 70 MiB cada uno (total carpeta: 140 MiB).
-        // 140 MiB < 256 MiB (ZIP_MAX_BYTES).
-        // En la versión con el bug de doble conteo: 140 MiB + 140 MiB = 280 MiB > 256 MiB, fallando erróneamente.
+        // 140 MiB < 50 GiB (ZIP_MAX_BYTES).
+        // En la versión con el bug de doble conteo en pruebas previas, un límite menor fallaba erróneamente.
         // Con la corrección de total_written independiente, se comprime exitosamente.
         let f1 = std::fs::File::create(root.root().join("datos/f1.bin")).expect("create f1");
         f1.set_len(70 * 1024 * 1024).expect("set_len f1");
@@ -416,5 +418,11 @@ mod ziptests {
         assert!(zip_fresh.exists(), "zip_ reciente debe conservarse");
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn limite_zip_corresponde_a_cincuenta_gib() {
+        assert_eq!(super::ZIP_MAX_BYTES, 50 * 1024 * 1024 * 1024);
+        assert_eq!(super::human_bytes_lossy(super::ZIP_MAX_BYTES), "50.0 GB");
     }
 }
