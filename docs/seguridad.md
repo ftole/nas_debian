@@ -78,12 +78,13 @@ Los comandos concretos paso a paso para aplicar cada uno de estos puntos figuran
 
 ---
 
-## 3. Brechas Abiertas y Riesgos Conocidos (`0f7a272`)
+## 3. Estado de Brechas y Riesgos Operativos (`v0.1.11`)
 
-La auditoría técnica sobre el código actual en `main` (`0f7a272`) detectó brechas relevantes que siguen abiertas y deben conocerse antes de operar o automatizar tareas (véase el detalle técnico con líneas de código en [docs/auditoria.md](./auditoria.md)):
+La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró cuatro brechas técnicas que quedaron **resueltas en `v0.1.11`**:
+- `system_update_run` ahora delega en `sudo /usr/bin/systemd-run --no-block --collect --unit=nas-system-update` (regla `sudoers` acotada) con seguimiento asíncrono desde el panel.
+- `crates/nas-engine/src/deploy/` unificó las plantillas con `packaging/` (`include_str!` para `nas-web.service`, `nginx-nas-web.conf`, `99-nas-tuning.conf`, `60-nas-readahead.rules` y paridad de `sudoers`/helpers).
+- `packaging/install.sh` actualiza correctamente `web_users` en `/var/lib/nas/nas.sqlite` (`INSERT ... ON CONFLICT`) y `LOGROTATE_BACKUPS` incluye `su root grp_samba`.
 
-1. **Actualización desde el panel web (`system_update_run`):** ejecuta `nas --json update apply` directamente como el usuario sin privilegios `nas-web` dentro de una unidad `systemd` con `ProtectSystem=yes` y sin `sudo`, por lo que falla al intentar escribir en `/opt/nas_debian` y `/usr/local/bin`. **Mitigación operativa:** ejecutar las actualizaciones desde consola con `sudo nas update apply`.
-2. **Deriva severa entre `packaging/` y `crates/nas-engine/src/deploy/`:** si se invoca `nas deploy apply` después de `install.sh`, los artefactos embebidos en `deploy/web.rs` sobrescriben `/etc/systemd/system/nas-web.service` (eliminando el hardening `systemd` y `ReadWritePaths` de `/etc/cron.d`, `/etc/backup-credentials`, `/etc/samba`) y reemplazan `/etc/sudoers.d/nas-web-rust` por una versión reducida de 5 reglas que inhabilita la mayoría de acciones del panel web.
-3. **Reseteo de contraseña `admin` en `packaging/install.sh`:** si ya existe `/var/lib/nas/nas.sqlite`, la consulta `UPDATE users SET password_hash=...` apunta a una tabla y columna inexistentes (`web_users.password_sha256` es el esquema real) y falla silenciosamente.
-4. **Rotación de bitácoras de respaldo en `deploy/artifacts.rs`:** `LOGROTATE_BACKUPS` carece de `su root grp_samba` sobre el directorio `/srv/nas/LOGS_BACKUP` (`2770 root:grp_samba`), lo que hace que Debian `logrotate` omita la rotación por permisos de grupo.
-5. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado de CA interna para evitar advertencias en navegadores.
+**Riesgos / acciones operativas vigentes:**
+1. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado emitido por CA interna / ACME en producción.
+2. **Actualización desde versiones `<= 0.1.10`:** en servidores instalados antes de `v0.1.11`, el primer paso debe hacerse por consola (`sudo rm -f /var/lock/nas-update.lock` si quedó huérfano, `sudo nas update apply --repo ftole/nas_debian --yes` y `sudo bash /opt/nas_debian/current/packaging/install.sh`) para aplicar la nueva regla `sudoers` de `nas-system-update`.
