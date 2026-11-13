@@ -50,7 +50,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 ### 1.4 Kernel, Samba, Auditoría y Actualizaciones Firmadas
 
 - **Kernel (`packaging/99-nas-tuning.conf`):** activa `net.ipv4.conf.*.rp_filter=1` (anti-*spoofing*), `net.ipv4.tcp_syncookies=1`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2` y desactiva IPv6 (`disable_ipv6=1`).
-- **Samba 4:** `server min protocol = SMB2_10`, `server max protocol = SMB3_11`, `server signing = mandatory`, `smb encrypt = desired`, `map to guest = Bad User`, carpetas de respaldo ocultas (`BACKUPS$`) y permisos POSIX `2770` + `default ACL`.
+- **Samba 4:** `server min protocol = SMB2_10`, `server max protocol = SMB3_11`, `server signing = mandatory`, `smb encrypt = desired`, `map to guest = Bad User`, directorios de respaldo `2770` (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`, con soporte para recursos ocultos `$`) y permisos POSIX `2770` + `default ACL`.
 - **Auditoría triple:**
   1. `web_audit` en SQLite con usuario e IP de origen (`origin_ip`).
   2. `nas-audit` (*append-only*) con cadena criptográfica SHA-256 verificable (`nas audit verify`).
