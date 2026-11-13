@@ -71,8 +71,8 @@ sudo nas deploy apply \
   --admin admin
 ```
 
-> [!CAUTION]
-> **Aviso por deriva conocida:** Si ejecutas `nas deploy apply` después de `packaging/install.sh`, verifica después `/etc/systemd/system/nas-web.service` y `/etc/sudoers.d/nas-web-rust`, o vuelve a ejecutar `sudo bash packaging/install.sh` hasta que se resuelva la deriva documentada en [docs/auditoria.md](./auditoria.md).
+> [!NOTE]
+> **Actualización desde versiones `<= 0.1.10`:** Tras ejecutar `sudo nas update apply`, ejecuta `sudo bash /opt/nas_debian/current/packaging/install.sh` una sola vez para refrescar `/etc/sudoers.d/nas-web-rust`, helpers y la unidad `nas-web.service`; a partir de `v0.1.11`, las actualizaciones posteriores pueden lanzarse directamente desde el panel web.
 
 ---
 
@@ -180,8 +180,8 @@ sudo mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
 | **Error `EAGAIN (11)` al respaldar archivos abiertos en Windows** | Bloqueos de rango de bytes activos en CIFS. | Los runners generados por `nas-backup-manage` ya montan con `ro,vers=3.1.1,noserverino,cache=none,soft,nobrl`. Si editaste un runner manualmente, restáuralo desde el panel. |
 | **Credenciales de dominio Windows fallan en backup CIFS** | Sintaxis incorrecta de dominio o contraseña con caracteres especiales. | Usa formato `DOMINIO\usuario` o `DOMINIO/usuario` al guardar la tarea en el panel; las credenciales se escriben por `stdin` en `/etc/backup-credentials/<id>.cred` (`0600`). |
 | **Respaldo abortado o directorio `.inprogress_*` residual** | Corte eléctrico repentino o volumen >95% lleno (`<2 GiB`). | Libera espacio (`df -h /srv/nas`), revisa `/srv/nas/LOGS_BACKUP/<id>.log`. La próxima ejecución limpia el `.inprogress_*` previo y adquiere `/var/lock/backup_<id>.lock`. |
-| **Reinstalar con `NAS_WEB_PASSWORD` no actualiza la clave de `admin`** | Bug conocido en `packaging/install.sh` (`UPDATE users ...` en lugar de `web_users`). | Cambia la contraseña desde el propio panel web o actualiza la tabla `web_users` tras revisar [docs/auditoria.md](./auditoria.md). |
-| **Botón "Actualizar ahora" en el panel web falla por permisos** | `system_update_run` invoca `nas update apply` como `nas-web` sin `sudo`. | Ejecuta la actualización desde consola SSH con `sudo nas update apply`. |
+| **Error `Permission denied (os error 13)` en `/var/lock/nas-update.lock` al usar `sudo nas update apply`** | Un intento previo ejecutado como `nas-web` dejó `/var/lock/nas-update.lock` con propietario `nas-web:nas-web`. | Elimina el bloqueo huérfano (`sudo rm -f /var/lock/nas-update.lock`), ejecuta `sudo nas update apply --repo ftole/nas_debian --yes` y luego `sudo bash /opt/nas_debian/current/packaging/install.sh` para habilitar actualizaciones desde la web (`v0.1.11+`). |
+| **`nginx -t` falla con `bind() to 0.0.0.0:80 failed (13: Permission denied)`** | `nginx -t` se invocó sin privilegios `root`. | Ejecuta `sudo nginx -t` (requiere privilegios de superusuario para probar el socket `:80`/`:443`). |
 | **Cambios locales de desarrollo no se reflejan en el navegador** | Activos embebidos en el binario y caché HTTP de `max-age=300`. | Ejecuta `sudo ./scripts/deploy_local.sh` y recarga con `Ctrl + Shift + R`. |
 
 ---
