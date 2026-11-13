@@ -56,9 +56,9 @@ El sistema soporta **3 roles oficiales** definidos en `ServerRole` (`ARCHIVOS`, 
 
 | Rol | Uso Previsto | Sistema de Archivos por Defecto | Opciones y Mantenimiento Clave |
 | :--- | :--- | :--- | :--- |
-| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) con carpetas visibles en red y alta concurrencia (+100 puestos). | **`ext4`** (sobreescribible con `--btrfs`) | `rw,noatime,commit=2` (HDD) / `commit=5` (SSD); `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` (HDD) / `1024 KB` (SSD); `fstrim.timer` en SSD; purga diaria de `.recycle` (>30 días). |
-| **`BACKUP`** | Central de respaldos (`SRV-BKP`) con recursos administrativos ocultos (`BACKUPS$`, `LOGS_BACKUP`). | **`Btrfs`** (sobreescribible con `--ext4`) | `compress=zstd:3,space_cache=v2`; `autodefrag` en HDD / `ssd,discard=async` en SSD; tarea mensual `nas-btrfs-scrub` (día 1 a las 02:00) para prevenir *Bit Rot*; deduplicación `rsync --link-dest`. |
-| **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado que combina recursos departamentales compartidos y repositorio de respaldos. | **`Btrfs`** (sobreescribible con `--ext4`) | Combina recursos visibles y ocultos (`BACKUPS$`), compresión `zstd:3`, *scrub* mensual automático y soporte completo de subvolúmenes Btrfs y volúmenes LVM desde el panel. |
+| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) con carpetas visibles en red y alta concurrencia (+100 puestos). | **`ext4`** (sobreescribible con `--btrfs`) | `rw,noatime,commit=2` (HDD) / `commit=5` (SSD); `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` (HDD) / `1024 KB` (SSD); `fstrim.timer` en SSD; purga diaria de `.recycle` (>15 días). |
+| **`BACKUP`** | Central de respaldos (`SRV-BKP`) con directorios dedicados (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`). | **`Btrfs`** (sobreescribible con `--ext4`) | `compress=zstd:3,space_cache=v2`; `autodefrag` en HDD / `ssd,discard=async` en SSD; tarea mensual `nas-btrfs-scrub` (día 1 a las 02:00) para prevenir *Bit Rot*; deduplicación `rsync --link-dest` y soporte de recursos ocultos `$` en Samba. |
+| **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado que combina recursos departamentales compartidos y repositorio de respaldos. | **`Btrfs`** (sobreescribible con `--ext4`) | Combina `/srv/nas/SISTEMAS` y carpetas de respaldo (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`), compresión `zstd:3`, *scrub* mensual automático y soporte completo de subvolúmenes Btrfs y volúmenes LVM desde el panel. |
 
 ### Protección del Disco del Sistema Operativo (`is_os_disk`) y `--keep-data`
 
@@ -79,9 +79,9 @@ El binario `nas-web` escucha únicamente en `127.0.0.1:8080` detrás de `Nginx` 
 
 La persistencia de estado vive en **SQLite en modo WAL (*Write-Ahead Logging*)** en `/var/lib/nas/nas.sqlite` (`crates/nas-web/src/db.rs`), con cuatro tablas principales:
 - `web_users` (`username`, `password_sha256` que almacena hashes `$pbkdf2-sha512$` o SHA-256 heredado con auto-actualización al autenticar, `role`, `created_at`).
-- `web_sessions` (`id`, `username`, `role`, `created_at`, `expires_at`, `ip`).
-- `web_audit` (`id`, `timestamp`, `username`, `origin_ip`, `action`, `target`, `result`, `details`).
-- `api_rate_limits` (`scope`, `client_key`, `hits`, `window_start`, `blocked_until`).
+- `web_sessions` (`id`, `username`, `created_at`, `expires_at`).
+- `web_audit` (`id`, `ts`, `username`, `action`, `target`, `result`, `detail`, `origin_ip`).
+- `api_rate_limits` (`key`, `window_start`, `hits`).
 
 ### 4.2 Frontend Modular Slate UI 100% Offline
 
@@ -104,7 +104,7 @@ Para minimizar la superficie de ataque, `nas-web` nunca ejecuta como `root`. Las
 | `nas-samba-apply` | `samba-apply` | Valida sintaxis con `testparm` y aplica cambios atómicos en `/etc/samba/smb.conf`. |
 | `nas-share-dir` | `share-dir` | Crea o elimina directorios de recursos compartidos dentro de `/srv/nas`. |
 | `nas-share-acl` | `share-acl` | Aplica permisos base `2770` y listas ACL POSIX heredables (`setfacl`) en `/srv/nas`. |
-| `nas-accounts` | `accounts` | Gestiona usuarios Linux, contraseñas Samba (`pdbedit`/`smbpasswd`) y grupos (`grp_samba`, `grp_backups`, `grp_admins`, departamentos). |
+| `nas-accounts` | `accounts` | Gestiona usuarios Linux, contraseñas Samba (`pdbedit`/`smbpasswd`) y grupos (`grp_samba`, `grp_web`, `grp_superadmin`, `grp_backups`, departamentos). |
 | `nas-backup-manage` | `backup-manage` | Instala tareas de respaldo vía JSON por `stdin` (`install-spec`), escribe credenciales `0600 root:root`, cron en `/etc/cron.d/` y ejecuta/detiene tareas. |
 | `nas-terminal` | `terminal` | Administra sesiones `tmux` del usuario autenticado para el terminal PTY web. |
 | `nas-storage-apply` | `storage-apply` | Ejecuta operaciones de disco, formateo, montaje en `/srv/nas`, LVM y subvolúmenes Btrfs validando `is_os_disk()`. |
