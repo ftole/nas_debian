@@ -211,6 +211,33 @@ pub fn build_plan(
             format!("/usr/local/bin/{bin}"),
         ]);
     }
+    for helper in crate::deploy::helpers::ROOT_HELPERS {
+        steps.push(vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0755".to_string(),
+            "-o".to_string(),
+            "root".to_string(),
+            "-g".to_string(),
+            "root".to_string(),
+            format!("{link}/packaging/{helper}"),
+            format!("/usr/local/sbin/{helper}"),
+        ]);
+    }
+    steps.push(vec![
+        "install".to_string(),
+        "-m".to_string(),
+        "0644".to_string(),
+        format!("{link}/version.json"),
+        "/etc/nas/version.json".to_string(),
+    ]);
+    steps.push(vec![
+        "install".to_string(),
+        "-m".to_string(),
+        "0644".to_string(),
+        format!("{link}/version.json"),
+        format!("{root}/version.json"),
+    ]);
 
     steps.push(vec!["nginx".to_string(), "-t".to_string()]);
     steps.extend(reloads.clone());
@@ -249,6 +276,33 @@ pub fn build_plan(
                 format!("/usr/local/bin/{bin}"),
             ]);
         }
+        for helper in crate::deploy::helpers::ROOT_HELPERS {
+            rollback.push(vec![
+                "install".to_string(),
+                "-m".to_string(),
+                "0755".to_string(),
+                "-o".to_string(),
+                "root".to_string(),
+                "-g".to_string(),
+                "root".to_string(),
+                format!("{link}/packaging/{helper}"),
+                format!("/usr/local/sbin/{helper}"),
+            ]);
+        }
+        rollback.push(vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0644".to_string(),
+            format!("{link}/version.json"),
+            "/etc/nas/version.json".to_string(),
+        ]);
+        rollback.push(vec![
+            "install".to_string(),
+            "-m".to_string(),
+            "0644".to_string(),
+            format!("{link}/version.json"),
+            format!("{root}/version.json"),
+        ]);
         rollback.extend(reloads);
     }
 
@@ -359,7 +413,7 @@ mod tests {
             .iter()
             .any(|step| step.last().is_some_and(|arg| arg.contains("/login"))));
 
-        assert_eq!(plan.rollback.len(), 9);
+        assert_eq!(plan.rollback.len(), 18);
         assert!(plan.rollback[0].contains(&"/opt/nas_debian/releases/1.2.2".to_string()));
         assert!(plan.steps.iter().any(|step| {
             step == &vec![
@@ -368,6 +422,46 @@ mod tests {
                 "0755",
                 "/opt/nas_debian/current/bin/nas-web",
                 "/usr/local/bin/nas-web",
+            ]
+        }));
+        assert!(plan.steps.iter().any(|step| {
+            step == &vec![
+                "install",
+                "-m",
+                "0755",
+                "-o",
+                "root",
+                "-g",
+                "root",
+                "/opt/nas_debian/current/packaging/nas-share-dir",
+                "/usr/local/sbin/nas-share-dir",
+            ]
+        }));
+        assert!(plan.steps.iter().any(|step| {
+            step == &vec![
+                "install",
+                "-m",
+                "0644",
+                "/opt/nas_debian/current/version.json",
+                "/etc/nas/version.json",
+            ]
+        }));
+        assert!(plan.steps.iter().any(|step| {
+            step == &vec![
+                "install",
+                "-m",
+                "0644",
+                "/opt/nas_debian/current/version.json",
+                "/opt/nas_debian/version.json",
+            ]
+        }));
+        assert!(plan.rollback.iter().any(|step| {
+            step == &vec![
+                "install",
+                "-m",
+                "0644",
+                "/opt/nas_debian/current/version.json",
+                "/etc/nas/version.json",
             ]
         }));
     }
