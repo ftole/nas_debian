@@ -121,7 +121,6 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
                 "-f",
                 "/etc/sysctl.d/99-nas-tuning.conf",
                 "/etc/udev/rules.d/60-nas-readahead.rules",
-                "/etc/udev/rules.d/80-udisks2-hide-os.rules",
             ],
             true,
         ));
@@ -229,6 +228,7 @@ mod os_tests {
             .collect();
         assert!(paths.contains(&"/etc/sysctl.d/99-nas-tuning.conf".to_string()));
         assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules".to_string()));
+        assert!(!paths.contains(&"/etc/udev/rules.d/80-udisks2-hide-os.rules".to_string()));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules".to_string()));
         assert!(paths.contains(&"sysctl".to_string()));
         assert!(paths.contains(&"augenrules".to_string()));
