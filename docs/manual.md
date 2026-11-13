@@ -18,7 +18,7 @@
 
 ### 1.3 Usuario Final Windows (Red Local)
 - Accede mediante Explorador de Windows (`\\SRV-NAS` o `\\<IP>`), descubierto automáticamente por **WSDD2** (sin SMBv1).
-- Recupera documentos borrados por accidente desde la carpeta oculta `.recycle` dentro de cada recurso compartido antes de la purga periódica (>30 días).
+- Recupera documentos borrados por accidente desde la carpeta oculta `.recycle` dentro de cada recurso compartido antes de la purga periódica (>15 días).
 - Usa el portal web HTTPS (si tiene cuenta asignada) para subir/descargar carpetas ZIP o previsualizar hojas Excel, Word y PowerPoint sin instalar software adicional.
 
 ---
@@ -48,7 +48,7 @@ sudo bash install.sh --build-from-source
 
 Selecciona uno de los **3 roles oficiales**:
 - **`ARCHIVOS`**: NAS departamental (`ext4` por defecto).
-- **`BACKUP`**: Central de respaldos con recursos ocultos `BACKUPS$` (`Btrfs` con `zstd:3` por defecto).
+- **`BACKUP`**: Central de respaldos con directorios dedicados `BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES` y `LOGS_BACKUP` en `2770` (`Btrfs` con `zstd:3` por defecto, más soporte para recursos ocultos `$` en Samba).
 - **`ARCHIVOS_BACKUP`**: Servidor híbrido unificado (`Btrfs` con `zstd:3` por defecto).
 
 ```bash
@@ -90,7 +90,7 @@ sudo nas deploy apply \
 | `nas users <subcomando>` | Listado e inventario de usuarios/grupos del sistema y Samba. |
 | `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución y bitácoras. |
 | `nas audit <subcomando>` | Consulta y verificación criptográfica SHA-256 de la bitácora `nas-audit`. |
-| `nas update <check \| apply \| rollback>` | Verificación `Ed25519`, actualización atómica A/B y rollback desde consola. |
+| `nas update <status \| check \| verify \| plan \| apply>` | Consulta de estado, verificación `Ed25519` y actualización atómica A/B desde consola (acepta `--previous <ver>` para rollback automático ante fallo). |
 | `nas uninstall [--yes --purge --scope os]` | Desinstalación controlada (conserva siempre `/srv/nas`). |
 
 ### 3.2 Asistente Visual de Terminal (`nas-tui`)
@@ -123,9 +123,9 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 
 | Frecuencia | Tarea Automática / Manual | Archivo / Comando | Qué Verifica o Mantiene |
 | :--- | :--- | :--- | :--- |
-| **Diaria** | Purga de papelera SMB | `/etc/cron.daily/nas-recycle-purge` | Elimina archivos en `.recycle` con antigüedad mayor a 30 días. |
+| **Diaria** | Purga de papelera SMB | `/etc/cron.daily/nas-recycle-purge` | Elimina archivos en `.recycle` con antigüedad mayor a 15 días. |
 | **Semanal** | TRIM en unidades flash | `systemctl status fstrim.timer` | Libera bloques no referenciados en SSD/NVMe sin degradar velocidad de escritura. |
-| **Semanal / Mensual** | Rotación de bitácoras | `/etc/logrotate.d/nas-*` | Comprime logs de respaldo y panel (`copytruncate`). |
+| **Semanal / Mensual** | Rotación de bitácoras | `/etc/logrotate.d/nas-backups` | Comprime logs de respaldo (`copytruncate`). |
 | **Mensual (día 1, 02:00)** | Verificación Btrfs | `/etc/cron.d/nas-btrfs-scrub` | Ejecuta `btrfs scrub start -B /srv/nas` contra *Bit Rot* en roles `BACKUP` / `ARCHIVOS_BACKUP`. |
 | **Semanal (Manual)** | Respaldo de estado del panel | Copia segura de `/var/lib/nas/nas.sqlite`, `/etc/nas/`, `/etc/samba/smb.conf` y `/etc/cron.d/backup_*` | Permite restaurar configuración, usuarios web y tareas cron ante fallo de disco raíz. |
 | **Mensual (Manual)** | Verificación de auditoría y actualización | `nas audit verify` y `sudo nas update apply` | Comprueba integridad SHA-256 de la bitácora y aplica parches firmados `Ed25519`. |
@@ -193,6 +193,6 @@ sudo mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
 | **Copia de Seguridad (`rsync`)** | Apagón o caída de red a mitad del snapshot | Directorio incompleto si se promoviera prematuramente | Staging aislado `.inprogress_*` + `trap cleanup EXIT TERM INT`; promoción `mv` solo con código `0` | Ejecutar de nuevo la tarea desde panel/CLI; el histórico previo permanece intacto. |
 | **Disco de Respaldos (`Btrfs`)** | Llenado del 100% del volumen | Riesgo de bloqueo de metadatos Btrfs y fallo de snapshots | Comprobación previa `df -Pk`: aviso al 85%, aborto duro si `>95%` o `<2 GiB` libres | Ajustar retención, purgar snapshots no permanentes y verificar con `btrfs filesystem df /srv/nas`. |
 | **Disco de Datos (`ext4`/`Btrfs`)** | Degradación silenciosa de sectores (*Bit Rot*) | Corrupción inadvertida de archivos antiguos | Sumas de comprobación Btrfs + `btrfs scrub` mensual; `commit=2` en `ext4` HDD anti-apagón | Revisar `btrfs scrub status /srv/nas`; restaurar archivo afectado desde snapshot o Golden Snapshot. |
-| **Actualización del Sistema** | Paquete corrupto, firma falsa o fallo tras reinicio | Servicio web caído o binario incompatible | Validación `SHA-256` + firma `Ed25519` previa + despliegue en slots A/B `/opt/nas_debian/releases/` | Ejecutar `sudo nas update rollback` para restaurar el slot previo al instante. |
+| **Actualización del Sistema** | Paquete corrupto, firma falsa o fallo tras reinicio | Servicio web caído o binario incompatible | Validación `SHA-256` + firma `Ed25519` previa + despliegue en slots A/B `/opt/nas_debian/releases/` + *healthcheck* `/login` | Si se indicó `--previous <ver>`, `nas update apply` revierte el slot automáticamente; en recuperación manual, reenlazar `/opt/nas_debian/current` al slot previo, reinstalar `/opt/nas_debian/current/bin/*` en `/usr/local/bin/` y reiniciar `nas-web` + `nginx`. |
 | **Operación de Almacenamiento** | Selección errónea del disco del sistema operativo | Destrucción del SO Debian y pérdida de arranque | Guardián `is_os_disk()` bloquea formateo/repartición en `/` y `/boot`; confirmación textual `SI-FORMATEAR` | No aplica pérdida si actúa el bloqueo; ante fallo físico de disco SO, reinstalar Debian y usar `--keep-data` sobre el disco de datos. |
 | **Sesión / Autenticación Web** | Ataque de fuerza bruta o intento XSS en archivos | Compromiso de sesión administrativa | `api_rate_limits` (HTTP 429), `PBKDF2-HMAC-SHA512`, `HMAC-SHA256` CSRF, `/api/files/raw` en `sandbox`, sanitizador DOM `.xlsx` | Inspeccionar `/audit` y `nas audit verify`; rotar contraseñas y revocar sesiones en `/var/lib/nas/nas.sqlite`. |
