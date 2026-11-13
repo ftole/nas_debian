@@ -1,146 +1,142 @@
-# Arquitectura del Sistema • NAS & Central de Respaldos (Debian 13)
+# Arquitectura del Sistema
 
-Este documento explica de forma clara, directa y transparente cómo está construido el servidor por dentro, cómo interactúan sus componentes y por qué se tomaron estas decisiones de ingeniería.
+> [!NOTE]
+> Documento técnico actualizado respecto al estado real del repositorio (`main` `0f7a272`, plataforma Rust `0.1.10` sobre Debian 13 Trixie `x86_64`).
 
----
+El sistema **NAS & Central de Respaldos Multiplataforma** está construido como un **workspace de Rust con 11 crates**, un backend HTTP en **`axum` 0.8** servido detrás de **Nginx**, una interfaz web **Slate UI 100% offline** con recursos embebidos en el binario, un asistente interactivo de terminal (**`nas-tui`**) y **7 helpers privilegiados** ejecutados bajo reglas estrictas de `sudoers`.
 
-## 1. Visión General de la Arquitectura
-
-A diferencia de soluciones pesadas basadas en contenedores o paneles web que consumen gigabytes de memoria en reposo, este proyecto adopta una **arquitectura nativa y ligera sobre Debian 13 (Trixie)**. 
-
-El servidor opera directamente sobre el kernel de Linux y los servicios estándar del sistema (`smbd`, `nginx`, `sssd`, `cron`), con toda la plataforma implementada en **Rust** y tres formas de administración complementarias:
-1. **CLI (`nas`):** Administración programática con salida ANSI y `--json` para automatización.
-2. **TUI (`nas-tui`):** Asistente de terminal con dashboard, servicios, respaldos y diagnóstico.
-3. **Panel Web (`nas-web`, axum + Slate UI):** Las mismas vistas y el mismo `app.js` del panel original, con los assets embebidos en el binario, 100% offline y cero dependencias externas.
-
-```
-               [ Clientes Windows / Linux / macOS / Navegador Web ]
-                                      │
-           ┌──────────────────────────┴──────────────────────────┐
-           ▼                                                     ▼
-     Red SMB/CIFS (Puerto 445)                             Panel Web (Puerto 80/443)
-   [Samba 4 + VFS acl/streams]                       [Nginx proxy_pass → axum]
-           │                                                     │
-           │                                        argv tipado (CommandSpec, sin shell)
-           │                                                     ▼
-           │                                    [nas-web: vistas + API + assets]
-           │                                          [nas-engine: lógica]
-           │                                          [Base SQLite en modo WAL]
-           │                                                     │
-           └──────────────────────────┬──────────────────────────┘
-                                      ▼
-                        [ Filesystems en /srv/nas ]
-                    • ext4 optimizado (Rol ARCHIVOS)
-                    • Btrfs con ZSTD (Rol BACKUP)
-                                      ▼
-                           [ Discos HDD / SSD / NVMe ]
-```
-
-A continuación se muestra el diagrama completo de capas y flujo del sistema:
-
-![Arquitectura General del Sistema](assets/arquitectura_general.svg)
+![Arquitectura General del Sistema](./assets/arquitectura_general.svg)
 
 ---
 
-## 2. Desglose de Capas
+## 1. Visión de Alto Nivel por Capas
 
-### Capa 1: Hardware, Kernel y Ajustes del Sistema
-El sistema detecta automáticamente las características físicas del almacenamiento y aplica reglas específicas:
-- **Detección de tipo de medio:** Inspecciona `/sys/block/<disco>/queue/rotational`. Si es `1` (disco mecánico HDD), aplica un readahead de `4096 KB` y sincronización de transacciones cada 2 segundos. Si es `0` (unidad de estado sólido SSD o NVMe), fija un readahead de `1024 KB` y activa `fstrim.timer`.
-- **Ajustes de memoria sucia (`sysctl`):** Configurados en `/etc/sysctl.d/99-nas-tuning.conf`. Limita la memoria sucia a `256 MB` (`vm.dirty_bytes`) y `64 MB` en segundo plano (`vm.dirty_background_bytes`). Esto evita que transferencias gigantescas colapsen la RAM y provoquen congelamientos de disco.
-- **Limpieza de sesiones SMB huérfanas:** Mediante `net.ipv4.tcp_keepalive_time = 120`, el kernel detecta y cierra equipos cliente que se desconectaron de golpe en 3 minutos, en lugar de mantener sesiones abiertas durante 2 horas.
-- **Aislamiento de la partición raíz:** La regla udev `/etc/udev/rules.d/80-udisks2-hide-os.rules` añade la marca `UDISKS_IGNORE="1"` al disco del sistema operativo, impidiendo que herramientas de almacenamiento lo formateen por descuido.
+1. **Capa 1 — Clientes y Orígenes de Red:**
+   - **Equipos Windows:** acceso por SMB/CIFS (*Server Message Block / Common Internet File System*) con protocolo negociado entre **`SMB2_10` y `SMB3_11`**, firma obligatoria (`server signing = mandatory`) y cifrado preferido (`smb encrypt = desired`).
+   - **Orígenes de respaldo:** servidores Windows mediante montaje temporal `mount.cifs` (`vers=3.1.1`), servidores Linux por `SSH` (clave Ed25519 dedicada o `sshpass -e`) y rutas locales en `/srv/nas`.
+   - **Administración:** navegador web por HTTPS (`Nginx` -> `127.0.0.1:8080`), consola local/SSH (`nas` CLI y `nas-tui`) y orquestación multi-nodo (`nasctl`).
+2. **Capa 2 — Interfaces de Control (`nas-web`, `nas-cli`, `nas-tui`, `nasctl`):**
+   - El panel web `nas-web` corre como servicio `systemd` dedicado bajo el usuario sin privilegios `nas-web`.
+   - El CLI `nas` expone subcomandos tipados con salida humana o `--json` (`{success, message, data}`).
+   - El asistente `nas-tui` (`ratatui`) ofrece 12 secciones de navegación en terminal (`Dashboard`, `Network`, `Shares`, `Users`, `Backups`, `Services`, `Diagnostics`, `Storage`, `Files`, `Domain`, `Terminal` y `Quit`).
+3. **Capa 3 — Motor del Sistema (`nas-engine`), Ejecución Segura (`nas-exec`) y Auditoría (`nas-audit`):**
+   - Toda operación del sistema se encapsula en `CommandSpec` (arreglo explícito `argv`, sin invocar `/bin/sh -c`), con `env_clear()`, timeouts acotados y redacción automática de secretos.
+   - Las operaciones que requieren `root` atraviesan `sudo -n` hacia los **7 helpers de `/usr/local/sbin/`** o binarios autorizados en `/etc/sudoers.d/nas-web-rust`.
+   - La trazabilidad combina `web_audit` en SQLite con `nas-audit` (bitácora *append-only* encadenada con hashes SHA-256).
+4. **Capa 4 — Almacenamiento, 3 Roles y Tuning Debian 13:**
+   - Gestión de `/srv/nas` según los 3 roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), protección de disco del sistema en código mediante `is_os_disk()`, reglas `sysctl` (`99-nas-tuning.conf`), `udev` (`60-nas-readahead.rules`) y auditoría kernel (`auditd`).
 
 ---
 
-### Capa 2: Almacenamiento y Filesystems
-Todo el almacenamiento gestionado se centraliza en el punto de montaje `/srv/nas`. La preparación admite dos estrategias:
+## 2. Inventario del Workspace Rust (11 Crates)
 
-| Estrategia | Cuándo se usa | Qué hace |
+Todos los crates del workspace (`Cargo.toml` versión `0.1.10`, edición Rust `2021`, MSRV `1.80`) prohíben el uso de código inseguro (`unsafe_code = "forbid"`).
+
+| Crate | Tipo | Responsabilidad Principal |
 | :--- | :--- | :--- |
-| **Formateo Limpio** | Discos nuevos o dedicados | Particiona con GPT, crea la etiqueta `NAS_DATA` y formatea con el sistema de archivos óptimo (`ext4` para NAS o `Btrfs` para copias de seguridad). |
-| **Conservar Datos (`--keep-data`)** | Discos existentes con información previa | Identifica la partición válida, detecta su sistema de archivos (`ext4`, `btrfs`, etc.) y la monta en `/srv/nas` aplicando los parámetros de rendimiento sin tocar los datos. |
-
-#### Optimización de Filesystems según Rol:
-1. **Rol `ARCHIVOS` (ext4):**
-   - Se ejecuta `tune2fs -m 1`, reduciendo la reserva de superusuario del 5% habitual al 1%, recuperando gigabytes de espacio útil.
-   - En HDD se monta con `commit=2` (sincroniza el journal cada 2 segundos), reduciendo drásticamente la ventana de pérdida ante apagones repentinos.
-   - Se aplica `noatime` para evitar escrituras constantes cada vez que alguien lee un archivo.
-2. **Rol `BACKUP` (Btrfs):**
-   - Se activa compresión transparente `compress=zstd:3`, logrando entre 20% y 40% de ahorro de espacio físico sin impacto perceptible en la CPU.
-   - Se incluye `space_cache=v2` y `autodefrag` en discos mecánicos.
-   - En SSD se configuran `discard=async` y `fstrim.timer`.
-   - Se programa una tarea mensual en `/etc/cron.d/nas-btrfs-scrub` que valida cada bloque contra sumas de verificación SHA256 para prevenir y reparar corrupción silenciosa (*Bit Rot*).
+| `nas-core` | Librería | Tipos base, envoltorio `ApiResponse`, errores `NasError`, rutas `NasPaths`, roles (`ServerRole`) y saneamiento de argumentos (`shell::quote_all`). |
+| `nas-exec` | Librería | Ejecutor `Runner` con `CommandSpec`, arreglo `argv` tipado, limpieza de entorno (`env_clear()`), timeouts, soporte `stdin` y modo `SudoMode`. |
+| `nas-audit` | Librería | Bitácora de auditoría *append-only* con encadenamiento criptográfico SHA-256 verificable y verificación de cadena. |
+| `nas-inventory` | Librería | Parseo y validación de inventarios YAML multi-servidor (`inventory.yaml`) y perfiles (`dev`/`prod`). |
+| `nas-ssh` | Librería | Transporte remoto OpenSSH con verificación estricta de huellas de host y llaves dedicadas. |
+| `nas-engine` | Librería | Lógica de negocio y sistema: almacenamiento (`storage`, `storage_ops`, `is_os_disk`), Samba, usuarios, respaldo (`backup`, `backup_spec`), dominio AD (`realmd`/`sssd`), servicios, diagnósticos, actualizaciones firmadas `Ed25519`, despliegue (`deploy/*`) y helpers (`helpers/*`). |
+| `nas-cli` | Binario (`nas`) | CLI unificado con subcomandos (`status`, `network`, `services`, `diag`, `audit`, `migrate`, `backup`, `update`, `deploy`, `storage`, `uninstall`, `users`, `helper`, `daemon`), symlink `nas-cli -> nas`. |
+| `nas-web` | Binario (`nas-web`) | Servidor HTTP `axum` 0.8 en `127.0.0.1:8080`, SQLite en modo WAL, autenticación `PBKDF2-HMAC-SHA512`, protección CSRF y activos frontend embebidos en el binario. |
+| `nas-tui` | Binario (`nas-tui`) | Asistente interactivo de terminal basado en `ratatui` + `crossterm` con 12 secciones operativas. |
+| `nasctl` | Binario (`nasctl`) | Orquestador multi-host sobre `inventory.yaml` usando `nas-inventory` y `nas-ssh`. |
+| `nas-dev` | Binario (`nas-dev`) | Utilidad interna de sincronización y compilación para el entorno de desarrollo. |
 
 ---
 
-### Capa 3: Servicios de Red y Dominio
+## 3. Roles del Servidor y Almacenamiento
 
-#### Samba 4 (SMB/CIFS) y Módulos VFS
-Para soportar más de 100 usuarios simultáneos en Microsoft Office y Excel sin bloqueos de red:
-- **`vfs objects = acl_xattr streams_xattr recycle`:** Guarda los permisos de Windows en atributos extendidos de Linux (`xattr`), emula los flujos de datos alternativos de NTFS (*Alternate Data Streams*) y proporciona papelera de reciclaje integrada por recurso. Esto permite que archivos temporales como `~$Libro1.xlsx` o marcas `Zone.Identifier` se gestionen de forma nativa sin corromper el archivo principal.
-- **Rendimiento de red:** Directivas como `use sendfile = yes`, `aio read/write size = 16384` y `max open files = 65535` reducen las transferencias de contexto en el procesador y garantizan estabilidad bajo alta concurrencia.
-- **Descubrimiento Windows sin SMBv1:** Se usa `wsdd2` con un override de systemd para que los equipos Windows 10/11 vean el NAS de inmediato en su explorador de red sin recurrir a protocolos obsoletos ni a difusiones NetBIOS inseguras.
+El sistema soporta **3 roles oficiales** definidos en `ServerRole` (`ARCHIVOS`, `BACKUP` y `ARCHIVOS_BACKUP`), persistidos en `/etc/nas/role`.
 
-#### Integración con Directorio Activo (Active Directory)
-El sistema incluye la pila nativa corporativa (`realmd`, `sssd`, `adcli`, `krb5-user`). Esto permite:
-- Unir el NAS al dominio Windows de la empresa con un clic desde el panel web o por consola.
-- Autenticar usuarios del dominio corporativo con Kerberos.
-- Desglosar credenciales en formato `DOMINIO\usuario` de forma segura.
+![Matriz de Roles y Selección de Almacenamiento](./assets/roles_almacenamiento.svg)
 
----
+| Rol | Uso Previsto | Sistema de Archivos por Defecto | Opciones y Mantenimiento Clave |
+| :--- | :--- | :--- | :--- |
+| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) con carpetas visibles en red y alta concurrencia (+100 puestos). | **`ext4`** (sobreescribible con `--btrfs`) | `rw,noatime,commit=2` (HDD) / `commit=5` (SSD); `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` (HDD) / `1024 KB` (SSD); `fstrim.timer` en SSD; purga diaria de `.recycle` (>30 días). |
+| **`BACKUP`** | Central de respaldos (`SRV-BKP`) con recursos administrativos ocultos (`BACKUPS$`, `LOGS_BACKUP`). | **`Btrfs`** (sobreescribible con `--ext4`) | `compress=zstd:3,space_cache=v2`; `autodefrag` en HDD / `ssd,discard=async` en SSD; tarea mensual `nas-btrfs-scrub` (día 1 a las 02:00) para prevenir *Bit Rot*; deduplicación `rsync --link-dest`. |
+| **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado que combina recursos departamentales compartidos y repositorio de respaldos. | **`Btrfs`** (sobreescribible con `--ext4`) | Combina recursos visibles y ocultos (`BACKUPS$`), compresión `zstd:3`, *scrub* mensual automático y soporte completo de subvolúmenes Btrfs y volúmenes LVM desde el panel. |
 
-### Capa 4: Capa de Aplicación Web (Rust + axum + Slate UI)
+### Protección del Disco del Sistema Operativo (`is_os_disk`) y `--keep-data`
 
-La aplicación web es un binario único (`/usr/local/bin/nas-web`) servido por `nas-web.service`
-y publicado por Nginx mediante `proxy_pass http://127.0.0.1:8080`. El workspace se organiza así:
-
-```
-crates/
-├── nas-core/         -> Configuración, rutas, roles (`ServerRole`), errores y contratos
-├── nas-exec/         -> Ejecutor de comandos con argv tipado, timeouts y redacción
-├── nas-audit/        -> Bitácora append-only con encadenamiento criptográfico SHA-256
-├── nas-inventory/    -> Inventarios YAML multi-servidor y separación de perfiles
-├── nas-ssh/          -> Transporte OpenSSH con ejecución remota y host keys
-├── nas-engine/       -> Lógica de sistema (almacenamiento, Samba, respaldos, dominio…)
-├── nas-cli/          -> CLI `nas` modularizada en subcomandos (`src/commands/`)
-├── nas-web/          -> Panel web axum modularizado por dominios (`src/routes/`)
-│   ├── templates/    -> layout.html y login.html generados desde layout.php/login.php
-│   └── assets/       -> app.js, CSS, vendor de ofimática y SVG (include_bytes!)
-├── nas-tui/          -> Asistente visual interactivo `nas-tui` (ratatui)
-└── nasctl/, nas-dev/ -> Orquestación multi-host e inspección de entorno
-```
-
-#### Características del Backend:
-- **Cero inyección de comandos:** Las utilidades del sistema (`systemctl`, `journalctl`, `smbpasswd`, `realm`, `adcli`, `rsync`) se ejecutan con `nas-exec`, que recibe un arreglo de argumentos tipado, aplica timeout y redacción de secretos; la contención fina se materializa en sudoers acotados y nunca se usa `/bin/sh -c`.
-- **Helpers privilegiados acotados:** Las operaciones que requieren root se delegan en `nas-samba-apply`, `nas-share-dir`, `nas-share-acl`, `nas-accounts` y `nas-backup-manage`, autorizados individualmente en `/etc/sudoers.d/nas-web-rust`.
-- **Base de datos SQLite en modo WAL:** El archivo `/var/lib/nas/nas.sqlite` almacena sesiones, auditoría (`web_audit`), historial de terminal, límites de peticiones (`api_rate_limits`) y usuarios del panel (`web_users`), con 0 MB en reposo.
-- **Assets intocables:** `app.js`, `app.css`, `login.css`, el favicon y las librerías de ofimática se sirven byte a byte desde el binario; sus hashes están fijados en `tests/parity/assets.sha256`.
-- **Paridad verificada:** Las plantillas se generaron desde `layout.php`/`login.php` y se validan en CI (`tests/parity.rs`), además de una comparación en vivo PHP vs Rust previa al retiro del panel anterior.
+- **Protección en código (`is_os_disk`):** Tanto el inventario (`crates/nas-engine/src/storage.rs`) como las operaciones de particionado y despliegue (`storage_ops.rs`, `deploy/storage.rs`) identifican el disco que aloja `/` o `/boot` consultando particiones montadas y árbol `lsblk`, marcándolo como `protected = true` e impidiendo formatearlo. No depende de reglas `udisks2` externas (`80-udisks2-hide-os.rules` no se instala en el sistema actual).
+- **Reutilización sin pérdida (`--keep-data`):** Permite reaprovisionar el sistema operativo y reutilizar una partición `ext4` o `Btrfs` preexistente montándola en `/srv/nas` sin formatear (requiere indicar un disco dedicado en `/dev/...`, nunca `LOCAL`).
 
 ---
 
-### Capa 5: Motor de Copias de Seguridad y Deduplicación
+## 4. Arquitectura del Panel Web (`nas-web`) y Frontend Slate UI
 
-El motor de respaldos trabaja de forma autónoma mediante tareas de `cron` o ejecuciones bajo demanda:
-- **Aislamiento con `flock`:** Cada tarea adquiere un cerrojo en `/var/lock/backup_<tarea>.lock`. Si una copia previa todavía sigue transfiriendo datos, la nueva ejecución se omite limpiamente sin solaparse.
-- **Staging atómico (`.inprogress_*`):** Toda copia escribe en una carpeta temporal oculta. Si se apaga la luz, se corta la red o el usuario cancela la tarea, las rutinas de salida (`trap cleanup EXIT TERM INT`) purgan los datos incompletos. Únicamente las copias que finalizan con éxito total (código 0) se promueven mediante un renombrado atómico `mv` a `snapshot_YYYY-MM-DD_HHMMSS`.
-- **Deduplicación por enlaces duros (*hardlinks*):** Con `rsync --link-dest`, los archivos que no cambiaron entre copias comparten el mismo inodo físico en disco. Esto ahorra más de un 85% de espacio respecto a copias completas repetitivas.
+### 4.1 Backend HTTP (`axum` + SQLite WAL)
+
+El binario `nas-web` escucha únicamente en `127.0.0.1:8080` detrás de `Nginx` (TLS 1.2/1.3, `client_max_body_size 50G`). Sus rutas se organizan por dominio mediante routers independientes ensamblados con `.merge()` en `crates/nas-web/src/lib.rs`:
+
+- `routes/auth.rs`: inicio y cierre de sesión, sesión actual, CSRF y rotación de contraseña.
+- `routes/pages.rs`: renderizado de vistas HTML, resumen de dashboard, auditoría, bitácora y métricas en vivo.
+- `routes/shares.rs`, `users.rs`, `backups.rs`, `storage.rs`, `files.rs`, `services.rs`, `network.rs`, `domain.rs`, `terminal.rs`, `system.rs`: API JSON `/api/*` bajo middleware de cabeceras HTTP de seguridad y extractors escalonados (`AuthenticatedUser`, `AdminUser`, `SuperAdminUser`).
+
+La persistencia de estado vive en **SQLite en modo WAL (*Write-Ahead Logging*)** en `/var/lib/nas/nas.sqlite` (`crates/nas-web/src/db.rs`), con cuatro tablas principales:
+- `web_users` (`username`, `password_sha256` que almacena hashes `$pbkdf2-sha512$` o SHA-256 heredado con auto-actualización al autenticar, `role`, `created_at`).
+- `web_sessions` (`id`, `username`, `role`, `created_at`, `expires_at`, `ip`).
+- `web_audit` (`id`, `timestamp`, `username`, `origin_ip`, `action`, `target`, `result`, `details`).
+- `api_rate_limits` (`scope`, `client_key`, `hits`, `window_start`, `blocked_until`).
+
+### 4.2 Frontend Modular Slate UI 100% Offline
+
+Todo el frontend se embebe en compilación mediante `include_str!` / `include_bytes!` (`crates/nas-web/src/assets.rs` y `views.rs`), sin CDNs ni peticiones externas:
+
+- **Plantilla principal:** `crates/nas-web/templates/layout.html` con **52 iconos SVG** (`<symbol id="...">`) y el logotipo `/img/logo-iintec.svg`.
+- **14 vistas principales de navegación:** `dashboard`, `files`, `logs`, `shares`, `backups`, `storage`, `terminal`, `users`, `services`, `diagnostics`, `networking`, `domain`, `applications`, `updates` (más ruta directa `/audit`).
+- **28 archivos JavaScript propios:** `app.js` + 4 utilidades en `assets/js/lib/` (`api.js`, `modal.js`, `toast.js`, `utils.js`) + 23 módulos por dominio en `assets/js/modules/` (agrupados en rutas `/js/modules/storage.js`, `users.js`, `backups.js`, `files.js`, `system.js`, etc.).
+- **3 librerías *vendor* locales:** `xlsx.full.min.js` (SheetJS), `docx-preview.min.js` y `jszip.min.js`, cargadas de forma perezosa (*lazy loading*) únicamente cuando el usuario previsualiza archivos ofimáticos en el navegador, junto con un sanitizador DOM propio para hojas `.xlsx`.
+- **Terminal PTY real:** gestionado por el helper `nas-terminal` sobre sesiones `tmux` aisladas por usuario autenticado (`start`, `keys`, `capture`, `resize`, `kill`).
 
 ---
 
-## 3. Rutas Clave del Sistema
+## 5. Frontera de Privilegios: 7 Helpers Root y Flujo de Backups
 
-| Ruta | Propósito | Permisos |
+Para minimizar la superficie de ataque, `nas-web` nunca ejecuta como `root`. Las tareas privilegiadas se canalizan mediante 7 scripts/wrappers en `/usr/local/sbin/` instalados por `packaging/install.sh`, que validan entradas y delegan en `nas helper <subcomando>`:
+
+| Helper en `/usr/local/sbin/` | Subcomando / Función | Alcance Acotado |
 | :--- | :--- | :--- |
-| `/srv/nas` | Raíz de almacenamiento de datos compartidos y backups | `2770 root:grp_samba` |
-| `/srv/nas/BACKUPS_HISTORICOS/` | Repositorio de snapshots inmutables deduplicados | `0750 root:grp_samba` |
-| `/srv/nas/LOGS_BACKUP/` | Bitácoras de cada tarea de respaldo | `0750 root:grp_samba` |
-| `/var/lib/nas/nas.sqlite` | Base de datos SQLite (sesiones, auditoría, límites, usuarios del panel) | `0660 nas-web:nas-web` |
-| `/etc/backup-credentials/` | Archivos de credenciales CIFS de origen | `0600 root:root` |
-| `/root/.ssh/known_hosts_backup` | Almacén de huellas SSH para tareas de respaldo | `0600 root:root` |
-| `/var/lock/backup_*.lock` | Descriptores de bloqueo de concurrencia | `0644 root:root` |
-| `/etc/sudoers.d/nas-web-rust` | Concesión mínima de privilegios del panel (helpers y systemctl acotado) | `0440 root:root` |
-| `/opt/nas_debian/` | Código fuente del proyecto y scripts de mantenimiento | `0755 root:root` |
-| `/usr/local/bin/nas-web` | Binario del panel web (servicio `nas-web.service`) | `0755 root:root` |
-| `/usr/local/bin/nas` | CLI de la plataforma Rust | `0755 root:root` |
+| `nas-samba-apply` | `samba-apply` | Valida sintaxis con `testparm` y aplica cambios atómicos en `/etc/samba/smb.conf`. |
+| `nas-share-dir` | `share-dir` | Crea o elimina directorios de recursos compartidos dentro de `/srv/nas`. |
+| `nas-share-acl` | `share-acl` | Aplica permisos base `2770` y listas ACL POSIX heredables (`setfacl`) en `/srv/nas`. |
+| `nas-accounts` | `accounts` | Gestiona usuarios Linux, contraseñas Samba (`pdbedit`/`smbpasswd`) y grupos (`grp_samba`, `grp_backups`, `grp_admins`, departamentos). |
+| `nas-backup-manage` | `backup-manage` | Instala tareas de respaldo vía JSON por `stdin` (`install-spec`), escribe credenciales `0600 root:root`, cron en `/etc/cron.d/` y ejecuta/detiene tareas. |
+| `nas-terminal` | `terminal` | Administra sesiones `tmux` del usuario autenticado para el terminal PTY web. |
+| `nas-storage-apply` | `storage-apply` | Ejecuta operaciones de disco, formateo, montaje en `/srv/nas`, LVM y subvolúmenes Btrfs validando `is_os_disk()`. |
+
+### Flujo de Copias de Seguridad y Deduplicación
+
+![Flujo de Respaldo, Staging Atómico y Deduplicación](./assets/flujo_backups.svg)
+
+1. **Instalación segura (`install-spec` por `stdin`):** el panel envía la especificación JSON y las credenciales a `nas-backup-manage` por entrada estándar; nunca aparecen contraseñas ni claves privadas SSH en líneas de comando ni en `ps`.
+2. **Exclusión mutua y control de capacidad:** cada tarea adquiere `/var/lock/backup_<id>.lock` con `flock` y verifica `df -Pk`: emite advertencia al superar el **85%** de uso y aborta de forma segura por encima del **95%** o con menos de **2 GiB** libres.
+3. **Staging atómico y deduplicación:** copia en `.inprogress_YYYY-MM-DD_HHMMSS` usando `rsync -aAXH --numeric-ids --safe-links --timeout=300 --link-dest=<último_snapshot>`. Un `trap cleanup EXIT TERM INT` desmonta orígenes CIFS y elimina cualquier staging interrumpido tras apagones o cortes de red.
+4. **Promoción y Golden Snapshots:** solo tras código de salida `0` promueve con `mv` a `snapshot_*`, manteniendo el histórico 100% consistente, con retención configurable de *N* snapshots y preservación de *Golden Snapshots* (`auto_permanent`: copia base inicial y mensual protegida).
+
+---
+
+## 6. Doble Vía de Aprovisionamiento (`packaging/` vs `nas deploy`)
+
+Actualmente existen en el repositorio dos caminos que escriben artefactos del sistema:
+
+1. **Instalación principal recomendada (`install.sh` -> `packaging/install.sh`):** descarga o compila los binarios Rust, crea el usuario `nas-web` y grupos base, instala los 7 helpers, genera `/etc/nas-web.env`, instala las reglas `sysctl`/`udev`/`auditd`/`logrotate`/cron de papelera, despliega `packaging/nas-web.service` (con endurecimiento completo `systemd`), `packaging/nginx-nas-web.conf` y `/etc/sudoers.d/nas-web-rust` completo.
+2. **Motor interno `nas deploy apply` (`crates/nas-engine/src/deploy/` + shim `src/core/deploy.sh`):** se encarga de particionar, formatear y montar `/srv/nas`, aplicar el rol (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), generar `/etc/samba/smb.conf` y configurar la cuenta administradora.
+
+> [!WARNING]
+> **Deriva documentada:** Como detalla [docs/auditoria.md](./auditoria.md), las plantillas embebidas dentro de `crates/nas-engine/src/deploy/web.rs`, `helpers.rs` y `artifacts.rs` presentan diferencias severas respecto a `packaging/` (entre ellas una lista `sudoers` incompleta, unidad `systemd` sin directivas de endurecimiento y ausencia de `nas-share-dir` en `ROOT_HELPERS`). Revise la auditoría antes de automatizar re-despliegues no supervisados.
+
+---
+
+## 7. Documentos Relacionados
+
+- [Resumen Ejecutivo y Guía Rápida](../README.md)
+- [Stack Tecnológico y Fundamentos](./tecnologias.md)
+- [Seguridad y Endurecimiento](./seguridad.md)
+- [Manual Operativo y Diagnóstico](./manual.md)
+- [Laboratorio, Desarrollo y Releases](./lab_y_desarrollo.md)
+- [Auditoría Técnica Código vs. Documentación](./auditoria.md)
