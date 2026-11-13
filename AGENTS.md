@@ -76,8 +76,6 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `crates/nas-engine/src/deploy/` | Rust Mod | Subsistemas del motor de despliegue (env, storage, samba, web, users, helpers) portados desde `deploy.sh` (ola B). |
 | `crates/nas-web/assets/js/lib/` | JS | Helpers compartidos del panel (api, modal, utils, toast). |
 | `crates/nas-web/assets/js/modules/` | JS | Módulos por dominio del panel (storage, users, files, backups, etc.). |
-| `docs/owners.md` | Markdown | Tabla de owners por crate/módulo. |
-| `docs/modularizacion_web.md` | Markdown | Inventario y ownership para modularización web. |
 | `crates/nasctl` / `crates/nas-dev` | Rust CLI | Ejecución multi-host por inventario y sincronización al entorno de desarrollo. |
 | `src/core/deploy.sh` | Script Bash CLI | **Shim de retrocompatibilidad** hacia `nas deploy apply` (Rust). Contiene bloques de referencia para auditoría y suites BATS. |
 | `src/core/uninstall.sh` | Script Bash CLI | **Desinstalador y Limpiador Total** para restablecer el servidor a su estado base limpio. |
@@ -86,8 +84,8 @@ Todos los archivos del proyecto son portables y se adaptan dinámicamente al dir
 | `src/lib/{colors,helpers}.sh` | Bash Lib | Paleta ANSI y funciones de detección de entorno (IP, NetBIOS, Workgroup, usuario, disco base). |
 | `tests/helpers.bats` | BATS | Pruebas unitarias de las funciones auxiliares de entorno. |
 | `tests/failure_*.bats` | BATS | Pruebas de inyección de fallos (discos en uso y runners de backup). |
-| `docs/` | Documentación | **Suite Integral de Documentación Técnica:** arquitectura, características, tecnologías, seguridad, diseño, operación/mantenimiento, gestión de releases y firmas, problemas/soluciones y diagramas SVG. |
-| `docs/assets/*.svg` | SVG Vectorial | Diagramas de arquitectura general, flujo de respaldos, roles de almacenamiento y modelo de seguridad. |
+| `docs/` | Documentación | **Suite Consolidada (7 documentos):** `arquitectura.md`, `tecnologias.md`, `seguridad.md`, `manual.md`, `lab_y_desarrollo.md`, `auditoria.md` y `propuesta_ux_usuarios.md`. |
+| `docs/assets/*.svg` | SVG Vectorial | 7 diagramas vectoriales (`arquitectura_general`, `roles_almacenamiento`, `modelo_seguridad`, `flujo_backups`, `flujo_autenticacion_y_privilegios`, `ciclo_release_y_actualizacion`, `entorno_lab_worktrees`). |
 | `.github/workflows/ci.yml` | CI | Pipeline de GitHub Actions: ShellCheck, BATS, Rust (fmt, clippy, test, release, packaging/verify, paridad) y sintaxis JS. |
 | `.gitattributes` | Config | Normalización de fin de línea (LF) y tratamiento de binarios. |
 | `README.md` | Markdown | **Guía de Puesta a Punto y Resumen Ejecutivo** del servidor NAS y Central de Respaldos. |
@@ -353,7 +351,7 @@ tail -f /srv/nas/LOGS_BACKUP/backup_*.log
 
 ## 8. Owners por Crate / Módulo
 
-Ver `docs/owners.md`. Tabla resumen:
+Tabla resumen de owners por crate/módulo:
 
 | Crate / Módulo | Responsabilidad | Owner |
 |---|---|---|
