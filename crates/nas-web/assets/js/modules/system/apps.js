@@ -45,7 +45,7 @@ async function loadApplications() {
       bodyWeb.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:6px;">
           <div><strong>Servicio:</strong> ${a.web.active ? '<span class="badge badge-ok">En ejecución</span>' : '<span class="badge badge-err">Detenido</span>'} (Portal HTTPS + Nginx)</div>
-          <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.rust_version || a.web.php_version)}</code> (${escapeHtml(a.web.pool_mode)})</div>
+          <div><strong>Motor asíncrono:</strong> <code>${escapeHtml(a.web.rust_version || '')}</code> (${escapeHtml(a.web.pool_mode)})</div>
           <div><strong>Consumo de memoria:</strong> <span class="badge badge-teal">${a.web.memory_mb} MB RAM</span> (Ultraligero)</div>
         </div>
       `;
@@ -229,8 +229,8 @@ async function reloadSambaService(btn) {
 /**
  * Recarga el servicio web nativo nas-web para aplicar cambios de configuración.
  */
-async function reloadPhpService(btn) {
-  const targetBtn = btn || document.getElementById('btn-reload-php');
+async function reloadWebService(btn) {
+  const targetBtn = btn || document.getElementById('btn-reload-web');
   if (targetBtn) {
     targetBtn.disabled = true;
     targetBtn.classList.add('is-loading');
