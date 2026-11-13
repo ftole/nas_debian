@@ -85,6 +85,9 @@ if command -v setfacl >/dev/null 2>&1; then
     setfacl -m u:"$SERVICE_USER":rwx,g:grp_samba:rwx,d:u:"$SERVICE_USER":rwx,d:g:grp_samba:rwx "$DATA_ROOT" 2>/dev/null || true
 fi
 install -d -m 0755 /etc/nas
+if [ -f "$SCRIPT_DIR/release.pub" ]; then
+    install -m 0644 -o root -g root "$SCRIPT_DIR/release.pub" /etc/nas/release.pub
+fi
 install -d -m 0700 -o root -g root /etc/backup-credentials
 install -d -m 0755 /etc/cron.d
 ln -sf "$ENV_FILE" /etc/nas/nas-web.env
@@ -240,7 +243,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl start cron, /usr/bin/systemctl stop cron, \
     /usr/bin/systemctl restart cron, /usr/bin/systemctl reload cron, \
     /usr/bin/systemd-run --no-block --collect systemctl reboot, \
-    /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
+    /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /usr/local/bin/nas --json update apply --repo ftole/nas_debian --root /opt/nas_debian --yes, \
     /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
     /usr/sbin/realm list, /usr/sbin/realm discover *, /usr/sbin/realm join *, /usr/sbin/realm leave, \
     /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, /usr/bin/btrfs subvolume list /srv/nas, \
@@ -251,7 +254,6 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \
     /usr/local/sbin/nas-backup-manage *, /usr/local/sbin/nas-terminal *, \
     /usr/local/sbin/nas-storage-apply *, \
-    /bin/bash /opt/nas_debian/src/core/updater.sh --yes, \
     /usr/bin/true
 SUDO
 chmod 0440 "$SUDOERS_FILE"
