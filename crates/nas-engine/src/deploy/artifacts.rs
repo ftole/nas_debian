@@ -42,6 +42,7 @@ ACTION==\"add|change\", KERNEL==\"sd[a-z]|nvme[0-9]n[0-9]\", ATTR{queue/rotation
 ";
 
 const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
+    su root grp_samba
     weekly
     rotate 8
     compress
@@ -399,5 +400,15 @@ mod artifact_tests {
     fn base_smb_conf_configura_directory_leases_auto() {
         let conf = params(ServerRole::Arquivos).base_smb_conf();
         assert!(conf.contains("smb3 directory leases = auto"));
+    }
+
+    #[test]
+    fn logrotate_backups_incluye_su_root_grp_samba() {
+        let artifacts = params(ServerRole::Backup).artifacts();
+        let logrotate = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/logrotate.d/nas-backups")
+            .expect("logrotate");
+        assert!(logrotate.content.contains("su root grp_samba"));
     }
 }
