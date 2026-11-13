@@ -68,6 +68,8 @@ pub fn global_smb_conf(workgroup: &str, netbios: &str) -> String {
    recycle:keeptree = yes\n\
    recycle:versions = yes\n\
    recycle:touch = yes\n\
+   recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*\n\
+   recycle:excludedir = /.recycle/\n\
    store dos attributes = yes\n\
    inherit permissions = yes\n\
    strict sync = yes\n\
@@ -338,6 +340,8 @@ mod tests {
         assert!(conf.contains("workgroup = TEAM-JOFRATO"));
         assert!(conf.contains("netbios name = SRV-NAS"));
         assert!(conf.contains("smb3 directory leases = auto"));
+        assert!(conf.contains("recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*"));
+        assert!(conf.contains("recycle:excludedir = /.recycle/"));
     }
 
     #[test]
