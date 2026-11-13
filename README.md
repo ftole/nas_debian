@@ -28,7 +28,7 @@ El comando `nas deploy apply` adapta el almacenamiento (`/srv/nas`), los recurso
 | Rol | Uso Principal | Sistema de Archivos por Defecto | Características Clave |
 | :--- | :--- | :--- | :--- |
 | **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) | **`ext4`** (override `--btrfs`) | Carpetas visibles, `commit=2` (HDD) / `commit=5` (SSD), `tune2fs -m 1`, ACLs POSIX `2770` + herencia por defecto, VFS `acl_xattr` + `streams_xattr` + `.recycle`, `fstrim.timer`. |
-| **`BACKUP`** | Central de respaldos (`SRV-BKP`) | **`Btrfs`** (override `--ext4`) | Recursos ocultos `BACKUPS$` y `LOGS_BACKUP`, compresión `zstd:3`, *scrub* mensual anti *Bit Rot*, `rsync --link-dest` (>85% deduplicación), staging `.inprogress_*`, *Golden Snapshots*. |
+| **`BACKUP`** | Central de respaldos (`SRV-BKP`) | **`Btrfs`** (override `--ext4`) | Directorios `/srv/nas/BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES` y `LOGS_BACKUP` (`2770`), compresión `zstd:3`, *scrub* mensual anti *Bit Rot*, `rsync --link-dest` (>85% deduplicación), staging `.inprogress_*`, *Golden Snapshots*. |
 | **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado | **`Btrfs`** (override `--ext4`) | Combina recursos compartidos departamentales con la central de respaldos y mantenimiento Btrfs automático en un único servidor. |
 
 Todos los roles cuentan con protección en código del disco del sistema operativo (**`is_os_disk()`**) y soporte de reutilización de particiones existentes sin formatear mediante **`--keep-data`**.
