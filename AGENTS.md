@@ -44,6 +44,11 @@
     1. **Comando oficial de despliegue local:** Ejecutar `scripts/deploy_local.sh` (o `sudo ./scripts/deploy_local.sh`). Para recompilar todo el workspace usar `./scripts/deploy_local.sh --all`.
     2. **Invalidación de caché cliente obligatoria:** El archivo `/js/app.js` se sirve con cabecera `Cache-Control: public, max-age=300`. Es imperativo recargar el navegador con `Ctrl + Shift + R` (o `Ctrl + F5`) para ver los cambios de interfaz inmediatamente.
     3. **No usar `install.sh --build-from-source` para cambios de desarrollo:** `install.sh` está reservado para aprovisionamiento general inicial de infraestructura y reinstalaciones completas.
+  * **REGLA DE VIGENCIA DOCUMENTAL (OBLIGATORIA):**
+    Antes de cerrar cualquier tarea o *commit* que modifique comandos CLI, endpoints/vistas web, `packaging/` (`systemd`, `nginx`, `sudoers`, `install.sh`), flujos de respaldo/actualización o controles de seguridad:
+    1. **Analizar y validar impacto documental:** Revisar explícitamente si `docs/manual.md`, `docs/seguridad.md`, `docs/arquitectura.md`, `docs/lab_y_desarrollo.md`, `README.md` o este `AGENTS.md` quedaron desactualizados respecto al comportamiento real del código.
+    2. **Actualizar junto con el cambio:** Cuando exista divergencia, nuevos pasos operativos, mitigaciones o corrección de brechas previamente documentadas, actualizar los archivos afectados en el mismo bloque de trabajo (respetando **un commit atómico `docs:` por archivo modificado**).
+    3. **No mantener brechas resueltas como activas:** Si un cambio corrige un fallo o limitación documentada, reflejar su resolución y versión en la documentación viva en lugar de dejar advertencias obsoletas.
 
 ---
 
