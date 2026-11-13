@@ -22,7 +22,7 @@
     <text x="20" y="26" fill="#38bdf8" font-size="11" font-weight="700" letter-spacing="1">INFRAESTRUCTURA BASE DE DESARROLLO (DEBIAN 13)</text>
 
     <rect x="20" y="38" width="275" height="40" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Repositorio Principal (/opt/dev/nas_debian)</text>
+    <text x="32" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Repo Base (/opt/dev/nas_debian)</text>
     <text x="32" y="70" fill="#94a3b8" font-size="9.5">Grupo devs • git core.sharedRepository=group</text>
 
     <rect x="312" y="38" width="275" height="40" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
@@ -69,7 +69,7 @@
     <text x="26" y="60" fill="#f8fafc" font-size="11.5" font-weight="700">scripts/deploy_local.sh</text>
     <text x="26" y="78" fill="#94a3b8" font-size="9.5">• Assets embebidos en binario</text>
     <text x="26" y="95" fill="#94a3b8" font-size="9.5">  (include_bytes!/include_str!)</text>
-    <text x="26" y="112" fill="#94a3b8" font-size="9.5">• Compila, instala en /usr/local/bin</text>
+    <text x="26" y="112" fill="#94a3b8" font-size="9.5">• Compila e instala binarios</text>
     <text x="26" y="128" fill="#94a3b8" font-size="9.5">  y reinicia nas-web.service</text>
     <text x="26" y="146" fill="#fbbf24" font-size="9">• Recargar UI: Ctrl + Shift + R</text>
 
