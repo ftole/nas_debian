@@ -70,6 +70,7 @@ pub fn global_smb_conf(workgroup: &str, netbios: &str) -> String {
    recycle:touch = yes\n\
    recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*\n\
    recycle:excludedir = /.recycle/\n\
+   map acl inherit = yes\n\
    store dos attributes = yes\n\
    inherit permissions = yes\n\
    strict sync = yes\n\
@@ -342,6 +343,7 @@ mod tests {
         assert!(conf.contains("smb3 directory leases = auto"));
         assert!(conf.contains("recycle:exclude = ~$*, *.tmp, *.temp, *.TMP, ~*"));
         assert!(conf.contains("recycle:excludedir = /.recycle/"));
+        assert!(conf.contains("map acl inherit = yes"));
     }
 
     #[test]
