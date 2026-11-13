@@ -755,7 +755,7 @@ window.triggerSystemUpdatesCheck = triggerSystemUpdatesCheck;
 window.renderSambaSessionsTable = renderSambaSessionsTable;
 window.openSambaSessionsModal = openSambaSessionsModal;
 window.reloadSambaService = reloadSambaService;
-window.reloadPhpService = reloadPhpService;
+window.reloadWebService = reloadWebService;
 window.restartWsddService = restartWsddService;
 window.triggerBtrfsScrub = triggerBtrfsScrub;
 
