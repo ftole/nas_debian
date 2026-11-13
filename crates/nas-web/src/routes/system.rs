@@ -442,7 +442,7 @@ pub async fn system_update_run(
             .collect::<Vec<_>>()
             .join("\n");
 
-        if output.success() {
+        if output.is_success() {
             Ok(if combined.is_empty() {
                 "Unidad nas-system-update iniciada en segundo plano".to_string()
             } else {
