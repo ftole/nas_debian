@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#10b981"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <!-- Header -->
+  <rect x="30" y="20" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="50" r="14" fill="#10b981"/>
+  <path d="M58 50 L64 56 L73 45" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Ciclo de Release Firmado (Ed25519) y Actualización Atómica A/B</text>
+  <text x="92" y="64" fill="#94a3b8" font-size="12">Desde las 5 puertas CI hasta la promoción atómica del symlink /opt/nas_debian/current con rollback</text>
+
+  <!-- Paso 1: 5 Puertas CI -->
+  <g transform="translate(30, 98)">
+    <rect width="205" height="368" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="205" height="4" rx="2" fill="#3b82f6"/>
+    <text x="14" y="26" fill="#60a5fa" font-size="11" font-weight="700">1. 5 PUERTAS CI (LOCAL/GH)</text>
+
+    <rect x="12" y="40" width="181" height="52" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="59" fill="#f8fafc" font-size="11" font-weight="600">Bash: BATS + ShellCheck</text>
+    <text x="20" y="76" fill="#94a3b8" font-size="9.5">tests/*.bats + bash -n install.sh</text>
+
+    <rect x="12" y="102" width="181" height="52" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="121" fill="#f8fafc" font-size="11" font-weight="600">JS: node --check</text>
+    <text x="20" y="138" fill="#94a3b8" font-size="9.5">28 JS propios (lib + modules)</text>
+
+    <rect x="12" y="164" width="181" height="62" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="183" fill="#f8fafc" font-size="11" font-weight="600">Rust Workspace</text>
+    <text x="20" y="200" fill="#94a3b8" font-size="9.5">cargo fmt --check + clippy -D</text>
+    <text x="20" y="215" fill="#94a3b8" font-size="9.5">cargo test --workspace --locked</text>
+
+    <rect x="12" y="236" width="181" height="62" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="255" fill="#f8fafc" font-size="11" font-weight="600">Empaquetado y Paridad</text>
+    <text x="20" y="272" fill="#94a3b8" font-size="9.5">packaging/verify.sh</text>
+    <text x="20" y="287" fill="#94a3b8" font-size="9.5">parity_extract + qa_ui_audit</text>
+
+    <rect x="12" y="308" width="181" height="46" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="327" fill="#38bdf8" font-size="10.5" font-weight="600">Disparo por Tag vX.Y.Z</text>
+    <text x="20" y="343" fill="#94a3b8" font-size="9.5">.github/workflows/release.yml</text>
+  </g>
+
+  <line x1="238" y1="280" x2="263" y2="280" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Paso 2: Empaquetado y Firma -->
+  <g transform="translate(268, 98)">
+    <rect width="205" height="368" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="205" height="4" rx="2" fill="#8b5cf6"/>
+    <text x="14" y="26" fill="#a78bfa" font-size="11" font-weight="700">2. EMPAQUETADO Y FIRMA</text>
+
+    <rect x="12" y="40" width="181" height="86" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">scripts/package.sh</text>
+    <text x="20" y="77" fill="#94a3b8" font-size="9.5">• 5 binarios release (--locked)</text>
+    <text x="20" y="93" fill="#94a3b8" font-size="9.5">• packaging/* + version.json</text>
+    <text x="20" y="109" fill="#a78bfa" font-size="9.5">• Tarball .tar.gz + SHA256SUMS</text>
+
+    <rect x="12" y="140" width="181" height="106" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="160" fill="#f8fafc" font-size="11" font-weight="600">Firma Criptográfica Ed25519</text>
+    <text x="20" y="177" fill="#94a3b8" font-size="9.5">• Secreto CI: NAS_RELEASE_KEY</text>
+    <text x="20" y="193" fill="#94a3b8" font-size="9.5">• Mensaje: version|commit|</text>
+    <text x="20" y="207" fill="#94a3b8" font-size="9.5">  artifact|sha256|published_at</text>
+    <text x="20" y="226" fill="#34d399" font-size="9.5">• Salida: manifest.sig</text>
+
+    <rect x="12" y="260" width="181" height="94" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="280" fill="#f8fafc" font-size="11" font-weight="600">Publicación GitHub Release</text>
+    <text x="20" y="297" fill="#94a3b8" font-size="9.5">• Adjunta tarball + SHA256SUMS</text>
+    <text x="20" y="313" fill="#94a3b8" font-size="9.5">  + manifest.json + manifest.sig</text>
+    <text x="20" y="335" fill="#38bdf8" font-size="9.5">• Clave pública en el repo:</text>
+    <text x="20" y="348" fill="#cbd5e1" font-size="9">  packaging/release.pub</text>
+  </g>
+
+  <line x1="476" y1="280" x2="501" y2="280" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Paso 3: Verificación en Servidor -->
+  <g transform="translate(506, 98)">
+    <rect width="205" height="368" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="205" height="4" rx="2" fill="#10b981"/>
+    <text x="14" y="26" fill="#34d399" font-size="11" font-weight="700">3. VERIFICACIÓN EN DESTINO</text>
+
+    <rect x="12" y="40" width="181" height="92" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">nas update check / apply</text>
+    <text x="20" y="77" fill="#94a3b8" font-size="9.5">• Consulta release en GitHub</text>
+    <text x="20" y="93" fill="#94a3b8" font-size="9.5">• Descarga artefacto y firmas</text>
+    <text x="20" y="109" fill="#94a3b8" font-size="9.5">  a directorio temporal seguro</text>
+
+    <rect x="12" y="146" width="181" height="106" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="166" fill="#f8fafc" font-size="11" font-weight="600">Validación Pre-Instalación</text>
+    <text x="20" y="184" fill="#34d399" font-size="9.5">1. Verifica SHA-256 del tarball</text>
+    <text x="20" y="201" fill="#34d399" font-size="9.5">2. Verifica firma Ed25519 con</text>
+    <text x="20" y="215" fill="#34d399" font-size="9.5">   packaging/release.pub</text>
+    <text x="20" y="236" fill="#ef4444" font-size="9.5">• Si falla: aborta sin tocar prod</text>
+
+    <rect x="12" y="266" width="181" height="88" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="286" fill="#f8fafc" font-size="11" font-weight="600">Auditoría y Bitácora</text>
+    <text x="20" y="303" fill="#94a3b8" font-size="9.5">• Registra versión, commit y</text>
+    <text x="20" y="318" fill="#94a3b8" font-size="9.5">  estado en nas-audit /</text>
+    <text x="20" y="333" fill="#94a3b8" font-size="9.5">  /etc/nas/version.json</text>
+  </g>
+
+  <line x1="714" y1="280" x2="739" y2="280" stroke="#10b981" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+  <!-- Paso 4: Despliegue A/B y Rollback -->
+  <g transform="translate(744, 98)">
+    <rect width="186" height="368" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="186" height="4" rx="2" fill="#f59e0b"/>
+    <text x="14" y="26" fill="#fbbf24" font-size="11" font-weight="700">4. SWAP A/B &amp; ROLLBACK</text>
+
+    <rect x="12" y="40" width="162" height="104" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">Slots de Release</text>
+    <text x="20" y="78" fill="#94a3b8" font-size="9.5">/opt/nas_debian/releases/</text>
+    <text x="20" y="95" fill="#64748b" font-size="9.5">  ├── 0.1.9 (slot anterior)</text>
+    <text x="20" y="111" fill="#34d399" font-size="9.5">  └── 0.1.10 (nuevo slot)</text>
+    <text x="20" y="130" fill="#38bdf8" font-size="9.5">Symlink atómico: current -&gt;</text>
+
+    <rect x="12" y="158" width="162" height="92" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="20" y="178" fill="#f8fafc" font-size="11" font-weight="600">Activación y Health</text>
+    <text x="20" y="196" fill="#94a3b8" font-size="9.5">• Instala binarios /usr/local/bin</text>
+    <text x="20" y="212" fill="#94a3b8" font-size="9.5">• Reinicia nas-web + nginx</text>
+    <text x="20" y="228" fill="#94a3b8" font-size="9.5">• Conserva /srv/nas y SQLite</text>
+
+    <rect x="12" y="264" width="162" height="90" rx="5" fill="#0f172a" stroke="#f59e0b" stroke-width="1"/>
+    <text x="20" y="284" fill="#fbbf24" font-size="11" font-weight="600">Rollback Instantáneo</text>
+    <text x="20" y="302" fill="#94a3b8" font-size="9.5">sudo nas update rollback</text>
+    <text x="20" y="319" fill="#94a3b8" font-size="9.5">• Revierte symlink al slot</text>
+    <text x="20" y="335" fill="#94a3b8" font-size="9.5">  previo y restaura binarios</text>
+  </g>
+</svg>
