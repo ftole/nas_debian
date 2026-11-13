@@ -204,6 +204,28 @@ fn update_apply_sin_pubkey_falla_con_error_claro() {
 }
 
 #[test]
+fn update_apply_con_yes_registra_fallo_en_auditoria() {
+    let dir = fixture_dir("update-audit-fail");
+    let state_dir = dir.join("state");
+
+    let output = nas()
+        .args(["update", "apply", "--yes"])
+        .env("NAS_STATE_DIR", &state_dir)
+        .env_remove("NAS_RELEASE_PUBKEY")
+        .env("NAS_RELEASE_PUBKEY_CANDIDATES", "none")
+        .output()
+        .expect("ejecuta");
+
+    assert!(!output.status.success());
+    let audit_raw =
+        std::fs::read_to_string(state_dir.join("audit/nas-audit.jsonl")).expect("bitácora");
+    assert!(audit_raw.contains("\"action\":\"update-apply\""));
+    assert!(audit_raw.contains("\"result\":\"FAILED\""));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn update_apply_rechaza_manifiesto_sin_firma() {
     let dir = fixture_dir("update-unsigned");
     let manifest = dir.join("manifest.json");
