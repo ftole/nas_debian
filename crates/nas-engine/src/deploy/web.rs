@@ -5,14 +5,41 @@ use nas_exec::{CommandSpec, Runner, SudoMode};
 
 use crate::deploy::Artifact;
 
-/// Unidad systemd del servicio nas-web.
-pub const SYSTEMD_UNIT: &str = "[Unit]\nDescription=Panel web NAS (Rust/axum)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=nas-web\nGroup=nas-web\nSupplementaryGroups=grp_samba\nEnvironmentFile=/etc/nas-web.env\nExecStart=/usr/local/bin/nas-web\nRestart=on-failure\nRestartSec=2\nTimeoutStopSec=10\n\nProtectSystem=yes\nProtectHome=no\nPrivateTmp=yes\nReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin\nUMask=0007\n\n[Install]\nWantedBy=multi-user.target\n";
+/// Unidad systemd del servicio nas-web (fuente única en `packaging/nas-web.service`).
+pub const SYSTEMD_UNIT: &str = include_str!("../../../../packaging/nas-web.service");
 
-/// Configuracion de Nginx.
-pub const NGINX_CONF: &str = "# Host virtual del panel NAS (backend Rust en 127.0.0.1:8080)\nserver {\n    listen 80 default_server;\n    server_name _;\n    return 301 https://$host$request_uri;\n}\n\nserver {\n    listen 443 ssl default_server;\n    server_name _;\n\n    ssl_certificate /etc/ssl/certs/nas-web.crt;\n    ssl_certificate_key /etc/ssl/private/nas-web.key;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n\n    add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n\n    client_max_body_size 50G;\n    client_body_timeout 3600s;\n\n    location / {\n        proxy_pass http://127.0.0.1:8080;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_read_timeout 3600s;\n        proxy_send_timeout 3600s;\n        proxy_buffering off;\n        proxy_request_buffering off;\n    }\n}\n";
+/// Configuracion de Nginx (fuente única en `packaging/nginx-nas-web.conf`).
+pub const NGINX_CONF: &str = include_str!("../../../../packaging/nginx-nas-web.conf");
 
-/// Reglas sudo acotadas.
-pub const SUDOERS: &str = "nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl restart nas-web, /usr/local/bin/nas helper *, /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, /usr/local/sbin/nas-storage-apply *, /usr/bin/true\n";
+/// Reglas sudo acotadas (paridad exacta con `packaging/install.sh`).
+pub const SUDOERS: &str = "\
+nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, \\
+    /usr/bin/systemctl restart smbd, /usr/bin/systemctl reload smbd, \\
+    /usr/bin/systemctl start nmbd, /usr/bin/systemctl stop nmbd, \\
+    /usr/bin/systemctl restart nmbd, /usr/bin/systemctl reload nmbd, \\
+    /usr/bin/systemctl start wsdd2, /usr/bin/systemctl stop wsdd2, \\
+    /usr/bin/systemctl restart wsdd2, /usr/bin/systemctl reload wsdd2, \\
+    /usr/bin/systemctl start nginx, /usr/bin/systemctl stop nginx, \\
+    /usr/bin/systemctl restart nginx, /usr/bin/systemctl reload nginx, \\
+    /usr/bin/systemctl start nas-web, /usr/bin/systemctl stop nas-web, \\
+    /usr/bin/systemctl restart nas-web, /usr/bin/systemctl reload nas-web, \\
+    /usr/bin/systemctl enable sssd, /usr/bin/systemctl disable sssd, /usr/bin/systemctl start sssd, /usr/bin/systemctl stop sssd, /usr/bin/systemctl restart sssd, /usr/bin/systemctl reboot, \\
+    /usr/bin/systemctl start cron, /usr/bin/systemctl stop cron, \\
+    /usr/bin/systemctl restart cron, /usr/bin/systemctl reload cron, \\
+    /usr/bin/systemd-run --no-block --collect systemctl reboot, \\
+    /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /usr/local/bin/nas --json update apply --repo ftole/nas_debian --root /opt/nas_debian --yes, \\
+    /usr/bin/smbstatus -b, /usr/bin/testparm -s, \\
+    /usr/sbin/realm list, /usr/sbin/realm discover *, /usr/sbin/realm join *, /usr/sbin/realm leave, \\
+    /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, /usr/bin/btrfs subvolume list /srv/nas, \\
+    /usr/bin/fstrim -v /srv/nas, \\
+    /usr/local/bin/nas helper *, \\
+    /usr/local/sbin/nas-samba-apply /var/lib/nas/staging/smbconf_*, \\
+    /usr/local/sbin/nas-share-dir *, /usr/local/sbin/nas-share-acl *, \\
+    /usr/local/sbin/nas-accounts *, /usr/bin/pdbedit -L -s, /usr/bin/passwd -S *, \\
+    /usr/local/sbin/nas-backup-manage *, /usr/local/sbin/nas-terminal *, \\
+    /usr/local/sbin/nas-storage-apply *, \\
+    /usr/bin/true
+";
 
 /// Genera el contenido de /etc/nas-web.env.
 pub fn env_file_content(
@@ -167,5 +194,32 @@ mod tests {
     fn sudoers_contiene_helper_y_true() {
         assert!(SUDOERS.contains("nas helper *"));
         assert!(SUDOERS.contains("/usr/bin/true"));
+    }
+
+    #[test]
+    fn paridad_con_plantillas_packaging() {
+        assert_eq!(
+            SYSTEMD_UNIT,
+            include_str!("../../../../packaging/nas-web.service")
+        );
+        assert!(SYSTEMD_UNIT.contains("NoNewPrivileges=no"));
+        assert!(SYSTEMD_UNIT.contains("-/etc/cron.d -/etc/backup-credentials -/etc/samba"));
+        assert_eq!(
+            NGINX_CONF,
+            include_str!("../../../../packaging/nginx-nas-web.conf")
+        );
+        assert!(NGINX_CONF.contains("gzip on;"));
+
+        let install_sh = include_str!("../../../../packaging/install.sh");
+        let marker = "cat > \"$SUDOERS_FILE\" <<'SUDO'\n";
+        let start = install_sh
+            .find(marker)
+            .map(|idx| idx + marker.len())
+            .expect("bloque SUDO en packaging/install.sh");
+        let end = install_sh[start..]
+            .find("\nSUDO\n")
+            .map(|rel| start + rel + 1)
+            .expect("cierre SUDO en packaging/install.sh");
+        assert_eq!(SUDOERS, &install_sh[start..end]);
     }
 }
