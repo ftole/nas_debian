@@ -1,100 +1,102 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <defs>
-    <linearGradient id="sec-red" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#ef4444"/>
-      <stop offset="100%" stop-color="#f87171"/>
-    </linearGradient>
-    <linearGradient id="sec-green" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#34d399"/>
-    </linearGradient>
     <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
       <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
     </filter>
   </defs>
 
   <!-- Header -->
-  <rect x="30" y="24" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
-  <circle cx="65" cy="54" r="14" fill="#ef4444"/>
-  <path d="M65 46 L73 50 L73 56 C73 61 65 64 65 64 C65 64 57 61 57 56 L57 50 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
-  <text x="92" y="48" fill="#f8fafc" font-size="18" font-weight="700">Modelo de Seguridad en Profundidad</text>
-  <text x="92" y="68" fill="#94a3b8" font-size="12">Blindaje multicapa del sistema operativo, servicios de red, panel web y almacenamiento</text>
+  <rect x="30" y="20" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="50" r="14" fill="#ef4444"/>
+  <path d="M65 42 L73 46 L73 52 C73 57 65 60 65 60 C65 60 57 57 57 52 L57 46 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Modelo de Seguridad en Profundidad y Controles Verificados</text>
+  <text x="92" y="64" fill="#94a3b8" font-size="12">Separación explícita entre controles automatizados en el código y endurecimiento manual de Debian 13</text>
 
-  <!-- 4 Cajas Horizontales Apiladas con Niveles de Protección -->
+  <!-- Nivel 1: Transporte, Auth Web y XSS -->
+  <g transform="translate(30, 96)">
+    <rect width="900" height="96" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="96" rx="2" fill="#3b82f6"/>
+    <text x="22" y="24" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">NIVEL 1 • APLICACIÓN WEB, AUTENTICACIÓN Y TRANSPORTE (AUTOMÁTICO)</text>
 
-  <!-- Nivel 1: Red y Perímetro -->
-  <g transform="translate(30, 105)">
-    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="6" height="88" rx="2" fill="#ef4444"/>
-    <text x="24" y="26" fill="#f87171" font-size="11" font-weight="700" letter-spacing="1">NIVEL 1 • RED Y PERÍMETRO</text>
-    
-    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Cortafuegos UFW Restrictivo</text>
-    <text x="36" y="69" fill="#94a3b8" font-size="10">deny incoming • solo puertos estrictos</text>
+    <rect x="22" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="34" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">PBKDF2-HMAC-SHA512 + CSRF</text>
+    <text x="34" y="67" fill="#94a3b8" font-size="9.5">210,000 iter • dummy hash anti-timing</text>
+    <text x="34" y="79" fill="#38bdf8" font-size="9">HMAC-SHA256 CSRF • HttpOnly; SameSite=Strict</text>
 
-    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">SSH Blindado (PermitRootLogin no)</text>
-    <text x="317" y="69" fill="#94a3b8" font-size="10">known_hosts_backup dedicado (accept-new)</text>
+    <rect x="312" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="324" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Rate Limit &amp; Aislamiento XSS</text>
+    <text x="324" y="67" fill="#94a3b8" font-size="9.5">SQLite api_rate_limits (5 fallos/60s -&gt; 429)</text>
+    <text x="324" y="79" fill="#38bdf8" font-size="9">/api/files/raw CSP none;sandbox • Sanitizador .xlsx</text>
 
-    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Protección Activa de Red</text>
-    <text x="607" y="69" fill="#94a3b8" font-size="10">fail2ban activo • unattended-upgrades</text>
+    <rect x="602" y="34" width="278" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="614" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Nginx TLS + Cabeceras HTTP</text>
+    <text x="614" y="67" fill="#94a3b8" font-size="9.5">proxy_pass 127.0.0.1:8080 • TLS 1.2/1.3</text>
+    <text x="614" y="79" fill="#38bdf8" font-size="9">CSP, X-Frame-Options, nosniff, Permissions-Policy</text>
   </g>
 
-  <!-- Nivel 2: Servicios y Panel Web -->
-  <g transform="translate(30, 208)">
-    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="6" height="88" rx="2" fill="#f59e0b"/>
-    <text x="24" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">NIVEL 2 • AISLAMIENTO WEB Y CONTROL DE PROCESOS</text>
+  <!-- Nivel 2: Aislamiento de Privilegios -->
+  <g transform="translate(30, 206)">
+    <rect width="900" height="96" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="96" rx="2" fill="#10b981"/>
+    <text x="22" y="24" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">NIVEL 2 • AISLAMIENTO DE PROCESOS Y ESCALADA ACOTADA (AUTOMÁTICO)</text>
 
-    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Usuario de servicio nas-web</text>
-    <text x="36" y="69" fill="#94a3b8" font-size="10">Servicio systemd endurecido (~0MB en reposo)</text>
+    <rect x="22" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="34" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Unit systemd nas-web.service</text>
+    <text x="34" y="67" fill="#94a3b8" font-size="9.5">ProtectSystem=yes • SystemCallFilter</text>
+    <text x="34" y="79" fill="#10b981" font-size="9">NoNewPrivileges=no + CapabilityBoundingSet</text>
 
-    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Sudoers Estrictamente Acotado</text>
-    <text x="317" y="69" fill="#94a3b8" font-size="10">/etc/sudoers.d/nas-web-rust verificado visudo</text>
+    <rect x="312" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="324" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Sudoers + 7 Helpers Root</text>
+    <text x="324" y="67" fill="#94a3b8" font-size="9.5">/etc/sudoers.d/nas-web-rust (visudo -c)</text>
+    <text x="324" y="79" fill="#10b981" font-size="9">install-spec por stdin (sin secretos en argv)</text>
 
-    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Cero Inyección de Comandos</text>
-    <text x="607" y="69" fill="#94a3b8" font-size="10">nas-exec con array de argumentos • 100% Offline</text>
+    <rect x="602" y="34" width="278" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="614" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">nas-exec Tipado Sin Shell</text>
+    <text x="614" y="67" fill="#94a3b8" font-size="9.5">Argv explícito • env_clear() • timeouts</text>
+    <text x="614" y="79" fill="#10b981" font-size="9">#![forbid(unsafe_code)] • Redacción secretos</text>
   </g>
 
-  <!-- Nivel 3: Datos y Permisos de Almacenamiento -->
-  <g transform="translate(30, 311)">
-    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="6" height="88" rx="2" fill="#3b82f6"/>
-    <text x="24" y="26" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">NIVEL 3 • CONTROL DE ACCESO Y CREDENCIALES</text>
+  <!-- Nivel 3: Datos, Samba, Auditoría y Firmas -->
+  <g transform="translate(30, 316)">
+    <rect width="900" height="96" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="96" rx="2" fill="#8b5cf6"/>
+    <text x="22" y="24" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1">NIVEL 3 • ALMACENAMIENTO, SAMBA, AUDITORÍA Y FIRMAS (AUTOMÁTICO)</text>
 
-    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">ACLs POSIX y Herencia por Defecto</text>
-    <text x="36" y="69" fill="#94a3b8" font-size="10">Permisos 2770 • default ACL subcarpetas</text>
+    <rect x="22" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="34" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Samba SMB2_10..SMB3_11 &amp; ACLs</text>
+    <text x="34" y="67" fill="#94a3b8" font-size="9.5">server signing = mandatory • smb encrypt = desired</text>
+    <text x="34" y="79" fill="#a78bfa" font-size="9">Permisos 2770 + default ACL • FileRoot anti-traversal</text>
 
-    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Secretos 0600 root:root</text>
-    <text x="317" y="69" fill="#94a3b8" font-size="10">Desglose de dominio AD • jamás en ps</text>
+    <rect x="312" y="34" width="275" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="324" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">Secretos y Conexiones Backup</text>
+    <text x="324" y="67" fill="#94a3b8" font-size="9.5">/etc/backup-credentials/ (0600 root:root)</text>
+    <text x="324" y="79" fill="#a78bfa" font-size="9">known_hosts_backup (accept-new) • Staging atómico</text>
 
-    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Samba VFS &amp; SMB2_02 mínimo</text>
-    <text x="607" y="69" fill="#94a3b8" font-size="10">map to guest = Bad User • cifrado SMB</text>
+    <rect x="602" y="34" width="278" height="50" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="614" y="52" fill="#f8fafc" font-size="11.5" font-weight="600">nas-audit, auditd &amp; Ed25519</text>
+    <text x="614" y="67" fill="#94a3b8" font-size="9.5">Cadena SHA-256 + auditd (/etc/audit/rules.d/nas.rules)</text>
+    <text x="614" y="79" fill="#a78bfa" font-size="9">Releases firmados Ed25519 (packaging/release.pub)</text>
   </g>
 
-  <!-- Nivel 4: Resiliencia Física y del Sistema -->
-  <g transform="translate(30, 414)">
-    <rect width="900" height="88" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="6" height="88" rx="2" fill="#10b981"/>
-    <text x="24" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">NIVEL 4 • RESILIENCIA ANTE APAGONES Y CORRUPCIÓN</text>
+  <!-- Nivel 4: Endurecimiento Manual del Host Debian 13 -->
+  <g transform="translate(30, 426)">
+    <rect width="900" height="106" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="6,4" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="6" height="106" rx="2" fill="#f59e0b"/>
+    <text x="22" y="24" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">NIVEL 4 • PERÍMETRO Y HOST DEBIAN 13 (ENDURECIMIENTO MANUAL / NO AUTOMATIZADO)</text>
 
-    <rect x="24" y="38" width="265" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="36" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Staging Atómico (.inprogress_*)</text>
-    <text x="36" y="69" fill="#94a3b8" font-size="10">trap cleanup purga fallos • mv atómico</text>
+    <rect x="22" y="36" width="275" height="54" rx="5" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="34" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">Cortafuegos UFW &amp; SSH Host</text>
+    <text x="34" y="69" fill="#94a3b8" font-size="9.5">UFW deny incoming (solo LAN SMB/HTTPS/SSH)</text>
+    <text x="34" y="82" fill="#fbbf24" font-size="9">sshd_config: PermitRootLogin no + llaves</text>
 
-    <rect x="305" y="38" width="275" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="317" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Anti-Apagón &amp; Bit Rot</text>
-    <text x="317" y="69" fill="#94a3b8" font-size="10">ext4 commit=2 • Btrfs scrub programado</text>
+    <rect x="312" y="36" width="275" height="54" rx="5" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="324" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">fail2ban, AIDE y Parches OS</text>
+    <text x="324" y="69" fill="#94a3b8" font-size="9.5">fail2ban SSH/Nginx • unattended-upgrades</text>
+    <text x="324" y="82" fill="#fbbf24" font-size="9">aideinit + cron FIM • máscara sleep logind</text>
 
-    <rect x="595" y="38" width="285" height="38" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="607" y="55" fill="#f8fafc" font-size="11.5" font-weight="600">Protección del Disco SO</text>
-    <text x="607" y="69" fill="#94a3b8" font-size="10">UDISKS_IGNORE=1 • bloqueo LVM/RAID</text>
+    <rect x="602" y="36" width="278" height="54" rx="5" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="614" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">Superficie Conocida / Brechas</text>
+    <text x="614" y="69" fill="#94a3b8" font-size="9.5">Deriva packaging vs deploy/web.rs (ver auditoría)</text>
+    <text x="614" y="82" fill="#f87171" font-size="9">system_update_run sin sudo • TLS autofirmado inicial</text>
   </g>
 </svg>
