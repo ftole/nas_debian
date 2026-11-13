@@ -1,9 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <defs>
-    <linearGradient id="accent-cyan" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#38bdf8"/>
-    </linearGradient>
     <linearGradient id="accent-green" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#10b981"/>
       <stop offset="100%" stop-color="#34d399"/>
@@ -14,105 +10,98 @@
     <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
     </marker>
-    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1 L 8 5 L 0 9 z" fill="#10b981"/>
-    </marker>
   </defs>
 
   <!-- Header -->
-  <rect x="30" y="24" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
-  <circle cx="65" cy="54" r="14" fill="#06b6d4"/>
-  <path d="M60 54 L65 49 L70 54 M65 50 L65 60" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="92" y="48" fill="#f8fafc" font-size="18" font-weight="700">Flujo de Respaldo, Staging Atómico y Deduplicación</text>
-  <text x="92" y="68" fill="#94a3b8" font-size="12">Pipeline de copia resiliente ante cortes, apagones y ransomware con deduplicación por Hardlinks (&gt;85%)</text>
+  <rect x="30" y="20" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
+  <circle cx="65" cy="50" r="14" fill="#06b6d4"/>
+  <path d="M60 50 L65 45 L70 50 M65 46 L65 56" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Flujo de Respaldo, Staging Atómico y Deduplicación</text>
+  <text x="92" y="64" fill="#94a3b8" font-size="12">Generación segura vía install-spec (stdin), exclusión flock, staging .inprogress_* y Golden Snapshots</text>
 
   <!-- Paso 1: Orígenes -->
-  <g transform="translate(30, 105)">
-    <rect width="250" height="395" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="250" height="4" rx="2" fill="#38bdf8"/>
-    <text x="18" y="28" fill="#38bdf8" font-size="11" font-weight="700" letter-spacing="1">1. ORÍGENES DE DATOS</text>
+  <g transform="translate(30, 98)">
+    <rect width="265" height="412" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="265" height="4" rx="2" fill="#38bdf8"/>
+    <text x="16" y="28" fill="#38bdf8" font-size="11" font-weight="700" letter-spacing="1">1. ORÍGENES Y CREDENCIALES</text>
 
-    <!-- Origen Windows -->
-    <rect x="15" y="45" width="220" height="95" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="68" fill="#f8fafc" font-size="12" font-weight="700">Servidores Windows</text>
-    <text x="25" y="86" fill="#94a3b8" font-size="10.5">• CIFS SMB 3.1.1 (ro, soft)</text>
-    <text x="25" y="103" fill="#94a3b8" font-size="10.5">• Soporte AD DOMINIO\user</text>
-    <text x="25" y="120" fill="#38bdf8" font-size="10">Credenciales 0600 root:root</text>
+    <rect x="14" y="42" width="237" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="63" fill="#f8fafc" font-size="12" font-weight="700">Servidores Windows (CIFS)</text>
+    <text x="24" y="81" fill="#94a3b8" font-size="10">• vers=3.1.1, ro, noserverino</text>
+    <text x="24" y="97" fill="#94a3b8" font-size="10">• cache=none, soft, nobrl</text>
+    <text x="24" y="113" fill="#94a3b8" font-size="10">• Desglose AD DOMINIO\usuario</text>
+    <text x="24" y="130" fill="#38bdf8" font-size="9.5">Credenciales 0600 vía stdin</text>
 
-    <!-- Origen Linux -->
-    <rect x="15" y="155" width="220" height="95" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="178" fill="#f8fafc" font-size="12" font-weight="700">Servidores Linux</text>
-    <text x="25" y="196" fill="#94a3b8" font-size="10.5">• SSH cifrado + rsync -aAXH</text>
-    <text x="25" y="213" fill="#94a3b8" font-size="10.5">• known_hosts_backup (TOFU)</text>
-    <text x="25" y="230" fill="#10b981" font-size="10">Preserva ACLs y UIDs exactos</text>
+    <rect x="14" y="162" width="237" height="114" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="183" fill="#f8fafc" font-size="12" font-weight="700">Servidores Linux (SSH)</text>
+    <text x="24" y="201" fill="#94a3b8" font-size="10">• Clave Ed25519 dedicada o sshpass -e</text>
+    <text x="24" y="217" fill="#94a3b8" font-size="10">• StrictHostKeyChecking=accept-new</text>
+    <text x="24" y="233" fill="#94a3b8" font-size="10">• /root/.ssh/known_hosts_backup</text>
+    <text x="24" y="251" fill="#10b981" font-size="9.5">Puerto configurable • -aAXH</text>
 
-    <!-- Origen Local -->
-    <rect x="15" y="265" width="220" height="95" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="288" fill="#f8fafc" font-size="12" font-weight="700">Carpetas Locales</text>
-    <text x="25" y="306" fill="#94a3b8" font-size="10.5">• Rutas internas del servidor</text>
-    <text x="25" y="323" fill="#94a3b8" font-size="10.5">• rsync directo sin red</text>
-    <text x="25" y="340" fill="#f59e0b" font-size="10">Sin sobrecarga de sockets</text>
+    <rect x="14" y="290" width="237" height="104" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="311" fill="#f8fafc" font-size="12" font-weight="700">Carpetas Locales</text>
+    <text x="24" y="329" fill="#94a3b8" font-size="10">• Rutas locales /srv/nas</text>
+    <text x="24" y="345" fill="#94a3b8" font-size="10">• rsync directo sin sockets</text>
+    <text x="24" y="361" fill="#94a3b8" font-size="10">• Destino configurable (dest_unit)</text>
+    <text x="24" y="378" fill="#fbbf24" font-size="9.5">Helper nas-backup-manage</text>
   </g>
 
-  <!-- Flecha 1 -> 2 -->
-  <line x1="285" y1="300" x2="320" y2="300" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="298" y1="300" x2="328" y2="300" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Paso 2: Pre-validaciones y Bloqueo -->
-  <g transform="translate(325, 105)">
-    <rect width="280" height="395" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="280" height="4" rx="2" fill="#f59e0b"/>
-    <text x="18" y="28" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">2. CONTROL Y STAGING ATÓMICO</text>
+  <!-- Paso 2: Control y Staging -->
+  <g transform="translate(333, 98)">
+    <rect width="290" height="412" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="290" height="4" rx="2" fill="#f59e0b"/>
+    <text x="16" y="28" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">2. BLOQUEO, ESPACIO Y STAGING</text>
 
-    <!-- Cerrojo flock -->
-    <rect x="15" y="45" width="250" height="80" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="68" fill="#f8fafc" font-size="12" font-weight="700">Exclusión Mutua (flock)</text>
-    <text x="25" y="86" fill="#94a3b8" font-size="10.5">/var/lock/backup_&lt;tarea&gt;.lock</text>
-    <text x="25" y="104" fill="#fbbf24" font-size="10">Evita solapamiento de procesos</text>
+    <rect x="15" y="42" width="260" height="86" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="25" y="63" fill="#f8fafc" font-size="12" font-weight="700">Exclusión Mutua (flock)</text>
+    <text x="25" y="81" fill="#94a3b8" font-size="10">/var/lock/backup_&lt;tarea&gt;.lock</text>
+    <text x="25" y="99" fill="#94a3b8" font-size="10">Impide ejecuciones simultáneas de</text>
+    <text x="25" y="114" fill="#fbbf24" font-size="10">cron y disparos manuales del panel</text>
 
-    <!-- Chequeo Espacio -->
-    <rect x="15" y="140" width="250" height="85" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="163" fill="#f8fafc" font-size="12" font-weight="700">Monitoreo Preventivo (df -Pk)</text>
-    <text x="25" y="181" fill="#94a3b8" font-size="10.5">• Alerta al superar el 85% de uso</text>
-    <text x="25" y="198" fill="#ef4444" font-size="10.5">• Aborta seguro si &lt; 2 GB o &gt; 95%</text>
+    <rect x="15" y="144" width="260" height="96" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="25" y="165" fill="#f8fafc" font-size="12" font-weight="700">Umbrales Previos (df -Pk)</text>
+    <text x="25" y="184" fill="#94a3b8" font-size="10">• &gt;85% ocupado: alerta en bitácora</text>
+    <text x="25" y="201" fill="#ef4444" font-size="10">• &gt;95% o &lt;2 GiB libres: aborta seguro</text>
+    <text x="25" y="219" fill="#94a3b8" font-size="10">Previene llenado total del volumen</text>
 
-    <!-- Staging Temporal -->
-    <rect x="15" y="240" width="250" height="135" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="263" fill="#f8fafc" font-size="12" font-weight="700">Staging .inprogress_*</text>
-    <text x="25" y="282" fill="#94a3b8" font-size="10.5">Directorio temporal aislado:</text>
-    <text x="25" y="299" fill="#38bdf8" font-size="9.5">/srv/nas/BACKUPS/.../.inprogress_xxx</text>
-    <text x="25" y="325" fill="#f8fafc" font-size="10.5">trap cleanup EXIT TERM INT</text>
-    <text x="25" y="345" fill="#10b981" font-size="10">Ante fallo/corte: purga inmediata</text>
+    <rect x="15" y="256" width="260" height="138" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="25" y="277" fill="#f8fafc" font-size="12" font-weight="700">Staging .inprogress_YYYY-MM-DD</text>
+    <text x="25" y="296" fill="#94a3b8" font-size="10">rsync -aAXH --numeric-ids --safe-links</text>
+    <text x="25" y="313" fill="#38bdf8" font-size="9.5">--timeout=300 • progreso en tiempo real</text>
+    <text x="25" y="335" fill="#f8fafc" font-size="10.5">trap cleanup EXIT TERM INT</text>
+    <text x="25" y="353" fill="#10b981" font-size="10">Ante corte o fallo: desmonta CIFS y</text>
+    <text x="25" y="369" fill="#10b981" font-size="10">elimina el staging incompleto</text>
   </g>
 
-  <!-- Flecha 2 -> 3 -->
-  <line x1="610" y1="300" x2="645" y2="300" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="626" y1="300" x2="656" y2="300" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Paso 3: Deduplicación y Almacén Final -->
-  <g transform="translate(650, 105)">
-    <rect width="280" height="395" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="280" height="4" rx="2" fill="url(#accent-green)"/>
-    <text x="18" y="28" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">3. SNAPSHOT Y DEDUPLICACIÓN</text>
+  <!-- Paso 3: Snapshot y Retención -->
+  <g transform="translate(661, 98)">
+    <rect width="269" height="412" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
+    <rect x="0" y="0" width="269" height="4" rx="2" fill="url(#accent-green)"/>
+    <text x="16" y="28" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">3. SNAPSHOT Y RETENCIÓN</text>
 
-    <!-- rsync link-dest -->
-    <rect x="15" y="45" width="250" height="110" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="68" fill="#f8fafc" font-size="12" font-weight="700">rsync --link-dest</text>
-    <text x="25" y="87" fill="#94a3b8" font-size="10.5">Compara con último snapshot:</text>
-    <text x="25" y="104" fill="#34d399" font-size="10.5">• Archivo idéntico: mismo inodo (0 B)</text>
-    <text x="25" y="121" fill="#fbbf24" font-size="10.5">• Archivo modificado: nuevo bloque</text>
-    <text x="25" y="140" fill="#10b981" font-size="10">Ahorro superior al 85% de espacio</text>
+    <rect x="14" y="42" width="241" height="114" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="63" fill="#f8fafc" font-size="12" font-weight="700">Deduplicación --link-dest</text>
+    <text x="24" y="82" fill="#94a3b8" font-size="10">Compara contra último snapshot:</text>
+    <text x="24" y="100" fill="#34d399" font-size="10">• Archivo igual: hardlink (0 bytes)</text>
+    <text x="24" y="117" fill="#fbbf24" font-size="10">• Archivo nuevo/editado: bloque nuevo</text>
+    <text x="24" y="135" fill="#10b981" font-size="9.5">+ compresión Btrfs zstd:3</text>
 
-    <!-- Promoción Atómica -->
-    <rect x="15" y="170" width="250" height="95" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="193" fill="#f8fafc" font-size="12" font-weight="700">Promoción Atómica (mv)</text>
-    <text x="25" y="212" fill="#94a3b8" font-size="10.5">Solo tras código de salida exitoso 0:</text>
-    <text x="25" y="230" fill="#f8fafc" font-size="10">.inprogress_*  ➔  snapshot_*</text>
-    <text x="25" y="250" fill="#10b981" font-size="10">Histórico siempre 100% íntegro</text>
+    <rect x="14" y="170" width="241" height="96" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="191" fill="#f8fafc" font-size="12" font-weight="700">Promoción Atómica (mv)</text>
+    <text x="24" y="210" fill="#94a3b8" font-size="10">Solo si rsync retorna código 0:</text>
+    <text x="24" y="228" fill="#f8fafc" font-size="10">.inprogress_* -&gt; snapshot_*</text>
+    <text x="24" y="247" fill="#10b981" font-size="9.5">Histórico 100% consistente</text>
 
-    <!-- Retención y Purga -->
-    <rect x="15" y="280" width="250" height="95" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="25" y="303" fill="#f8fafc" font-size="12" font-weight="700">Política de Retención</text>
-    <text x="25" y="322" fill="#94a3b8" font-size="10.5">Conserva N snapshots recientes.</text>
-    <text x="25" y="339" fill="#94a3b8" font-size="10">Purga head -n -RETENTION</text>
-    <text x="25" y="356" fill="#38bdf8" font-size="10">Inodos compartidos protegidos</text>
+    <rect x="14" y="280" width="241" height="114" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="301" fill="#f8fafc" font-size="12" font-weight="700">Retención &amp; Golden Snapshot</text>
+    <text x="24" y="320" fill="#94a3b8" font-size="10">• Conserva N snapshots recientes</text>
+    <text x="24" y="337" fill="#94a3b8" font-size="10">• AUTO_PERMANENT: copia base y</text>
+    <text x="24" y="353" fill="#94a3b8" font-size="10">  mensual inmutable protegida</text>
+    <text x="24" y="373" fill="#38bdf8" font-size="9.5">LOGS_BACKUP (2770) + cron.d</text>
   </g>
 </svg>
