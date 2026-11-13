@@ -189,23 +189,79 @@ async function startSystemUpdate() {
 
   try {
     const res = await apiFetch('/api/system/update/run', { method: 'POST' });
+
+    const rawOut = res.data?.output;
+    const outputText = typeof rawOut === 'string'
+      ? rawOut
+      : (rawOut ? JSON.stringify(rawOut, null, 2) : (res.message || 'Sincronización finalizada correctamente.'));
+    if (log) {
+      log.style.display = 'block';
+      log.textContent = outputText;
+    }
+
+    let finalState = null;
+    if (res.data?.queued) {
+      const unitName = res.data?.unit || 'nas-system-update';
+      let sawActive = false;
+      let transientErrors = 0;
+
+      for (let attempt = 0; attempt < 72; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        try {
+          const poll = await apiFetch('/api/system/updates', { silentToast: true });
+          const d = poll.data || {};
+          transientErrors = 0;
+
+          if (d.update_in_progress) {
+            sawActive = true;
+            if (stepLabel) {
+              stepLabel.textContent = `Actualizando en segundo plano (${unitName})...`;
+            }
+            continue;
+          }
+
+          if (sawActive || attempt >= 1) {
+            finalState = d;
+            break;
+          }
+        } catch (pollErr) {
+          if (pollErr && pollErr.message === 'Sesión expirada.') {
+            throw pollErr;
+          }
+          sawActive = true;
+          transientErrors++;
+          if (stepLabel) {
+            stepLabel.textContent = 'Fase 5/5: Reiniciando servicio nas-web y comprobando disponibilidad...';
+          }
+          if (transientErrors >= 24) {
+            throw new Error(`El panel no volvió a responder tras reiniciar ${unitName}.`);
+          }
+        }
+      }
+
+      if (!finalState) {
+        throw new Error(`La unidad ${unitName} sigue ejecutándose. Revise journalctl -u ${unitName}.`);
+      }
+    }
+
     clearInterval(phaseInterval);
 
+    const stillPending = Boolean(finalState && finalState.has_updates);
     if (bar) {
       bar.style.width = '100%';
-      bar.style.background = '#22c55e';
+      bar.style.background = stillPending ? '#f59e0b' : '#22c55e';
     }
     if (spinner) {
       spinner.style.display = 'none';
     }
     if (stepLabel) {
-      stepLabel.innerHTML = '<span style="color:#22c55e;">✔ Actualización completada con éxito</span>';
+      stepLabel.innerHTML = stillPending
+        ? '<span style="color:#f59e0b;">⚠ La unidad finalizó, pero siguen figurando actualizaciones pendientes</span>'
+        : '<span style="color:#22c55e;">✔ Actualización completada con éxito</span>';
     }
 
-    const outputText = res.data?.output || res.message || 'Sincronización finalizada correctamente.';
-    if (log) {
-      log.style.display = 'block';
-      log.textContent = outputText;
+    if (finalState && log) {
+      log.textContent = `${outputText}\nVersión activa reportada: v${finalState.version || res.data?.version || 'desconocida'}`;
     }
 
     if (footer) {
@@ -217,7 +273,12 @@ async function startSystemUpdate() {
       `;
     }
 
-    showToast('Actualización del sistema completada con éxito.', 'success');
+    showToast(
+      stillPending
+        ? 'La actualización finalizó; verifique el estado de la versión o journalctl -u nas-system-update.'
+        : 'Actualización del sistema completada con éxito.',
+      stillPending ? 'warning' : 'success',
+    );
     loadUpdates();
   } catch (e) {
     clearInterval(phaseInterval);
