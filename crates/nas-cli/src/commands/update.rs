@@ -45,7 +45,7 @@ pub fn update_status(json: bool) -> NasResult<ExitCode> {
     } else {
         println!("Estado del actualizador NAS:");
         println!("  Versión instalada : {deployed_version}");
-        println!("  Requisito de firma: Ed25519 / GPG obligatorio");
+        println!("  Requisito de firma: Ed25519 obligatorio");
         println!("  Canal             : producción (main)");
     }
 
