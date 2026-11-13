@@ -40,7 +40,7 @@
 
     <rect x="314" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Orígenes Remotos (SMB / SSH / Local)</text>
-    <text x="326" y="68" fill="#94a3b8" font-size="10">CIFS v3.1.1, SSH Ed25519/sshpass y rutas locales</text>
+    <text x="326" y="68" fill="#94a3b8" font-size="10">CIFS 3.1.1, SSH Ed25519/sshpass y local</text>
 
     <rect x="608" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="620" y="54" fill="#f8fafc" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
@@ -60,7 +60,7 @@
 
     <rect x="314" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Backend Web (nas-web + Nginx TLS)</text>
-    <text x="326" y="69" fill="#94a3b8" font-size="10">Axum 0.8 en 127.0.0.1:8080 • Routers por dominio</text>
+    <text x="326" y="69" fill="#94a3b8" font-size="10">Axum 0.8 (127.0.0.1:8080) • Routers</text>
     <text x="326" y="83" fill="#38bdf8" font-size="10">SQLite WAL (sesiones, auditoría, rate limit)</text>
 
     <rect x="608" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
@@ -95,7 +95,7 @@
 
     <rect x="681" y="36" width="199" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="691" y="54" fill="#f8fafc" font-size="12" font-weight="600">nas-exec &amp; nas-audit</text>
-    <text x="691" y="70" fill="#94a3b8" font-size="10">Argv sin shell, timeouts, env_clear</text>
+    <text x="691" y="70" fill="#94a3b8" font-size="9.5">Argv sin shell, timeout, env_clear</text>
     <text x="691" y="85" fill="#94a3b8" font-size="10">Cadena SHA-256 append-only</text>
     <text x="691" y="100" fill="#a78bfa" font-size="9.5">Ed25519 en updates A/B</text>
   </g>
@@ -115,7 +115,7 @@
 
     <rect x="314" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="326" y="58" fill="#34d399" font-size="12" font-weight="700">Rol BACKUP (Central)</text>
-    <text x="326" y="76" fill="#cbd5e1" font-size="10.5">• Recursos ocultos (BACKUPS$, LOGS)</text>
+    <text x="326" y="76" fill="#cbd5e1" font-size="10.5">• BACKUPS_HISTORICOS / LOGS (2770)</text>
     <text x="326" y="93" fill="#94a3b8" font-size="10">• Btrfs (compress=zstd:3, space_cache=v2)</text>
     <text x="326" y="110" fill="#94a3b8" font-size="10">• btrfs scrub mensual (día 1, 02:00)</text>
     <text x="326" y="127" fill="#38bdf8" font-size="10">• Deduplicación &gt;85% con hardlinks</text>
