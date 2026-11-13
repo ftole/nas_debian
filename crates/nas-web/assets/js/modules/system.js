@@ -15,12 +15,12 @@ async function loadUpdates() {
     const verTag = u.version ? (u.version.startsWith('v') ? u.version : `v${u.version}`) : 'v0.1.3';
     const latestVer = u.latest_version ? (u.latest_version.startsWith('v') ? u.latest_version : `v${u.latest_version}`) : verTag;
 
-    // Badge verde de verificación criptográfica GPG
-    const gpgBadge = u.gpg_verified
-      ? `<span class="badge badge-ok" title="Tag criptográficamente firmado y verificado con GPG" style="display:inline-flex; align-items:center; gap:5px; font-weight:600;">
-           <svg class="icon" style="width:13px;height:13px;"><use href="#icon-check"></use></svg> Firmado por Francisco Toledo
+    // Badge verde de verificación criptográfica Ed25519
+    const ed25519Badge = u.ed25519_verified
+      ? `<span class="badge badge-ok" title="Manifiesto verificado criptográficamente con firma Ed25519" style="display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+           <svg class="icon" style="width:13px;height:13px;"><use href="#icon-check"></use></svg> Verificado con Ed25519
          </span>`
-      : `<span class="badge badge-gray" title="Sin firma GPG detectada en el tag local">Sin firma GPG</span>`;
+      : `<span class="badge badge-gray" title="Sin verificación Ed25519 registrada en el manifiesto local">Sin firma Ed25519</span>`;
 
     // Estado dinámico (Al día o actualización disponible)
     const statusBanner = u.has_updates
@@ -70,8 +70,8 @@ async function loadUpdates() {
         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <span style="font-size:26px; font-weight:700; color:var(--text-primary); letter-spacing:-0.5px;">${escapeHtml(verTag)}</span>
-            ${gpgBadge}
-            <span class="badge badge-blue">${escapeHtml(u.channel || 'main')}</span>
+            ${ed25519Badge}
+            <span class="badge badge-blue">${escapeHtml(u.channel || 'stable')}</span>
           </div>
           <div>
             ${statusBanner}
@@ -88,7 +88,7 @@ async function loadUpdates() {
             <strong class="info-val"><code>${escapeHtml(latestVer)}</code></strong>
           </div>
           <div class="info-row" style="padding:8px 12px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color);">
-            <span class="info-label">Fecha del commit:</span>
+            <span class="info-label">Fecha de publicación:</span>
             <strong class="info-val">${escapeHtml(u.commit_date || 'N/A')}</strong>
           </div>
         </div>
@@ -168,11 +168,11 @@ async function startSystemUpdate() {
 
   // Fases visuales informativas
   const phases = [
-    { pct: '15%', text: 'Fase 1/5: Respaldo preventivo del estado actual en /tmp/backup_nas_*' },
-    { pct: '35%', text: 'Fase 2/5: Avance rápido y verificación de firmas criptográficas GPG' },
-    { pct: '55%', text: 'Fase 3/5: Validación de sintaxis de scripts Bash y código Rust' },
-    { pct: '75%', text: 'Fase 4/5: Sincronización segura de binarios y reglas sudoers' },
-    { pct: '90%', text: 'Fase 5/5: Recarga de servicios (Nginx, nas-web, Samba)' },
+    { pct: '15%', text: 'Fase 1/5: Consultando última release y descargando paquete en caché' },
+    { pct: '35%', text: 'Fase 2/5: Verificando suma SHA-256 y firma criptográfica Ed25519' },
+    { pct: '55%', text: 'Fase 3/5: Extrayendo release y promoviendo enlace atómico A/B' },
+    { pct: '75%', text: 'Fase 4/5: Instalando binarios, helpers y version.json activo' },
+    { pct: '90%', text: 'Fase 5/5: Validando Nginx, recargando nas-web y comprobando arranque' },
   ];
 
   let phaseIndex = 0;
