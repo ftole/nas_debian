@@ -107,11 +107,11 @@ async function refreshDashboardMetrics() {
       const netBadges = document.getElementById('kpi-network-badges');
       if (netBadges) {
         netBadges.innerHTML = d.services
-          .filter(s => ['smbd', 'wsdd2', 'nginx', 'nas-web'].includes(s.service) || (s.service && s.service.includes('fpm')))
+          .filter(s => ['smbd', 'wsdd2', 'nginx', 'nas-web'].includes(s.service))
           .map(s => {
-            const label = s.service === 'nas-web' ? 'nas-web (Rust)' : ((s.service && s.service.includes('fpm')) ? 'php-fpm' : s.service);
+            const label = s.service === 'nas-web' ? 'nas-web (Rust)' : s.service;
             const cls = s.active ? 'badge-ok' : 'badge-danger';
-            const statusTxt = s.active ? ((s.service && s.service.includes('fpm')) ? 'ondemand' : 'OK') : 'OFF';
+            const statusTxt = s.active ? 'OK' : 'OFF';
             return `<span class="badge ${cls}">${escapeHtml(label)} ${statusTxt}</span>`;
           })
           .join(' ');
