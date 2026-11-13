@@ -187,6 +187,8 @@ async function startSystemUpdate() {
     }
   }, 1200);
 
+  const prevUpdateTs = window.LAST_UPDATE_INFO?.last_update?.ts || null;
+
   try {
     const res = await apiFetch('/api/system/update/run', { method: 'POST' });
 
@@ -200,6 +202,7 @@ async function startSystemUpdate() {
     }
 
     let finalState = null;
+    let updateFailedError = null;
     if (res.data?.queued) {
       const unitName = res.data?.unit || 'nas-system-update';
       let sawActive = false;
@@ -208,7 +211,7 @@ async function startSystemUpdate() {
       for (let attempt = 0; attempt < 72; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 2500));
         try {
-          const poll = await apiFetch('/api/system/updates', { silentToast: true });
+          const poll = await apiFetch('/api/system/updates?local=1', { silentToast: true });
           const d = poll.data || {};
           transientErrors = 0;
 
@@ -221,7 +224,16 @@ async function startSystemUpdate() {
           }
 
           if (sawActive || attempt >= 1) {
-            finalState = d;
+            const lastUpd = d.last_update;
+            if (lastUpd && lastUpd.result === 'FAILED' && (lastUpd.ts !== prevUpdateTs || sawActive)) {
+              updateFailedError = new Error(lastUpd.detail || `La unidad ${unitName} finalizó con error.`);
+              break;
+            }
+            const refreshed = await apiFetch('/api/system/updates', { silentToast: true }).catch(() => null);
+            finalState = (refreshed && refreshed.data) ? refreshed.data : d;
+            if (finalState.last_update && finalState.last_update.result === 'FAILED' && (finalState.last_update.ts !== prevUpdateTs || sawActive)) {
+              updateFailedError = new Error(finalState.last_update.detail || `La unidad ${unitName} finalizó con error.`);
+            }
             break;
           }
         } catch (pollErr) {
@@ -237,6 +249,10 @@ async function startSystemUpdate() {
             throw new Error(`El panel no volvió a responder tras reiniciar ${unitName}.`);
           }
         }
+      }
+
+      if (updateFailedError) {
+        throw updateFailedError;
       }
 
       if (!finalState) {
