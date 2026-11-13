@@ -97,8 +97,8 @@ btn-preview-edit
 btn-preview-edit-label
 btn-preview-save
 btn-refresh-applications
-btn-reload-php
 btn-reload-samba
+btn-reload-web
 btn-restart-wsdd
 btn-scrub-btrfs
 btn-scrub-storage
