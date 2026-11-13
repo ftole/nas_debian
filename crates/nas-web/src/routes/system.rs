@@ -176,9 +176,11 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
             })
         });
 
-    let gpg_verified = version
-        .get("gpg_verified")
+    let ed25519_verified = version
+        .get("ed25519_verified")
         .and_then(|v| v.as_bool())
+        .or_else(|| version.get("signature_verified").and_then(|v| v.as_bool()))
+        .or_else(|| version.get("gpg_verified").and_then(|v| v.as_bool()))
         .unwrap_or(false);
 
     let version_str = version
@@ -195,6 +197,10 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
         .get("channel")
         .and_then(|v| v.as_str())
         .unwrap_or("stable");
+    let signature_scheme = version
+        .get("signature_scheme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Ed25519");
 
     let (latest_version, has_updates) = match query_github_latest() {
         Some(release) => {
@@ -207,7 +213,7 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
     let notes_str = version
         .get("notes")
         .and_then(|v| v.as_str())
-        .unwrap_or("Release oficial verificado con firmas criptograficas");
+        .unwrap_or("Release oficial verificado con firma Ed25519");
 
     axum::Json(ApiResponse::ok(
         serde_json::json!({
@@ -217,7 +223,8 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
             "commit_date": version.get("date").and_then(|v| v.as_str()),
             "has_updates": has_updates,
             "channel": channel_str,
-            "gpg_verified": gpg_verified,
+            "signature_scheme": signature_scheme,
+            "ed25519_verified": ed25519_verified,
             "release_notes": notes_str,
             "commit": commit_str,
         }),
@@ -331,7 +338,6 @@ pub async fn system_applications(
                 "status": if nginx_active { "activo" } else { "inactivo" },
                 "pool_mode": "axum/tokio",
                 "rust_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
-                "php_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
                 "memory_mb": process_rss_mb(),
             },
             "btrfs": {
