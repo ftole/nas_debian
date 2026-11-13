@@ -1,302 +1,89 @@
-# Seguridad y Endurecimiento • NAS Debian 13
+# Seguridad y Endurecimiento del Sistema
 
-Este documento constituye la **especificación técnica completa, exhaustiva y operativa** de todas las medidas de ciberseguridad, endurecimiento (*hardening*), auditoría forense, control de identidades y resiliencia con las que cuenta la plataforma NAS y Central de Respaldos (Debian 13 Trixie).
+> [!IMPORTANT]
+> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) brechas abiertas verificadas** sobre `main` (`0f7a272`).
+
+![Modelo de Seguridad en Profundidad](./assets/modelo_seguridad.svg)
 
 ---
 
-## 1. Principio de Defensa en Profundidad y Arquitectura de 4 Niveles
+## 1. Controles Automatizados en Código y Empaquetado
 
-La plataforma no confía en un único perímetro defensivo. Implementa un modelo estricto de **defensa en profundidad (*Defense in Depth*)** estructurado en **4 niveles complementarios e independientes**, donde la vulneración teórica de una capa es contenida de forma inmediata por las salvaguardas de los niveles adyacentes:
+Los siguientes controles se aplican automáticamente mediante `install.sh`, `packaging/install.sh` y el propio código fuente Rust de `nas-web`, `nas-exec`, `nas-engine` y `nas-audit`.
 
-![Modelo de Seguridad en Profundidad](assets/modelo_seguridad.svg)
+### 1.1 Autenticación Web, Sesiones y Protección CSRF
 
-### Matriz Resumen de los 4 Niveles de Seguridad
+Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 
-| Nivel | Ámbito / Capa | Tecnologías Clave | Propósito Principal |
+- **Derivación de contraseñas (`PBKDF2-HMAC-SHA512`):** `210,000` iteraciones con *salt* aleatorio de 16 bytes en formato `$pbkdf2-sha512$`, implementado sobre `hmac` y `sha2` sin dependencias inseguras (`#![forbid(unsafe_code)]`).
+  - Incluye **mitigación anti-enumeración por tiempo (*dummy hash*)** cuando el usuario no existe.
+  - Si detecta un hash SHA-256 heredado, lo verifica y lo **actualiza automáticamente a PBKDF2-HMAC-SHA512** al primer inicio de sesión exitoso.
+- **Protección contra fuerza bruta (*Rate Limiting*):** tabla `api_rate_limits` en `/var/lib/nas/nas.sqlite` (modo WAL). Tras **5 intentos fallidos en 60 segundos**, bloquea la IP/origen con HTTP `429 Too Many Requests`.
+- **Cookies seguras:** `HttpOnly; SameSite=Strict; Secure` con TTL configurable (`NAS_WEB_TTL_SECS=28800`, 8 horas).
+- **Tokens CSRF (`HMAC-SHA256`):** validados en métodos mutantes (`POST`, `PUT`, `PATCH`, `DELETE`), tanto en formularios previos al login (`login:<ts>`, TTL 7200 s) como ligados a sesión autenticada (`session:<id>`).
+- **Control de acceso escalonado (*Extractors*):**
+  - `AuthenticatedUser`: lectura y sesión activa.
+  - `AdminUser`: operaciones administrativas del panel.
+  - `SuperAdminUser`: operaciones críticas reservadas, con respaldo del archivo `/etc/nas/superadmin`.
+
+### 1.2 Aislamiento XSS en Visores y Transporte HTTP
+
+- **Cabeceras Nginx y Middleware `nas-web` (`lib.rs` y `packaging/nginx-nas-web.conf`):** TLS 1.2/1.3, `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`), `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` y `Permissions-Policy`.
+- **Aislamiento de descargas directas (`/api/files/raw`):** responde con `Content-Security-Policy: default-src 'none'; sandbox` y `X-Content-Type-Options: nosniff`, impidiendo que archivos HTML/SVG subidos por usuarios puedan ejecutar JavaScript bajo el origen del panel.
+- **Sanitizador DOM en cliente para hojas `.xlsx`:** en `crates/nas-web/assets/js/modules/files/viewers.js`, la tabla HTML generada por SheetJS pasa por un limpiador DOM basado en lista blanca estricta de etiquetas (`table`, `thead`, `tbody`, `tr`, `th`, `td`, etc.) y atributos seguros, bloqueando `<script>`, `<iframe>` y manejadores `on*`.
+- **Protección anti *Path Traversal*:** `FileRoot::resolve` verifica rutas canónicas dentro de `/srv/nas` antes de leer, subir, comprimir o eliminar archivos.
+
+### 1.3 Frontera de Privilegios, `systemd` y Paso Seguro de Secretos
+
+![Flujo de Autenticación y Frontera de Privilegios](./assets/flujo_autenticacion_y_privilegios.svg)
+
+- **Usuario dedicado sin shell de acceso:** el servidor HTTP corre como usuario `nas-web` (grupo `nas-web`, grupo suplementario `grp_samba`).
+- **Endurecimiento `systemd` (`packaging/nas-web.service`):**
+  - `ProtectSystem=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`, `PrivateTmp=yes`, `RestrictNamespaces=yes`, `LockPersonality=yes`, `MemoryDenyWriteExecute=yes`, `SystemCallFilter=@system-service`.
+  - `ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin -/etc/cron.d -/etc/backup-credentials -/etc/samba`.
+  - **`NoNewPrivileges=no` acotado con `CapabilityBoundingSet` y `AmbientCapabilities`:** necesario específicamente para que el binario pueda invocar `sudo -n` hacia la lista blanca de `/etc/sudoers.d/nas-web-rust` sin quedar bloqueado por el bit `no_new_privs`.
+- **Ejecución sin shell (`nas-exec`):** todos los comandos externos se construyen con `CommandSpec` (arreglo explícito `argv`), `env_clear()`, `PATH` fijo, timeouts y redacción automática de secretos en mensajes de error.
+- **Sudoers y 7 Helpers Root:** `/etc/sudoers.d/nas-web-rust` (`0440`, validado con `visudo -cf`) restringe `sudo -n` a servicios y los 7 helpers en `/usr/local/sbin/` (`nas-samba-apply`, `nas-share-dir`, `nas-share-acl`, `nas-accounts`, `nas-backup-manage`, `nas-terminal`, `nas-storage-apply`).
+- **Credenciales de respaldo vía `stdin`:** el alta/edición de tareas desde el panel invoca `nas-backup-manage install-spec` pasando la definición JSON y contraseñas/claves SSH por entrada estándar (`stdin`), guardándolas en `/etc/backup-credentials/` con permisos `0600 root:root`. Nunca se exponen secretos en la lista de argumentos (`ps`).
+- **Firmas SSH dedicadas en backups:** los runners generan y usan `/root/.ssh/known_hosts_backup` con `StrictHostKeyChecking=accept-new` (TOFU), protegiendo contra suplantación tras el primer enlace.
+
+### 1.4 Kernel, Samba, Auditoría y Actualizaciones Firmadas
+
+- **Kernel (`packaging/99-nas-tuning.conf`):** activa `net.ipv4.conf.*.rp_filter=1` (anti-*spoofing*), `net.ipv4.tcp_syncookies=1`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2` y desactiva IPv6 (`disable_ipv6=1`).
+- **Samba 4:** `server min protocol = SMB2_10`, `server max protocol = SMB3_11`, `server signing = mandatory`, `smb encrypt = desired`, `map to guest = Bad User`, carpetas de respaldo ocultas (`BACKUPS$`) y permisos POSIX `2770` + `default ACL`.
+- **Auditoría triple:**
+  1. `web_audit` en SQLite con usuario e IP de origen (`origin_ip`).
+  2. `nas-audit` (*append-only*) con cadena criptográfica SHA-256 verificable (`nas audit verify`).
+  3. `auditd` (`packaging/nas.rules` -> `/etc/audit/rules.d/nas.rules`) vigilando `/etc/sudoers`, `/etc/sudoers.d`, `/etc/samba/smb.conf`, `/etc/backup-credentials/` y `/usr/local/sbin/nas-terminal`.
+- **Actualizaciones firmadas `Ed25519`:** `nas update` verifica el hash `SHA-256` del paquete y la firma `Ed25519` contra `packaging/release.pub` antes de desplegar en el slot A/B.
+
+---
+
+## 2. Endurecimiento Manual del Host Debian 13 (NO Automatizado)
+
+> [!WARNING]
+> Ni `install.sh`, ni `packaging/install.sh`, ni `nas deploy apply` configuran automáticamente el cortafuegos, `fail2ban`, la política SSH del host, las actualizaciones desatendidas de Debian ni la base inicial de AIDE. El administrador debe aplicar estos controles manualmente en producción.
+
+| Control Manual | Paquete / Archivo en Debian 13 | Objetivo de Seguridad | Estado por Defecto Tras `install.sh` |
 | :--- | :--- | :--- | :--- |
-| **Nivel 1** | **Núcleo y Kernel** | `sysctl`, udev, ext4 `commit=2`, Btrfs `scrub`, LVM/RAID lock | Endurecimiento del stack de red IP, aislamiento de memoria/punteros, protección física de disco y mitigación de DoS. |
-| **Nivel 2** | **Integridad y Auditoría** | `auditd`, AIDE (FIM), Samba `recycle`, rsyslog, logrotate | Registro de eventos del kernel en tiempo real, verificación criptográfica offline de archivos y trazabilidad de operaciones SMB. |
-| **Nivel 3** | **Perímetro y Red** | UFW Firewall, OpenSSH TOFU (`accept-new`), fail2ban, WSDD2 | Denegación por defecto de puertos, autenticación SSH sin root, bloqueo de fuerza bruta y descubrimiento seguro sin NetBIOS broadcast. |
-| **Nivel 4** | **Aplicación y Datos** | `nas-web` (Rust/axum), `nas-exec`, CSRF, Rate Limiting, RBAC tripartito, Staging Atómico, Hardlinks | Privilegios mínimos en entorno web, prevención total de inyección de comandos, control de acceso granular y respaldos inmunes a apagones. |
+| **Cortafuegos `UFW`** | `ufw` (`/etc/default/ufw`, reglas LAN) | Política `deny incoming`; abrir solo `22/tcp`, `443/tcp` (o `80/443`) y SMB (`445/tcp`, `139/tcp` si aplica) restringidos a la subred corporativa; fijar `IPV6=no`. | **No configurado** (sin reglas activas). |
+| **Endurecimiento SSH** | `/etc/ssh/sshd_config.d/99-nas-hardening.conf` | Fijar `PermitRootLogin no`, exigir llaves públicas (`PasswordAuthentication no` tras validar llaves), `AllowUsers` / `AllowGroups`. | **Por defecto de Debian** (permite contraseña según instalación base). |
+| **Prevención de intrusiones** | `fail2ban` (`/etc/fail2ban/jail.local`) | Bloqueo automático de IPs por intentos repetidos en `sshd` y endpoints Nginx. | **No instalado ni configurado automáticamente.** |
+| **Parches automáticos OS** | `unattended-upgrades` | Instalación automática de parches de seguridad de Debian 13 (`Debian-Security`). | **No configurado automáticamente.** |
+| **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda. | **No inicializado** (debe ejecutarse `aideinit` tras cerrar la configuración). |
+| **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **No enmascarado automáticamente.** |
+| **Certificado TLS definitivo** | `/etc/ssl/certs/nas-web.crt` y `.key` | Reemplazar el certificado autofirmado inicial generado por `packaging/install.sh` por uno emitido por la CA corporativa o ACME. | **Autofirmado** (generado por 3650 días en `packaging/install.sh`). |
+
+Los comandos concretos paso a paso para aplicar cada uno de estos puntos figuran en la sección de Endurecimiento Manual de [docs/manual.md](./manual.md).
 
 ---
 
-## 2. Nivel 1: Endurecimiento del Kernel y Núcleo del Sistema (Kernel Sysctl & Storage Hardening)
+## 3. Brechas Abiertas y Riesgos Conocidos (`0f7a272`)
 
-El nivel más bajo de la arquitectura blinda los parámetros del kernel Linux mediante `/etc/sysctl.d/99-nas-tuning.conf` y reglas udev persistentes.
+La auditoría técnica sobre el código actual en `main` (`0f7a272`) detectó brechas relevantes que siguen abiertas y deben conocerse antes de operar o automatizar tareas (véase el detalle técnico con líneas de código en [docs/auditoria.md](./auditoria.md)):
 
-### 2.1 Mitigación de Ataques de Red a Nivel de Kernel (Anti-Spoofing y SYN Flood)
-- **Anti-IP Spoofing (RFC 3704):**
-  ```ini
-  net.ipv4.conf.all.rp_filter = 1
-  net.ipv4.conf.default.rp_filter = 1
-  ```
-  Activa el filtrado de ruta inversa estricto (*Strict Reverse Path Forwarding*). El kernel descarta automáticamente cualquier paquete entrante cuya dirección IP de origen no coincida con la ruta de retorno correspondiente en la tabla de enrutamiento local, mitigando ataques de falsificación de IP y amplificación DDoS, evitando que un atacante finja ser otro equipo en la red.
-- **Mitigación de SYN Flood (Agotamiento de Conexiones TCP):**
-  ```ini
-  net.ipv4.tcp_syncookies = 1
-  ```
-  Habilita los *SYN Cookies* criptográficos. Cuando la cola de conexiones semi-abiertas (*backlog*) se satura, el kernel deja de reservar memoria en tablas de estado y responde codificando la secuencia en el número SYN-ACK, frustrando ataques DoS por inundación SYN.
-- **Reciclaje Rápido de Sesiones TCP Huérfanas:**
-  ```ini
-  net.ipv4.tcp_keepalive_time = 120
-  net.ipv4.tcp_keepalive_intvl = 15
-  net.ipv4.tcp_keepalive_probes = 4
-  ```
-  Sondea conexiones inactivas a partir de los 2 minutos (en lugar de las 2 horas estándar de Linux) y las cierra tras 60 segundos sin respuesta. Esto libera descriptores de archivo y memoria ante caídas abruptas de clientes Windows.
-- **Desactivación Integral de IPv6 (Reducción de Superficie de Ataque):**
-  ```ini
-  net.ipv6.conf.all.disable_ipv6 = 1
-  net.ipv6.conf.default.disable_ipv6 = 1
-  net.ipv6.conf.lo.disable_ipv6 = 1
-  ```
-  Desactiva por completo el stack de red IPv6 a nivel del kernel y en el cortafuegos UFW (`IPV6=no`), eliminando vectores de ataque basados en Neighbor Discovery Protocol (NDP), Router Advertisements maliciosos y escaneos de red local multicast (`ff02::1`).
-
-### 2.2 Aislamiento de Memoria, Punteros de Kernel y Control de Procesos
-- **Ocultamiento de Direcciones de Memoria del Kernel (`kptr_restrict`):**
-  ```ini
-  kernel.kptr_restrict = 2
-  ```
-  Oculta todas las referencias y punteros de memoria del kernel (`%pK`) a todos los usuarios del sistema, **incluyendo al usuario root**, mostrándolos como ceros. Esto previene que adversarios locales calculen desplazamientos de memoria para construir cadenas ROP (*Return-Oriented Programming*) o evadir KASLR (*Kernel Address Space Layout Randomization*).
-- **Restricción del Buffer de Registro del Kernel (`dmesg_restrict`):**
-  ```ini
-  kernel.dmesg_restrict = 1
-  ```
-  Restringe la lectura de `dmesg` y del buffer de logs del kernel únicamente a procesos que posean la capacidad `CAP_SYSLOG`. Impide que atacantes locales sin privilegios inspeccionen fallos de segmentación, módulos cargados o trazas de memoria.
-- **Bloqueo de Inyección de Código entre Procesos (`ptrace_scope` de Yama LSM):**
-  ```ini
-  kernel.yama.ptrace_scope = 2
-  ```
-  Bloquea la invocación de `ptrace()` por parte de procesos no administradores. Solo un proceso con `CAP_SYS_PTRACE` puede inspeccionar o depurar otros procesos, neutralizando herramientas de inyección en tiempo de ejecución, volcado de credenciales en memoria y hooks maliciosos.
-
-### 2.3 Resiliencia de Entrada/Salida (I/O) y Control de Memoria Sucia
-- **Límites de Escritura a Disco en Ráfaga:**
-  ```ini
-  vm.dirty_background_bytes = 67108864   # 64 MB
-  vm.dirty_bytes = 268435456            # 256 MB
-  vm.dirty_expire_centisecs = 300       # 3 segundos
-  ```
-  Fuerza al subsistema VFS a vaciar datos a disco en bloques pequeños y continuos. Evita que transferencias masivas de 50+ GB saturen la memoria RAM provocando congelamientos completos del sistema (*I/O stalls*).
-- **Protección de Caché de Inodos y Monitoreo Inotify:**
-  ```ini
-  vm.vfs_cache_pressure = 30
-  fs.inotify.max_user_instances = 2048
-  fs.inotify.max_user_watches = 524288
-  ```
-  Mantiene en RAM los metadatos de archivos de uso frecuente para alto rendimiento y permite a Samba supervisar hasta 524,288 archivos concurrentes sin agotar recursos.
-
-### 2.4 Protección del Almacenamiento Físico y Prevención de Corrupción
-- **Aislamiento de la Unidad del SO:** Regla udev `/etc/udev/rules.d/80-udisks2-hide-os.rules` asigna `UDISKS_IGNORE="1"` al disco donde reside la raíz `/`, ocultándolo en UDisks2 e interfaces gráficas.
-- **Bloqueo Incondicional de Volúmenes en Uso:** El motor de despliegue (`deploy.sh`) y la API web (`nas-engine::storage`) verifican firmas LVM (`PV/VG`) y arreglos RAID (`mdadm`). Si un disco contiene metadatos de volumen activo, **el sistema prohíbe formatearlo categóricamente**.
-- **Confirmación Textual Estricta:** Cualquier formateo manual exige el paso interactivo de escribir exactamente `SI-FORMATEAR`. Las banderas `--force` nunca sobrepasan discos en uso.
-- **Reutilización Segura de Datos (`--keep-data`):** Reconoce particiones preexistentes (`NAS_DATA`) y las monta en `/srv/nas` sin formateo, permitiendo migraciones sin riesgo de pérdida.
-- **Sincronización contra Apagones y Bit Rot:**
-  - En discos mecánicos ext4 (`rotational=1`): directiva `commit=2` que vacía transacciones del *journal* cada 2 segundos.
-  - En Central de Backup con Btrfs: compresión `zstd:3` y auditoría mensual programada en `/etc/cron.d/nas-btrfs-scrub` (`btrfs scrub start -B /srv/nas`) para verificar y autoreparar sumas de comprobación frente a corrupción silenciosa (*Bit Rot*).
-- **Hardening aplicado via Rust:** `apply_hardening()` en `nas-engine` ejecuta sysctl, udev y auditd de forma tipada durante el despliegue.
-
----
-
-## 3. Nivel 2: Integridad del Sistema, Auditoría Forense y Detección de Intrusiones (FIM & Auditing)
-
-El segundo nivel garantiza la trazabilidad forense inmutable de todas las acciones críticas del sistema operativo y de los recursos compartidos.
-
-### 3.1 Auditoría del Kernel en Tiempo Real con `auditd`
-El subsistema de auditoría del kernel (`auditd`) se despliega con reglas específicas en `/etc/audit/rules.d/nas.rules`, cargadas dinámicamente mediante `augenrules --load`:
-
-```text
-# Auditoría de modificaciones en permisos y configuración administrativa
--w /etc/sudoers -p wa -k sudoers_changes
--w /etc/sudoers.d/ -p wa -k sudoers_changes
-
-# Auditoría de modificaciones en la configuración de recursos Samba
--w /etc/samba/smb.conf -p wa -k samba_changes
-
-# Auditoría de accesos a credenciales de respaldos corporativos
--w /etc/backup-credentials/ -p rwa -k backup_credentials
-
-# Auditoría de ejecuciones de la terminal administrativa segura
--w /usr/local/sbin/nas-terminal -p x -k nas_terminal
-```
-
-- **Vigilancia de Privilegios Administrativos:** Cualquier intento de modificar `/etc/sudoers` o los archivos drop-in en `/etc/sudoers.d/` genera un evento de kernel inmediato con la etiqueta `sudoers_changes`, registrando UID, PID, comando y archivo alterado.
-- **Integridad de Samba:** Modificaciones no autorizadas en `/etc/samba/smb.conf` quedan etiquetadas como `samba_changes`.
-- **Protección de Credenciales de Red:** Todo acceso de lectura, escritura o cambio de atributos sobre `/etc/backup-credentials/` genera eventos `backup_credentials` (`-p rwa`).
-- **Trazabilidad de Terminal:** Toda ejecución del helper de terminal `/usr/local/sbin/nas-terminal` queda registrada bajo la clave `nas_terminal` (`-p x`).
-
-### 3.2 Monitoreo de Integridad de Archivos Offline con AIDE (File Integrity Monitoring)
-La plataforma incluye `aide` preconfigurado e inicializado de manera no bloqueante durante el despliegue (`aideinit -y -f` / `aide --init`).
-- **Línea Base Criptográfica:** Genera la base de datos `/var/lib/aide/aide.db` con hashes criptográficos (SHA-256, SHA-512) de todos los binarios esenciales (`/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`) y librerías del sistema.
-- **Detección de Rootkits y Modificaciones Silenciosas:** Permite auditar en frío si algún binario del sistema operativo fue reemplazado o adulterado mediante `aide --check`.
-
-### 3.3 Papelera de Reciclaje Integrada con VFS `recycle`
-Cada recurso compartido de Samba incorpora en su definición el módulo VFS `recycle`:
-```ini
-vfs objects = acl_xattr streams_xattr recycle
-recycle:repository = .recycle
-recycle:keeptree = yes
-recycle:versions = yes
-recycle:touch = yes
-recycle:directory_mode = 0770
-```
-- **Recuperación de Archivos Borrados:** Los archivos eliminados se mueven a una papelera oculta (`.recycle`) por recurso, permitiendo restauración sin herramientas externas.
-- **Preservación de Estructura:** `keeptree = yes` mantiene la ruta original dentro de la papelera.
-- **Versionado:** `versions = yes` conserva copias anteriores si se sobrescribe un archivo.
-- **Visualización en Tiempo Real:** El panel web (módulo Papelera) permite listar, restaurar y vaciar la papelera por recurso. 
-
-### 3.4 Rotación Segura de Bitácoras (`logrotate`)
-Las bitácoras críticas (`/var/log/nas-admin.log`, `/var/log/samba/audit.log`, `/srv/nas/LOGS_BACKUP/backups_master.log`) cuentan con configuración de rotación en `/etc/logrotate.d/` con `copytruncate` y compresión gzip semanal/mensual, evitando el agotamiento de espacio en disco.
-
----
-
-## 4. Nivel 3: Perímetro de Red, Control de Tráfico y Conectividad Blindada
-
-El tercer nivel blinda la exposición de servicios del NAS hacia la red local y externa.
-
-### 4.1 Cortafuegos UFW Restrictivo
-El firewall aplica una política estricta de **denegación por defecto para todo tráfico entrante** (`default deny incoming`) y habilita exclusivamente los servicios esenciales:
-
-| Puerto / Protocolo | Servicio | Justificación de Seguridad |
-| :--- | :--- | :--- |
-| `22/tcp` | SSH | Acceso de administración remota cifrado con claves |
-| `80/tcp` | Nginx HTTP | Redirección obligatoria a HTTPS y administración (acotable a subred local) |
-| `443/tcp` | Nginx HTTPS | Panel web seguro cifrado con TLS 1.2 / 1.3 |
-| `137,138/udp` | Samba NetBIOS | Resolución de nombres de red local |
-| `139,445/tcp` | Samba SMB/CIFS | Compartición de archivos SMB 3.1.1 con firmas y cifrado |
-| `3702/udp, tcp` | WSDD2 WSD | Descubrimiento dinámico de Windows 10/11 sin broadcast obsoleto |
-| `5355/udp, tcp` | WSDD2 LLMNR | Resolución local de nombres de enlace |
-| `5357/tcp` | WSDD2 HTTP | Notificación de eventos de descubrimiento |
-
-Todos los demás puertos (incluyendo bases de datos o servicios auxiliares) quedan terminantemente cerrados.
-
-### 4.2 Blindaje de SSH y Gestión de Huellas TOFU
-- **Root Deshabilitado:** `PermitRootLogin no` en `/etc/ssh/sshd_config` y archivos drop-in. Exige autenticación con usuario regular y escalada mediante `sudo`.
-- **Almacén Dedicado para Respaldos Remotos:** Las conexiones rsync/SSH hacia servidores Linux remotos no usan el archivo compartido del sistema ni degradan la comprobación. Utilizan `/root/.ssh/known_hosts_backup` (permisos `0600 root:root`) con la directiva `StrictHostKeyChecking=accept-new`.
-- **Protección contra *Man-in-the-Middle*:** La primera conexión registra la clave pública de forma confiable (*Trust On First Use*). Si la firma remota se altera en conexiones posteriores, el proceso aborta de inmediato y lo reporta en la bitácora.
-
-### 4.3 Detección Activa contra Fuerza Bruta y Parches Automáticos
-- **fail2ban:** Supervisa autenticaciones SSH y bloquea automáticamente direcciones IP tras múltiples intentos fallidos.
-- **Actualizaciones Desatendidas (`unattended-upgrades`):** Aplica de forma automática los parches críticos de seguridad procedentes del repositorio oficial Debian Security (`trixie-security`).
-- **Bloqueo de Suspensión Física:** Reglas en `systemd-logind` que inhiben el apagado o suspensión por cierre de tapa o pulsación accidental de botón físico en servidores compactos o portátiles de prueba.
-
----
-
-## 5. Nivel 4: Capa de Aplicación Web, Control de Acceso (RBAC), Cifrado y Respaldos Resilientes
-
-El nivel superior protege la interfaz de administración web, el motor de ejecución de comandos, el almacenamiento estructurado y el ciclo de vida de los respaldos.
-
-### 5.1 Aislamiento del Servidor Web y Mínimos Privilegios
-- **Usuario de Servicio sin Login:** `nas-web.service` corre como la cuenta de sistema `nas-web` (shell `nologin`), sin escritura fuera de `/var/lib/nas` y `/srv/nas`.
-- **Endurecimiento systemd:** `ProtectSystem=yes`, `PrivateTmp=yes`, `NoNewPrivileges`, `RestrictAddressFamilies` y `CapabilityBoundingSet` acotado; `ReadWritePaths` limita la escritura a `/var/lib/nas`, `/srv/nas`, `/usr/local/bin`, `/etc/cron.d`, `/etc/backup-credentials` y `/etc/samba`.
-- **Escucha local:** El binario atiende en `127.0.0.1:8080`; solo Nginx publica el puerto 80/443.
-- **Despliegue (ola B portada):** El motor de aprovisionamiento está portado a Rust (`crates/nas-engine/src/deploy/`), con subsistemas para entorno, almacenamiento, Samba, web, usuarios y helpers. `deploy.sh` es un shim hacia `nas deploy apply`.
-- **Consumo en reposo:** Al ser un binario compilado sin intérprete, no hay procesos ociosos que calentar ni memoria de runtime que liberar.
-- **Cifrado TLS y Cabeceras HTTP:** Certificado autofirmado con longitud de clave segura (o certificado corporativo) en `/etc/ssl/certs/nas-web.crt`, forzando cabeceras:
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: SAMEORIGIN`
-  - `X-XSS-Protection: 1; mode=block`
-
-### 5.2 Prevención Absoluta de Inyección de Comandos (`nas-exec`)
-Toda invocación al sistema pasa por `nas-exec`, que recibe el programa y un arreglo de argumentos tipado (nunca texto de shell), aplica timeout y redacción de secretos; la contención fina de privilegios se materializa en `/etc/sudoers.d/nas-web-rust` y en los helpers acotados.
-
-```rust
-Runner::new().run(
-    &CommandSpec::new("systemctl")
-        .args(["restart", "smbd"])
-        .sudo(SudoMode::Passwordless),
-)?;
-```
-
-No existe ninguna ruta de código que construya una línea de shell con datos del usuario. Esto erradica **Command Injection** por `;`, `&&`, `|`, backticks o `$()`.
-
-- **Modularización (ola B):** El backend web expone routers por dominio (`.merge()`) y el frontend se divide en `lib/` + `modules/`, reduciendo conflictos entre desarrolladores.
-
-### 5.3 Escalada Acotada con Sudoers (`nas-web-rust`)
-`/etc/sudoers.d/nas-web-rust` autoriza únicamente binarios y argumentos canónicos:
-- `systemctl` para `smbd`, `nmbd`, `wsdd2`, `nginx`, `nas-web`, `cron` y el ciclo completo de `sssd` (start/stop/restart/reload/enable/disable).
-- Helpers validados: `nas-samba-apply` (valida con `testparm`, respalda e instala `smb.conf` de forma atómica), `nas-share-dir`, `nas-share-acl`, `nas-accounts`, `nas-backup-manage` (run/stop/logs/freeze/restore), `nas-storage-apply` (formateo, LVM, subvolúmenes, unidades) y `nas-terminal` (PTY de sesión por usuario).
-- `pdbedit -L -s`, `passwd -S *`, `testparm -s`, `realm list|join|leave`, `btrfs scrub`, `fstrim` y `/bin/bash /opt/nas_debian/src/core/updater.sh --yes`.
-- El archivo se valida con `visudo -cf` en cada instalación y actualización.
-
-### 5.4 Confinamiento contra *Path Traversal* en el Explorador de Archivos
-En el gestor de archivos web, cada ruta solicitada es normalizada en `FileRoot::resolve` (se canoniza el ancestro existente y se recompone el resto) y validada contra `/srv/nas`:
-- Intentos de escape con `..`, caracteres nulos o accesos simbólicos que apunten fuera de `/srv/nas` son rechazados con HTTP 400/403.
-- La papelera oculta `.trash` queda estrictamente confinada y protegida contra navegación directa.
-
-### 5.5 Seguridad Web: Tokens Anti-CSRF y Rate Limiting
-- **Protección CSRF:** Cada sesión genera un token de 256 bits (`getrandom`) y las peticiones mutantes deben presentarlo en el formulario o en la cabecera `X-CSRF-Token`; la comparación es en tiempo constante.
-- **Sesiones:** Cookie `HttpOnly`, `SameSite=Strict` y `Secure` (configurable con `NAS_WEB_INSECURE_COOKIE=1` solo en desarrollo), con identificador aleatorio de 256 bits y TTL configurable.
-- **Rate Limiting contra Fuerza Bruta:** La tabla `api_rate_limits` en SQLite cuenta intentos por clave/IP en ventanas deslizantes y responde HTTP 429, sin demonios en memoria (Redis/Memcached).
-- **100% Offline (Inmunidad a la Cadena de Suministro):** No se realizan llamadas a CDNs, Google Fonts ni scripts externos. La interfaz Slate UI incluye sus 36 iconos SVG y estilos de forma local.
-
-### 5.6 Terminal Administrativa Segura (PTY Real)
-- La terminal web opera mediante un helper root (`/usr/local/sbin/nas-terminal`) que gestiona sesiones PTY bajo `tmux` ejecutadas en el contexto del usuario autenticado, invocado por `nas-web` con `nas-exec`.
-- Cuenta con lista blanca estricta de acciones (`start`, `keys`, `capture`, `resize`, `kill`), directorio confinado y compatibilidad transparente con `sudo` interactivo.
-
-### 5.7 Control de Acceso Basado en Roles (RBAC) Tripartito
-El sistema clasifica las cuentas en tres niveles estrictos:
-1. **`grp_superadmin` (Superadministrador Inmutable):**
-   - Cuenta principal designada en el despliegue y registrada en `/etc/nas/superadmin`.
-   - Control total sobre el sistema y única autorizada para otorgar o remover permisos de superadministrador.
-   - **Inmutable:** No puede ser eliminada, degradada ni suspendida desde la interfaz web ni mediante scripts estándar.
-2. **`grp_samba` (Administrador de Infraestructura):**
-   - Acceso a consola/SSH, permisos de elevación con `sudo` y acceso completo al panel web.
-3. **`grp_web` (Operador de Servicios):**
-   - Acceso web para supervisar estado, explorar archivos, consultar bitácoras, gestionar redes compartidas y respaldos.
-   - Sin acceso a almacenamiento físico, terminal interactiva, unión a dominio ni reinicio del host.
-4. **Usuarios de Almacenamiento Estándar:**
-   - Cuentas restringidas a Samba. Su shell de sistema se fija en `/usr/sbin/nologin`, impidiendo cualquier sesión interactiva por SSH o terminal local.
-
-### 5.8 Sincronización y Herencia de Permisos con ACLs POSIX
-- Las redes compartidas se configuran en `smb.conf` y se complementan con listas de control de acceso POSIX (`setfacl`).
-- La inyección de ACLs por defecto (`setfacl -d`) en subdirectorios garantiza que cualquier nuevo archivo o carpeta creada por usuarios de un grupo herede automáticamente los permisos de lectura o escritura requeridos por los demás grupos autorizados.
-
-### 5.9 Motor de Copias de Seguridad: Staging Atómico y Deduplicación
-- **Credenciales Protegidas:** Contraseñas de red en `/etc/backup-credentials/<tarea>.cred` con permisos `0600 root:root`. Se rechaza cualquier credencial con permisos laxos.
-- **Montaje en Solo Lectura:** Las fuentes CIFS/SMB se montan con el flag `ro`, imposibilitando cualquier alteración en el servidor de origen.
-- **Staging Atómico y Trampas de Limpieza:** Cada copia escribe en un directorio oculto temporal `.inprogress_<timestamp>`. Interceptores de señal (`trap cleanup EXIT TERM INT`) garantizan que ante apagones o caídas de red, los datos parciales se eliminen y los recursos se desmonten. Solo al completar con éxito se ejecuta la promoción atómica mediante `mv`.
-- **Deduplicación por Hardlinks Superior al 85%:** El motor utiliza `rsync --link-dest=<ultimo_snapshot>`, enlazando inodos idénticos sin duplicar bloques físicos en disco.
-
----
-
-## 6. Actualización Segura y Rollback Automático
-
-El gestor de actualizaciones (`sudo nas update` o menú [8] del asistente) incorpora salvaguardas para garantizar la continuidad del servicio:
-
-1. **Validación de Origen:** Comprueba que la rama activa sea `main` y el repositorio remoto sea el oficial (`ftole/nas_debian`).
-2. **Protección de Cambios Locales:** Si existen modificaciones sin confirmar en `/opt/nas_debian`, la actualización se suspende para no sobreescribir configuraciones locales.
-3. **Respaldo Previo Atómico:** Antes de aplicar cambios, crea una copia completa del directorio en `/opt/nas_debian.update_backup_<timestamp>`.
-4. **Fusión Estricta Fast-Forward:** Aplica `git merge --ff-only`. Si la historia diverge, la operación se cancela de forma segura.
-5. **Validación Integral Posterior:**
-   - Valida la integridad del repositorio con `git fsck`.
-   - Verifica la sintaxis de todos los scripts Bash mediante `bash -n`.
-   - Si alguna prueba falla, **restaura automáticamente el estado anterior desde la copia de respaldo**.
-6. **Verificación Criptográfica Opcional (Firmas GPG):** En entornos de alta seguridad, se puede exigir la huella GPG del firmante (`NAS_REQUIRE_SIGNED_TAGS=true` y `NAS_UPDATE_SIGNER="<huella-40-hex>"`), verificando tags oficiales `vMAJOR.MINOR.PATCH`.
-
----
-
-## 7. Matriz de Trazabilidad de Amenazas vs. Medidas de Seguridad
-
-La siguiente tabla resume cómo interactúan los 4 niveles defensivos ante vectores de ataque y fallos habituales:
-
-| Amenaza / Vector de Riesgo | Nivel Defensivo | Medida Aplicada | Resultado Operativo |
-| :--- | :---: | :--- | :--- |
-| **IP Spoofing / DoS Amplificado** | Nivel 1 | `rp_filter = 1` en sysctl | El kernel descarta paquetes con IP origen incoherente. |
-| **TCP SYN Flood (Agotamiento DoS)** | Nivel 1 | `tcp_syncookies = 1` en sysctl | El host responde mediante cookies criptográficas sin agotar RAM. |
-| **Vectores de Ataque IPv6 / Multicast NDP** | Nivel 1 | `disable_ipv6 = 1` en sysctl + UFW `IPV6=no` | Stack IPv6 desactivado a nivel de kernel; cero superficie de ataque IPv6. |
-| **Explotación Local de Kernel (ROP/KASLR)** | Nivel 1 | `kptr_restrict = 2` y `dmesg_restrict = 1` | Direcciones de memoria y buffer de depuración ocultos incluso a root. |
-| **Inyección de Código entre Procesos** | Nivel 1 | `kernel.yama.ptrace_scope = 2` | Procesos no privilegiados no pueden inspeccionar memoria ajena. |
-| **Formateo Inadvertido del Disco del SO** | Nivel 1 | Regla udev `80-udisks2-hide-os.rules` | Disco del sistema ignorado y protegido en UDisks2. |
-| **Modificación Silenciosa de Sudoers/SMB** | Nivel 2 | Reglas `nas.rules` en `auditd` | Generación instantánea de eventos de auditoría forense en el kernel. |
-| **Alteración de Binarios del SO (Rootkits)** | Nivel 2 | Línea base criptográfica en `aide.db` | Detección de modificaciones no autorizadas mediante `aide --check`. |
-| **Manipulación Indebida de Archivos SMB** | Nivel 2 | VFS `recycle` + papelera por recurso | Los archivos borrados se recuperan desde la papelera integrada por recurso. |
-| **Acceso no Autorizado a Puertos de Red** | Nivel 3 | Firewall UFW (política de denegación por defecto) | Solo puertos autorizados responden; el resto queda en silencio. |
-| **Fuerza Bruta en Acceso SSH** | Nivel 3 | `fail2ban` + `PermitRootLogin no` | Bloqueo automático de IP y prohibición de inicio directo como root. |
-| **Ataque Man-in-the-Middle en Respaldos** | Nivel 3 | OpenSSH con `StrictHostKeyChecking=accept-new` | Cancelación inmediata de la copia si la firma remota fue alterada. |
-| **Inyección de Comandos en Panel Web** | Nivel 4 | `nas-exec` con argv tipado por `CommandSpec` | No se invoca shell; parámetros nunca se concatenan como texto. |
-| **Falsificación de Peticiones Web (CSRF)** | Nivel 4 | Tokens criptográficos de 64 caracteres hex | Peticiones POST/PUT/DELETE rechazadas si el token no coincide. |
-| **Fuerza Bruta contra el Login Web** | Nivel 4 | Rate Limiting (HTTP 429 tras 5 fallos) | Bloqueo temporal de la IP atacante. |
-| **Escape de Directorio (*Path Traversal*)** | Nivel 4 | Normalización `realpath()` contra `/srv/nas` | Rutas fuera de la raíz autorizada devuelven error 400/403. |
-| **Escalada o Supresión de Cuentas Maestras** | Nivel 4 | Modelo RBAC y protección de `grp_superadmin` | Cuenta superadministradora inmutable; roles estrictamente divididos. |
-| **Apagón Eléctrico durante Respaldo** | Nivel 4 | Staging atómico en `.inprogress_*` y `trap` | Datos parciales eliminados; repositorio histórico siempre íntegro. |
-| **Corrupción Silenciosa de Datos (*Bit Rot*)** | Nivel 1 | Tarea mensual de `btrfs scrub` programada | Detección y reparación de bloques dañados antes de que afecten datos. |
+1. **Actualización desde el panel web (`system_update_run`):** ejecuta `nas --json update apply` directamente como el usuario sin privilegios `nas-web` dentro de una unidad `systemd` con `ProtectSystem=yes` y sin `sudo`, por lo que falla al intentar escribir en `/opt/nas_debian` y `/usr/local/bin`. **Mitigación operativa:** ejecutar las actualizaciones desde consola con `sudo nas update apply`.
+2. **Deriva severa entre `packaging/` y `crates/nas-engine/src/deploy/`:** si se invoca `nas deploy apply` después de `install.sh`, los artefactos embebidos en `deploy/web.rs` sobrescriben `/etc/systemd/system/nas-web.service` (eliminando el hardening `systemd` y `ReadWritePaths` de `/etc/cron.d`, `/etc/backup-credentials`, `/etc/samba`) y reemplazan `/etc/sudoers.d/nas-web-rust` por una versión reducida de 5 reglas que inhabilita la mayoría de acciones del panel web.
+3. **Reseteo de contraseña `admin` en `packaging/install.sh`:** si ya existe `/var/lib/nas/nas.sqlite`, la consulta `UPDATE users SET password_hash=...` apunta a una tabla y columna inexistentes (`web_users.password_sha256` es el esquema real) y falla silenciosamente.
+4. **Rotación de bitácoras de respaldo en `deploy/artifacts.rs`:** `LOGROTATE_BACKUPS` carece de `su root grp_samba` sobre el directorio `/srv/nas/LOGS_BACKUP` (`2770 root:grp_samba`), lo que hace que Debian `logrotate` omita la rotación por permisos de grupo.
+5. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado de CA interna para evitar advertencias en navegadores.
