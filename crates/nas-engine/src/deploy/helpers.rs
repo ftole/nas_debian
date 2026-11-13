@@ -1,9 +1,9 @@
 //! Instalación y validación de los helpers privilegiados de root del despliegue.
 //!
 //! Centraliza la copia de los ejecutables auxiliares (`nas-samba-apply`,
-//! `nas-share-acl`, `nas-accounts`, `nas-backup-manage`, `nas-storage-apply` y
-//! `nas-terminal`) a `/usr/local/sbin`, la asignación de permisos seguros y la
-//! validación de las reglas sudo mediante `visudo -cf`.
+//! `nas-share-acl`, `nas-share-dir`, `nas-accounts`, `nas-backup-manage`,
+//! `nas-storage-apply` y `nas-terminal`) a `/usr/local/sbin`, la asignación de
+//! permisos seguros y la validación de las reglas sudo mediante `visudo -cf`.
 
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ pub const SUDOERS_FILE: &str = "/etc/sudoers.d/nas-web-rust";
 pub const ROOT_HELPERS: &[&str] = &[
     "nas-samba-apply",
     "nas-share-acl",
+    "nas-share-dir",
     "nas-accounts",
     "nas-backup-manage",
     "nas-storage-apply",
@@ -274,14 +275,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lista_helpers_contiene_los_seis_esperados() {
-        assert_eq!(ROOT_HELPERS.len(), 6);
+    fn lista_helpers_contiene_los_siete_esperados() {
+        assert_eq!(ROOT_HELPERS.len(), 7);
         assert!(ROOT_HELPERS.contains(&"nas-samba-apply"));
         assert!(ROOT_HELPERS.contains(&"nas-share-acl"));
+        assert!(ROOT_HELPERS.contains(&"nas-share-dir"));
         assert!(ROOT_HELPERS.contains(&"nas-accounts"));
         assert!(ROOT_HELPERS.contains(&"nas-backup-manage"));
         assert!(ROOT_HELPERS.contains(&"nas-storage-apply"));
         assert!(ROOT_HELPERS.contains(&"nas-terminal"));
+    }
+
+    #[test]
+    fn paridad_helpers_con_packaging_install() {
+        let install_sh = include_str!("../../../../packaging/install.sh");
+        for helper in ROOT_HELPERS {
+            assert!(
+                install_sh.contains(helper),
+                "packaging/install.sh debe instalar/autorizar {helper}"
+            );
+        }
     }
 
     #[test]
@@ -306,6 +319,6 @@ mod tests {
         assert_eq!(HELPER_DIR, "/usr/local/sbin");
         assert_eq!(SUDOERS_FILE, "/etc/sudoers.d/nas-web-rust");
         assert_eq!(helpers(), root_helpers());
-        assert_eq!(helper_names().len(), 6);
+        assert_eq!(helper_names().len(), 7);
     }
 }
