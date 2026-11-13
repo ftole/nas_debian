@@ -157,10 +157,45 @@ pub async fn system_reboot(
     }
 }
 
+fn is_system_update_active() -> bool {
+    let runner = Runner::new();
+    match runner.run(
+        &nas_exec::CommandSpec::new("systemctl")
+            .args(["is-active", "nas-system-update"])
+            .timeout(std::time::Duration::from_secs(3)),
+    ) {
+        Ok(out) => matches!(out.stdout.trim(), "active" | "activating"),
+        _ => false,
+    }
+}
+
+/// Especificación del comando privilegiado para lanzar la actualización en segundo plano.
+pub fn system_update_command_spec() -> nas_exec::CommandSpec {
+    nas_exec::CommandSpec::new("/usr/bin/systemd-run")
+        .args([
+            "--no-block",
+            "--collect",
+            "--unit=nas-system-update",
+            "/usr/local/bin/nas",
+            "--json",
+            "update",
+            "apply",
+            "--repo",
+            "ftole/nas_debian",
+            "--root",
+            "/opt/nas_debian",
+            "--yes",
+        ])
+        .sudo(nas_exec::SudoMode::Passwordless)
+        .timeout(std::time::Duration::from_secs(30))
+}
+
 /// Información de versión y actualizaciones.
 pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let candidates = [
+        state.paths.repo.join("current/version.json"),
         state.paths.repo.join("version.json"),
+        std::path::PathBuf::from("/opt/nas_debian/current/version.json"),
         std::path::PathBuf::from("/etc/nas/version.json"),
         std::path::PathBuf::from("/opt/nas_debian/version.json"),
         std::path::PathBuf::from("/opt/nas/version.json"),
@@ -214,6 +249,9 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
         .get("notes")
         .and_then(|v| v.as_str())
         .unwrap_or("Release oficial verificado con firma Ed25519");
+    let update_in_progress = tokio::task::spawn_blocking(is_system_update_active)
+        .await
+        .unwrap_or(false);
 
     axum::Json(ApiResponse::ok(
         serde_json::json!({
@@ -222,6 +260,7 @@ pub async fn system_updates(State(state): State<AppState>, _user: AuthenticatedU
             "installed_commit": commit_str,
             "commit_date": version.get("date").and_then(|v| v.as_str()),
             "has_updates": has_updates,
+            "update_in_progress": update_in_progress,
             "channel": channel_str,
             "signature_scheme": signature_scheme,
             "ed25519_verified": ed25519_verified,
@@ -377,7 +416,6 @@ pub async fn system_update_run(
     headers: HeaderMap,
 ) -> Response {
     let actor = admin.username().to_string();
-    let paths = state.paths.clone();
     audit_ip(
         &state,
         &headers,
@@ -389,53 +427,33 @@ pub async fn system_update_run(
     );
 
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let runner = Runner::new();
-        let active = runner.run(
-            &nas_exec::CommandSpec::new("systemctl")
-                .args(["is-active", "nas-system-update"])
-                .timeout(std::time::Duration::from_secs(5)),
-        );
-        let is_running = match &active {
-            Ok(out) => matches!(out.stdout.trim(), "active" | "activating"),
-            _ => false,
-        };
-        if is_running {
+        if is_system_update_active() {
             return Err("ya hay una actualización del sistema en ejecución".into());
         }
 
-        let nas_path = paths.repo.join("target/release/nas");
-        let nas_executable = if nas_path.exists() {
-            nas_path
+        let runner = Runner::new();
+        let output = runner
+            .run(&system_update_command_spec())
+            .map_err(|error| format!("no se pudo iniciar la unidad de actualización: {error}"))?;
+
+        let combined = [output.stdout.trim(), output.stderr.trim()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if output.success() {
+            Ok(if combined.is_empty() {
+                "Unidad nas-system-update iniciada en segundo plano".to_string()
+            } else {
+                combined
+            })
         } else {
-            std::path::PathBuf::from("/usr/local/bin/nas")
-        };
-
-        let output = std::process::Command::new(nas_executable)
-            .args([
-                "--json",
-                "update",
-                "apply",
-                "--repo",
-                "ftole/nas_debian",
-                "--root",
-                "/opt/nas_debian",
-                "--yes",
-            ])
-            .env_clear()
-            .env(
-                "PATH",
-                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            )
-            .output()
-            .map_err(|error| format!("no se pudo ejecutar nas update apply: {error}"))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if output.status.success() {
-            Ok(stdout)
-        } else {
-            Err(if stderr.is_empty() { stdout } else { stderr })
+            Err(if combined.is_empty() {
+                "systemd-run devolvió un error al iniciar nas-system-update".to_string()
+            } else {
+                combined
+            })
         }
     })
     .await
@@ -449,19 +467,18 @@ pub async fn system_update_run(
                 &actor,
                 "system_update",
                 "sistema",
-                "SUCCESS",
+                "QUEUED",
                 "",
             );
-            let payload = serde_json::from_str::<serde_json::Value>(&output)
-                .map(|data| {
-                    serde_json::json!({ "output": data, "version": env!("CARGO_PKG_VERSION") })
-                })
-                .unwrap_or_else(|_| {
-                    serde_json::json!({ "output": output, "version": env!("CARGO_PKG_VERSION") })
-                });
+            let payload = serde_json::json!({
+                "queued": true,
+                "unit": "nas-system-update",
+                "output": output,
+                "version": env!("CARGO_PKG_VERSION"),
+            });
             axum::Json(ApiResponse::ok(
                 payload,
-                "Actualización del sistema aplicada",
+                "Actualización del sistema iniciada en segundo plano",
             ))
             .into_response()
         }
@@ -490,4 +507,40 @@ pub fn router() -> Router<crate::AppState> {
         .route("/api/system/applications", get(system_applications))
         .route("/api/system/reboot", post(system_reboot))
         .route("/api/system/update/run", post(system_update_run))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::system_update_command_spec;
+    use nas_exec::SudoMode;
+
+    #[test]
+    fn comando_update_usa_systemd_run_con_sudo_nopasswd_y_coincide_con_sudoers() {
+        let spec = system_update_command_spec();
+        assert_eq!(spec.program, "/usr/bin/systemd-run");
+        assert!(matches!(spec.sudo, SudoMode::Passwordless));
+        assert_eq!(
+            spec.args,
+            vec![
+                "--no-block",
+                "--collect",
+                "--unit=nas-system-update",
+                "/usr/local/bin/nas",
+                "--json",
+                "update",
+                "apply",
+                "--repo",
+                "ftole/nas_debian",
+                "--root",
+                "/opt/nas_debian",
+                "--yes",
+            ]
+        );
+        let full_cmd = format!("{} {}", spec.program, spec.args.join(" "));
+        let install_sh = include_str!("../../../../packaging/install.sh");
+        assert!(
+            install_sh.contains(&full_cmd),
+            "la regla sudoers de packaging/install.sh debe autorizar exactamente: {full_cmd}"
+        );
+    }
 }
