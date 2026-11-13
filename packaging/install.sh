@@ -139,7 +139,27 @@ if [ "$GENERATE_NEW_PASS" -eq 1 ]; then
 
     # Si la base de datos ya existía y se proporcionó una nueva contraseña explícita, actualizar hash
     if [ -f "$STATE_DIR/nas.sqlite" ] && [ -n "${NAS_WEB_PASSWORD:-}" ]; then
-        sqlite3 "$STATE_DIR/nas.sqlite" "UPDATE users SET password_hash='$hash' WHERE username='admin';" 2>/dev/null || true
+        if command -v sqlite3 >/dev/null 2>&1; then
+            sqlite3 "$STATE_DIR/nas.sqlite" \
+                "INSERT INTO web_users (username, password_sha256, role, created_at) VALUES ('admin', '$hash', 'superadmin', strftime('%s','now')) ON CONFLICT(username) DO UPDATE SET password_sha256 = excluded.password_sha256;"
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 - "$STATE_DIR/nas.sqlite" "$hash" <<'PYEOF'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+conn.execute(
+    "INSERT INTO web_users (username, password_sha256, role, created_at) "
+    "VALUES ('admin', ?, 'superadmin', strftime('%s','now')) "
+    "ON CONFLICT(username) DO UPDATE SET password_sha256 = excluded.password_sha256;",
+    (sys.argv[2],),
+)
+conn.commit()
+PYEOF
+        else
+            echo "[-] error: no se encontró sqlite3 ni python3 para actualizar web_users en $STATE_DIR/nas.sqlite" >&2
+            exit 1
+        fi
+        chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"/nas.sqlite*
+        chmod 0640 "$STATE_DIR"/nas.sqlite*
     fi
 
     # Guardar contraseña temporalmente para presentarse una sola vez al usuario
