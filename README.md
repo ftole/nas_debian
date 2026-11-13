@@ -1,248 +1,110 @@
-# Servidor NAS y Central de Respaldos Multiplataforma (Debian 13)
+# Servidor NAS & Central de Respaldos Multiplataforma (Debian 13)
 
-[![Debian 13](https://img.shields.io/badge/OS-Debian%2013%20(Trixie)-A81D33?style=for-the-badge&logo=debian&logoColor=white)](https://github.com/ftole/nas_debian) [![Rust](https://img.shields.io/badge/Platform-Rust-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/ftole/nas_debian) [![Samba](https://img.shields.io/badge/Service-Samba%20SMB-0066CC?style=for-the-badge)](https://github.com/ftole/nas_debian) [![Web UI](https://img.shields.io/badge/Web%20UI-Rust%20(axum)%20%2B%20Nginx-009688?style=for-the-badge)](https://github.com/ftole/nas_debian)
+<div align="center">
 
-Este repositorio contiene las herramientas para desplegar y administrar sobre **Debian 13 (Trixie)** un servidor de almacenamiento en red (NAS departamental) y una central de copias de seguridad resistente a ransomware. 
+![Debian 13 Trixie](https://img.shields.io/badge/OS-Debian%2013%20Trixie-A81D33?style=for-the-badge&logo=debian&logoColor=white)
+![Rust](https://img.shields.io/badge/Platform-Rust%20Workspace%20(11%20crates)-000000?style=for-the-badge&logo=rust&logoColor=white)
+![Samba 4](https://img.shields.io/badge/Protocol-SMB2__10..SMB3__11%20%2B%20VFS-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+![Panel Web](https://img.shields.io/badge/Panel%20Web-Axum%20%2B%20Slate%20UI%20Offline-0F172A?style=for-the-badge)
 
-Todo el sistema corre de forma **nativa** sobre Linux, sin capas de virtualización pesadas ni dependencias externas. Toda la plataforma está implementada en **Rust**: el CLI `nas`, el asistente de terminal `nas-tui` y el panel web `nas-web` (axum + Nginx) comparten el mismo motor (`nas-engine`), con los assets del panel embebidos en el binario y cero llamadas a CDNs.
+**Solución integral en Rust sobre Debian 13 (`x86_64`) para compartición departamental Samba, central de respaldos deduplicados y administración web 100% offline.**
 
-El panel web portado conserva **las vistas y el JavaScript originales** (`app.js`, CSS y librerías de ofimática offline servidos byte a byte), verificado en CI mediante el contrato de paridad `tests/parity/` y comparado en vivo contra el panel PHP antes de retirarlo (fase F6/F7).
-
----
-
-## 🏛️ Arquitectura General
-
-El servidor combina el rendimiento del kernel de Debian 13 con interfaces ágiles pensadas tanto para la consola como para el navegador:
-
-![Arquitectura General del Sistema](docs/assets/arquitectura_general.svg)
+</div>
 
 ---
 
-## 🧱 Estructura del Repositorio
+## Arquitectura en Breve
 
-| Ruta | Contenido |
-| :--- | :--- |
-| `crates/nas-core` | Configuración, rutas, errores y contrato de respuesta |
-| `crates/nas-exec` | Ejecución de comandos con argv tipado, timeouts y redacción de secretos |
-| `crates/nas-audit` | Bitácora append-only con encadenamiento criptográfico SHA-256 |
-| `crates/nas-inventory` | Inventario YAML multi-servidor y separación de perfiles dev/prod |
-| `crates/nas-ssh` | Transporte OpenSSH y ejecución remota con claves dedicadas |
-| `crates/nas-engine` | Almacenamiento, Samba, usuarios, respaldos, dominio, diagnósticos |
-| `crates/nas-cli` | CLI unificada `nas` modularizada en comandos (`src/commands/`) con salida ANSI y `--json` |
-| `crates/nas-web` | Panel web axum modularizado en dominios (`src/routes/`) con assets embebidos |
-| `crates/nas-tui` | Asistente de terminal visual interactivo (ratatui) |
-| `crates/nasctl`, `crates/nas-dev` | Orquestación multi-host e inspección de entorno de desarrollo |
-| `src/core`, `src/lib` | Motor Bash y shims de compatibilidad para despliegue y desinstalación |
+La plataforma (`0.1.10`) se compone de un **workspace Rust de 11 crates** (`#![forbid(unsafe_code)]`) respaldado por SQLite en modo WAL, ejecución tipada sin shell (`nas-exec`), auditoría encadenada SHA-256 (`nas-audit`), un asistente de terminal (**`nas-tui`**), CLI unificado (**`nas`**), orquestador multi-host (**`nasctl`**) y un panel web en **`axum` 0.8 + Nginx TLS** con **Slate UI 100% offline** (**52 iconos SVG**, 28 módulos JS + 3 librerías *vendor* locales y 14 vistas de navegación).
 
-## 📚 Documentación Técnica Detallada
-
-Para mantener este repositorio organizado y este documento directo al grano, el detalle técnico completo se encuentra estructurado en el directorio [`docs/`](docs/):
-
-| Documento | ¿Qué encontrarás allí? |
-| :--- | :--- |
-| 🏗️ **[Arquitectura del Sistema](docs/arquitectura.md)** | Desglose profundo de capas, kernel sysctl, VFS Samba, SQLite WAL y concurrencia. |
-| ⚡ **[Características y Capacidades](docs/caracteristicas.md)** | Roles del servidor, soporte para +100 puestos en Office/Excel, papelera web y terminal interactiva. |
-| 🧰 **[Tecnologías Usadas y Cuadro Maestro](docs/tecnologias.md)** | Inventario técnico completo de cada componente, demonio y parámetro del kernel con sus beneficios. |
-| 🛡️ **[Seguridad y Endurecimiento](docs/seguridad.md)** | Defensa en profundidad, UFW, SSH blindado, credenciales `0600`, ejecución con argv tipado y rollback. |
-| 🎨 **[Sistema de Diseño Slate UI y UX](docs/diseno.md)** | Tokens visuales, filosofía 100% offline, 36 iconos SVG nativos y diseño sereno. |
-| 🔧 **[Operación Diaria y Mantenimiento](docs/operacion_mantenimiento.md)** | Guía de uso diario, restauración de archivos, checklist preventivo y tareas programadas. |
-| 🚀 **[Publicación y Gestión de Releases](docs/releases.md)** | Manual completo para primer release (beta) y versiones continuas con firmas GPG. |
-| 🚨 **[Posibles Problemas, Soluciones y FMEA](docs/problemas_soluciones.md)** | Diagnóstico paso a paso de fallos comunes y matriz de resiliencia con pruebas BATS. |
+![Arquitectura General del Sistema](./docs/assets/arquitectura_general.svg)
 
 ---
 
-## 🎯 Tres Roles Especializados (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`)
+## Los 3 Roles del Servidor
 
-Durante el despliegue puedes configurar tu máquina para uno de tres perfiles según tus necesidades operativas:
+El comando `nas deploy apply` adapta el almacenamiento (`/srv/nas`), los recursos compartidos y el mantenimiento automático a **3 roles oficiales**:
 
-- **Rol ARCHIVOS (NAS Departamental):** Diseñado para compartir carpetas en red a toda la oficina. Utiliza **ext4 optimizado** (`commit=2` en HDD para soportar cortes de energía), expone recursos visibles en el explorador de Windows y soporta más de 100 puestos simultáneos trabajando en hojas de cálculo de Excel sin bloqueos temporales (`~$`). En el panel web, restringe el módulo de respaldos y concentra la operativa en recursos compartidos (`/shares`).
-- **Rol BACKUP (Central de Respaldos):** Diseñado como caja fuerte para recibir copias de servidores Windows, Linux y locales. Utiliza **Btrfs con compresión Zstandard** (`zstd:3`), deduplicación por enlaces duros (`rsync --link-dest` con >85% de ahorro), recursos ocultos terminados en `$` y revisiones mensuales automáticas contra corrupción silenciosa (*Bit Rot*). En el panel web, restringe el módulo de recursos abiertos y concentra la gestión en tareas de copias de seguridad (`/backups`).
-- **Rol ARCHIVOS_BACKUP (Híbrido - Archivos y Respaldos):** La solución integral que combina ambas funciones en un único servidor. Permite desplegar recursos compartidos departamentales visibles para la red corporativa y, de manera paralela, programar respaldos automatizados multiplataforma con carpetas protegidas. En el panel web, **habilita simultáneamente tanto Recursos Compartidos (`/shares`) como Tareas de Respaldo (`/backups`)**, adaptando la navegación, métricas y permisos en tiempo real.
+| Rol | Uso Principal | Sistema de Archivos por Defecto | Características Clave |
+| :--- | :--- | :--- | :--- |
+| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) | **`ext4`** (override `--btrfs`) | Carpetas visibles, `commit=2` (HDD) / `commit=5` (SSD), `tune2fs -m 1`, ACLs POSIX `2770` + herencia por defecto, VFS `acl_xattr` + `streams_xattr` + `.recycle`, `fstrim.timer`. |
+| **`BACKUP`** | Central de respaldos (`SRV-BKP`) | **`Btrfs`** (override `--ext4`) | Recursos ocultos `BACKUPS$` y `LOGS_BACKUP`, compresión `zstd:3`, *scrub* mensual anti *Bit Rot*, `rsync --link-dest` (>85% deduplicación), staging `.inprogress_*`, *Golden Snapshots*. |
+| **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado | **`Btrfs`** (override `--ext4`) | Combina recursos compartidos departamentales con la central de respaldos y mantenimiento Btrfs automático en un único servidor. |
 
-### Persistencia del Rol y Comportamiento en el Panel Web
-El rol seleccionado se guarda de forma inmutable en `/etc/nas/role`. El backend web (`SystemService`) lee este archivo dinámicamente y el middleware de control de acceso (`AuthMiddleware`) adapta el acceso a rutas y la navegación lateral, mostrando además el badge correspondiente (`ARCHIVOS`, `BACKUP` o `ARCHIVOS & BACKUP`) en la cabecera. Todos los roles admiten el modo **`--keep-data`** para reutilizar discos sin formatear.
-
-![Matriz de Roles y Selección de Almacenamiento](docs/assets/roles_almacenamiento.svg)
-
-*(Conoce todos los detalles en la [Guía de Características](docs/caracteristicas.md)).*
+Todos los roles cuentan con protección en código del disco del sistema operativo (**`is_os_disk()`**) y soporte de reutilización de particiones existentes sin formatear mediante **`--keep-data`**.
 
 ---
 
-## 💻 Resumen del Stack Tecnológico
+## Instalación y Puesta en Marcha
 
-El sistema aprovecha al máximo el rendimiento nativo del kernel de Debian 13 en lugar de envolver todo en contenedores lentos:
-
-- **Almacenamiento Inteligente:** `ext4` transaccional anti-apagón para NAS y `Btrfs` con compresión `zstd:3` + scrub mensual para respaldos.
-- **Samba 4 con VFS Avanzado:** Módulos `acl_xattr`, `streams_xattr` y `full_audit` para emular ADS de Windows, permitir concurrencia masiva en Office y registrar operaciones.
-- **Descubrimiento Moderno WSDD2:** Los clientes Windows 10/11 ven el NAS al instante en el Explorador de Red sin protocolos antiguos inseguros.
-- **Panel Web 100% Offline (Rust):** `nas-web.service` (axum) servido por Nginx con `proxy_pass` (~0 MB en reposo), assets embebidos y base SQLite WAL (`/var/lib/nas/nas.sqlite`).
-
-*(Consulta el inventario componente por componente en [Tecnologías Usadas](docs/tecnologias.md)).*
-
----
-
-## 🚀 Instalación y Puesta en Marcha
-
-### Requisitos Previos
-- Servidor o equipo con **Debian 13 (Trixie)** x86_64 recién instalado.
-- Acceso con privilegios de `root` o usuario en el grupo `sudo`.
-- Conexión a Internet durante la descarga inicial de paquetes.
-- Disco secundario opcional para `/srv/nas` (puedes formatearlo o reutilizarlo con sus datos intactos usando `--keep-data`).
-
-### Opción A: Instalador Remoto Oficial (Recomendado)
-
-En la consola de tu servidor ejecuta:
+### 1. Instalar la plataforma Rust (`install.sh`)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash
 ```
 
-*(Si utilizas `wget`: `wget -qO- https://raw.githubusercontent.com/ftole/nas_debian/main/install.sh | sudo bash`)*
+O compilar desde el código fuente del repositorio local:
 
-> [!TIP]
-> El instalador descarga los archivos en `/opt/nas_debian`, registra el comando global `nas` y abre el asistente visual en consola. **No tocará tus discos ni particiones hasta que lo confirmes expresamente.**
+```bash
+sudo bash install.sh --build-from-source
+```
 
-### Opción B: Preparación Manual Paso a Paso
+### 2. Aprovisionar disco, rol y Samba (`nas deploy apply`)
 
-Si por políticas corporativas de auditoría prefieres auditar y ejecutar cada paso manualmente (actualización de repositorios, cortafuegos UFW, endurecimiento SSH, fail2ban y despliegue), consulta nuestra [Guía de Preparación Manual Paso a Paso](docs/operacion_mantenimiento.md#7-preparación-y-despliegue-manual-paso-a-paso).
+```bash
+# Ejemplo: servidor departamental ARCHIVOS sobre /dev/sdb
+sudo nas deploy apply \
+  --disk /dev/sdb \
+  --role ARCHIVOS \
+  --workgroup TEAM-JOFRATO \
+  --netbios SRV-NAS \
+  --admin admin
+
+# Ejemplo: central BACKUP sobre SSD reutilizando partición existente (--keep-data)
+sudo nas deploy apply \
+  --disk /dev/sdb \
+  --role BACKUP \
+  --ssd \
+  --keep-data \
+  --workgroup TEAM-JOFRATO \
+  --netbios SRV-BKP \
+  --admin admin
+```
+
+> [!NOTE]
+> Tras completar la instalación, accede al panel web en `https://<IP-del-servidor>` (la contraseña inicial generada se guarda temporalmente en `/etc/nas/.initial_admin_password`) y consulta el checklist de endurecimiento manual de Debian 13 (`UFW`, SSH, `fail2ban`, `AIDE`) en [docs/manual.md](./docs/manual.md).
 
 ---
 
-## 🛠️ Comandos Globales del CLI `nas`
+## Interfaces de Operación
 
-Una vez instalado, tienes a tu disposición el binario unificado `nas` para administración en consola o scripts programáticos, con salida enriquecida ANSI y formato estructurado `--json`:
+- **Panel Web (`nas-web` + Nginx TLS):** 14 vistas operativas + `/audit`, explorador Drag & Drop (ZIP hasta 50 GiB), visores ofimáticos 100% offline (`.xlsx`, `.docx`, `.pptx`) y Terminal PTY real sobre `tmux`.
+- **CLI Unificado (`nas`):** `status`, `network`, `services`, `diag`, `storage`, `users`, `backup`, `audit`, `update`, `deploy`, `uninstall` con soporte `--json`.
+- **Asistente Visual de Terminal (`nas-tui`):** 12 secciones interactivas desde consola local o SSH.
+- **Multi-Host (`nasctl`):** ejecución remota por inventario YAML (`inventory.yaml`) sobre transporte OpenSSH.
 
-### Comandos de Diagnóstico y Estado
-| Comando | Función |
+---
+
+## Mapa de Documentación Técnica (`docs/`)
+
+La documentación del proyecto está consolidada en **7 documentos** y **7 diagramas SVG** en `docs/assets/`:
+
+| Documento | Contenido |
 | :--- | :--- |
-| `sudo nas status` | Métricas generales del sistema (CPU, memoria, carga, uptime e IP). |
-| `sudo nas network` | Inventario de red (interfaces, gateway, DNS, puertos y resolución SMB). |
-| `sudo nas services` | Estado en tiempo real de los demonios clave (`smbd`, `nmbd`, `wsdd2`, `nginx`). |
-| `sudo nas diag` | Diagnóstico integral con código de salida significativo y resolución de incidentes. |
-| `sudo nas version` | Muestra la versión del workspace y commit de compilación. |
+| [docs/arquitectura.md](./docs/arquitectura.md) | Workspace Rust (11 crates), 3 roles, 7 helpers root, backend `axum`, frontend modular Slate UI (28 JS + 3 vendor, 52 SVG), SQLite WAL, `is_os_disk()` y doble vía `packaging/` vs `nas deploy`. |
+| [docs/tecnologias.md](./docs/tecnologias.md) | Explicación clara de todo el stack tecnológico, beneficios operativos y glosario integrado de siglas en inglés y español (`SMB2_10..SMB3_11`, `PBKDF2-HMAC-SHA512`, `Btrfs`, `rsync`, `WSDD2`, etc.). |
+| [docs/seguridad.md](./docs/seguridad.md) | Controles automáticos implementados (`PBKDF2`, CSRF `HMAC-SHA256`, rate limit, `/api/files/raw`, sanitizador `.xlsx`, `NoNewPrivileges=no` + capacidades, `stdin`, `nas-audit`, `Ed25519`), endurecimiento manual Debian 13 y brechas abiertas. |
+| [docs/manual.md](./docs/manual.md) | Manual operativo por perfiles, uso de `nas` / `nas-tui` / 14 vistas web, mantenimiento periódico, endurecimiento manual paso a paso, diagnóstico y matriz FMEA. |
+| [docs/lab_y_desarrollo.md](./docs/lab_y_desarrollo.md) | Preparación del laboratorio `/opt/dev`, `git worktree` + `CARGO_TARGET_DIR`, `scripts/deploy_local.sh`, las 5 puertas CI locales, `scripts/package.sh`, firmas `Ed25519` y actualización atómica A/B con rollback. |
+| [docs/auditoria.md](./docs/auditoria.md) | Auditoría técnica código vs. documentación sobre `main` (`0f7a272`) con evidencia de líneas y estado real de los hallazgos abiertos. |
+| [docs/propuesta_ux_usuarios.md](./docs/propuesta_ux_usuarios.md) | Propuesta de diseño UX para segmentación por pestañas, tags/chips de grupos, vista previa de accesos Samba y matriz interactiva. |
 
-### Subcomandos de Operación y Administración
-| Módulo / Subcomando | Descripción de Operaciones |
-| :--- | :--- |
-| `sudo nas backup <list>` | Lista e inspecciona las tareas de respaldo y runners instalados. |
-| `sudo nas storage list` | Inventario de almacenamiento con jerarquía de particiones y protección de SO. |
-| `sudo nas users list` | Listado estructurado de usuarios y grupos corporativos locales. |
-| `sudo nas audit <verify\|show>` | Verificación criptográfica y visualización de la bitácora inmutable de auditoría. |
-| `sudo nas deploy <plan\|apply>` | Planificación y aplicación nativa del despliegue en disco (con guardas anti-so y fstab). |
-| `sudo nas update <status\|verify\|apply>` | Verificación y aplicación de actualizaciones firmadas con validación SHA-256 / Ed25519. |
-| `sudo nas migrate status` | Verificación del estado de retiro del stack anterior y paridad activa. |
-| `sudo nas uninstall [--scope os]` | Desinstalación granular y limpia del panel o ajustes del sistema operativo. |
-| `sudo nas helper <helper>` | Invocación de helpers root acotados (`storage-apply`, `samba-apply`, `accounts`, etc.). |
+### Diagramas Vectoriales (`docs/assets/`)
 
-> [!TIP]
-> Todos los subcomandos aceptan la bandera opcional `--json` para emitir la respuesta en formato JSON estructurado, ideal para pipelines CI/CD, scripts de monitoreo y automatización.
-
----
-
-## 🖥️ Asistente de Terminal Interactivo (`nas-tui`)
-
-Para administración visual interactiva desde la consola o una sesión SSH, el sistema incluye **`nas-tui`**, desarrollado en Rust con la librería `ratatui`:
-
-```bash
-sudo nas-tui
-```
-
-El TUI ofrece:
-- **Dashboard Principal:** Métricas de CPU, memoria, almacenamiento y estado de la red en tiempo real.
-- **Gestión de Servicios:** Monitoreo y control directo de demonios (`smbd`, `nmbd`, `wsdd2`, `nginx`).
-- **Tareas de Respaldo:** Supervisión de estado, últimas ejecuciones y acceso rápido a logs.
-- **Herramientas de Diagnóstico:** Comprobaciones de salud automáticas con recomendaciones inmediatas.
-
----
-
-## 💾 Despliegue Automatizado por Línea de Comandos
-
-Si necesitas desplegar servidores de forma desatendida mediante scripts:
-
-```bash
-# Servidor NAS en disco secundario (/dev/sdb) formateando desde cero:
-printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP SRV-NAS admin - ARCHIVOS
-
-# Servidor NAS conservando datos preexistentes en /dev/sdb (--keep-data):
-printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP SRV-NAS admin - ARCHIVOS --keep-data
-
-# Central de Respaldos formateando disco secundario (/dev/sdb):
-printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh /dev/sdb WORKGROUP SRV-BKP admin - BACKUP
-
-# Servidor Híbrido (Archivos y Respaldos combinados) en partición local o disco secundario:
-printf '%s\n' '<CLAVE_ADMIN>' | sudo bash src/core/deploy.sh LOCAL WORKGROUP SRV-NAS admin - ARCHIVOS_BACKUP
-```
-
----
-
-## 🪟 Administración Remota desde Windows
-
-La plataforma activa se administra con `nasctl` (inventario multi-host) y `nas`
-sobre OpenSSH, o con el panel web:
-
-```powershell
-# Estado remoto por inventario (inventory.example.yaml)
-nasctl --inventory inventory.yaml status
-
-# Ejecución de un subcomando en todos los hosts del perfil
-nasctl --inventory inventory.yaml exec -- nas status
-
-# Panel web
-start https://10.10.1.222/
-```
-
-Los antiguos `nas_admin.bat` / `nas_admin.py` fueron **retirados en la fase F7** y
-solo se conservan en el historial de Git; su funcionalidad queda cubierta por
-`nasctl` + `nas` y por el panel web.
-
-
----
-
-## 🧪 Pruebas y Verificación
-
-```bash
-# Workspace Rust
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-
-# Contrato de paridad del panel (IDs, clases, endpoints y hashes de assets)
-python3 scripts/parity_extract.py --check
-
-# Auditoría de interfaz (estática; en vivo requiere credenciales)
-python3 scripts/qa_ui_audit.py --static
-
-# Empaquetado (systemd, nginx, instalador y sudoers)
-bash packaging/verify.sh
-```
-
-Las suites remotas interactivas (`test_remote.py`, `test_remote.sh`) y el
-asistente `nas_admin.*` fueron **retirados en F7**; su cobertura se trasladó a
-los tests Rust, al contrato de paridad y a `nasctl`.
-
-## 📂 Estructura del Repositorio
-
-```text
-nas_debian/
-├── install.sh             -> Instalador oficial (toolchain Rust + build + packaging)
-├── Cargo.toml             -> Workspace Rust
-├── crates/
-│   ├── nas-core/          -> Configuración, rutas, errores y contrato
-│   ├── nas-exec/          -> Ejecución segura (argv, sudo, timeout, redacción)
-│   ├── nas-audit/         -> Bitácora append-only con encadenamiento SHA-256
-│   ├── nas-inventory/     -> Inventarios YAML multi-servidor y separación dev/prod
-│   ├── nas-ssh/           -> Transporte OpenSSH y ejecución remota
-│   ├── nas-engine/        -> Almacenamiento, Samba, respaldos, dominio, diagnósticos
-│   ├── nas-cli/           -> CLI unificada `nas` modularizada en subcomandos
-│   ├── nas-web/           -> Panel axum modularizado por dominios + assets embebidos
-│   ├── nas-tui/           -> Asistente visual de terminal (ratatui)
-│   └── nasctl/, nas-dev/  -> Multi-host e inspección de desarrollo
-├── packaging/             -> Unidad systemd, nginx, helpers privilegiados e instalador
-├── scripts/               -> Contrato de paridad, auditoría UI y validaciones
-├── src/core/, src/lib/    -> Motor Bash de despliegue/desinstalación y shims
-├── tests/parity/          -> Contrato congelado (IDs, clases, endpoints y hashes)
-└── docs/                  -> Documentación técnica y operativa
-```
-
-## ⚖️ Licencia
-
-Este proyecto es propiedad exclusiva de su autor. Todos los derechos reservados. Consulta el archivo [LICENSE](LICENSE).
+- [arquitectura_general.svg](./docs/assets/arquitectura_general.svg) — Capas del sistema, workspace y almacenamiento.
+- [roles_almacenamiento.svg](./docs/assets/roles_almacenamiento.svg) — Matriz de los 3 roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`).
+- [modelo_seguridad.svg](./docs/assets/modelo_seguridad.svg) — Controles automáticos vs endurecimiento manual Debian 13.
+- [flujo_backups.svg](./docs/assets/flujo_backups.svg) — Pipeline `install-spec`, `flock`, staging `.inprogress_*` y retención.
+- [flujo_autenticacion_y_privilegios.svg](./docs/assets/flujo_autenticacion_y_privilegios.svg) — Flujo HTTPS, `PBKDF2`/`CSRF`, `sudoers` y 7 helpers root.
+- [ciclo_release_y_actualizacion.svg](./docs/assets/ciclo_release_y_actualizacion.svg) — 5 puertas CI, firma `Ed25519`, slots A/B y rollback.
+- [entorno_lab_worktrees.svg](./docs/assets/entorno_lab_worktrees.svg) — Flujo de laboratorio multi-agente con `git worktree` y `deploy_local.sh`.
