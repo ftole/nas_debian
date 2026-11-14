@@ -88,3 +88,16 @@ La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) regi
 **Riesgos / acciones operativas vigentes:**
 1. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado emitido por CA interna / ACME en producción.
 2. **Actualización desde versiones `<= 0.1.10`:** en servidores instalados antes de `v0.1.11`, el primer paso debe hacerse por consola (`sudo rm -f /var/lock/nas-update.lock` si quedó huérfano, `sudo nas update apply --repo ftole/nas_debian --yes` y `sudo bash /opt/nas_debian/current/packaging/install.sh`) para aplicar la nueva regla `sudoers` de `nas-system-update`.
+
+---
+
+## 4. Plan Pendiente: Automatización del Endurecimiento en Rust (`nas security`)
+
+> [!NOTE]
+> **Estado: Pendiente de implementación.** Actualmente los controles de la Sección 2 siguen aplicándose manualmente tras la instalación.
+
+Se proyecta automatizar el endurecimiento base directamente en Rust (`crates/nas-engine` + subcomando `nas security status | harden`) e invocarlo al cierre de `packaging/install.sh` (`nas security harden --apply`, con opción `--no-harden` para pruebas):
+- **Paquetes y controles sin riesgo de bloqueo:** instalación de `ufw`, `fail2ban`, `unattended-upgrades` y `aide`; configuración de `fail2ban` (`/etc/fail2ban/jail.d/nas.local`), parches de seguridad automáticos sin reinicio forzado, máscara ACPI (`sleep`/`suspend`/`hibernate`/`hybrid-sleep` manteniendo intacta la interfaz gráfica) e inicialización de AIDE al final de la instalación.
+- **Cortafuegos `ufw` con protección anti-lockout:** autodetección de subred LAN (anulable con `NAS_LAN_CIDR`), preservación de acceso `22/tcp` para la IP origen de `$SSH_CONNECTION` si es externa y respeto de reglas existentes cuando `ufw` ya esté activo (salvo `--force-fw`).
+- **Endurecimiento SSH seguro:** drop-in `/etc/ssh/sshd_config.d/99-nas-hardening.conf` validado con `sshd -t` (rollback automático ante fallo); solo desactivar `PasswordAuthentication` si existen llaves válidas en `authorized_keys` (o bandera explícita).
+- **Equipos ya desplegados:** soporte `--safe-only` / `--refresh-aide` tras actualizaciones verificadas y comando explícito `sudo nas security harden --dry-run` / `--apply`.
