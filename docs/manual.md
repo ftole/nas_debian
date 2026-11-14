@@ -134,6 +134,9 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 
 ## 5. Checklist de Endurecimiento Manual en Debian 13
 
+> [!NOTE]
+> **Automatización pendiente:** La ejecución automática de estos controles vía `nas security harden` durante `install.sh` / actualizaciones está registrada como mejora pendiente en [docs/seguridad.md](./seguridad.md#4-plan-pendiente-automatización-del-endurecimiento-en-rust-nas-security). Mientras tanto, aplícalos con este checklist.
+
 Ejecuta estos pasos después de completar `install.sh` y `nas deploy apply` en un servidor de producción:
 
 ```bash
