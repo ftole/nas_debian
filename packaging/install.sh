@@ -301,6 +301,19 @@ else
     echo "[7/7] Nginx omitido (--no-nginx o no instalado)"
 fi
 
+if [ -x "$PREFIX/nas" ]; then
+    "$PREFIX/nas" backup repair-runners >/dev/null 2>&1 || true
+    if [ ! -f "$STATE_DIR/migrations/backup_dedup_v1.done" ] && { [ -d "$DATA_ROOT/BACKUPS_HISTORICOS" ] || [ -d "$DATA_ROOT/BACKUPS_PERMANENTES" ] || [ -d "$DATA_ROOT/unidades" ]; }; then
+        if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+            systemd-run --quiet --no-block --collect --unit=nas-backup-dedup-migration \
+                -p Nice=19 -p IOSchedulingClass=idle \
+                "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
+        else
+            "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 echo "[verificación]"
 if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null; then
     echo "    healthz OK"
