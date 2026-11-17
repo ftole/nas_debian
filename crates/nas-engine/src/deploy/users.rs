@@ -123,6 +123,14 @@ pub fn provision_superadmin(
     password: Option<&str>,
     full_name: &str,
 ) -> NasResult<bool> {
+    if let Some(pass) = password {
+        if !pass.is_empty() && pass.chars().any(char::is_control) {
+            return Err(NasError::Invalid(
+                "la contraseña contiene caracteres de control no permitidos".into(),
+            ));
+        }
+    }
+
     let created = if account_exists(runner, username) {
         false
     } else {
@@ -142,10 +150,11 @@ pub fn provision_superadmin(
 
         if let Some(pass) = password {
             if !pass.is_empty() {
+                let safe_runner = runner.clone().with_secret(pass);
                 let spec = CommandSpec::new("chpasswd")
-                    .stdin_secret(nas_exec::SecretInput::new(format!("{username}:{pass}\n")))
+                    .stdin_secret(nas_exec::SecretInput::new(format!("{username}:{pass}")))
                     .timeout(Duration::from_secs(30));
-                runner.run(&spec)?.ensure_success()?;
+                safe_runner.run(&spec)?.ensure_success()?;
             }
         }
         true
@@ -243,5 +252,14 @@ mod tests {
         let art = sudoers_artifact();
         assert_eq!(art.path, "/etc/sudoers.d/nas-web");
         assert_eq!(art.mode, 0o440);
+    }
+
+    #[test]
+    fn provision_superadmin_rechaza_caracteres_de_control_en_contrasena() {
+        let runner = Runner::new();
+        for bad in ["Clave\nroot:evil", "Clave\r123", "Clave\x00123"] {
+            let err = provision_superadmin(&runner, "admin_test", Some(bad), "Admin").unwrap_err();
+            assert!(err.to_string().contains("caracteres de control"));
+        }
     }
 }
