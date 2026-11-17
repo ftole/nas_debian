@@ -17,14 +17,20 @@ fn read_stdin_line() -> String {
 }
 
 fn trim_stdin_line(raw: &str) -> String {
-    raw.trim_end_matches(['\r', '\n']).to_string()
+    raw.strip_suffix("\r\n")
+        .or_else(|| raw.strip_suffix('\n'))
+        .unwrap_or(raw)
+        .to_string()
 }
 
 fn read_stdin_single_line() -> String {
-    use std::io::BufRead;
-    let mut line = String::new();
-    let _ = std::io::stdin().lock().read_line(&mut line);
-    trim_stdin_line(&line)
+    use std::io::Read;
+    let mut buffer = String::new();
+    let _ = std::io::stdin()
+        .lock()
+        .take(8192)
+        .read_to_string(&mut buffer);
+    trim_stdin_line(&buffer)
 }
 
 #[cfg(unix)]
@@ -462,5 +468,10 @@ mod tests {
     fn recorta_saltos_de_linea_en_stdin() {
         assert_eq!(trim_stdin_line("ClaveSegura1!\r\n"), "ClaveSegura1!");
         assert_eq!(trim_stdin_line("ClaveSegura1!\n"), "ClaveSegura1!");
+        assert_eq!(
+            trim_stdin_line("Clave123\nroot:hack\n"),
+            "Clave123\nroot:hack"
+        );
+        assert_eq!(trim_stdin_line("Clave123\n\n"), "Clave123\n");
     }
 }
