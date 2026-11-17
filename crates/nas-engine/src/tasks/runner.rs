@@ -46,7 +46,7 @@ impl BackupTask {
                     mount_point.clone(),
                     "-o".into(),
                     format!(
-                        "credentials={credentials},ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl"
+                        "credentials={credentials},ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl,file_mode=0777,dir_mode=0777"
                     ),
                 ]);
                 steps.push(self.rsync_step(&format!("{mount_point}/"), &staging, last_snapshot));
