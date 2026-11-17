@@ -1,4 +1,4 @@
-use crate::routes::{clean_helper_error, safe_content_disposition};
+use crate::routes::{clean_helper_error, run_json, safe_content_disposition};
 
 #[test]
 fn content_disposition_formatea_ascii_y_rfc6266_unicode() {
@@ -45,6 +45,16 @@ fn clean_helper_error_desempaqueta_json_y_humaniza_mount_cifs() {
 
     let plain = "error desconocido en ejecución";
     assert_eq!(clean_helper_error(plain), "error desconocido en ejecución");
+}
+
+#[test]
+fn run_json_redacta_secretos_de_stdin_en_errores() {
+    let spec = nas_exec::CommandSpec::new("sh")
+        .args(["-c", "echo fallo MiSecretoUnico99 >&2; exit 1"])
+        .stdin_secret(nas_exec::SecretInput::new("MiSecretoUnico99"));
+    let err = run_json(spec).unwrap_err();
+    assert!(!err.contains("MiSecretoUnico99"));
+    assert!(err.contains("***"));
 }
 
 mod semver_tests {
