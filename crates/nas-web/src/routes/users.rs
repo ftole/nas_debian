@@ -258,6 +258,9 @@ pub async fn user_create(
     if body.password.len() < 6 {
         return bad_request("la contraseña debe tener al menos 6 caracteres");
     }
+    if body.password.chars().any(char::is_control) {
+        return bad_request("la contraseña contiene caracteres de control no permitidos");
+    }
 
     let username = body.username.clone();
     let groups = body.groups.join(",");
@@ -356,8 +359,13 @@ pub async fn user_update(
     if (target_is_super || body.is_superadmin) && !admin.is_superadmin() {
         return forbidden("no se puede modificar el rango del superadministrador");
     }
-    if !body.password.is_empty() && body.password.len() < 6 {
-        return bad_request("la contraseña debe tener al menos 6 caracteres");
+    if !body.password.is_empty() {
+        if body.password.len() < 6 {
+            return bad_request("la contraseña debe tener al menos 6 caracteres");
+        }
+        if body.password.chars().any(char::is_control) {
+            return bad_request("la contraseña contiene caracteres de control no permitidos");
+        }
     }
 
     let username = body.username.clone();
@@ -584,7 +592,14 @@ pub fn router() -> Router<crate::AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_accounts_status_tsv, AccountRuntimeStatus};
+    use super::{is_protected_posix_account, parse_accounts_status_tsv, AccountRuntimeStatus};
+
+    #[test]
+    fn nas_es_cuenta_reservada_protegida() {
+        assert!(is_protected_posix_account("nas"));
+        assert!(is_protected_posix_account("nas-web"));
+        assert!(is_protected_posix_account("root"));
+    }
 
     #[test]
     fn parsea_tsv_de_estado_cuatro_y_tres_columnas() {
