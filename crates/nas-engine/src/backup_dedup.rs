@@ -219,6 +219,13 @@ pub fn patch_runner_content(content: &str) -> String {
         if updated.contains("chattr -R +i {}") {
             updated = updated.replace("chattr -R +i {}", "chattr +i {}");
         }
+        if trimmed == "chmod -R u+w \"$OLD\" 2>/dev/null || true"
+            || trimmed == "chmod -R u+w \"$OLD\""
+        {
+            let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            updated =
+                format!("{indent}find \"$OLD\" -type d -exec chmod u+w {{}} + 2>/dev/null || true");
+        }
         if updated.contains("if cp -al \"$FINAL\" \"$PERM_DEST\" 2>/dev/null; then") {
             updated = updated.replace(
                 "if cp -al \"$FINAL\" \"$PERM_DEST\" 2>/dev/null; then",
@@ -334,6 +341,7 @@ pub fn repair_runners(runner: &Runner, bin_dir: &Path) -> NasResult<RunnerRepair
 
 #[derive(Debug, Clone)]
 struct FileMetaRecord {
+    container_idx: usize,
     path: PathBuf,
     dev: u64,
     ino: u64,
@@ -343,6 +351,12 @@ struct FileMetaRecord {
     uid: u32,
     gid: u32,
     mode: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ContainerFsInfo {
+    fsid: String,
+    fstype: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -473,12 +487,17 @@ fn repair_container_permissions(
                 continue;
             };
             let ft = meta.file_type();
-            if ft.is_symlink() {
+            if ft.is_symlink() || (!ft.is_file() && !ft.is_dir()) {
                 continue;
             }
 
-            let is_freeze_meta = ft.is_file()
-                && path.file_name().and_then(|n| n.to_str()) == Some(".freeze_meta.json");
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !dry_run && ft.is_file() && file_name.starts_with(".nas_dedup_") {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+
+            let is_freeze_meta = ft.is_file() && file_name == ".freeze_meta.json";
             let mode = meta.permissions().mode() & 0o7777;
             if !is_freeze_meta && (mode & 0o200) == 0 {
                 let new_mode = if is_cifs { mode | 0o222 } else { mode | 0o200 };
@@ -530,7 +549,11 @@ fn repair_container_permissions(
 }
 
 #[cfg(unix)]
-fn collect_files_in_container(container: &Path, out: &mut Vec<FileMetaRecord>) {
+fn collect_files_in_container(
+    container_idx: usize,
+    container: &Path,
+    out: &mut Vec<FileMetaRecord>,
+) {
     use std::os::unix::fs::MetadataExt;
 
     let mut stack = vec![container.to_path_buf()];
@@ -556,6 +579,7 @@ fn collect_files_in_container(container: &Path, out: &mut Vec<FileMetaRecord>) {
                     continue;
                 }
                 out.push(FileMetaRecord {
+                    container_idx,
                     path,
                     dev: meta.dev(),
                     ino: meta.ino(),
@@ -572,7 +596,106 @@ fn collect_files_in_container(container: &Path, out: &mut Vec<FileMetaRecord>) {
 }
 
 #[cfg(not(unix))]
-fn collect_files_in_container(_container: &Path, _out: &mut Vec<FileMetaRecord>) {}
+fn collect_files_in_container(
+    _container_idx: usize,
+    _container: &Path,
+    _out: &mut Vec<FileMetaRecord>,
+) {
+}
+
+fn query_container_fs(runner: &Runner, dir: &Path) -> Option<ContainerFsInfo> {
+    let out = runner
+        .run(
+            &CommandSpec::new("stat")
+                .args(["-f", "-c", "%i %T", &dir.to_string_lossy()])
+                .timeout(Duration::from_secs(10)),
+        )
+        .ok()?;
+    if !out.is_success() {
+        return None;
+    }
+    let mut parts = out.stdout.split_whitespace();
+    let fsid = parts.next()?.to_string();
+    let fstype = parts.next()?.to_string();
+    Some(ContainerFsInfo { fsid, fstype })
+}
+
+fn is_btrfs_ro_subvolume(runner: &Runner, dir: &Path) -> bool {
+    let Ok(out) = runner.run(
+        &CommandSpec::new("btrfs")
+            .args(["property", "get", &dir.to_string_lossy(), "ro"])
+            .timeout(Duration::from_secs(10)),
+    ) else {
+        return false;
+    };
+    out.is_success() && out.stdout.trim() == "ro=true"
+}
+
+fn parse_filefrag_extents(stdout: &str) -> Option<Vec<(String, String, String, bool)>> {
+    let mut extents = Vec::new();
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        let parts: Vec<&str> = trimmed.split(':').collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        if parts[0].trim().parse::<u64>().is_err() {
+            continue;
+        }
+        let logical = parts[1].trim().to_string();
+        let physical = parts[2].trim().to_string();
+        let length = parts[3].trim().to_string();
+        let flags = parts[4..].join(":");
+        let is_inline = flags.contains("inline");
+        let is_shared = flags.contains("shared");
+        if is_inline {
+            return None;
+        }
+        extents.push((logical, physical, length, is_shared));
+    }
+    if extents.is_empty() {
+        None
+    } else {
+        Some(extents)
+    }
+}
+
+fn filefrag_extents(runner: &Runner, path: &Path) -> Option<Vec<(String, String, String, bool)>> {
+    let bin = if Path::new("/usr/sbin/filefrag").is_file() {
+        "/usr/sbin/filefrag"
+    } else if Path::new("/sbin/filefrag").is_file() {
+        "/sbin/filefrag"
+    } else {
+        "filefrag"
+    };
+    let out = runner
+        .run(
+            &CommandSpec::new(bin)
+                .args(["-e", "-k", &path.to_string_lossy()])
+                .timeout(Duration::from_secs(15)),
+        )
+        .ok()?;
+    if !out.is_success() {
+        return None;
+    }
+    parse_filefrag_extents(&out.stdout)
+}
+
+fn files_share_physical_extents(runner: &Runner, canon: &Path, dup: &Path) -> bool {
+    let Some(ext_a) = filefrag_extents(runner, canon) else {
+        return false;
+    };
+    let Some(ext_b) = filefrag_extents(runner, dup) else {
+        return false;
+    };
+    if ext_a.len() != ext_b.len() {
+        return false;
+    }
+    ext_a
+        .iter()
+        .zip(ext_b.iter())
+        .all(|(a, b)| a.0 == b.0 && a.1 == b.1 && a.2 == b.2 && a.1 != "0..0" && (a.3 || b.3))
+}
 
 fn read_partial_sig(path: &Path, size: u64) -> std::io::Result<PartialSig> {
     let mut file = File::open(path)?;
@@ -709,31 +832,93 @@ fn deduplicate_task(
 
     let is_cifs = task_is_cifs(&options.runner_dir, task_id);
 
-    // 1. Levantar temporalmente inmutabilidad y reparar permisos `a-w` que rompían `--link-dest`.
-    for container in &containers {
+    // 1. Levantar temporalmente inmutabilidad (y propiedad Btrfs ro si aplica) y reparar permisos `a-w`.
+    let mut ro_subvols: Vec<PathBuf> = Vec::new();
+    let mut container_writable = vec![true; containers.len()];
+    for (idx, container) in containers.iter().enumerate() {
         if !options.dry_run {
-            let _ = runner.run(
+            if is_btrfs_ro_subvolume(runner, container) {
+                match runner.run(
+                    &CommandSpec::new("btrfs")
+                        .args([
+                            "property",
+                            "set",
+                            &container.to_string_lossy(),
+                            "ro",
+                            "false",
+                        ])
+                        .timeout(Duration::from_secs(30)),
+                ) {
+                    Ok(out) if out.is_success() => {
+                        ro_subvols.push(container.clone());
+                    }
+                    Ok(out) => {
+                        container_writable[idx] = false;
+                        summary.errors.push(format!(
+                            "{}: no se pudo desactivar ro en subvolumen Btrfs: {}",
+                            container.display(),
+                            out.stderr.trim()
+                        ));
+                        continue;
+                    }
+                    Err(e) => {
+                        container_writable[idx] = false;
+                        summary.errors.push(format!(
+                            "{}: fallo al ejecutar btrfs property set ro false: {e}",
+                            container.display()
+                        ));
+                        continue;
+                    }
+                }
+            }
+
+            // Nota: `chattr -R -i` devuelve código 1 si encuentra enlaces simbólicos dentro del snapshot,
+            // por lo que únicamente un fallo de ejecución o timeout es error real.
+            if let Err(e) = runner.run(
                 &CommandSpec::new("chattr")
                     .args(["-R", "-i", &container.to_string_lossy()])
-                    .timeout(Duration::from_secs(120)),
+                    .timeout(Duration::from_secs(3600)),
+            ) {
+                container_writable[idx] = false;
+                summary.errors.push(format!(
+                    "{}: chattr -R -i falló o excedió el tiempo: {e}",
+                    container.display()
+                ));
+                continue;
+            }
+            let _ = runner.run(
+                &CommandSpec::new("chattr")
+                    .args(["-i", &container.to_string_lossy()])
+                    .timeout(Duration::from_secs(30)),
             );
         }
         summary.permissions_repaired +=
             repair_container_permissions(container, is_cifs, options.dry_run, &mut summary.errors);
     }
 
+    let container_fs: Vec<Option<ContainerFsInfo>> = containers
+        .iter()
+        .map(|c| query_container_fs(runner, c))
+        .collect();
+
     // 2. Recolectar archivos regulares en orden canónico (newest snapshot_* primero).
     let mut all_files = Vec::new();
-    for container in &containers {
-        collect_files_in_container(container, &mut all_files);
+    for (c_idx, container) in containers.iter().enumerate() {
+        if container_writable[c_idx] {
+            collect_files_in_container(c_idx, container, &mut all_files);
+        }
     }
     summary.files_scanned = all_files.len() as u64;
 
-    // 3. Agrupar por tamaño > 0.
-    let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+    // 3. Agrupar primero por (tamaño > 0, MetaKey exacto) en memoria para evitar leer/hashear
+    // archivos cuyos metadatos nunca permitirían hardlink.
+    let mut by_size_meta: HashMap<(u64, MetaKey), Vec<usize>> = HashMap::new();
     for (idx, rec) in all_files.iter().enumerate() {
         if rec.size > 0 {
-            by_size.entry(rec.size).or_default().push(idx);
+            by_size_meta
+                .entry((rec.size, rec.meta_key()))
+                .or_default()
+                .push(idx);
         }
     }
 
@@ -742,7 +927,7 @@ fn deduplicate_task(
     let mut reclaimed_inodes: HashSet<(u64, u64)> = HashSet::new();
     let mut seq = 0u64;
 
-    for (size, indices) in by_size {
+    for ((size, _mk), indices) in by_size_meta {
         let unique_inodes: HashSet<(u64, u64)> = indices
             .iter()
             .map(|&i| (all_files[i].dev, all_files[i].ino))
@@ -787,58 +972,65 @@ fn deduplicate_task(
                 }
             }
 
-            for (_sha, sha_indices) in by_sha {
-                // Sub-agrupar por metadatos exactos para que los hardlinks no alteren mtime/uid/gid/mode.
-                let mut by_meta: HashMap<MetaKey, Vec<usize>> = HashMap::new();
-                for &idx in &sha_indices {
-                    let mk = all_files[idx].meta_key();
-                    by_meta.entry(mk).or_default().push(idx);
+            for (_sha, meta_indices) in by_sha {
+                if meta_indices.len() < 2 {
+                    continue;
                 }
+                let canon_idx = meta_indices[0];
+                let canon_container_idx = all_files[canon_idx].container_idx;
+                let canon_dev = all_files[canon_idx].dev;
+                let canon_ino = all_files[canon_idx].ino;
+                let canon_path = all_files[canon_idx].path.clone();
 
-                for (_mk, meta_indices) in by_meta {
-                    if meta_indices.len() < 2 {
+                for &dup_idx in &meta_indices[1..] {
+                    let dup = &all_files[dup_idx];
+                    if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
                         continue;
                     }
-                    let canon_idx = meta_indices[0];
-                    let canon_dev = all_files[canon_idx].dev;
-                    let canon_ino = all_files[canon_idx].ino;
-                    let canon_path = all_files[canon_idx].path.clone();
-
-                    for &dup_idx in &meta_indices[1..] {
-                        let dup = &all_files[dup_idx];
-                        if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
+                    let cross_dev = dup.dev != canon_dev;
+                    if cross_dev {
+                        let same_btrfs_fs = match (
+                            &container_fs[canon_container_idx],
+                            &container_fs[dup.container_idx],
+                        ) {
+                            (Some(cfs), Some(dfs)) => cfs.fsid == dfs.fsid && cfs.fstype == "btrfs",
+                            _ => false,
+                        };
+                        if !same_btrfs_fs
+                            || files_share_physical_extents(runner, &canon_path, &dup.path)
+                        {
                             continue;
                         }
-                        if dup.dev != canon_dev {
-                            continue;
-                        }
+                    }
 
-                        if options.dry_run {
-                            summary.hardlinks_created += 1;
-                            if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                                summary.bytes_reclaimed =
-                                    summary.bytes_reclaimed.saturating_add(dup.size);
-                            }
+                    if options.dry_run {
+                        if cross_dev {
+                            summary.reflinks_created += 1;
                         } else {
-                            seq += 1;
-                            match replace_with_link_or_reflink(runner, &canon_path, &dup.path, seq)
-                            {
-                                Ok(LinkOutcome::Hardlinked) => {
-                                    summary.hardlinks_created += 1;
-                                    if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                                        summary.bytes_reclaimed =
-                                            summary.bytes_reclaimed.saturating_add(dup.size);
-                                    }
+                            summary.hardlinks_created += 1;
+                        }
+                        if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                            summary.bytes_reclaimed =
+                                summary.bytes_reclaimed.saturating_add(dup.size);
+                        }
+                    } else {
+                        seq += 1;
+                        match replace_with_link_or_reflink(runner, &canon_path, &dup.path, seq) {
+                            Ok(LinkOutcome::Hardlinked) => {
+                                summary.hardlinks_created += 1;
+                                if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                                    summary.bytes_reclaimed =
+                                        summary.bytes_reclaimed.saturating_add(dup.size);
                                 }
-                                Ok(LinkOutcome::Reflinked) => {
-                                    summary.reflinks_created += 1;
-                                    if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                                        summary.bytes_reclaimed =
-                                            summary.bytes_reclaimed.saturating_add(dup.size);
-                                    }
-                                }
-                                Err(err) => summary.errors.push(err),
                             }
+                            Ok(LinkOutcome::Reflinked) => {
+                                summary.reflinks_created += 1;
+                                if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                                    summary.bytes_reclaimed =
+                                        summary.bytes_reclaimed.saturating_add(dup.size);
+                                }
+                            }
+                            Err(err) => summary.errors.push(err),
                         }
                     }
                 }
@@ -846,8 +1038,16 @@ fn deduplicate_task(
         }
     }
 
-    // 4. Restaurar inmutabilidad únicamente en los contenedores raíz (sin -R ni chmod -R a-w).
+    // 4. Restaurar inmutabilidad únicamente en los contenedores raíz (sin -R ni chmod -R a-w),
+    // y restaurar propiedad `ro=true` en subvolúmenes Btrfs que originalmente eran read-only.
     if !options.dry_run {
+        for ro_sub in &ro_subvols {
+            let _ = runner.run(
+                &CommandSpec::new("btrfs")
+                    .args(["property", "set", &ro_sub.to_string_lossy(), "ro", "true"])
+                    .timeout(Duration::from_secs(30)),
+            );
+        }
         for container in &containers {
             let _ = runner.run(
                 &CommandSpec::new("chattr")
@@ -973,6 +1173,11 @@ pub fn run_dedup_migration_if_needed(
     {
         if let Some(parent) = marker.parent() {
             let _ = fs::create_dir_all(parent);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o755));
+            }
         }
         let completed_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -988,6 +1193,11 @@ pub fn run_dedup_migration_if_needed(
         });
         if let Ok(json_txt) = serde_json::to_string_pretty(&payload) {
             if fs::write(&marker, format!("{json_txt}\n")).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&marker, fs::Permissions::from_mode(0o644));
+                }
                 marker_written = Some(marker.display().to_string());
             }
         }
@@ -1389,6 +1599,87 @@ chattr -R +i "$FINAL" 2>/dev/null || true
             fs::metadata(snap2.join("grande.dat")).unwrap().ino(),
             "rsync --link-dest debe enlazar inodos tras la reparación"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn patch_runner_content_protege_hardlinks_en_retencion() {
+        let old = r#"#!/bin/bash
+    for ((i = 0; i < TO_REMOVE; i++)); do
+        OLD="${ALL_SNAPS[$i]}"
+        chattr -R -i "$OLD" 2>/dev/null || true
+        chmod -R u+w "$OLD" 2>/dev/null || true
+        if rm -rf -- "$OLD"; then
+            log "retención: eliminado $(basename "$OLD")"
+        fi
+    done
+"#;
+        let patched = patch_runner_content(old);
+        assert!(!patched.contains("chmod -R u+w \"$OLD\""));
+        assert!(patched.contains("find \"$OLD\" -type d -exec chmod u+w {} + 2>/dev/null || true"));
+        assert_eq!(patch_runner_content(&patched), patched);
+    }
+
+    #[test]
+    fn parsea_extensiones_filefrag_compartidas() {
+        let sample = "\
+Filesystem type is: 9123683e
+File size of /srv/nas/a.bin is 65536 (64 blocks of 1024 bytes)
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..      63:   12345678..  12345741:     64:             last,shared,eof
+/srv/nas/a.bin: 1 extent found
+";
+        let exts = parse_filefrag_extents(sample).expect("extents");
+        assert_eq!(exts.len(), 1);
+        assert_eq!(exts[0].0, "0..      63");
+        assert_eq!(exts[0].1, "12345678..  12345741");
+        assert_eq!(exts[0].2, "64");
+        assert!(exts[0].3);
+
+        let inline = "\
+Filesystem type is: 9123683e
+ ext:     logical_offset:        physical_offset: length:   expected: flags:
+   0:        0..       0:          0..         0:      1:             last,inline,eof
+";
+        assert!(parse_filefrag_extents(inline).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marcador_de_migracion_tiene_permisos_legibles() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("marker-perms");
+        let state_dir = root.join("state");
+        let runner_dir = root.join("bin");
+        let lock_dir = root.join("lock");
+        fs::create_dir_all(&runner_dir).unwrap();
+        fs::create_dir_all(&lock_dir).unwrap();
+
+        let opts = MigrationOptions {
+            state_dir: state_dir.clone(),
+            dedup: DeduplicateOptions {
+                roots: Vec::new(),
+                runner_dir,
+                lock_dir,
+                log_dir: root.join("logs"),
+                task_filter: None,
+                dry_run: false,
+                use_flock: true,
+            },
+            force: false,
+        };
+        let rep = run_dedup_migration_if_needed(&Runner::new(), &opts).unwrap();
+        let marker_path = PathBuf::from(rep.marker_path.expect("marcador"));
+        let parent_mode = fs::metadata(marker_path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = fs::metadata(&marker_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(parent_mode, 0o755);
+        assert_eq!(file_mode, 0o644);
 
         let _ = fs::remove_dir_all(&root);
     }
