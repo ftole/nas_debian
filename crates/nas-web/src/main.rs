@@ -64,6 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let csrf_secret = load_or_create_csrf_secret(&paths.state_dir);
     let role = ServerRole::from_file(&paths.role_file)?.unwrap_or(ServerRole::ArquivosBackup);
+    let state_dir_for_mig = paths.state_dir.clone();
+    let data_root_for_mig = paths.data_root.clone();
     let auth = Auth::with_csrf_secret(db, ttl_secs, secure_cookie, csrf_secret);
     let state = AppState::new(auth, paths, role);
     let app = router(state);
@@ -76,8 +78,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db_path.display()
     );
 
+    maybe_trigger_backup_dedup_migration(&state_dir_for_mig, &data_root_for_mig);
+
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn maybe_trigger_backup_dedup_migration(state_dir: &Path, data_root: &Path) {
+    if std::env::var_os("NAS_WEB_SKIP_MIGRATION").is_some()
+        || data_root != Path::new("/srv/nas")
+        || !Path::new("/usr/local/bin/nas").is_file()
+    {
+        return;
+    }
+    let marker = state_dir.join(nas_engine::backup_dedup::DEDUP_MIGRATION_MARKER);
+    if marker.is_file() {
+        return;
+    }
+    let has_backup_dirs = data_root.join("BACKUPS_HISTORICOS").is_dir()
+        || data_root.join("BACKUPS_PERMANENTES").is_dir()
+        || data_root.join("unidades").is_dir();
+    if !has_backup_dirs {
+        return;
+    }
+
+    let _ = std::thread::Builder::new()
+        .name("backup-dedup-mig".to_string())
+        .spawn(|| {
+            let runner = nas_exec::Runner::new();
+            let _ = runner.run(
+                &nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                    .args(["helper", "backup-dedup-migration"])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(30)),
+            );
+        });
 }
 
 fn load_or_create_csrf_secret(state_dir: &Path) -> [u8; 32] {
