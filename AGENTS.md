@@ -46,6 +46,7 @@
     3. **No usar `install.sh --build-from-source` para cambios de desarrollo:** `install.sh` está reservado para aprovisionamiento general inicial de infraestructura y reinstalaciones completas.
     4. **Confirmación obligatoria de despliegue local, merge y push:**
        * Siempre que se realice cualquier modificación, **preguntar explícitamente** al usuario si desea realizar el despliegue local de los cambios, haciéndole mención expresa de que **valide primero que no exista trabajo pendiente de otro desarrollador** (en ramas, *worktrees* o cambios sin integrar).
+       * Si el despliegue local requiere `sudo` con contraseña y el usuario aún no la ha proporcionado en la conversación, pedirla o entregar los comandos exactos de despliegue; **nunca guardar ni persistir contraseñas en archivos ni commits**.
        * **Posterior al despliegue local**, **preguntar explícitamente** si se desea realizar el *merge* a `main` y el `git push`.
   * **REGLA DE VIGENCIA DOCUMENTAL (OBLIGATORIA):**
     Antes de cerrar cualquier tarea o *commit* que modifique comandos CLI, endpoints/vistas web, `packaging/` (`systemd`, `nginx`, `sudoers`, `install.sh`), flujos de respaldo/actualización o controles de seguridad:
