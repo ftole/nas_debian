@@ -264,24 +264,30 @@ fn calculate_dirs_combined_size_with_timeout(dirs: &[PathBuf], timeout_secs: u64
         .args(args)
         .timeout(Duration::from_secs(timeout_secs));
 
-    if let Ok(out) = runner.run(&spec) {
-        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
-            return (bytes, out.is_success());
+    match runner.run(&spec) {
+        Ok(out) => {
+            if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
+                return (bytes, out.is_success());
+            }
+            if !out.is_success() {
+                // Fallback a `-scb` solo si `-B1` no fuera soportado (p. ej. du no GNU).
+                let mut compat_args = vec!["-scb".to_string()];
+                for d in dirs {
+                    compat_args.push(d.to_string_lossy().to_string());
+                }
+                if let Ok(compat_out) = runner.run(
+                    &nas_exec::CommandSpec::new("du")
+                        .args(compat_args)
+                        .timeout(Duration::from_secs(timeout_secs)),
+                ) {
+                    if let Some(bytes) = parse_du_total_bytes(&compat_out.stdout) {
+                        return (bytes, compat_out.is_success());
+                    }
+                }
+            }
         }
-    }
-
-    // Fallback a `-scb` solo si `-B1` no estuviera disponible (p. ej. du no GNU).
-    let mut compat_args = vec!["-scb".to_string()];
-    for d in dirs {
-        compat_args.push(d.to_string_lossy().to_string());
-    }
-    if let Ok(out) = runner.run(
-        &nas_exec::CommandSpec::new("du")
-            .args(compat_args)
-            .timeout(Duration::from_secs(timeout_secs)),
-    ) {
-        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
-            return (bytes, out.is_success());
+        Err(_) => {
+            // Timeout o fallo de ejecución: no duplicar la espera con un segundo `du`.
         }
     }
 
