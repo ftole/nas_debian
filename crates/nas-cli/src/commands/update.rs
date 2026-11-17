@@ -580,6 +580,39 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         return Err(error);
     }
 
+    // Reparar runners obsoletos y programar (una sola vez) la recuperación de deduplicación.
+    let _ = nas_engine::backup_dedup::repair_runners(&runner, Path::new("/usr/local/bin"));
+    let dedup_marker =
+        Path::new("/var/lib/nas").join(nas_engine::backup_dedup::DEDUP_MIGRATION_MARKER);
+    let has_backup_dirs = Path::new("/srv/nas/BACKUPS_HISTORICOS").is_dir()
+        || Path::new("/srv/nas/BACKUPS_PERMANENTES").is_dir()
+        || Path::new("/srv/nas/unidades").is_dir();
+    if !dedup_marker.is_file() && has_backup_dirs {
+        if Path::new("/run/systemd/system").exists() && Path::new("/run/systemd/private").exists() {
+            let step = vec![
+                "systemd-run".to_string(),
+                "--quiet".to_string(),
+                "--no-block".to_string(),
+                "--collect".to_string(),
+                "--unit=nas-backup-dedup-migration".to_string(),
+                "-p".to_string(),
+                "Nice=19".to_string(),
+                "-p".to_string(),
+                "IOSchedulingClass=idle".to_string(),
+                "/usr/local/bin/nas".to_string(),
+                "backup".to_string(),
+                "deduplicate".to_string(),
+                "--migration".to_string(),
+            ];
+            let _ = run_step(&runner, &step, sudo, 30);
+        } else {
+            let _ = nas_engine::backup_dedup::run_dedup_migration_if_needed(
+                &runner,
+                &nas_engine::backup_dedup::MigrationOptions::default(),
+            );
+        }
+    }
+
     if json {
         print_json(&ApiResponse::ok(
             serde_json::json!({
