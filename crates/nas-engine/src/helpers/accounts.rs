@@ -1,6 +1,6 @@
 //! Helpers para gestión validada de cuentas del sistema y de Samba.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
@@ -189,12 +189,49 @@ fn sync_groups(
 
     let joined: Vec<String> = keep.into_iter().collect();
     let csv = joined.join(",");
-    runner.run(
-        &CommandSpec::new("usermod")
-            .args(["-G", &csv, user])
-            .timeout(Duration::from_secs(20)),
-    )?;
+    runner
+        .run(
+            &CommandSpec::new("usermod")
+                .args(["-G", &csv, user])
+                .timeout(Duration::from_secs(20)),
+        )?
+        .ensure_success()?;
     Ok(())
+}
+
+/// Interpreta `pdbedit -L -w` devolviendo `usuario -> habilitado` (sin bandera `D`).
+pub(crate) fn parse_pdbedit_w(stdout: &str) -> HashMap<String, bool> {
+    let mut map = HashMap::new();
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 5 {
+            let user = parts[0].trim();
+            let flags = parts[4];
+            if !user.is_empty() {
+                map.insert(user.to_string(), !flags.contains('D'));
+            }
+        } else if parts.len() >= 4 {
+            let user = parts[0].trim();
+            let flags = parts[3];
+            if !user.is_empty() {
+                map.insert(user.to_string(), !flags.contains('D'));
+            }
+        }
+    }
+    map
+}
+
+fn samba_user_exists(runner: &Runner, user: &str) -> bool {
+    if let Ok(out) = runner.run(
+        &CommandSpec::new("pdbedit")
+            .args(["-L", "-w"])
+            .timeout(Duration::from_secs(15)),
+    ) {
+        if out.is_success() {
+            return parse_pdbedit_w(&out.stdout).contains_key(user);
+        }
+    }
+    false
 }
 
 fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>) -> NasResult<()> {
@@ -208,17 +245,19 @@ fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>)
     };
 
     if enable {
-        if let Some(pass) = password {
-            if !pass.is_empty() {
-                let spec = CommandSpec::new("smbpasswd")
-                    .args(["-a", "-s", user])
-                    .stdin_secret(SecretInput::new(format!("{pass}\n{pass}\n")))
-                    .timeout(Duration::from_secs(30));
-                let out = runner.run(&spec)?;
-                if !out.is_success() {
-                    return Err(fail("-a", &out));
-                }
+        if let Some(pass) = password.filter(|pass| !pass.is_empty()) {
+            let spec = CommandSpec::new("smbpasswd")
+                .args(["-a", "-s", user])
+                .stdin_secret(SecretInput::new(format!("{pass}\n{pass}\n")))
+                .timeout(Duration::from_secs(30));
+            let out = runner.run(&spec)?;
+            if !out.is_success() {
+                return Err(fail("-a", &out));
             }
+        } else if !samba_user_exists(runner, user) {
+            return Err(NasError::Invalid(format!(
+                "se requiere contraseña para habilitar Samba en '{user}'"
+            )));
         }
         let out = runner.run(
             &CommandSpec::new("smbpasswd")
@@ -228,7 +267,7 @@ fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>)
         if !out.is_success() {
             return Err(fail("-e", &out));
         }
-    } else {
+    } else if samba_user_exists(runner, user) {
         let out = runner.run(
             &CommandSpec::new("smbpasswd")
                 .args(["-d", user])
@@ -257,6 +296,21 @@ fn sync_system_password(runner: &Runner, user: &str, password: &str) -> NasResul
             "chpasswd falló para '{user}': {detail}"
         )));
     }
+    Ok(())
+}
+
+fn rollback_created_user(runner: &Runner, user: &str) {
+    let _ = runner.run(&CommandSpec::new("smbpasswd").args(["-x", user]));
+    let del = runner.run(&CommandSpec::new("userdel").args(["-r", user]));
+    if !matches!(del, Ok(ref out) if out.is_success()) {
+        let _ = runner.run(&CommandSpec::new("userdel").args([user]));
+    }
+}
+
+fn configure_created_user(runner: &Runner, user: &str, args: &CreateUserArgs) -> NasResult<()> {
+    sync_system_password(runner, user, &args.password)?;
+    sync_groups(runner, user, args.admin, args.web, &args.groups)?;
+    sync_samba(runner, user, args.samba, Some(&args.password))?;
     Ok(())
 }
 
@@ -299,9 +353,10 @@ pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> 
         )?
         .ensure_success()?;
 
-    sync_system_password(runner, u, &args.password)?;
-    sync_groups(runner, u, args.admin, args.web, &args.groups)?;
-    sync_samba(runner, u, args.samba, Some(&args.password))?;
+    if let Err(err) = configure_created_user(runner, u, args) {
+        rollback_created_user(runner, u);
+        return Err(err);
+    }
 
     Ok(format!("usuario {u} creado"))
 }
@@ -362,6 +417,20 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
     Ok(format!("usuario {u} actualizado"))
 }
 
+fn toggle_usermod_steps(username: &str, enable: bool) -> Vec<Vec<String>> {
+    if enable {
+        vec![
+            vec!["-e".into(), String::new(), username.into()],
+            vec!["-U".into(), username.into()],
+        ]
+    } else {
+        vec![
+            vec!["-L".into(), username.into()],
+            vec!["-e".into(), "1".into(), username.into()],
+        ]
+    }
+}
+
 /// Activa o suspende una cuenta de usuario.
 pub fn toggle_user(runner: &Runner, username: &str, enable: bool) -> NasResult<String> {
     let u = username.trim();
@@ -373,43 +442,32 @@ pub fn toggle_user(runner: &Runner, username: &str, enable: bool) -> NasResult<S
         ));
     }
 
-    if enable {
-        for args in [vec!["-e", ""], vec!["-U"]] {
-            runner
-                .run(
-                    &CommandSpec::new("usermod")
-                        .args(args)
-                        .timeout(Duration::from_secs(20)),
-                )?
-                .ensure_success()?;
-        }
+    for args in toggle_usermod_steps(u, enable) {
         runner
             .run(
-                &CommandSpec::new("smbpasswd")
-                    .args(["-e", u])
+                &CommandSpec::new("usermod")
+                    .args(args)
                     .timeout(Duration::from_secs(20)),
             )?
             .ensure_success()?;
-        Ok(format!("usuario {u} reactivado"))
-    } else {
-        for args in [vec!["-L"], vec!["-e", "1"]] {
-            runner
-                .run(
-                    &CommandSpec::new("usermod")
-                        .args(args)
-                        .timeout(Duration::from_secs(20)),
-                )?
-                .ensure_success()?;
-        }
-        runner
-            .run(
-                &CommandSpec::new("smbpasswd")
-                    .args(["-d", u])
-                    .timeout(Duration::from_secs(20)),
-            )?
-            .ensure_success()?;
-        Ok(format!("usuario {u} suspendido"))
     }
+
+    if samba_user_exists(runner, u) {
+        let flag = if enable { "-e" } else { "-d" };
+        runner
+            .run(
+                &CommandSpec::new("smbpasswd")
+                    .args([flag, u])
+                    .timeout(Duration::from_secs(20)),
+            )?
+            .ensure_success()?;
+    }
+
+    Ok(if enable {
+        format!("usuario {u} reactivado")
+    } else {
+        format!("usuario {u} suspendido")
+    })
 }
 
 /// Elimina una cuenta de usuario del sistema y de Samba.
@@ -472,5 +530,37 @@ mod tests {
     #[test]
     fn sanitizacion_gecos() {
         assert_eq!(sanitize_gecos("Juan:Pérez\r\n"), "JuanPérez");
+    }
+
+    #[test]
+    fn parsea_salida_pdbedit_w() {
+        let sample = "\
+operador1:1001:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:ABCDEF0123456789:[U          ]:LCT-65000000:
+suspendido:1002:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:ABCDEF0123456789:[DU         ]:LCT-65000000:
+";
+        let map = parse_pdbedit_w(sample);
+        assert_eq!(map.get("operador1"), Some(&true));
+        assert_eq!(map.get("suspendido"), Some(&false));
+        assert_eq!(map.get("inexistente"), None);
+    }
+
+    #[test]
+    fn toggle_usermod_siempre_incluye_usuario() {
+        let enable_steps = toggle_usermod_steps("operador1", true);
+        assert_eq!(
+            enable_steps,
+            vec![
+                vec!["-e".to_string(), String::new(), "operador1".to_string()],
+                vec!["-U".to_string(), "operador1".to_string()],
+            ]
+        );
+        let disable_steps = toggle_usermod_steps("operador1", false);
+        assert_eq!(
+            disable_steps,
+            vec![
+                vec!["-L".to_string(), "operador1".to_string()],
+                vec!["-e".to_string(), "1".to_string(), "operador1".to_string()],
+            ]
+        );
     }
 }
