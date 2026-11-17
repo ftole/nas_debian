@@ -419,6 +419,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             }
         },
         HelperAction::PurgeRecycle { days } => share::purge_recycle(&runner, days)?,
+        HelperAction::BackupDedupMigration => run_backup_dedup_migration_helper(&runner)?,
     };
 
     if json {
@@ -429,6 +430,76 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn run_backup_dedup_migration_helper(runner: &Runner) -> NasResult<String> {
+    #[cfg(unix)]
+    if !is_root() {
+        return Err(NasError::Denied(
+            "se requieren privilegios de superusuario para ejecutar la migración de respaldos"
+                .into(),
+        ));
+    }
+
+    let runners = nas_engine::backup_dedup::repair_runners(runner, Path::new("/usr/local/bin"))?;
+    let marker = Path::new("/var/lib/nas").join(nas_engine::backup_dedup::DEDUP_MIGRATION_MARKER);
+    if marker.is_file() {
+        return Ok(format!(
+            "Runners actualizados ({}); migración de deduplicación ya completada",
+            runners.updated.len()
+        ));
+    }
+
+    let has_backup_dirs = Path::new("/srv/nas/BACKUPS_HISTORICOS").is_dir()
+        || Path::new("/srv/nas/BACKUPS_PERMANENTES").is_dir()
+        || Path::new("/srv/nas/unidades").is_dir();
+    if !has_backup_dirs {
+        return Ok(format!(
+            "Runners actualizados ({}); sin directorios de respaldo para deduplicar",
+            runners.updated.len()
+        ));
+    }
+
+    if Path::new("/run/systemd/system").exists() && Path::new("/run/systemd/private").exists() {
+        let out = runner.run(
+            &nas_exec::CommandSpec::new("systemd-run")
+                .args([
+                    "--quiet",
+                    "--no-block",
+                    "--collect",
+                    "--unit=nas-backup-dedup-migration",
+                    "-p",
+                    "Nice=19",
+                    "-p",
+                    "IOSchedulingClass=idle",
+                    "/usr/local/bin/nas",
+                    "backup",
+                    "deduplicate",
+                    "--migration",
+                ])
+                .timeout(std::time::Duration::from_secs(30)),
+        );
+        return match out {
+            Ok(res) if res.is_success() => Ok(format!(
+                "Runners actualizados ({}); unidad nas-backup-dedup-migration iniciada en segundo plano",
+                runners.updated.len()
+            )),
+            Ok(_) | Err(_) => Ok(format!(
+                "Runners actualizados ({}); migración ya en ejecución o diferida",
+                runners.updated.len()
+            )),
+        };
+    }
+
+    let report = nas_engine::backup_dedup::run_dedup_migration_if_needed(
+        runner,
+        &nas_engine::backup_dedup::MigrationOptions::default(),
+    )?;
+    let hardlinks = report.dedup.as_ref().map_or(0, |d| d.total_hardlinks);
+    Ok(format!(
+        "Runners actualizados ({}); deduplicación ejecutada ({hardlinks} hardlinks)",
+        runners.updated.len()
+    ))
 }
 
 #[cfg(all(test, unix))]
