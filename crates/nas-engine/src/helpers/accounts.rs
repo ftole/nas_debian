@@ -402,6 +402,22 @@ pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> 
 pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> {
     let u = args.username.trim();
     let _uid = ensure_manageable_existing_user(runner, u)?;
+
+    let mut new_password: Option<&str> = None;
+    if let Some(pass) = &args.password {
+        if !pass.is_empty() && pass != "--keep-password" {
+            validate_password(pass)?;
+            new_password = Some(pass.as_str());
+        }
+    }
+
+    for g in &args.groups {
+        let g = g.trim();
+        if !g.is_empty() && !is_valid_group(g) {
+            return Err(NasError::Invalid(format!("grupo inválido: '{g}'")));
+        }
+    }
+
     let is_super = is_superadmin_account(runner, u);
 
     let full = sanitize_gecos(&args.full_name);
@@ -427,12 +443,9 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
         .ensure_success()?;
 
     let mut has_new_password = false;
-    if let Some(pass) = &args.password {
-        if !pass.is_empty() && pass != "--keep-password" {
-            validate_password(pass)?;
-            sync_system_password(runner, u, pass)?;
-            has_new_password = true;
-        }
+    if let Some(pass) = new_password {
+        sync_system_password(runner, u, pass)?;
+        has_new_password = true;
     }
 
     sync_groups(runner, u, args.admin, args.web, &args.groups)?;
@@ -440,11 +453,7 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
         runner,
         u,
         args.samba,
-        if has_new_password {
-            args.password.as_deref()
-        } else {
-            None
-        },
+        if has_new_password { new_password } else { None },
     )?;
 
     Ok(format!("usuario {u} actualizado"))
@@ -584,6 +593,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(err_ctrl.to_string().contains("caracteres de control"));
+    }
+
+    #[test]
+    fn update_user_rechaza_nas_y_contrasena_invalida() {
+        let runner = Runner::new();
+        let err_nas = update_user(
+            &runner,
+            &UpdateUserArgs {
+                username: "nas".into(),
+                full_name: "Nas".into(),
+                password: None,
+                admin: false,
+                web: false,
+                samba: false,
+                groups: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(err_nas.to_string().contains("reservado"));
+
+        let err_root_ctrl = update_user(
+            &runner,
+            &UpdateUserArgs {
+                username: "root".into(),
+                full_name: "Root".into(),
+                password: Some("Clave\n123".into()),
+                admin: false,
+                web: false,
+                samba: false,
+                groups: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(err_root_ctrl.to_string().contains("reservado"));
     }
 
     #[test]
