@@ -160,7 +160,7 @@ fi
 
 if [ -x "$PREFIX/nas" ]; then
     "${SUDO_CMD[@]}" "$PREFIX/nas" backup repair-runners >/dev/null 2>&1 || true
-    if [ ! -f /var/lib/nas/migrations/backup_dedup_v1.done ] && { [ -d /srv/nas/BACKUPS_HISTORICOS ] || [ -d /srv/nas/BACKUPS_PERMANENTES ] || [ -d /srv/nas/unidades ]; }; then
+    if "${SUDO_CMD[@]}" test ! -f /var/lib/nas/migrations/backup_dedup_v1.done && { "${SUDO_CMD[@]}" test -d /srv/nas/BACKUPS_HISTORICOS || "${SUDO_CMD[@]}" test -d /srv/nas/BACKUPS_PERMANENTES || "${SUDO_CMD[@]}" test -d /srv/nas/unidades; }; then
         if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             "${SUDO_CMD[@]}" systemd-run --quiet --no-block --collect --unit=nas-backup-dedup-migration \
                 -p Nice=19 -p IOSchedulingClass=idle \
