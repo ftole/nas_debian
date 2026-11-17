@@ -24,6 +24,7 @@ pub const RESERVED_USERS: &[&str] = &[
     "nobody",
     "nogroup",
     "www-data",
+    "nas",
     "nas-web",
     "sshd",
     "messagebus",
@@ -107,6 +108,21 @@ pub fn sanitize_gecos(name: &str) -> String {
     name.chars()
         .filter(|c| !matches!(c, ':' | '\r' | '\n' | '\0'))
         .collect()
+}
+
+/// Valida que la contraseña cumpla la longitud mínima y carezca de caracteres de control.
+pub fn validate_password(password: &str) -> NasResult<()> {
+    if password.chars().any(char::is_control) {
+        return Err(NasError::Invalid(
+            "la contraseña contiene caracteres de control no permitidos".into(),
+        ));
+    }
+    if password.len() < 6 {
+        return Err(NasError::Invalid(
+            "contraseña demasiado corta (mínimo 6 caracteres)".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Argumentos para crear una cuenta.
@@ -234,6 +250,27 @@ fn samba_user_exists(runner: &Runner, user: &str) -> bool {
     false
 }
 
+fn chpasswd_payload(user: &str, password: &str) -> NasResult<String> {
+    if user.is_empty() || user.contains(':') || user.chars().any(char::is_control) {
+        return Err(NasError::Invalid("nombre de usuario inválido".into()));
+    }
+    if password.chars().any(char::is_control) {
+        return Err(NasError::Invalid(
+            "la contraseña contiene caracteres de control no permitidos".into(),
+        ));
+    }
+    Ok(format!("{user}:{password}"))
+}
+
+fn smbpasswd_payload(password: &str) -> NasResult<String> {
+    if password.chars().any(char::is_control) {
+        return Err(NasError::Invalid(
+            "la contraseña contiene caracteres de control no permitidos".into(),
+        ));
+    }
+    Ok(format!("{password}\n{password}"))
+}
+
 fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>) -> NasResult<()> {
     let fail = |action: &str, output: &nas_exec::CommandOutput| -> NasError {
         let detail = if output.stderr.is_empty() {
@@ -246,11 +283,13 @@ fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>)
 
     if enable {
         if let Some(pass) = password.filter(|pass| !pass.is_empty()) {
+            let payload = smbpasswd_payload(pass)?;
+            let safe_runner = runner.clone().with_secret(pass);
             let spec = CommandSpec::new("smbpasswd")
                 .args(["-a", "-s", user])
-                .stdin_secret(SecretInput::new(format!("{pass}\n{pass}\n")))
+                .stdin_secret(SecretInput::new(payload))
                 .timeout(Duration::from_secs(30));
-            let out = runner.run(&spec)?;
+            let out = safe_runner.run(&spec)?;
             if !out.is_success() {
                 return Err(fail("-a", &out));
             }
@@ -282,10 +321,12 @@ fn sync_samba(runner: &Runner, user: &str, enable: bool, password: Option<&str>)
 
 /// Fija la contraseña de sistema con `chpasswd`; el fallo se propaga.
 fn sync_system_password(runner: &Runner, user: &str, password: &str) -> NasResult<()> {
+    let payload = chpasswd_payload(user, password)?;
+    let safe_runner = runner.clone().with_secret(password);
     let spec = CommandSpec::new("chpasswd")
-        .stdin_secret(SecretInput::new(format!("{user}:{password}\n")))
+        .stdin_secret(SecretInput::new(payload))
         .timeout(Duration::from_secs(30));
-    let out = runner.run(&spec)?;
+    let out = safe_runner.run(&spec)?;
     if !out.is_success() {
         let detail = if out.stderr.is_empty() {
             out.stdout
@@ -322,11 +363,7 @@ pub fn create_user(runner: &Runner, args: &CreateUserArgs) -> NasResult<String> 
             "usuario inválido o reservado del sistema".into(),
         ));
     }
-    if args.password.len() < 6 {
-        return Err(NasError::Invalid(
-            "contraseña demasiado corta (mínimo 6 caracteres)".into(),
-        ));
-    }
+    validate_password(&args.password)?;
 
     if let Ok(out) = runner.run(
         &CommandSpec::new("id")
@@ -392,11 +429,7 @@ pub fn update_user(runner: &Runner, args: &UpdateUserArgs) -> NasResult<String> 
     let mut has_new_password = false;
     if let Some(pass) = &args.password {
         if !pass.is_empty() && pass != "--keep-password" {
-            if pass.len() < 6 {
-                return Err(NasError::Invalid(
-                    "contraseña demasiado corta (mínimo 6 caracteres)".into(),
-                ));
-            }
+            validate_password(pass)?;
             sync_system_password(runner, u, pass)?;
             has_new_password = true;
         }
@@ -501,10 +534,75 @@ mod tests {
         assert!(is_valid_user("juan"));
         assert!(is_valid_user("operador_1"));
         assert!(!is_valid_user("root"));
+        assert!(!is_valid_user("nas"));
         assert!(!is_valid_user("nas-web"));
         assert!(!is_valid_user("systemd-coredump"));
         assert!(!is_valid_user("Juan"));
         assert!(!is_valid_user(""));
+    }
+
+    #[test]
+    fn validacion_de_contrasenas_rechaza_cortas_y_control() {
+        assert!(validate_password("ClaveSegura1!").is_ok());
+        assert!(validate_password("abc:def").is_ok());
+        assert!(validate_password("12345").is_err());
+        assert!(validate_password("Clave\nroot:hack").is_err());
+        assert!(validate_password("Clave\r123").is_err());
+        assert!(validate_password("Clave\x00123").is_err());
+        assert!(validate_password("Clave\t123").is_err());
+    }
+
+    #[test]
+    fn create_user_rechaza_nas_y_contrasena_con_salto() {
+        let runner = Runner::new();
+        let err_nas = create_user(
+            &runner,
+            &CreateUserArgs {
+                username: "nas".into(),
+                full_name: "Operador".into(),
+                password: "ClaveSegura1!".into(),
+                admin: false,
+                web: false,
+                samba: false,
+                groups: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(err_nas.to_string().contains("reservado"));
+
+        let err_ctrl = create_user(
+            &runner,
+            &CreateUserArgs {
+                username: "operador_test".into(),
+                full_name: "Operador".into(),
+                password: "Clave123\nroot:evil".into(),
+                admin: false,
+                web: false,
+                samba: false,
+                groups: vec![],
+            },
+        )
+        .unwrap_err();
+        assert!(err_ctrl.to_string().contains("caracteres de control"));
+    }
+
+    #[test]
+    fn payloads_no_agregan_salto_final_redundante_ni_permiten_inyeccion() {
+        assert_eq!(
+            chpasswd_payload("juan", "Clave123!").unwrap(),
+            "juan:Clave123!"
+        );
+        assert_eq!(
+            smbpasswd_payload("Clave123!").unwrap(),
+            "Clave123!\nClave123!"
+        );
+        assert!(chpasswd_payload("juan", "abc\nroot:evil").is_err());
+        assert!(chpasswd_payload("juan", "abc\r123").is_err());
+        assert!(chpasswd_payload("juan", "abc\x00123").is_err());
+        assert!(chpasswd_payload("juan:root", "Clave123!").is_err());
+        assert!(smbpasswd_payload("abc\n123").is_err());
+        assert!(smbpasswd_payload("abc\r123").is_err());
+        assert!(smbpasswd_payload("abc\x00123").is_err());
     }
 
     #[test]
