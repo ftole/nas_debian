@@ -109,7 +109,7 @@ impl CommandSpec {
         self
     }
 
-    /// Define datos de entrada por `stdin`.
+    /// Define datos de entrada por `stdin` (garantiza un único salto de línea final si falta).
     pub fn stdin_secret(mut self, secret: SecretInput) -> Self {
         self.stdin_data = Some(secret);
         self
@@ -277,7 +277,9 @@ impl Runner {
         if let Some(mut stdin) = child.stdin.take() {
             if let Some(value) = payload {
                 let mut data = value.into_bytes();
-                data.push(b'\n');
+                if !data.ends_with(b"\n") {
+                    data.push(b'\n');
+                }
                 stdin
                     .write_all(&data)
                     .map_err(|e| NasError::io(&spec.program, e))?;
@@ -397,5 +399,40 @@ mod tests {
         let out = runner.run(&spec).expect("ejecución");
         assert!(out.timed_out);
         assert!(!out.is_success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdin_secret_no_duplica_salto_de_linea_final() {
+        let runner = Runner::new();
+        let con_salto = runner
+            .run(
+                &CommandSpec::new("cat")
+                    .preserve_whitespace()
+                    .stdin_secret(SecretInput::new("nas:Clave123\n")),
+            )
+            .expect("ejecución con salto");
+        assert!(con_salto.is_success());
+        assert_eq!(con_salto.stdout, "nas:Clave123\n");
+
+        let doble_linea = runner
+            .run(
+                &CommandSpec::new("cat")
+                    .preserve_whitespace()
+                    .stdin_secret(SecretInput::new("Clave123\nClave123\n")),
+            )
+            .expect("ejecución multilínea");
+        assert!(doble_linea.is_success());
+        assert_eq!(doble_linea.stdout, "Clave123\nClave123\n");
+
+        let sin_salto = runner
+            .run(
+                &CommandSpec::new("cat")
+                    .preserve_whitespace()
+                    .stdin_secret(SecretInput::new("nas:Clave123")),
+            )
+            .expect("ejecución sin salto");
+        assert!(sin_salto.is_success());
+        assert_eq!(sin_salto.stdout, "nas:Clave123\n");
     }
 }
