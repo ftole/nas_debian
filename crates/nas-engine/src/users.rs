@@ -44,6 +44,7 @@ const RESERVED_SYSTEM_USERS: &[&str] = &[
     "nobody",
     "nogroup",
     "www-data",
+    "nas",
     "nas-web",
     "sshd",
     "messagebus",
@@ -179,12 +180,16 @@ users:x:100:empleado1
 asesor:x:1002:1002:Asesor Comercial:/home/asesor:/usr/sbin/nologin
 nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
 nas-web:x:998:998:Panel Web:/var/lib/nas:/usr/sbin/nologin
+nas:x:1004:1006:Operador - Nas:/home/nas:/usr/sbin/nologin
 ";
         let users = parse_passwd(extra);
         let managed = managed_users(&users);
         assert_eq!(managed.len(), 1);
         assert_eq!(managed[0].name, "asesor");
         assert!(is_protected_system_account("root", Some(0)));
+        assert!(is_protected_system_account("nas", None));
+        assert!(is_protected_system_account("nas", Some(1004)));
+        assert!(is_protected_system_account("NAS", Some(1004)));
         assert!(is_protected_system_account("nas-web", Some(1005)));
         assert!(is_protected_system_account("nobody", Some(65534)));
         assert!(!is_protected_system_account("asesor", Some(1002)));
