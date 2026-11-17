@@ -88,7 +88,7 @@ sudo nas deploy apply \
 | `nas diag` | Diagnóstico integral con código de salida significativo para scripts. |
 | `nas storage <subcomando>` | Inventario de discos (mostrando `protected: true` en el disco del SO), particiones y uso de `/srv/nas`. |
 | `nas users <subcomando>` | Listado e inventario de usuarios/grupos del sistema y Samba. |
-| `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución y bitácoras. |
+| `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución, bitácoras, Golden Snapshots, `repair-runners` y `deduplicate`. |
 | `nas audit <subcomando>` | Consulta y verificación criptográfica SHA-256 de la bitácora `nas-audit`. |
 | `nas update <status \| check \| verify \| plan \| apply>` | Consulta de estado, verificación `Ed25519` y actualización atómica A/B desde consola (acepta `--previous <ver>` para rollback automático ante fallo). |
 | `nas uninstall [--yes --purge --scope os]` | Desinstalación controlada (conserva siempre `/srv/nas`). |
@@ -186,6 +186,7 @@ sudo mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
 | **Error `Permission denied (os error 13)` en `/var/lock/nas-update.lock` al usar `sudo nas update apply`** | Un intento previo ejecutado como `nas-web` dejó `/var/lock/nas-update.lock` con propietario `nas-web:nas-web`. | Elimina el bloqueo huérfano (`sudo rm -f /var/lock/nas-update.lock`), ejecuta `sudo nas update apply --repo ftole/nas_debian --yes` y luego `sudo bash /opt/nas_debian/current/packaging/install.sh` para habilitar actualizaciones desde la web (`v0.1.11+`). |
 | **`nginx -t` falla con `bind() to 0.0.0.0:80 failed (13: Permission denied)`** | `nginx -t` se invocó sin privilegios `root`. | Ejecuta `sudo nginx -t` (requiere privilegios de superusuario para probar el socket `:80`/`:443`). |
 | **Cambios locales de desarrollo no se reflejan en el navegador** | Activos embebidos en el binario y caché HTTP de `max-age=300`. | Ejecuta `sudo ./scripts/deploy_local.sh` y recarga con `Ctrl + Shift + R`. |
+| **Snapshots y `FULL_*` consumen espacio múltiple sin deduplicar** | Runners antiguos aplicaban `chmod -R a-w` rompiendo `--link-dest` o había archivos duplicados previos. | Al actualizar/desplegar se reparan los runners y se lanza una única migración en segundo plano (`nas-backup-dedup-migration`, marcador `/var/lib/nas/migrations/backup_dedup_v1.done`). Para inspeccionar o ejecutar manualmente: `sudo nas backup deduplicate --dry-run` y `sudo nas backup deduplicate`. |
 
 ---
 
