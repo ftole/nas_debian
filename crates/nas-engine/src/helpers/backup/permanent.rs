@@ -30,17 +30,35 @@ pub struct PermanentBackupInfo {
 fn dir_stats(path: &Path) -> (u64, u64) {
     let mut files = 0u64;
     let mut bytes = 0u64;
-    if let Ok(entries) = std::fs::read_dir(path) {
+    #[cfg(unix)]
+    let mut seen = std::collections::HashSet::<(u64, u64)>::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    files += 1;
-                    bytes += meta.len();
-                } else if meta.is_dir() {
-                    let (sub_files, sub_bytes) = dir_stats(&entry.path());
-                    files += sub_files;
-                    bytes += sub_bytes;
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_file() {
+                files += 1;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if seen.insert((meta.dev(), meta.ino())) {
+                        bytes += meta.len();
+                    }
                 }
+                #[cfg(not(unix))]
+                {
+                    bytes += meta.len();
+                }
+            } else if meta.is_dir() {
+                stack.push(entry.path());
             }
         }
     }
@@ -192,24 +210,40 @@ pub fn freeze_backup_task(
     // Levantar temporalmente inmutabilidad en el snapshot origen para permitir crear enlaces duros
     let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &latest.to_string_lossy()]));
 
-    // Clonación instantánea mediante Hardlinks (costo 0 bytes extras)
+    // Clonación instantánea mediante Hardlinks (costo 0 bytes extras), o reflink Btrfs si cruza subvolúmenes.
+    let latest_s = latest.to_string_lossy().to_string();
+    let target_s = target_path.to_string_lossy().to_string();
     let cp_res = runner.run(
         &CommandSpec::new("cp")
-            .args([
-                "-al",
-                &latest.to_string_lossy(),
-                &target_path.to_string_lossy(),
-            ])
+            .args(["-al", &latest_s, &target_s])
             .timeout(Duration::from_secs(120)),
     )?;
+    let cp_ok = if cp_res.is_success() {
+        Ok(())
+    } else {
+        let _ = std::fs::remove_dir_all(&target_path);
+        let reflink_res = runner.run(
+            &CommandSpec::new("cp")
+                .args(["-a", "--reflink=always", &latest_s, &target_s])
+                .timeout(Duration::from_secs(120)),
+        )?;
+        if reflink_res.is_success() {
+            Ok(())
+        } else {
+            Err(if cp_res.stderr.is_empty() {
+                reflink_res.stderr
+            } else {
+                cp_res.stderr
+            })
+        }
+    };
 
-    // Restaurar inmutabilidad en el contenedor origen (sin -R para permitir deduplicación)
-    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &latest.to_string_lossy()]));
+    // Restaurar inmutabilidad en el contenedor origen (sin -R ni chmod -R a-w para permitir hardlinks)
+    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &latest_s]));
 
-    if !cp_res.is_success() {
+    if let Err(err) = cp_ok {
         return Err(NasError::Invalid(format!(
-            "error al congelar snapshot vía hardlinks: {}",
-            cp_res.stderr
+            "error al congelar snapshot vía hardlinks/reflink: {err}"
         )));
     }
 
@@ -218,23 +252,21 @@ pub fn freeze_backup_task(
     let info = PermanentBackupInfo {
         task: id.to_string(),
         name: folder_name.clone(),
-        path: target_path.to_string_lossy().to_string(),
+        path: target_s.clone(),
         date: date_str,
         tag: clean_tag,
         size_bytes,
         files_count,
     };
 
-    // Guardar metadatos en el snapshot antes de bloquear escritura
+    // Guardar metadatos en el snapshot antes de bloquear el contenedor con chattr +i
     let meta_file = target_path.join(".freeze_meta.json");
     if let Ok(meta_json) = serde_json::to_string_pretty(&info) {
         let _ = std::fs::write(&meta_file, meta_json);
     }
 
-    // Inmutabilidad: remover permisos de escritura y asegurar con chattr solo el contenedor (sin -R)
-    let _ =
-        runner.run(&CommandSpec::new("chmod").args(["-R", "a-w", &target_path.to_string_lossy()]));
-    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &target_path.to_string_lossy()]));
+    // Inmutabilidad solo en el directorio contenedor (sin -R ni chmod -R a-w para preservar hardlinks en snapshot origen)
+    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &target_s]));
 
     // Registrar en la bitácora de la tarea
     let log_file = format!("/srv/nas/LOGS_BACKUP/backup_{id}.log");
