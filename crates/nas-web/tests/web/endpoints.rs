@@ -381,7 +381,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/users.js",
-            51912,
+            51952,
             &[
                 "renderUsersTableBody",
                 "loadUsersAndGroups",
