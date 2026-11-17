@@ -423,8 +423,25 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
         )));
     };
 
-    let _ = runner.run(&CommandSpec::new("chattr").args(["-R", "-i", &path.to_string_lossy()]));
-    let _ = runner.run(&CommandSpec::new("chmod").args(["-R", "u+w", &path.to_string_lossy()]));
+    let _ = runner.run(
+        &CommandSpec::new("chattr")
+            .args(["-R", "-i", &path.to_string_lossy()])
+            .timeout(Duration::from_secs(600)),
+    );
+    let _ = runner.run(
+        &CommandSpec::new("find")
+            .args([
+                &path.to_string_lossy(),
+                "-type",
+                "d",
+                "-exec",
+                "chmod",
+                "u+w",
+                "{}",
+                "+",
+            ])
+            .timeout(Duration::from_secs(600)),
+    );
     let mut rm_success = false;
     if let Ok(res) = runner.run(&CommandSpec::new("rm").args(["-rf", &path.to_string_lossy()])) {
         if res.is_success() {
