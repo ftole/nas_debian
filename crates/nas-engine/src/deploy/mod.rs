@@ -143,15 +143,23 @@ impl DeployParams {
             .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
         let rest_ok = user_chars
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-        if !(first_ok && rest_ok) || self.admin_user.chars().count() > 32 {
+        if !(first_ok && rest_ok)
+            || self.admin_user.chars().count() > 32
+            || crate::helpers::accounts::RESERVED_USERS.contains(&self.admin_user.as_str())
+        {
             problems.push(format!(
-                "usuario administrador inválido: '{}'",
+                "usuario administrador inválido o reservado: '{}'",
                 self.admin_user
             ));
         }
 
         if let Some(pass) = &self.admin_password {
-            if pass.len() < 6 {
+            if pass.chars().any(char::is_control) {
+                problems.push(
+                    "la contraseña del administrador contiene caracteres de control no permitidos"
+                        .to_string(),
+                );
+            } else if pass.len() < 6 {
                 problems.push(
                     "la contraseña del administrador debe tener al menos 6 caracteres".to_string(),
                 );
@@ -409,6 +417,15 @@ mod tests {
         assert!(problems.iter().any(|p| p.contains("NetBIOS")));
         assert!(problems.iter().any(|p| p.contains("workgroup")));
         assert!(problems.iter().any(|p| p.contains("usuario")));
+
+        let mut reserved = params(ServerRole::Arquivos);
+        reserved.admin_user = "nas".to_string();
+        reserved.admin_password = Some("Clave123\nroot:evil".to_string());
+        let res_problems = reserved.validate();
+        assert!(res_problems.iter().any(|p| p.contains("reservado")));
+        assert!(res_problems
+            .iter()
+            .any(|p| p.contains("caracteres de control")));
     }
 
     #[test]
