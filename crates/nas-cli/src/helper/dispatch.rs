@@ -16,6 +16,32 @@ fn read_stdin_line() -> String {
     buffer.trim_end_matches(['\r', '\n']).to_string()
 }
 
+fn trim_stdin_line(raw: &str) -> String {
+    raw.trim_end_matches(['\r', '\n']).to_string()
+}
+
+fn read_stdin_single_line() -> String {
+    use std::io::BufRead;
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    trim_stdin_line(&line)
+}
+
+#[cfg(unix)]
+fn helper_needs_escape(action: &HelperAction) -> bool {
+    match action {
+        HelperAction::StorageApply { .. } => true,
+        HelperAction::Accounts { action } => !matches!(action, AccountsAction::Status),
+        HelperAction::BackupManage { action } => {
+            matches!(
+                action,
+                BackupManageAction::Test { proto, .. } if proto == "cifs"
+            ) || matches!(action, BackupManageAction::TestCifs { .. })
+        }
+        _ => false,
+    }
+}
+
 #[cfg(unix)]
 fn is_root() -> bool {
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
@@ -36,18 +62,7 @@ fn is_root() -> bool {
 pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
     #[cfg(unix)]
     {
-        let needs_escape = match &action {
-            HelperAction::StorageApply { .. } => true,
-            HelperAction::BackupManage { action } => {
-                matches!(
-                    action,
-                    BackupManageAction::Test { proto, .. } if proto == "cifs"
-                ) || matches!(action, BackupManageAction::TestCifs { .. })
-            }
-            _ => false,
-        };
-
-        if needs_escape
+        if helper_needs_escape(&action)
             && std::env::var("NAS_ESCAPED").as_deref() != Ok("1")
             && is_root()
             && Path::new("/run/systemd/system").exists()
@@ -121,7 +136,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 groups,
             } => {
                 let pass = if password == "-" {
-                    read_stdin_line()
+                    read_stdin_single_line()
                 } else {
                     password
                 };
@@ -153,7 +168,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 groups,
             } => {
                 let pass = if password == "-" {
-                    let s = read_stdin_line();
+                    let s = read_stdin_single_line();
                     if s.is_empty() {
                         None
                     } else {
@@ -408,4 +423,44 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{helper_needs_escape, trim_stdin_line, AccountsAction, HelperAction};
+
+    #[test]
+    fn cuentas_mutantes_escapan_y_status_no() {
+        assert!(helper_needs_escape(&HelperAction::Accounts {
+            action: AccountsAction::CreateUser {
+                username: "operador1".into(),
+                full_name: "Operador".into(),
+                password: "-".into(),
+                admin: "0".into(),
+                web: "1".into(),
+                samba: "0".into(),
+                groups: String::new(),
+            },
+        }));
+        assert!(helper_needs_escape(&HelperAction::Accounts {
+            action: AccountsAction::ToggleUser {
+                username: "operador1".into(),
+                enable: "0".into(),
+            },
+        }));
+        assert!(helper_needs_escape(&HelperAction::Accounts {
+            action: AccountsAction::CreateGroup {
+                group: "grp_ventas".into(),
+            },
+        }));
+        assert!(!helper_needs_escape(&HelperAction::Accounts {
+            action: AccountsAction::Status,
+        }));
+    }
+
+    #[test]
+    fn recorta_saltos_de_linea_en_stdin() {
+        assert_eq!(trim_stdin_line("ClaveSegura1!\r\n"), "ClaveSegura1!");
+        assert_eq!(trim_stdin_line("ClaveSegura1!\n"), "ClaveSegura1!");
+    }
 }
