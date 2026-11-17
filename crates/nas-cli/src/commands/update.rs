@@ -580,8 +580,18 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         return Err(error);
     }
 
-    // Reparar runners obsoletos y programar (una sola vez) la recuperación de deduplicación.
-    let _ = nas_engine::backup_dedup::repair_runners(&runner, Path::new("/usr/local/bin"));
+    // Reparar runners obsoletos con el binario recién instalado y programar (una sola vez)
+    // la recuperación de deduplicación.
+    if Path::new("/usr/local/bin/nas").is_file() {
+        let repair_step = vec![
+            "/usr/local/bin/nas".to_string(),
+            "backup".to_string(),
+            "repair-runners".to_string(),
+        ];
+        let _ = run_step(&runner, &repair_step, sudo, 60);
+    } else {
+        let _ = nas_engine::backup_dedup::repair_runners(&runner, Path::new("/usr/local/bin"));
+    }
     let dedup_marker =
         Path::new("/var/lib/nas").join(nas_engine::backup_dedup::DEDUP_MIGRATION_MARKER);
     let has_backup_dirs = Path::new("/srv/nas/BACKUPS_HISTORICOS").is_dir()
@@ -605,6 +615,14 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
                 "--migration".to_string(),
             ];
             let _ = run_step(&runner, &step, sudo, 30);
+        } else if Path::new("/usr/local/bin/nas").is_file() {
+            let step = vec![
+                "/usr/local/bin/nas".to_string(),
+                "backup".to_string(),
+                "deduplicate".to_string(),
+                "--migration".to_string(),
+            ];
+            let _ = run_step(&runner, &step, sudo, 3600);
         } else {
             let _ = nas_engine::backup_dedup::run_dedup_migration_if_needed(
                 &runner,
