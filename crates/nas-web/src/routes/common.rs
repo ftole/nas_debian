@@ -174,9 +174,11 @@ pub fn configured_superadmin() -> Option<String> {
 }
 
 pub fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
-    let output = Runner::new()
-        .run(&command)
-        .map_err(|error| error.to_string())?;
+    let runner = match &command.stdin_data {
+        Some(secret) => Runner::new().with_secret(secret.expose()),
+        None => Runner::new(),
+    };
+    let output = runner.run(&command).map_err(|error| error.to_string())?;
     if output.is_success() {
         Ok(output.stdout)
     } else {
