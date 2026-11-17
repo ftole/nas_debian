@@ -192,8 +192,8 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
     if [ "$HAS_PERM" != "true" ]; then
         PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_INICIAL"
         if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
-            PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}')
-            PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l)
+            PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}' || true)
+            PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l || true)
             printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"INICIAL","size_bytes":%s,"files_count":%s}}\n' \
                 "$TASK" "FULL_${{DATE_STR}}_INICIAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
             chattr +i "$PERM_DEST" 2>/dev/null || true
@@ -206,8 +206,8 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
             if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
                 PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
                 if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
-                    PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}')
-                    PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l)
+                    PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}' || true)
+                    PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l || true)
                     printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"MENSUAL","size_bytes":%s,"files_count":%s}}\n' \
                         "$TASK" "FULL_${{DATE_STR}}_MENSUAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
                     chattr +i "$PERM_DEST" 2>/dev/null || true
@@ -228,7 +228,7 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
     for ((i = 0; i < TO_REMOVE; i++)); do
         OLD="${{ALL_SNAPS[$i]}}"
         chattr -R -i "$OLD" 2>/dev/null || true
-        chmod -R u+w "$OLD" 2>/dev/null || true
+        find "$OLD" -type d -exec chmod u+w {{}} + 2>/dev/null || true
         if rm -rf -- "$OLD"; then
             log "retención: eliminado $(basename "$OLD")"
         fi
