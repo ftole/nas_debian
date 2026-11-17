@@ -265,3 +265,105 @@ pub fn backup_restore(
     println!("{msg}");
     Ok(ExitCode::SUCCESS)
 }
+
+pub struct DeduplicateCliOptions {
+    pub task: Option<String>,
+    pub runner_dir: PathBuf,
+    pub lock_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub dry_run: bool,
+    pub migration: bool,
+    pub force: bool,
+}
+
+pub fn backup_repair_runners(dir: &Path, json: bool) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let report = nas_engine::backup_dedup::repair_runners(&runner, dir)?;
+
+    if json {
+        print_json(&ApiResponse::ok(&report, "Runners verificados"))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!("REPARACIÓN DE RUNNERS ({})", dir.display());
+    println!("  Inspeccionados : {}", report.inspected);
+    println!("  Actualizados   : {}", report.updated.len());
+    println!("  Sin cambios    : {}", report.already_ok);
+    for path in &report.updated {
+        println!("  -> actualizado: {path}");
+    }
+    for err in &report.errors {
+        eprintln!("  [!] {err}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+pub fn backup_deduplicate(options: DeduplicateCliOptions, json: bool) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let dedup_opts = nas_engine::backup_dedup::DeduplicateOptions {
+        roots: Vec::new(),
+        runner_dir: options.runner_dir,
+        lock_dir: options.lock_dir,
+        log_dir: PathBuf::from("/srv/nas/LOGS_BACKUP"),
+        task_filter: options.task,
+        dry_run: options.dry_run,
+        use_flock: true,
+    };
+
+    if options.migration {
+        let mig_opts = nas_engine::backup_dedup::MigrationOptions {
+            state_dir: options.state_dir,
+            dedup: dedup_opts,
+            force: options.force,
+        };
+        let report = nas_engine::backup_dedup::run_dedup_migration_if_needed(&runner, &mig_opts)?;
+        if json {
+            print_json(&ApiResponse::ok(&report, "Migración de deduplicación"))?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        if report.already_completed {
+            println!("Migración de deduplicación ya aplicada previamente (omitida).");
+        } else if let Some(d) = &report.dedup {
+            println!(
+                "Migración completada: {} hardlinks, {} reflinks, {} permisos reparados, {} bytes recuperados",
+                d.total_hardlinks,
+                d.total_reflinks,
+                d.total_permissions_repaired,
+                d.total_bytes_reclaimed
+            );
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let report = nas_engine::backup_dedup::deduplicate_backups(&runner, &dedup_opts)?;
+    if json {
+        print_json(&ApiResponse::ok(&report, "Deduplicación de respaldos"))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    println!(
+        "DEDUPLICACIÓN DE RESPALDOS{}",
+        if report.dry_run { " (SIMULACIÓN)" } else { "" }
+    );
+    for task in &report.tasks {
+        if task.skipped_locked {
+            println!("  {} : omitida (respaldo activo en curso)", task.task);
+        } else {
+            println!(
+                "  {} : {} snapshots, {} archivos, {} permisos, {} hardlinks, {} reflinks, {} bytes recuperados",
+                task.task,
+                task.snapshots_scanned,
+                task.files_scanned,
+                task.permissions_repaired,
+                task.hardlinks_created,
+                task.reflinks_created,
+                task.bytes_reclaimed
+            );
+        }
+    }
+    println!(
+        "Total: {} hardlinks, {} reflinks, {} bytes recuperados",
+        report.total_hardlinks, report.total_reflinks, report.total_bytes_reclaimed
+    );
+    Ok(ExitCode::SUCCESS)
+}
