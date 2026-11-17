@@ -279,7 +279,7 @@ function updateUsersKpis(users, groups) {
   const kpiTotalDesc = document.getElementById('usr-kpi-total-desc');
   if (kpiTotalDesc) kpiTotalDesc.textContent = descParts.join(' · ') || 'Cuentas Linux / Samba';
 
-  const activeCount = uList.filter(u => (u.samba_enabled ?? u.enabled) !== false).length;
+  const activeCount = uList.filter(u => (u.enabled ?? u.samba_enabled) !== false).length;
   const blockedCount = uList.length - activeCount;
 
   const kpiActive = document.getElementById('usr-kpi-active');
@@ -333,7 +333,7 @@ function updateUserChipCounters(users) {
   if (cStandard) cStandard.textContent = String(uList.filter(u => !u.is_admin && !u.can_web).length);
 
   const cBlocked = document.getElementById('chip-count-blocked');
-  if (cBlocked) cBlocked.textContent = String(uList.filter(u => (u.samba_enabled ?? u.enabled) === false).length);
+  if (cBlocked) cBlocked.textContent = String(uList.filter(u => (u.enabled ?? u.samba_enabled) === false).length);
 
   const cSamba = document.getElementById('chip-count-samba');
   if (cSamba) cSamba.textContent = String(uList.filter(u => !!u.is_samba).length);
@@ -414,8 +414,8 @@ function sortUsersTable(col) {
       valB = score(b);
       return _usersSortAsc ? (valB - valA) : (valA - valB);
     } else if (col === 'status') {
-      valA = (a.samba_enabled ?? a.enabled) ? 1 : 0;
-      valB = (b.samba_enabled ?? b.enabled) ? 1 : 0;
+      valA = (a.enabled ?? a.samba_enabled) ? 1 : 0;
+      valB = (b.enabled ?? b.samba_enabled) ? 1 : 0;
       return _usersSortAsc ? (valB - valA) : (valA - valB);
     } else {
       valA = (a.username || '').toLowerCase();
@@ -440,7 +440,7 @@ function renderUsersTableBody() {
       : (u.is_admin
         ? '<span class="badge badge-warn">Admin</span>'
         : (u.can_web ? '<span class="badge badge-blue">Operador</span>' : '<span class="badge badge-gray">Estándar</span>'));
-    const netEnabled = !!(u.samba_enabled ?? u.enabled);
+    const netEnabled = (u.enabled ?? u.samba_enabled) !== false;
     const canManage = !isProtected && (isAdminCaller || !u.is_admin);
 
     const shellBadge = (u.shell && u.shell.includes('nologin'))
