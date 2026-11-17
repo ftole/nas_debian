@@ -49,6 +49,54 @@ async fn usuarios_valida_nombres_y_privilegios() {
     let response = app
         .clone()
         .oneshot(post_json(
+            "/api/users",
+            &cookie,
+            r#"{"username":"nas","password":"ClaveSegura1!","groups":[]}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    for bad_pass in [
+        r#"{"username":"operador_prueba","password":"Clave123\nroot:hack","groups":[]}"#,
+        r#"{"username":"operador_prueba","password":"Clave123\r123","groups":[]}"#,
+        r#"{"username":"operador_prueba","password":"Clave123\u0000123","groups":[]}"#,
+    ] {
+        let response = app
+            .clone()
+            .oneshot(post_json("/api/users", &cookie, bad_pass))
+            .await
+            .expect("respuesta");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let response_upd = app
+            .clone()
+            .oneshot(post_json("/api/users/update", &cookie, bad_pass))
+            .await
+            .expect("respuesta");
+        assert_eq!(response_upd.status(), StatusCode::BAD_REQUEST);
+    }
+
+    for endpoint in [
+        "/api/users/update",
+        "/api/users/toggle",
+        "/api/users/delete",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                endpoint,
+                &cookie,
+                r#"{"username":"nas","enabled":false}"#,
+            ))
+            .await
+            .expect("respuesta");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
             "/api/groups",
             &cookie,
             r#"{"name":"grupo invalido con espacios"}"#,
