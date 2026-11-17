@@ -1,5 +1,7 @@
 mod groups;
 
+use std::collections::HashMap;
+
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
@@ -107,6 +109,51 @@ pub fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, Str
     super::common::run_nas_helper("accounts", args, password, 60)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AccountRuntimeStatus {
+    enabled: bool,
+    is_samba: bool,
+    samba_enabled: bool,
+}
+
+fn parse_accounts_status_tsv(tsv: &str) -> HashMap<String, AccountRuntimeStatus> {
+    let mut map = HashMap::new();
+    for line in tsv.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 4 {
+            let username = parts[0].trim();
+            if !username.is_empty() {
+                let enabled = parts[1].trim() == "1";
+                let is_samba = parts[2].trim() == "1";
+                let samba_enabled = is_samba && parts[3].trim() == "1";
+                map.insert(
+                    username.to_string(),
+                    AccountRuntimeStatus {
+                        enabled,
+                        is_samba,
+                        samba_enabled,
+                    },
+                );
+            }
+        } else if parts.len() == 3 {
+            let username = parts[0].trim();
+            if !username.is_empty() {
+                let enabled = parts[1].trim() == "1";
+                let samba_enabled = parts[2].trim() == "1";
+                map.insert(
+                    username.to_string(),
+                    AccountRuntimeStatus {
+                        enabled,
+                        is_samba: samba_enabled,
+                        samba_enabled,
+                    },
+                );
+            }
+        }
+    }
+    map
+}
+
 /// Usuarios administrables (formato que consume `app.js`).
 pub async fn users(
     _user: crate::extractors::AuthenticatedUser,
@@ -117,22 +164,31 @@ pub async fn users(
         let (mut users, groups) = nas_engine::users::load_local();
         users.retain(|user| !user.system);
 
-        let samba_users = Runner::new()
-            .run(
-                &nas_exec::CommandSpec::new("pdbedit")
-                    .args(["-L", "-s"])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(15)),
-            )
+        let status_map = run_accounts(&["status"], None)
             .ok()
-            .map(|output| {
-                output
-                    .stdout
-                    .lines()
-                    .filter_map(|line| line.split(':').next().map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            .map(|tsv| parse_accounts_status_tsv(&tsv))
+            .filter(|map| !map.is_empty());
+
+        let fallback_samba = if status_map.is_none() {
+            Runner::new()
+                .run(
+                    &nas_exec::CommandSpec::new("pdbedit")
+                        .args(["-L", "-s"])
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(15)),
+                )
+                .ok()
+                .map(|output| {
+                    output
+                        .stdout
+                        .lines()
+                        .filter_map(|line| line.split(':').next().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         let list: Vec<serde_json::Value> = users
             .into_iter()
@@ -146,7 +202,17 @@ pub async fn users(
                 let is_superadmin = role.as_deref() == Some("superadmin");
                 let is_admin = matches!(role.as_deref(), Some("admin") | Some("superadmin"));
                 let can_web = role.is_some();
-                let is_samba = samba_users.iter().any(|name| name == &user.name);
+                let runtime = status_map
+                    .as_ref()
+                    .and_then(|map| map.get(&user.name).copied())
+                    .unwrap_or_else(|| {
+                        let in_samba = fallback_samba.iter().any(|name| name == &user.name);
+                        AccountRuntimeStatus {
+                            enabled: true,
+                            is_samba: in_samba,
+                            samba_enabled: in_samba,
+                        }
+                    });
                 serde_json::json!({
                     "username": user.name,
                     "full_name": user.full_name,
@@ -157,9 +223,9 @@ pub async fn users(
                     "is_admin": is_admin,
                     "is_superadmin": is_superadmin,
                     "can_web": can_web,
-                    "samba_enabled": is_samba,
-                    "is_samba": is_samba,
-                    "enabled": true,
+                    "samba_enabled": runtime.samba_enabled,
+                    "is_samba": runtime.is_samba,
+                    "enabled": runtime.enabled,
                 })
             })
             .collect();
@@ -202,6 +268,14 @@ pub async fn user_create(
     let password = body.password.clone();
 
     let result = tokio::task::spawn_blocking(move || {
+        let hash = if can_web {
+            Some(
+                crate::Auth::hash_password(&password)
+                    .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
+            )
+        } else {
+            None
+        };
         run_accounts(
             &[
                 "create-user",
@@ -215,11 +289,6 @@ pub async fn user_create(
             ],
             Some(&password),
         )?;
-        let hash = if can_web {
-            crate::Auth::hash_password(&password).ok()
-        } else {
-            None
-        };
         Ok::<_, String>(hash)
     })
     .await
@@ -228,15 +297,30 @@ pub async fn user_create(
     match result {
         Ok(maybe_hash) => {
             if can_web {
-                if let Some(hash) = maybe_hash {
-                    let role = if body.is_superadmin {
-                        "superadmin"
-                    } else if body.is_admin {
-                        "admin"
-                    } else {
-                        "operator"
-                    };
-                    let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+                let Some(hash) = maybe_hash else {
+                    let rollback_user = body.username.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = run_accounts(&["delete-user", &rollback_user], None);
+                    })
+                    .await;
+                    return server_error("no se pudo generar el hash de acceso web");
+                };
+                let role = if body.is_superadmin {
+                    "superadmin"
+                } else if body.is_admin {
+                    "admin"
+                } else {
+                    "operator"
+                };
+                if let Err(err) = state.auth.db().upsert_user(&body.username, &hash, role) {
+                    let rollback_user = body.username.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = run_accounts(&["delete-user", &rollback_user], None);
+                    })
+                    .await;
+                    return server_error(&format!(
+                        "no se pudo registrar el acceso web en SQLite: {err}"
+                    ));
                 }
             }
             audit_ip(
@@ -314,7 +398,13 @@ pub async fn user_update(
             ],
             secret,
         )?;
-        let web_hash = hash_password.and_then(|pw| crate::Auth::hash_password(&pw).ok());
+        let web_hash = match hash_password {
+            Some(pw) => Some(
+                crate::Auth::hash_password(&pw)
+                    .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
+            ),
+            None => None,
+        };
         Ok::<_, String>(web_hash)
     })
     .await
@@ -332,16 +422,38 @@ pub async fn user_update(
             if can_web {
                 if !body.password.is_empty() {
                     if let Some(hash) = web_hash {
-                        let _ = state.auth.db().upsert_user(&body.username, &hash, role);
+                        if let Err(err) = state.auth.db().upsert_user(&body.username, &hash, role) {
+                            return server_error(&format!(
+                                "no se pudo actualizar el acceso web en SQLite: {err}"
+                            ));
+                        }
                     }
-                } else if let Ok(Some(existing_hash)) = state.auth.db().user_hash(&body.username) {
-                    let _ = state
-                        .auth
-                        .db()
-                        .upsert_user(&body.username, &existing_hash, role);
+                } else {
+                    match state.auth.db().user_hash(&body.username) {
+                        Ok(Some(existing_hash)) => {
+                            if let Err(err) =
+                                state
+                                    .auth
+                                    .db()
+                                    .upsert_user(&body.username, &existing_hash, role)
+                            {
+                                return server_error(&format!(
+                                    "no se pudo actualizar el rol web en SQLite: {err}"
+                                ));
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            return server_error(&format!(
+                                "no se pudo consultar el acceso web en SQLite: {err}"
+                            ));
+                        }
+                    }
                 }
-            } else {
-                let _ = state.auth.db().delete_user(&body.username);
+            } else if let Err(err) = state.auth.db().delete_user(&body.username) {
+                return server_error(&format!(
+                    "no se pudo revocar el acceso web en SQLite: {err}"
+                ));
             }
             if !body.password.is_empty() {
                 let _ = state.auth.db().delete_user_sessions(&body.username);
@@ -433,7 +545,11 @@ pub async fn user_delete(
 
     match result {
         Ok(_) => {
-            let _ = state.auth.db().delete_user(&body.username);
+            if let Err(err) = state.auth.db().delete_user(&body.username) {
+                return server_error(&format!(
+                    "cuenta eliminada del sistema, pero falló SQLite: {err}"
+                ));
+            }
             audit_ip(
                 &state,
                 &headers,
@@ -464,4 +580,52 @@ pub fn router() -> Router<crate::AppState> {
         .route("/api/groups", get(groups).post(group_create))
         .route("/api/groups/rename", post(group_rename))
         .route("/api/groups/delete", post(group_delete))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_accounts_status_tsv, AccountRuntimeStatus};
+
+    #[test]
+    fn parsea_tsv_de_estado_cuatro_y_tres_columnas() {
+        let sample = "\
+operador1\t1\t0\t0
+empleado1\t1\t1\t1
+suspendido\t0\t1\t0
+legado\t1\t0
+";
+        let map = parse_accounts_status_tsv(sample);
+        assert_eq!(
+            map.get("operador1"),
+            Some(&AccountRuntimeStatus {
+                enabled: true,
+                is_samba: false,
+                samba_enabled: false,
+            })
+        );
+        assert_eq!(
+            map.get("empleado1"),
+            Some(&AccountRuntimeStatus {
+                enabled: true,
+                is_samba: true,
+                samba_enabled: true,
+            })
+        );
+        assert_eq!(
+            map.get("suspendido"),
+            Some(&AccountRuntimeStatus {
+                enabled: false,
+                is_samba: true,
+                samba_enabled: false,
+            })
+        );
+        assert_eq!(
+            map.get("legado"),
+            Some(&AccountRuntimeStatus {
+                enabled: true,
+                is_samba: false,
+                samba_enabled: false,
+            })
+        );
+    }
 }
