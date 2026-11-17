@@ -82,6 +82,9 @@ pub enum HelperAction {
         #[arg(long, default_value_t = 15)]
         days: u32,
     },
+    /// Repara runners y lanza (una sola vez) la migración de deduplicación de respaldos.
+    #[command(alias = "backup_dedup_migration")]
+    BackupDedupMigration,
 }
 
 /// Subcomandos de gestión de cuentas (`nas helper accounts`).
