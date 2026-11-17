@@ -18,8 +18,9 @@ pub use backup::{backup_row, backup_row_with_metrics};
 pub use status::classify_backup_status;
 pub use storage::{
     calculate_destination_disk, calculate_dirs_combined_size_ex, calculate_single_dir_size_ex,
-    calculate_task_size, calculate_task_size_ex, calculate_task_storage, task_storage_with_cache,
-    BackupDiskMetrics, TaskStorageSummary, SIZE_CACHE_TTL_SECS,
+    calculate_task_size, calculate_task_size_ex, calculate_task_storage,
+    invalidate_task_storage_cache, task_storage_with_cache, BackupDiskMetrics, TaskStorageSummary,
+    SIZE_CACHE_TTL_SECS,
 };
 
 /// Etiquetas legibles de los servicios del panel.
