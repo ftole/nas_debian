@@ -68,11 +68,18 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
     let password = if let Some(p) = &request.password {
         Some(p.clone())
     } else if request.password_stdin {
+        use std::io::Read;
         let mut buffer = String::new();
         std::io::stdin()
-            .read_line(&mut buffer)
+            .lock()
+            .take(8192)
+            .read_to_string(&mut buffer)
             .map_err(|e| NasError::io("stdin", e))?;
-        let trimmed = buffer.trim_end_matches(['\r', '\n']).to_string();
+        let trimmed = buffer
+            .strip_suffix("\r\n")
+            .or_else(|| buffer.strip_suffix('\n'))
+            .unwrap_or(&buffer)
+            .to_string();
         if !trimmed.is_empty() {
             Some(trimmed)
         } else {
