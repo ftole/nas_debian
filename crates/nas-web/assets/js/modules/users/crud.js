@@ -149,7 +149,7 @@ function openEditUser(username) {
   document.getElementById('edit-user-uname').value = username;
   document.getElementById('edit-user-fullname').value = u.full_name || '';
   document.getElementById('edit-user-pass').value = '';
-  document.getElementById('edit-user-samba-enabled').checked = !!(u.samba_enabled ?? u.enabled);
+  document.getElementById('edit-user-samba-enabled').checked = !!(u.is_samba ? (u.samba_enabled !== false) : false);
 
   // Determinar rol
   let userRole = 'standard';
@@ -291,7 +291,7 @@ async function addGroupMember() {
       body: JSON.stringify({ username, group: _activeGroup, action: 'add' }),
     });
     showToast(`${username} añadido a ${_activeGroup}.`, 'success');
-    loadUsersAndGroups();
+    await loadUsersAndGroups();
     openGroupMembers(_activeGroup);
   } catch (e) {
     // Ya mostrado
@@ -319,7 +319,7 @@ async function removeGroupMember(username) {
           body: JSON.stringify({ username, group: _activeGroup, action: 'remove' }),
         });
         showToast(`${username} quitado de ${_activeGroup}.`, 'success');
-        loadUsersAndGroups();
+        await loadUsersAndGroups();
         openGroupMembers(_activeGroup);
       } catch (e) {
         // Ya mostrado por apiFetch
