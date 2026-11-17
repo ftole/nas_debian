@@ -54,15 +54,40 @@ fn helper_share_acl_rechaza_rutas_invalidas() {
 
 #[test]
 fn helper_accounts_rechaza_usuarios_reservados() {
+    for reserved in ["root", "nas", "nas-web"] {
+        let output = nas()
+            .args([
+                "--json",
+                "helper",
+                "accounts",
+                "create-user",
+                reserved,
+                "Cuenta Reservada",
+                "ClaveSegura1!",
+            ])
+            .output()
+            .expect("ejecuta");
+        assert!(!output.status.success());
+        let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+        assert_eq!(payload["success"], false);
+        assert!(payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("inválido o reservado"));
+    }
+}
+
+#[test]
+fn helper_accounts_rechaza_contrasena_con_salto_de_linea() {
     let output = nas()
         .args([
             "--json",
             "helper",
             "accounts",
             "create-user",
-            "root",
-            "Super",
-            "123456",
+            "operador_prueba",
+            "Prueba",
+            "Clave123\nroot:hack",
         ])
         .output()
         .expect("ejecuta");
@@ -72,7 +97,7 @@ fn helper_accounts_rechaza_usuarios_reservados() {
     assert!(payload["error"]
         .as_str()
         .unwrap()
-        .contains("inválido o reservado"));
+        .contains("caracteres de control"));
 }
 
 #[test]
