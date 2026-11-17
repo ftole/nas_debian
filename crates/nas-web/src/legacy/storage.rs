@@ -1,7 +1,9 @@
 //! Cálculo de métricas y tamaños de almacenamiento para tareas de respaldo con caché TTL.
 
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nas_exec::Runner;
 
@@ -29,16 +31,16 @@ pub struct BackupDiskMetrics {
 }
 
 /// Resuelve una ruta existente subiendo por los ancestros si el directorio no existe aún.
-fn resolve_existing_path(dest_root: &str) -> &std::path::Path {
-    let mut path = std::path::Path::new(dest_root);
+fn resolve_existing_path(dest_root: &str) -> &Path {
+    let mut path = Path::new(dest_root);
     while !path.exists() {
         if let Some(parent) = path.parent() {
             if parent.as_os_str().is_empty() {
-                return std::path::Path::new("/");
+                return Path::new("/");
             }
             path = parent;
         } else {
-            return std::path::Path::new("/");
+            return Path::new("/");
         }
     }
     path
@@ -51,7 +53,7 @@ pub fn calculate_destination_disk(dest_root: &str) -> BackupDiskMetrics {
     let runner = Runner::new();
     let spec = nas_exec::CommandSpec::new("df")
         .args(["-Pk", check_path_str.as_ref()])
-        .timeout(std::time::Duration::from_millis(1500));
+        .timeout(Duration::from_millis(1500));
 
     if let Ok(out) = runner.run(&spec) {
         if out.is_success() {
@@ -98,12 +100,20 @@ pub struct TaskStorageSummary {
 }
 
 /// Tiempo de vida en segundos de la caché de tamaño de almacenamiento.
-pub const SIZE_CACHE_TTL_SECS: u64 = 60;
+pub const SIZE_CACHE_TTL_SECS: u64 = 300;
 
-fn storage_cache() -> &'static Mutex<std::collections::HashMap<String, TaskStorageSummary>> {
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, TaskStorageSummary>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+const INITIAL_DU_TIMEOUT_SECS: u64 = 15;
+const BACKGROUND_DU_TIMEOUT_SECS: u64 = 180;
+const FALLBACK_MAX_ENTRIES: usize = 20_000;
+
+fn storage_cache() -> &'static Mutex<HashMap<String, TaskStorageSummary>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, TaskStorageSummary>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn in_flight_refreshes() -> &'static Mutex<HashSet<String>> {
+    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 fn now_epoch() -> u64 {
@@ -113,11 +123,12 @@ fn now_epoch() -> u64 {
         .unwrap_or(0)
 }
 
-fn cached_task_storage(task_id: &str) -> Option<TaskStorageSummary> {
+fn get_cached_entry(task_id: &str) -> Option<(TaskStorageSummary, bool)> {
     let cache = storage_cache().lock().ok()?;
-    let entry = cache.get(task_id)?;
-    let fresh = now_epoch().saturating_sub(entry.computed_at_epoch) < SIZE_CACHE_TTL_SECS;
-    fresh.then_some(*entry)
+    let entry = *cache.get(task_id)?;
+    let fresh = entry.computed_at_epoch > 0
+        && now_epoch().saturating_sub(entry.computed_at_epoch) < SIZE_CACHE_TTL_SECS;
+    Some((entry, fresh))
 }
 
 fn store_task_storage(task_id: &str, summary: TaskStorageSummary) {
@@ -126,8 +137,92 @@ fn store_task_storage(task_id: &str, summary: TaskStorageSummary) {
     }
 }
 
-/// Calcula el tamaño de un directorio individual en bytes mediante `du -sb`.
-pub fn calculate_single_dir_size_ex(dir: &std::path::Path) -> (u64, bool) {
+/// Invalida la caché de almacenamiento de una tarea tras congelar o eliminar respaldos.
+pub fn invalidate_task_storage_cache(task_id: &str) {
+    if let Ok(mut cache) = storage_cache().lock() {
+        cache.remove(task_id);
+    }
+}
+
+fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
+    let id = task.id.clone();
+    {
+        let Ok(mut set) = in_flight_refreshes().lock() else {
+            return;
+        };
+        if !set.insert(id.clone()) {
+            return;
+        }
+    }
+
+    std::thread::Builder::new()
+        .name(format!("storage-refresh-{id}"))
+        .spawn(move || {
+            let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
+            store_task_storage(&task.id, fresh);
+            if let Ok(mut set) = in_flight_refreshes().lock() {
+                set.remove(&id);
+            }
+        })
+        .ok();
+}
+
+/// Recorre múltiples directorios deduplicando por `(dev, ino)` con un límite de entradas.
+fn walk_size_dedup_bounded(dirs: &[PathBuf], physical_blocks: bool, max_entries: usize) -> u64 {
+    let mut total = 0u64;
+    let mut count = 0usize;
+    #[cfg(unix)]
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
+    let mut stack: Vec<PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            count += 1;
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else if meta.is_file() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if seen.insert((meta.dev(), meta.ino())) {
+                        let sz = if physical_blocks {
+                            meta.blocks().saturating_mul(512)
+                        } else {
+                            meta.len()
+                        };
+                        total = total.saturating_add(sz);
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = physical_blocks;
+                    total = total.saturating_add(meta.len());
+                }
+            }
+            if count >= max_entries {
+                return total;
+            }
+        }
+    }
+    total
+}
+
+fn parse_du_total_bytes(stdout: &str) -> Option<u64> {
+    let last_line = stdout.lines().rev().find(|l| !l.trim().is_empty())?;
+    let bytes_str = last_line.split_whitespace().next()?;
+    bytes_str.parse::<u64>().ok()
+}
+
+fn calculate_single_dir_size_with_timeout(dir: &Path, timeout_secs: u64) -> (u64, bool) {
     if !dir.is_dir() {
         return (0, true);
     }
@@ -135,72 +230,80 @@ pub fn calculate_single_dir_size_ex(dir: &std::path::Path) -> (u64, bool) {
     let runner = Runner::new();
     let spec = nas_exec::CommandSpec::new("du")
         .args(["-sb", &dir.to_string_lossy()])
-        .timeout(std::time::Duration::from_secs(15));
+        .timeout(Duration::from_secs(timeout_secs));
 
     if let Ok(out) = runner.run(&spec) {
-        if let Some(first_line) = out.stdout.lines().next() {
-            if let Some(bytes_str) = first_line.split_whitespace().next() {
-                if let Ok(bytes) = bytes_str.parse::<u64>() {
-                    return (bytes, out.is_success());
-                }
-            }
+        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
+            return (bytes, out.is_success());
         }
     }
 
-    let approx = crate::files::dir_size_recursive_bounded(dir, 5000);
+    let approx = walk_size_dedup_bounded(&[dir.to_path_buf()], false, FALLBACK_MAX_ENTRIES);
     (approx, false)
 }
 
-/// Calcula el espacio físico consolidado ocupado en disco por múltiples directorios mediante `du -scb`.
-pub fn calculate_dirs_combined_size_ex(dirs: &[std::path::PathBuf]) -> (u64, bool) {
+/// Calcula el tamaño de un directorio individual en bytes mediante `du -sb`.
+pub fn calculate_single_dir_size_ex(dir: &Path) -> (u64, bool) {
+    calculate_single_dir_size_with_timeout(dir, INITIAL_DU_TIMEOUT_SECS)
+}
+
+fn calculate_dirs_combined_size_with_timeout(dirs: &[PathBuf], timeout_secs: u64) -> (u64, bool) {
     if dirs.is_empty() {
         return (0, true);
     }
-    if dirs.len() == 1 {
-        return calculate_single_dir_size_ex(&dirs[0]);
-    }
 
     let runner = Runner::new();
-    let mut args = vec!["-scb".to_string()];
+    // Usar `-sc -B1` (bloques físicos reales en bytes, deduplicados por inodo,
+    // reflejando compresión Btrfs zstd:3 y archivos dispersos).
+    let mut args = vec!["-sc".to_string(), "-B1".to_string()];
     for d in dirs {
         args.push(d.to_string_lossy().to_string());
     }
 
     let spec = nas_exec::CommandSpec::new("du")
         .args(args)
-        .timeout(std::time::Duration::from_secs(20));
+        .timeout(Duration::from_secs(timeout_secs));
 
     if let Ok(out) = runner.run(&spec) {
-        if let Some(last_line) = out.stdout.lines().rev().find(|l| !l.trim().is_empty()) {
-            if let Some(bytes_str) = last_line.split_whitespace().next() {
-                if let Ok(bytes) = bytes_str.parse::<u64>() {
-                    return (bytes, out.is_success());
-                }
-            }
+        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
+            return (bytes, out.is_success());
         }
     }
 
-    let mut sum = 0u64;
-    let mut all_ok = true;
+    // Fallback a `-scb` solo si `-B1` no estuviera disponible (p. ej. du no GNU).
+    let mut compat_args = vec!["-scb".to_string()];
     for d in dirs {
-        let (b, ok) = calculate_single_dir_size_ex(d);
-        sum = sum.saturating_add(b);
-        if !ok {
-            all_ok = false;
+        compat_args.push(d.to_string_lossy().to_string());
+    }
+    if let Ok(out) = runner.run(
+        &nas_exec::CommandSpec::new("du")
+            .args(compat_args)
+            .timeout(Duration::from_secs(timeout_secs)),
+    ) {
+        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
+            return (bytes, out.is_success());
         }
     }
-    (sum, all_ok)
+
+    let approx = walk_size_dedup_bounded(dirs, true, FALLBACK_MAX_ENTRIES);
+    (approx, false)
 }
 
-/// Calcula las métricas de almacenamiento de una tarea considerando tanto la capacidad
-/// del último respaldo completo (snapshot o full) como el espacio físico consolidado en disco.
-pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStorageSummary {
+/// Calcula el espacio físico consolidado ocupado en disco por múltiples directorios mediante `du -sc -B1`.
+pub fn calculate_dirs_combined_size_ex(dirs: &[PathBuf]) -> (u64, bool) {
+    calculate_dirs_combined_size_with_timeout(dirs, 20)
+}
+
+fn calculate_task_storage_with_timeout(
+    task: &nas_engine::tasks::BackupTask,
+    timeout_secs: u64,
+) -> TaskStorageSummary {
     let hist_dir = task.task_dir();
     let s = hist_dir.to_string_lossy();
     let perm_dir = if s.contains("BACKUPS_HISTORICOS") {
-        std::path::PathBuf::from(s.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES"))
+        PathBuf::from(s.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES"))
     } else {
-        std::path::PathBuf::from(format!("/srv/nas/BACKUPS_PERMANENTES/{}", task.id))
+        PathBuf::from(format!("/srv/nas/BACKUPS_PERMANENTES/{}", task.id))
     };
 
     // 1. Encontrar todos los candidatos a respaldo completo (snapshots e inmutables FULL)
@@ -230,12 +333,12 @@ pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStora
         }
     }
 
-    // 2. Determinar la capacidad del respaldo completo más reciente
+    // 2. Determinar la capacidad lógica del respaldo completo más reciente
     let (full_size_bytes, full_complete) = if !candidates.is_empty() {
         candidates.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-        calculate_single_dir_size_ex(&candidates[0])
+        calculate_single_dir_size_with_timeout(&candidates[0], timeout_secs)
     } else if hist_dir.is_dir() {
-        calculate_single_dir_size_ex(&hist_dir)
+        calculate_single_dir_size_with_timeout(&hist_dir, timeout_secs)
     } else {
         (0, true)
     };
@@ -250,7 +353,7 @@ pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStora
     }
 
     let (disk_usage_bytes, disk_complete) = if !existing_dirs.is_empty() {
-        calculate_dirs_combined_size_ex(&existing_dirs)
+        calculate_dirs_combined_size_with_timeout(&existing_dirs, timeout_secs)
     } else {
         (0, true)
     };
@@ -274,29 +377,104 @@ pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStora
     }
 }
 
-/// Obtiene el resumen de almacenamiento de una tarea respetando la caché en memoria.
+/// Calcula las métricas de almacenamiento de una tarea considerando tanto la capacidad
+/// del último respaldo completo (snapshot o full) como el espacio físico consolidado en disco.
+pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStorageSummary {
+    calculate_task_storage_with_timeout(task, INITIAL_DU_TIMEOUT_SECS)
+}
+
+/// Obtiene el resumen de almacenamiento de una tarea respetando la caché en memoria
+/// (stale-while-revalidate con exclusión de refrescos duplicados).
 pub fn task_storage_with_cache(task: &nas_engine::tasks::BackupTask) -> TaskStorageSummary {
-    if let Some(cached) = cached_task_storage(&task.id) {
-        let task_clone = task.clone();
-        std::thread::spawn(move || {
-            let fresh = calculate_task_storage(&task_clone);
-            store_task_storage(&task_clone.id, fresh);
-        });
+    if let Some((cached, fresh)) = get_cached_entry(&task.id) {
+        if !fresh {
+            spawn_background_refresh(task.clone());
+        }
         return cached;
     }
 
-    let computed = calculate_task_storage(task);
-    store_task_storage(&task.id, computed);
+    let mut computed = calculate_task_storage_with_timeout(task, INITIAL_DU_TIMEOUT_SECS);
+    if !computed.complete {
+        // Marcar como obsoleto para que el sondeo en segundo plano lo complete sin truncar.
+        computed.computed_at_epoch = 0;
+        store_task_storage(&task.id, computed);
+        spawn_background_refresh(task.clone());
+    } else {
+        store_task_storage(&task.id, computed);
+    }
     computed
 }
 
 /// Compatibilidad: calcula el espacio en bytes consumido por el directorio de la tarea de respaldo.
-pub fn calculate_task_size_ex(task_dir: &std::path::Path) -> (u64, bool) {
+pub fn calculate_task_size_ex(task_dir: &Path) -> (u64, bool) {
     calculate_single_dir_size_ex(task_dir)
 }
 
 /// Compatibilidad: devuelve solo los bytes.
 #[allow(dead_code)]
-pub fn calculate_task_size(task_dir: &std::path::Path) -> u64 {
+pub fn calculate_task_size(task_dir: &Path) -> u64 {
     calculate_task_size_ex(task_dir).0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn combined_size_deduplica_hardlinks_entre_directorios() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-stg-test-{}-{nanos}", std::process::id()));
+        let d1 = root.join("hist");
+        let d2 = root.join("perm");
+        fs::create_dir_all(&d1).unwrap();
+        fs::create_dir_all(&d2).unwrap();
+
+        let payload = vec![0x55u8; 512 * 1024];
+        fs::write(d1.join("file.bin"), &payload).unwrap();
+        fs::hard_link(d1.join("file.bin"), d2.join("file.bin")).unwrap();
+
+        let (single, ok1) = calculate_single_dir_size_ex(&d1);
+        let (combined, ok2) = calculate_dirs_combined_size_ex(&[d1.clone(), d2.clone()]);
+        assert!(ok1 && ok2);
+        assert_eq!(single, 512 * 1024);
+        // En disco no debe duplicarse (approx 512 KiB + overhead mínimo de directorio).
+        assert!(
+            combined <= 540 * 1024,
+            "hardlinks no deduplicados: single={single}, combined={combined}"
+        );
+
+        let fallback = walk_size_dedup_bounded(&[d1, d2], false, 1000);
+        assert_eq!(fallback, 512 * 1024);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cache_de_almacenamiento_se_invalida_explicitamente() {
+        let task = nas_engine::tasks::BackupTask {
+            id: "cache_test_task".into(),
+            kind: nas_engine::tasks::SourceKind::Local,
+            source_ip: None,
+            share: None,
+            path: Some("/nonexistent".into()),
+            user: None,
+            port: None,
+            retention: 7,
+            destination_root: "/tmp/nonexistent-nas-hist".into(),
+            log_dir: "/tmp/nonexistent-nas-logs".into(),
+            credentials_file: None,
+            key_file: None,
+            auto_permanent: true,
+        };
+        let summary = task_storage_with_cache(&task);
+        assert_eq!(summary.full_size_bytes, 0);
+        assert!(get_cached_entry(&task.id).is_some());
+        invalidate_task_storage_cache(&task.id);
+        assert!(get_cached_entry(&task.id).is_none());
+    }
 }
