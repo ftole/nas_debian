@@ -21,6 +21,13 @@ pub fn apply_admin_credentials(
     if password.trim().is_empty() {
         return Err("la contraseña del administrador no puede quedar vacía".into());
     }
+    if password.chars().any(char::is_control) {
+        return Err(
+            "la contraseña del administrador contiene caracteres de control no permitidos".into(),
+        );
+    }
+
+    let safe_runner = runner.clone().with_secret(password);
 
     let configure_sudo = |spec: nas_exec::CommandSpec| nas_exec::CommandSpec {
         sudo: if sudo {
@@ -34,12 +41,12 @@ pub fn apply_admin_credentials(
     let chpasswd = configure_sudo(
         CommandSpec::new("chpasswd")
             .stdin_secret(nas_exec::SecretInput::new(format!(
-                "{}:{}\n",
+                "{}:{}",
                 params.admin_user, password
             )))
             .timeout(Duration::from_secs(30)),
     );
-    let output = runner
+    let output = safe_runner
         .run(&chpasswd)
         .map_err(|error| format!("chpasswd no se pudo ejecutar: {error}"))?;
     if !output.is_success() {
@@ -57,11 +64,11 @@ pub fn apply_admin_credentials(
         CommandSpec::new("smbpasswd")
             .args(["-a", "-s", &params.admin_user])
             .stdin_secret(nas_exec::SecretInput::new(format!(
-                "{password}\n{password}\n"
+                "{password}\n{password}"
             )))
             .timeout(Duration::from_secs(30)),
     );
-    let output = runner
+    let output = safe_runner
         .run(&smb_add)
         .map_err(|error| format!("smbpasswd -a no se pudo ejecutar: {error}"))?;
     if !output.is_success() {
@@ -321,4 +328,29 @@ pub fn uninstall_command(
         println!("Plataforma desinstalada. /srv/nas se conserva intacto.");
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_admin_credentials;
+    use nas_core::ServerRole;
+    use nas_engine::deploy::DeployParams;
+    use nas_exec::Runner;
+
+    #[test]
+    fn apply_admin_credentials_rechaza_caracteres_de_control() {
+        let runner = Runner::new();
+        for bad in ["Clave\nroot:evil", "Clave\r123", "Clave\x00123"] {
+            let mut params = DeployParams::new(
+                "/dev/sdb",
+                "TEAM",
+                "SRV-NAS",
+                "admin_test",
+                ServerRole::Arquivos,
+            );
+            params.admin_password = Some(bad.to_string());
+            let err = apply_admin_credentials(&runner, &params, false).unwrap_err();
+            assert!(err.contains("caracteres de control"));
+        }
+    }
 }
