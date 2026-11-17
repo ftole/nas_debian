@@ -151,6 +151,12 @@ LINK_ARGS=()
 if [ "${{#PREV_SNAPS[@]}}" -gt 0 ]; then
     LAST="${{PREV_SNAPS[$((${{#PREV_SNAPS[@]}} - 1))]}}"
     LINK_ARGS=("--link-dest=$LAST")
+elif [ -d "$PERM_DIR" ]; then
+    mapfile -t PREV_PERMS < <(find "$PERM_DIR" -maxdepth 1 -type d -name 'FULL_*' | LC_ALL=C sort)
+    if [ "${{#PREV_PERMS[@]}}" -gt 0 ]; then
+        LAST_PERM="${{PREV_PERMS[$((${{#PREV_PERMS[@]}} - 1))]}}"
+        LINK_ARGS=("--link-dest=$LAST_PERM")
+    fi
 fi
 
 mkdir -p "$STAGE"
@@ -176,7 +182,6 @@ if [ -d "$STAGE" ]; then
     SNAPSHOT_OK=true
 fi
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
-chmod -R a-w "$FINAL" 2>/dev/null || true
 
 if [ "$AUTO_PERMANENT" = "true" ]; then
     HAS_PERM=false
@@ -186,10 +191,11 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
 
     if [ "$HAS_PERM" != "true" ]; then
         PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_INICIAL"
-        if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
-            printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"INICIAL","size_bytes":0,"files_count":0}}\n' \
-                "$TASK" "FULL_${{DATE_STR}}_INICIAL" "$PERM_DEST" "$DATE_STR" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
-            chmod -R a-w "$PERM_DEST" 2>/dev/null || true
+        if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
+            PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}')
+            PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l)
+            printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"INICIAL","size_bytes":%s,"files_count":%s}}\n' \
+                "$TASK" "FULL_${{DATE_STR}}_INICIAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
             chattr +i "$PERM_DEST" 2>/dev/null || true
             log "congelación inicial automática: FULL_${{DATE_STR}}_INICIAL"
         fi
@@ -199,10 +205,11 @@ if [ "$AUTO_PERMANENT" = "true" ]; then
             MONTH_TAG=$(date +%Y-%m)
             if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
                 PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
-                if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null; then
-                    printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"MENSUAL","size_bytes":0,"files_count":0}}\n' \
-                        "$TASK" "FULL_${{DATE_STR}}_MENSUAL" "$PERM_DEST" "$DATE_STR" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
-                    chmod -R a-w "$PERM_DEST" 2>/dev/null || true
+                if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
+                    PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}')
+                    PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l)
+                    printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"MENSUAL","size_bytes":%s,"files_count":%s}}\n' \
+                        "$TASK" "FULL_${{DATE_STR}}_MENSUAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
                     chattr +i "$PERM_DEST" 2>/dev/null || true
                     log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
                 fi
