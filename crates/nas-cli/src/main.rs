@@ -329,6 +329,36 @@ enum BackupAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Repara scripts `backup_*.sh` existentes para preservar hardlinks en `--link-dest`.
+    RepairRunners {
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        dir: PathBuf,
+    },
+    /// Deduplica snapshots y respaldos permanentes existentes vía hardlinks / Btrfs reflink.
+    Deduplicate {
+        /// Identificador opcional de la tarea a procesar.
+        #[arg(long)]
+        task: Option<String>,
+        /// Directorio de runners.
+        #[arg(long, default_value = "/usr/local/bin")]
+        runner_dir: PathBuf,
+        /// Directorio de bloqueos.
+        #[arg(long, default_value = "/var/lock")]
+        lock_dir: PathBuf,
+        /// Directorio de estado para el marcador de migración única.
+        #[arg(long, default_value = "/var/lib/nas")]
+        state_dir: PathBuf,
+        /// Simula sin modificar permisos ni crear enlaces.
+        #[arg(long)]
+        dry_run: bool,
+        /// Modo migración idempotente de una sola ejecución (usa marcador en `--state-dir`).
+        #[arg(long)]
+        migration: bool,
+        /// Fuerza la re-ejecución aunque ya exista el marcador de migración.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -405,6 +435,29 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 dest,
                 yes,
             } => commands::backup::backup_restore(&id, &snapshot, dest.as_deref(), yes, cli.json),
+            BackupAction::RepairRunners { dir } => {
+                commands::backup::backup_repair_runners(&dir, cli.json)
+            }
+            BackupAction::Deduplicate {
+                task,
+                runner_dir,
+                lock_dir,
+                state_dir,
+                dry_run,
+                migration,
+                force,
+            } => commands::backup::backup_deduplicate(
+                commands::backup::DeduplicateCliOptions {
+                    task,
+                    runner_dir,
+                    lock_dir,
+                    state_dir,
+                    dry_run,
+                    migration,
+                    force,
+                },
+                cli.json,
+            ),
         },
         Command::Update { action } => match action {
             None | Some(UpdateAction::Status) => commands::update::update_status(cli.json),
