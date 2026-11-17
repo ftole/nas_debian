@@ -217,6 +217,7 @@ pub async fn backup_freeze_id(
 
     match outcome {
         Ok(msg) => {
+            crate::legacy::invalidate_task_storage_cache(&id);
             audit_ip(
                 &state,
                 &headers,
@@ -267,6 +268,7 @@ pub async fn backup_freeze(
 
     match outcome {
         Ok(msg) => {
+            crate::legacy::invalidate_task_storage_cache(&id);
             audit_ip(
                 &state,
                 &headers,
@@ -368,6 +370,7 @@ pub async fn backup_permanent_delete(
 
     match outcome {
         Ok(msg) => {
+            crate::legacy::invalidate_task_storage_cache(&id);
             audit_ip(
                 &state,
                 &headers,
