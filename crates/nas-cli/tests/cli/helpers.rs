@@ -79,6 +79,9 @@ fn helper_accounts_rechaza_usuarios_reservados() {
 
 #[test]
 fn helper_accounts_rechaza_contrasena_con_salto_de_linea() {
+    use std::io::Write;
+    use std::process::Stdio;
+
     let output = nas()
         .args([
             "--json",
@@ -95,6 +98,41 @@ fn helper_accounts_rechaza_contrasena_con_salto_de_linea() {
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
     assert!(payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("caracteres de control"));
+
+    let mut child = nas()
+        .args([
+            "--json",
+            "helper",
+            "accounts",
+            "create-user",
+            "operador_prueba",
+            "Prueba",
+            "-",
+            "0",
+            "0",
+            "1",
+            "",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"Clave123\nroot:hack\n")
+        .unwrap();
+    let stdin_out = child.wait_with_output().expect("wait");
+    assert!(!stdin_out.status.success());
+    let stdin_payload: serde_json::Value =
+        serde_json::from_slice(&stdin_out.stderr).expect("json stdin");
+    assert_eq!(stdin_payload["success"], false);
+    assert!(stdin_payload["error"]
         .as_str()
         .unwrap()
         .contains("caracteres de control"));
