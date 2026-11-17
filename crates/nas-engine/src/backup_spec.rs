@@ -300,7 +300,8 @@ mod tests {
         assert!(runner.contains("--link-dest"));
         assert!(runner.contains("/srv/nas/BACKUPS_HISTORICOS/contabilidad"));
         assert!(runner.contains("mount -t cifs"));
-        assert!(runner.contains("chmod -R a-w \"$FINAL\""));
+        assert!(!runner.contains("chmod -R a-w"));
+        assert!(runner.contains("--reflink=always"));
         assert!(runner.contains("chattr +i \"$FINAL\""));
         assert!(runner.contains("LOCK_DIR:-/var/lock"));
         assert!(runner.contains("MOUNT_ROOT:-/mnt/backup_sources"));
