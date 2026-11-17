@@ -160,8 +160,12 @@ pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result
     if !is_valid_user(user) {
         return Err(format!("usuario inválido: {user}"));
     }
+    if password.chars().any(char::is_control) {
+        return Err("la contraseña contiene caracteres de control no permitidos".into());
+    }
 
-    let output = runner
+    let safe_runner = runner.clone().with_secret(password);
+    let output = safe_runner
         .run(
             &CommandSpec::new("realm")
                 .args(["join", "--user", user, domain])
@@ -228,7 +232,9 @@ pub fn leave(runner: &Runner) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_domain, is_valid_user, join_plan, leave_plan, parse_realm_list};
+    use super::{
+        is_valid_domain, is_valid_user, join, join_plan, leave_plan, parse_realm_list, Runner,
+    };
 
     const REALM_LIST: &str = "\
 team.local
@@ -282,5 +288,12 @@ team.local
 
         let leave = leave_plan();
         assert_eq!(leave[0], vec!["realm", "leave"]);
+    }
+
+    #[test]
+    fn join_rechaza_caracteres_de_control_en_contrasena() {
+        let runner = Runner::new();
+        let err = join(&runner, "team.local", "administrador", "Clave\n123").unwrap_err();
+        assert!(err.contains("caracteres de control"));
     }
 }
