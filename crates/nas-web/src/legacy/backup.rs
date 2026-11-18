@@ -1,28 +1,48 @@
 //! Proyección JSON y progreso en tiempo real de tareas de respaldo.
 
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
 use serde_json::{json, Value};
 
 use super::{
-    calculate_destination_disk, classify_backup_status, cron_description, human_bytes, task_cron,
-    task_storage_with_cache, BackupDiskMetrics,
+    calculate_destination_disk, classify_backup_status, cron_description, human_bytes, read_tail,
+    task_cron, task_storage_with_cache, BackupDiskMetrics,
 };
 
 /// Proyección plana de una tarea de respaldo.
 pub fn backup_row(task: &nas_engine::tasks::BackupTask) -> Value {
-    let mut disk_cache = std::collections::HashMap::new();
+    let mut disk_cache = HashMap::new();
     backup_row_with_metrics(task, &mut disk_cache)
 }
 
 /// Proyección plana de una tarea de respaldo reutilizando el cálculo de disco por destino.
 pub fn backup_row_with_metrics(
     task: &nas_engine::tasks::BackupTask,
-    disk_cache: &mut std::collections::HashMap<String, BackupDiskMetrics>,
+    disk_cache: &mut HashMap<String, BackupDiskMetrics>,
+) -> Value {
+    backup_row_with_context(task, disk_cache, None)
+}
+
+/// Proyección plana de una tarea de respaldo reutilizando disco y conjunto de tareas activas.
+pub fn backup_row_with_context(
+    task: &nas_engine::tasks::BackupTask,
+    disk_cache: &mut HashMap<String, BackupDiskMetrics>,
+    running_ids: Option<&HashSet<String>>,
 ) -> Value {
     let id = &task.id;
     let cron = task_cron(id);
     let log_path = format!("{}/backup_{}.log", task.log_dir, id);
-    let running = is_backup_task_running(id);
-    let log_content = std::fs::read_to_string(&log_path).ok();
+    let running = match running_ids {
+        Some(set) => set.contains(id),
+        None => is_backup_task_running(id),
+    };
+    let log_file = Path::new(&log_path);
+    let log_content = if log_file.is_file() {
+        Some(read_tail(log_file, 100))
+    } else {
+        None
+    };
 
     let last_run = log_content
         .as_deref()
@@ -202,23 +222,39 @@ fn read_backup_progress(id: &str) -> Option<BackupProgress> {
     None
 }
 
-fn is_backup_task_running(id: &str) -> bool {
+/// Descubre en una única pasada por `/proc` los identificadores `backup_<id>.sh` en ejecución.
+pub fn running_backup_task_ids() -> HashSet<String> {
+    let mut active = HashSet::new();
     let Ok(entries) = std::fs::read_dir("/proc") else {
-        return false;
+        return active;
     };
-    let needle = format!("backup_{id}.sh");
-    entries.flatten().any(|entry| {
+    for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(pid) = name.to_str() else {
-            return false;
+            continue;
         };
         if !pid.bytes().all(|b| b.is_ascii_digit()) {
-            return false;
+            continue;
         }
-        std::fs::read(entry.path().join("cmdline"))
-            .map(|bytes| String::from_utf8_lossy(&bytes).contains(&needle))
-            .unwrap_or(false)
-    })
+        let Ok(bytes) = std::fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        for part in text.split('\0') {
+            if let Some(after) = part.rsplit('/').next().and_then(|f| f.strip_prefix("backup_")) {
+                if let Some(id) = after.strip_suffix(".sh") {
+                    if !id.is_empty() {
+                        active.insert(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    active
+}
+
+fn is_backup_task_running(id: &str) -> bool {
+    running_backup_task_ids().contains(id)
 }
 
 #[cfg(test)]
