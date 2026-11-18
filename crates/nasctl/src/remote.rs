@@ -2,9 +2,11 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use clap::{Args, Subcommand};
-use nas_core::{ApiResponse, NasError, NasPaths, NasResult};
+use nas_core::{ApiResponse, NasError, NasPaths, NasResult, ResourceBudget};
 use nas_inventory::Inventory;
 use nas_ssh::{OpenSsh, RemoteExecutor, SshTarget};
 use serde::Serialize;
@@ -75,6 +77,9 @@ pub struct ExecOptions {
     /// Binario remoto de la CLI.
     #[arg(long, default_value = "nas")]
     pub remote_bin: String,
+    /// Límite de hosts remotos consultados en paralelo (por defecto según presupuesto).
+    #[arg(long)]
+    pub concurrency: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,90 +165,115 @@ pub fn exec(
     let audit = nas_audit::AuditLog::new(NasPaths::from_env().audit_log());
     let actor = std::env::var("USER").unwrap_or_else(|_| "nasctl".to_string());
 
-    let mut results = Vec::new();
-    let mut failures = 0usize;
+    let worker_count = effective_concurrency(options.concurrency, hosts.len());
+    let next_idx = AtomicUsize::new(0);
+    let slots: Mutex<Vec<Option<ExecResult>>> = Mutex::new(vec![None; hosts.len()]);
 
-    for host in &hosts {
-        let mut target = SshTarget::new(host.address.clone(), host.port, host.user.clone())
-            .with_connect_timeout(host.timeout_secs)
-            .with_known_hosts(
-                options
-                    .known_hosts
-                    .clone()
-                    .unwrap_or_else(|| default_known_hosts(&host.alias)),
-            );
-        if let Some(identity) = &options.identity {
-            target = target.with_identity(identity.clone());
-        }
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            scope.spawn(|| loop {
+                let idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                let Some(host) = hosts.get(idx) else {
+                    break;
+                };
+                let mut target = SshTarget::new(host.address.clone(), host.port, host.user.clone())
+                    .with_connect_timeout(host.timeout_secs)
+                    .with_known_hosts(
+                        options
+                            .known_hosts
+                            .clone()
+                            .unwrap_or_else(|| default_known_hosts(&host.alias)),
+                    );
+                if let Some(identity) = &options.identity {
+                    target = target.with_identity(identity.clone());
+                }
 
-        let mut argv = vec![options.remote_bin.clone(), "--json".to_string()];
-        argv.extend(action.argv());
+                let mut argv = vec![options.remote_bin.clone(), "--json".to_string()];
+                argv.extend(action.argv());
 
-        let started = std::time::Instant::now();
-        let outcome = executor.run(&target, &argv);
-        let duration = started.elapsed().as_millis();
+                let started = std::time::Instant::now();
+                let outcome = executor.run(&target, &argv);
+                let duration = started.elapsed().as_millis();
 
-        let result = match outcome {
-            Ok(output) if output.is_success() => match parse_envelope(&output.stdout) {
-                Some(envelope) if envelope["success"] == serde_json::Value::Bool(true) => {
-                    ExecResult {
+                let result = match outcome {
+                    Ok(output) if output.is_success() => match parse_envelope(&output.stdout) {
+                        Some(envelope)
+                            if envelope["success"] == serde_json::Value::Bool(true) =>
+                        {
+                            ExecResult {
+                                host: host.alias.clone(),
+                                address: host.address.clone(),
+                                action: action.label(),
+                                success: true,
+                                duration_ms: duration,
+                                data: envelope.get("data").cloned(),
+                                error: None,
+                            }
+                        }
+                        Some(envelope) => ExecResult {
+                            host: host.alias.clone(),
+                            address: host.address.clone(),
+                            action: action.label(),
+                            success: false,
+                            duration_ms: duration,
+                            data: None,
+                            error: envelope["error"].as_str().map(str::to_string),
+                        },
+                        None => ExecResult {
+                            host: host.alias.clone(),
+                            address: host.address.clone(),
+                            action: action.label(),
+                            success: false,
+                            duration_ms: duration,
+                            data: None,
+                            error: Some("respuesta remota no es JSON válido".to_string()),
+                        },
+                    },
+                    Ok(output) => ExecResult {
                         host: host.alias.clone(),
                         address: host.address.clone(),
                         action: action.label(),
-                        success: true,
+                        success: false,
                         duration_ms: duration,
-                        data: envelope.get("data").cloned(),
-                        error: None,
-                    }
-                }
-                Some(envelope) => ExecResult {
-                    host: host.alias.clone(),
-                    address: host.address.clone(),
-                    action: action.label(),
-                    success: false,
-                    duration_ms: duration,
-                    data: None,
-                    error: envelope["error"].as_str().map(str::to_string),
-                },
-                None => ExecResult {
-                    host: host.alias.clone(),
-                    address: host.address.clone(),
-                    action: action.label(),
-                    success: false,
-                    duration_ms: duration,
-                    data: None,
-                    error: Some("respuesta remota no es JSON válido".to_string()),
-                },
-            },
-            Ok(output) => ExecResult {
-                host: host.alias.clone(),
-                address: host.address.clone(),
-                action: action.label(),
-                success: false,
-                duration_ms: duration,
-                data: None,
-                error: Some(if output.stderr.is_empty() {
-                    output.stdout
-                } else {
-                    output.stderr
-                }),
-            },
-            Err(error) => ExecResult {
-                host: host.alias.clone(),
-                address: host.address.clone(),
-                action: action.label(),
-                success: false,
-                duration_ms: duration,
-                data: None,
-                error: Some(error.to_string()),
-            },
-        };
+                        data: None,
+                        error: Some(if output.stderr.is_empty() {
+                            output.stdout
+                        } else {
+                            output.stderr
+                        }),
+                    },
+                    Err(error) => ExecResult {
+                        host: host.alias.clone(),
+                        address: host.address.clone(),
+                        action: action.label(),
+                        success: false,
+                        duration_ms: duration,
+                        data: None,
+                        error: Some(error.to_string()),
+                    },
+                };
 
+                if let Ok(mut guard) = slots.lock() {
+                    guard[idx] = Some(result);
+                }
+            });
+        }
+    });
+
+    let results: Vec<ExecResult> = slots
+        .into_inner()
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect();
+
+    let mut failures = 0usize;
+    for result in &results {
         let _ = audit.append(nas_audit::AuditEntry::new(
             &actor,
-            &host.alias,
+            &result.host,
             format!("exec:{}", action.label()),
-            &host.address,
+            &result.address,
             if result.success { "SUCCESS" } else { "FAILED" },
             result.error.clone().unwrap_or_default(),
         ));
@@ -251,7 +281,6 @@ pub fn exec(
         if !result.success {
             failures += 1;
         }
-        results.push(result);
     }
 
     if json {
@@ -287,9 +316,14 @@ pub fn exec(
     }
 }
 
+fn effective_concurrency(requested: Option<usize>, total_hosts: usize) -> usize {
+    let base = requested.unwrap_or_else(|| ResourceBudget::detect().max_concurrent_remote_hosts);
+    base.clamp(1, total_hosts.max(1))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_envelope, select_hosts, RemoteAction};
+    use super::{effective_concurrency, parse_envelope, select_hosts, RemoteAction};
     use nas_inventory::Inventory;
 
     const YAML: &str = "
@@ -340,5 +374,13 @@ hosts:
         assert_eq!(ok["success"], true);
         assert_eq!(ok["data"]["a"], 1);
         assert!(parse_envelope("texto plano").is_none());
+    }
+
+    #[test]
+    fn acota_concurrencia_remota_al_numero_de_hosts() {
+        assert_eq!(effective_concurrency(Some(0), 5), 1);
+        assert_eq!(effective_concurrency(Some(10), 3), 3);
+        assert_eq!(effective_concurrency(Some(2), 5), 2);
+        assert!(effective_concurrency(None, 4) >= 1);
     }
 }
