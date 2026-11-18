@@ -241,7 +241,11 @@ pub fn running_backup_task_ids() -> HashSet<String> {
         };
         let text = String::from_utf8_lossy(&bytes);
         for part in text.split('\0') {
-            if let Some(after) = part.rsplit('/').next().and_then(|f| f.strip_prefix("backup_")) {
+            if let Some(after) = part
+                .rsplit('/')
+                .next()
+                .and_then(|f| f.strip_prefix("backup_"))
+            {
                 if let Some(id) = after.strip_suffix(".sh") {
                     if !id.is_empty() {
                         active.insert(id.to_string());
