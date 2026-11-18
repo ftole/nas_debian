@@ -70,7 +70,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 | **Endurecimiento SSH** | `/etc/ssh/sshd_config.d/99-nas-hardening.conf` | Fijar `PermitRootLogin no`, exigir llaves públicas (`PasswordAuthentication no` tras validar llaves), `AllowUsers` / `AllowGroups`. | **Por defecto de Debian** (permite contraseña según instalación base). |
 | **Prevención de intrusiones** | `fail2ban` (`/etc/fail2ban/jail.local`) | Bloqueo automático de IPs por intentos repetidos en `sshd` y endpoints Nginx. | **No instalado ni configurado automáticamente.** |
 | **Parches automáticos OS** | `unattended-upgrades` | Instalación automática de parches de seguridad de Debian 13 (`Debian-Security`). | **No configurado automáticamente.** |
-| **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda. | **No inicializado** (debe ejecutarse `aideinit` tras cerrar la configuración). |
+| **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`, exclusiones `packaging/75_aide_nas`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda excluyendo `/srv/nas`, `/var/lib/nas` y desarrollo. | **No inicializado** (exclusiones instaladas si existe `/etc/aide/aide.conf.d`; ejecutar `aideinit` tras cerrar la configuración). |
 | **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **No enmascarado automáticamente.** |
 | **Certificado TLS definitivo** | `/etc/ssl/certs/nas-web.crt` y `.key` | Reemplazar el certificado autofirmado inicial generado por `packaging/install.sh` por uno emitido por la CA corporativa o ACME. | **Autofirmado** (generado por 3650 días en `packaging/install.sh`). |
 
@@ -82,7 +82,7 @@ Los comandos concretos paso a paso para aplicar cada uno de estos puntos figuran
 
 La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró cuatro brechas técnicas que quedaron **resueltas en `v0.1.11`**:
 - `system_update_run` ahora delega en `sudo /usr/bin/systemd-run --no-block --collect --unit=nas-system-update` (regla `sudoers` acotada) con seguimiento asíncrono desde el panel.
-- `crates/nas-engine/src/deploy/` unificó las plantillas con `packaging/` (`include_str!` para `nas-web.service`, `nginx-nas-web.conf`, `99-nas-tuning.conf`, `60-nas-readahead.rules` y paridad de `sudoers`/helpers).
+- `crates/nas-engine/src/deploy/` unificó las plantillas con `packaging/` (`include_str!` para `nas-web.service`, `nginx-nas-web.conf`, `99-nas-tuning.conf`, `60-nas-readahead.rules`, `75_aide_nas` y paridad de `sudoers`/helpers).
 - `packaging/install.sh` actualiza correctamente `web_users` en `/var/lib/nas/nas.sqlite` (`INSERT ... ON CONFLICT`) y `LOGROTATE_BACKUPS` incluye `su root grp_samba`.
 
 **Riesgos / acciones operativas vigentes:**
