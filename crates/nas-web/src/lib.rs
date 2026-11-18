@@ -30,7 +30,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
-use nas_core::{NasError, NasPaths, NasResult, ResourceBudget, ServerRole};
+use nas_core::{NasError, NasPaths, NasResult, ResourceBudget, ServerRole, SystemResources};
 
 /// Error devuelto al ejecutar una operación criptográfica de autenticación acotada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +48,17 @@ fn auth_semaphores(
     let queue_permits = auth_permits.saturating_mul(4).max(4);
     (
         Arc::new(tokio::sync::Semaphore::new(auth_permits)),
+        Arc::new(tokio::sync::Semaphore::new(queue_permits)),
+    )
+}
+
+fn upload_semaphores(
+    budget: &ResourceBudget,
+) -> (Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>) {
+    let upload_permits = budget.max_concurrent_upload_ops.max(1);
+    let queue_permits = upload_permits.saturating_mul(3).max(3);
+    (
+        Arc::new(tokio::sync::Semaphore::new(upload_permits)),
         Arc::new(tokio::sync::Semaphore::new(queue_permits)),
     )
 }
@@ -73,6 +84,10 @@ pub struct AppState {
     pub auth_ops: Arc<tokio::sync::Semaphore>,
     /// Semáforo que acota la cola total de inicios de sesión en espera para aplicar backpressure.
     pub auth_queue: Arc<tokio::sync::Semaphore>,
+    /// Semáforo que acota subidas simultáneas de archivos en streaming.
+    pub upload_ops: Arc<tokio::sync::Semaphore>,
+    /// Semáforo que acota la cola de subidas en espera para aplicar backpressure.
+    pub upload_queue: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -89,6 +104,7 @@ impl AppState {
             budget.max_concurrent_heavy_ops.max(1),
         ));
         let (auth_ops, auth_queue) = auth_semaphores(&budget);
+        let (upload_ops, upload_queue) = upload_semaphores(&budget);
 
         Self {
             auth: Arc::new(auth),
@@ -100,6 +116,8 @@ impl AppState {
             heavy_ops,
             auth_ops,
             auth_queue,
+            upload_ops,
+            upload_queue,
         }
     }
 
@@ -114,6 +132,9 @@ impl AppState {
         let (auth_ops, auth_queue) = auth_semaphores(&budget);
         self.auth_ops = auth_ops;
         self.auth_queue = auth_queue;
+        let (upload_ops, upload_queue) = upload_semaphores(&budget);
+        self.upload_ops = upload_ops;
+        self.upload_queue = upload_queue;
         self.budget = budget;
         self
     }
@@ -134,13 +155,32 @@ impl AppState {
         tokio::task::spawn_blocking(task).await
     }
 
-    /// Ejecuta una operación pesada de CPU/E/S acotada por el semáforo `heavy_ops`.
+    /// Ejecuta una operación pesada de CPU/E/S acotada por `heavy_ops` con regulación
+    /// reactiva en vivo ante presión crítica de memoria o E/S.
     pub async fn run_heavy_blocking<F, T>(&self, task: F) -> Result<T, tokio::task::JoinError>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        let _permit = self.heavy_ops.acquire().await.ok();
+        let live = SystemResources::detect();
+        self.run_heavy_blocking_with_resources(live, task).await
+    }
+
+    /// Ejecuta una operación pesada aplicando regulación reactiva según `live`.
+    pub async fn run_heavy_blocking_with_resources<F, T>(
+        &self,
+        live: SystemResources,
+        task: F,
+    ) -> Result<T, tokio::task::JoinError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let (permits, backoff) = self.budget.heavy_ops_throttle_plan(&live);
+        if !backoff.is_zero() {
+            tokio::time::sleep(backoff).await;
+        }
+        let _permit = self.heavy_ops.acquire_many(permits).await.ok();
         tokio::task::spawn_blocking(task).await
     }
 
@@ -278,4 +318,57 @@ async fn security_headers(request: Request, next: Next) -> Response {
     );
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nas_core::SystemResources;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn run_heavy_blocking_serializa_bajo_presion_critica() {
+        let dir = std::env::temp_dir().join(format!("nas-web-heavy-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = Db::in_memory().expect("db");
+        let auth = Auth::new(db, 3600, false);
+        let mut paths = NasPaths::development();
+        paths.state_dir = dir.clone();
+        paths.data_root = dir.clone();
+
+        let idle_res =
+            SystemResources::from_snapshot(12, None, 16384, 12288, None, 0.3, 0.0, 0.0, 0.0);
+        let budget = ResourceBudget::from_resources(idle_res);
+        assert_eq!(budget.max_concurrent_heavy_ops, 3);
+        let state = AppState::new(auth, paths, ServerRole::Arquivos).with_budget(budget);
+
+        let critical_res =
+            SystemResources::from_snapshot(12, None, 16384, 128, None, 1.5, 10.0, 40.0, 60.0);
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..3 {
+            let st = state.clone();
+            let live = critical_res.clone();
+            let act = Arc::clone(&active);
+            let mx = Arc::clone(&max_seen);
+            handles.push(tokio::spawn(async move {
+                st.run_heavy_blocking_with_resources(live, move || {
+                    let now = act.fetch_add(1, Ordering::SeqCst) + 1;
+                    mx.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                    act.fetch_sub(1, Ordering::SeqCst);
+                })
+                .await
+                .expect("join");
+            }));
+        }
+        for h in handles {
+            h.await.expect("task");
+        }
+        assert_eq!(max_seen.load(Ordering::SeqCst), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
