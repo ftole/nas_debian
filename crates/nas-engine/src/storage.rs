@@ -1,5 +1,8 @@
 //! Inventario de almacenamiento: uso, discos e inspección.
 
+use std::collections::HashSet;
+use std::path::Path;
+
 use nas_core::{NasError, NasPaths, NasResult};
 use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
@@ -107,25 +110,14 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
 
     if let Some(device) = &device {
         let target_path = resolve_target_device(device);
-
-        if let Some(target_path) = target_path {
-            let rotational = runner
-                .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", &target_path]))
-                .ok()
-                .and_then(|out| {
-                    out.stdout
-                        .lines()
-                        .find(|l| !l.trim().is_empty())
-                        .and_then(|l| l.trim().parse::<u8>().ok())
-                });
-            match rotational {
-                Some(0) => {
-                    supports_trim = true;
-                    device_type = "SSD (Flash)".to_string();
-                }
-                Some(_) => device_type = "HDD (Mecánico)".to_string(),
-                None => {}
+        let probe_dev = target_path.as_deref().unwrap_or(device.as_str());
+        match detect_device_rotational(runner, probe_dev) {
+            Some(false) => {
+                supports_trim = true;
+                device_type = "SSD (Flash)".to_string();
             }
+            Some(true) => device_type = "HDD (Mecánico)".to_string(),
+            None => {}
         }
     }
 
@@ -339,6 +331,218 @@ fn resolve_target_device(device: &str) -> Option<String> {
     }
 }
 
+/// Interpreta una bandera booleana de rotación (`0`/`1`, `true`/`false`, `yes`/`no`).
+pub fn parse_rotational_flag(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" => Some(true),
+        "0" | "false" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+fn resolve_sysfs_rotational(
+    sys_root: &Path,
+    dev_name: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Option<bool> {
+    if depth >= 8 || dev_name.is_empty() || !visited.insert(dev_name.to_string()) {
+        return None;
+    }
+
+    // 1. Dispositivos apilados (LVM, dm-crypt, MD RAID): recorrer `/sys/.../slaves/*`.
+    for slaves_dir in [
+        sys_root.join("class/block").join(dev_name).join("slaves"),
+        sys_root.join("block").join(dev_name).join("slaves"),
+    ] {
+        if let Ok(entries) = std::fs::read_dir(&slaves_dir) {
+            let mut saw_slave = false;
+            let mut any_non_rotational = false;
+            for entry in entries.flatten() {
+                saw_slave = true;
+                let slave_name = entry.file_name().to_string_lossy().to_string();
+                match resolve_sysfs_rotational(sys_root, &slave_name, visited, depth + 1) {
+                    Some(true) => return Some(true),
+                    Some(false) => any_non_rotational = true,
+                    None => {}
+                }
+            }
+            if saw_slave && any_non_rotational {
+                return Some(false);
+            }
+        }
+    }
+
+    // 2. Cola directa del dispositivo en sysfs (`queue/rotational`).
+    for rota_path in [
+        sys_root
+            .join("class/block")
+            .join(dev_name)
+            .join("queue/rotational"),
+        sys_root
+            .join("block")
+            .join(dev_name)
+            .join("queue/rotational"),
+    ] {
+        if let Ok(raw) = std::fs::read_to_string(&rota_path) {
+            if let Some(flag) = parse_rotational_flag(&raw) {
+                return Some(flag);
+            }
+        }
+    }
+
+    // 3. Partición: resolver hacia el disco padre mediante enlace sysfs o nombre de partición.
+    let class_entry = sys_root.join("class/block").join(dev_name);
+    if let Ok(canon) = std::fs::canonicalize(&class_entry) {
+        if let Some(parent_name) = canon
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+        {
+            if parent_name != dev_name && parent_name != "block" {
+                if let Some(flag) =
+                    resolve_sysfs_rotational(sys_root, parent_name, visited, depth + 1)
+                {
+                    return Some(flag);
+                }
+            }
+        }
+    }
+
+    if let Some(parent_name) = parent_disk(dev_name) {
+        if parent_name != dev_name {
+            if let Some(flag) = resolve_sysfs_rotational(sys_root, &parent_name, visited, depth + 1)
+            {
+                return Some(flag);
+            }
+        }
+    }
+
+    None
+}
+
+fn clean_block_source(device: &str) -> &str {
+    let trimmed = device.trim();
+    trimmed.split('[').next().unwrap_or(trimmed).trim()
+}
+
+/// Detecta si un dispositivo de bloque es rotacional recorriendo `slaves/*` en un árbol sysfs.
+pub fn detect_rotational_in_sysfs(sys_root: &Path, device_or_name: &str) -> Option<bool> {
+    let trimmed = clean_block_source(device_or_name);
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let resolved = if sys_root == Path::new("/sys") && trimmed.starts_with("/dev/") {
+        std::fs::canonicalize(trimmed)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| trimmed.to_string())
+    } else {
+        trimmed.to_string()
+    };
+
+    let dev_name = resolved
+        .trim_start_matches("/dev/")
+        .trim_end_matches('/')
+        .to_string();
+    let mut visited = HashSet::new();
+    if let Some(flag) = resolve_sysfs_rotational(sys_root, &dev_name, &mut visited, 0) {
+        return Some(flag);
+    }
+
+    if let Some(last) = dev_name.rsplit('/').next().filter(|s| *s != dev_name) {
+        let mut visited_last = HashSet::new();
+        return resolve_sysfs_rotational(sys_root, last, &mut visited_last, 0);
+    }
+
+    None
+}
+
+/// Detecta de forma robusta si un dispositivo (`/dev/...`, LVM, MD RAID o VM) es rotacional.
+pub fn detect_device_rotational(runner: &Runner, device: &str) -> Option<bool> {
+    let device = clean_block_source(device);
+    if device.is_empty() {
+        return None;
+    }
+    if let Some(flag) = detect_rotational_in_sysfs(Path::new("/sys"), device) {
+        return Some(flag);
+    }
+
+    // `lsblk -nso ROTA` recorre toda la pila inversa (`slaves`) hasta discos físicos.
+    for args in [["-nso", "ROTA", device], ["-ndo", "ROTA", device]] {
+        if let Ok(out) = runner.run(
+            &CommandSpec::new("lsblk")
+                .args(args)
+                .timeout(std::time::Duration::from_secs(5)),
+        ) {
+            if out.is_success() {
+                let mut saw_false = false;
+                for line in out.stdout.lines() {
+                    if let Some(flag) = parse_rotational_flag(line) {
+                        if flag {
+                            return Some(true);
+                        }
+                        saw_false = true;
+                    }
+                }
+                if saw_false {
+                    return Some(false);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn mount_source_from_proc_mounts(target: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string("/proc/mounts").ok()?;
+    let target_str = target.to_string_lossy();
+    let mut best: Option<(usize, String)> = None;
+    for line in raw.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(src) = parts.next() else {
+            continue;
+        };
+        let Some(mp) = parts.next() else {
+            continue;
+        };
+        if !src.starts_with("/dev/") {
+            continue;
+        }
+        let matches = mp == "/"
+            || target_str == mp
+            || target_str
+                .strip_prefix(mp)
+                .is_some_and(|rest| rest.starts_with('/'));
+        if matches && best.as_ref().map_or(true, |(len, _)| mp.len() > *len) {
+            best = Some((mp.len(), src.to_string()));
+        }
+    }
+    best.map(|(_, src)| src)
+}
+
+/// Detecta si el volumen que aloja `path` reside sobre almacenamiento rotacional.
+pub fn detect_path_rotational(runner: &Runner, path: &Path) -> Option<bool> {
+    let mut existing = path;
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else {
+            break;
+        };
+        if parent.as_os_str().is_empty() {
+            existing = Path::new("/");
+            break;
+        }
+        existing = parent;
+    }
+
+    let source = findmnt_value(runner, &existing.to_string_lossy(), "SOURCE")
+        .filter(|s| s.starts_with("/dev/"))
+        .or_else(|| mount_source_from_proc_mounts(existing))?;
+    detect_device_rotational(runner, &source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{is_valid_device, parent_disk, parse_df_full, resolve_target_device};
@@ -440,5 +644,64 @@ mod tests {
         assert_eq!(list[0].children_count, 2);
         assert!(!list[1].protected);
         assert_eq!(list[1].children_count, 0);
+    }
+
+    #[test]
+    fn detecta_rotacional_en_lvm_md_particion_y_pool_mixto() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let sys = std::env::temp_dir().join(format!("nas-sysfs-{}-{nanos}", std::process::id()));
+
+        // Discos base: nvme0n1 (SSD=0), sda (HDD=1), sdb (SSD=0), vda (VM=0)
+        for (disk, val) in [("nvme0n1", "0"), ("sda", "1"), ("sdb", "0"), ("vda", "0")] {
+            let q = sys.join(format!("block/{disk}/queue"));
+            std::fs::create_dir_all(&q).unwrap();
+            std::fs::write(q.join("rotational"), format!("{val}\n")).unwrap();
+        }
+
+        // LVM dm-0 sobre nvme0n1p1 -> SSD (0)
+        std::fs::create_dir_all(sys.join("block/dm-0/slaves/nvme0n1p1")).unwrap();
+        std::fs::create_dir_all(sys.join("block/dm-0/queue")).unwrap();
+        std::fs::write(sys.join("block/dm-0/queue/rotational"), "1\n").unwrap();
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/dm-0"),
+            Some(false)
+        );
+
+        // MD RAID md0 mixto (sdb1=0 + sda1=1) -> conservador true
+        std::fs::create_dir_all(sys.join("block/md0/slaves/sdb1")).unwrap();
+        std::fs::create_dir_all(sys.join("block/md0/slaves/sda1")).unwrap();
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/md0"),
+            Some(true)
+        );
+
+        // MD RAID md1 puro SSD (sdb1=0 + nvme0n1p1=0) -> false
+        std::fs::create_dir_all(sys.join("block/md1/slaves/sdb1")).unwrap();
+        std::fs::create_dir_all(sys.join("block/md1/slaves/nvme0n1p1")).unwrap();
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/md1"),
+            Some(false)
+        );
+
+        // VM virtio vda1 -> false
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/vda1"),
+            Some(false)
+        );
+
+        // Fuente de montaje Btrfs con subvolumen `[/@subvol]` -> false
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/nvme0n1p1[/@subvol]"),
+            Some(false)
+        );
+        assert_eq!(
+            super::detect_rotational_in_sysfs(&sys, "/dev/sda1[/@]"),
+            Some(true)
+        );
+
+        let _ = std::fs::remove_dir_all(&sys);
     }
 }
