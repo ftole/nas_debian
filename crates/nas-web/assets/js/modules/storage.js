@@ -353,17 +353,38 @@ async function refreshScrubCard(started = false) {
 }
 
 function pollBtrfsScrubProgress() {
-  if (_scrubPollTimer) clearInterval(_scrubPollTimer);
+  if (_scrubPollTimer) {
+    clearTimeout(_scrubPollTimer);
+    _scrubPollTimer = null;
+  }
 
-  checkBtrfsScrubStatus(true);
-  _scrubPollTimer = setInterval(async () => {
-    const isFinished = await checkBtrfsScrubStatus(true);
+  let inFlight = false;
+  const step = async () => {
+    if (document.hidden || AppState.activeView !== 'storage') {
+      _scrubPollTimer = setTimeout(step, 5000);
+      return;
+    }
+    if (inFlight) {
+      _scrubPollTimer = setTimeout(step, 3000);
+      return;
+    }
+    inFlight = true;
+    let isFinished = false;
+    try {
+      isFinished = await checkBtrfsScrubStatus(true);
+    } finally {
+      inFlight = false;
+    }
     if (isFinished) {
-      clearInterval(_scrubPollTimer);
       _scrubPollTimer = null;
       showToast('Auditoría BTRFS scrub finalizada exitosamente.', 'success');
+    } else {
+      _scrubPollTimer = setTimeout(step, 3000);
     }
-  }, 3000);
+  };
+
+  checkBtrfsScrubStatus(true);
+  _scrubPollTimer = setTimeout(step, 3000);
 }
 
 async function runStorageScrub() {
