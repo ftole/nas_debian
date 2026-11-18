@@ -1983,4 +1983,34 @@ Filesystem type is: 9123683e
 
         let _ = fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn sha256_file_regula_durante_lectura_de_archivo_grande() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let root = temp_root("sha-throttle");
+        let file_path = root.join("grande.bin");
+        // > 16 MiB para cruzar THROTTLE_SHA_CHUNK_OPS (256 bloques de 64 KiB).
+        let payload = vec![0x5Au8; (THROTTLE_SHA_CHUNK_OPS + 8) * 64 * 1024];
+        fs::write(&file_path, &payload).unwrap();
+
+        let mut hasher = Sha256::new();
+        hasher.update(&payload);
+        let expected: [u8; 32] = hasher.finalize().into();
+
+        let probes = Arc::new(AtomicUsize::new(0));
+        let probes_clone = Arc::clone(&probes);
+        let mut throttle = DedupThrottle::new(1, Duration::ZERO, move || {
+            probes_clone.fetch_add(1, Ordering::Relaxed);
+            (MemoryPressure::Critical, true)
+        });
+
+        let (digest, saw_critical) = sha256_file(&file_path, &mut throttle).unwrap();
+        assert_eq!(digest, expected);
+        assert!(saw_critical);
+        assert!(probes.load(Ordering::Relaxed) >= 1);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
