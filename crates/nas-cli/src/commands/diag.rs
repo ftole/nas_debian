@@ -53,6 +53,25 @@ pub fn diag(json: bool) -> NasResult<ExitCode> {
         });
     }
 
+    let budget = nas_core::ResourceBudget::detect();
+    let res = &budget.resources;
+    checks.push(Check {
+        name: "resources".to_string(),
+        ok: res.total_mem_mb == 0 || res.available_mem_mb >= 64,
+        detail: format!(
+            "{} CPUs efec. ({} host), {} / {} MiB disp., presión={}, workers={}, sys_ops={}, heavy_ops={}, cgroup={}",
+            res.effective_cpus,
+            res.host_cpus,
+            res.available_mem_mb,
+            res.total_mem_mb,
+            res.memory_pressure.as_str(),
+            budget.tokio_worker_threads,
+            budget.max_concurrent_system_ops,
+            budget.max_concurrent_heavy_ops,
+            res.cgroup_limited
+        ),
+    });
+
     let all_ok = checks.iter().all(|check| check.ok);
 
     if json {
