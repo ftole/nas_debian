@@ -57,14 +57,15 @@ pub async fn files_delete(
     let audit_path = path.clone();
     let permanent = body.permanent;
 
-    let outcome = tokio::task::spawn_blocking(move || {
-        if permanent {
-            root.delete_permanent(&path).map(|_| None)
-        } else {
-            root.trash_with_actor(&path, &client).map(Some)
-        }
-    })
-    .await;
+    let outcome = state
+        .run_system_blocking(move || {
+            if permanent {
+                root.delete_permanent(&path).map(|_| None)
+            } else {
+                root.trash_with_actor(&path, &client).map(Some)
+            }
+        })
+        .await;
 
     match outcome {
         Ok(Ok(target)) => {
@@ -81,7 +82,8 @@ pub async fn files_delete(
                 &audit_path,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             let msg = if permanent {
                 "Elemento eliminado definitivamente"
             } else {
@@ -112,7 +114,10 @@ pub async fn files_trash(
         Err(response) => return *response,
     };
 
-    match tokio::task::spawn_blocking(move || root.trash_entries()).await {
+    match state
+        .run_system_blocking(move || root.trash_entries())
+        .await
+    {
         Ok(Ok(items)) => axum::Json(ApiResponse::ok(
             crate::legacy::trash_listing(&items),
             "Papelera",
@@ -133,7 +138,10 @@ pub async fn trash_restore(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match tokio::task::spawn_blocking(move || root.restore_trash(&body.id)).await {
+    match state
+        .run_system_blocking(move || root.restore_trash(&body.id))
+        .await
+    {
         Ok(Ok(name)) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "restored": name }),
             "Elemento restaurado",
@@ -154,7 +162,10 @@ pub async fn trash_delete(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match tokio::task::spawn_blocking(move || root.delete_trash(&body.id)).await {
+    match state
+        .run_system_blocking(move || root.delete_trash(&body.id))
+        .await
+    {
         Ok(Ok(())) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Elemento eliminado",
         ))
@@ -180,7 +191,7 @@ pub async fn trash_empty(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match tokio::task::spawn_blocking(move || root.empty_trash()).await {
+    match state.run_system_blocking(move || root.empty_trash()).await {
         Ok(Ok(removed)) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "removed": removed }),
             "Papelera vaciada",
@@ -207,17 +218,18 @@ pub async fn trash_restore_all(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match tokio::task::spawn_blocking(move || {
-        let entries = root.trash_entries()?;
-        let mut restored = 0u32;
-        for entry in entries {
-            if root.restore_trash(&entry.id).is_ok() {
-                restored += 1;
+    match state
+        .run_system_blocking(move || {
+            let entries = root.trash_entries()?;
+            let mut restored = 0u32;
+            for entry in entries {
+                if root.restore_trash(&entry.id).is_ok() {
+                    restored += 1;
+                }
             }
-        }
-        Ok::<_, nas_core::NasError>(restored)
-    })
-    .await
+            Ok::<_, nas_core::NasError>(restored)
+        })
+        .await
     {
         Ok(Ok(restored)) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "restored": restored }),
