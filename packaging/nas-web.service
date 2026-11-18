@@ -15,6 +15,14 @@ Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10
 
+# Cuotas de recursos para evitar saturación de CPU, RAM y E/S del servidor NAS
+MemoryHigh=512M
+MemoryMax=1G
+CPUQuota=200%
+TasksMax=256
+IOWeight=50
+Nice=5
+
 # Endurecimiento. `sudo -n` requiere CAP_SETUID/SETGID y las acciones
 # privilegiadas acotadas (btrfs/fstrim) necesitan CAP_SYS_ADMIN.
 NoNewPrivileges=no
