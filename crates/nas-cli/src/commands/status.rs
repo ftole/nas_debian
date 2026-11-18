@@ -38,6 +38,19 @@ pub fn status(json: bool) -> NasResult<ExitCode> {
         metrics.timezone_abbr,
         metrics.timezone_offset / 3600
     );
+    let b = &metrics.resource_budget;
+    let r = &b.resources;
+    println!(
+        "Presupuesto     : {} CPUs efec. ({} host) | {} MiB disp. ({}) | workers={} sys={} heavy={} build_jobs={}",
+        r.effective_cpus,
+        r.host_cpus,
+        r.available_mem_mb,
+        r.memory_pressure.as_str(),
+        b.tokio_worker_threads,
+        b.max_concurrent_system_ops,
+        b.max_concurrent_heavy_ops,
+        b.cargo_build_jobs
+    );
 
     Ok(ExitCode::SUCCESS)
 }
