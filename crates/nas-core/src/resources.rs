@@ -178,6 +178,8 @@ impl SystemResources {
     }
 }
 
+const BLOCKING_POOL_DB_AUTH_HEADROOM: usize = 4;
+
 /// Presupuesto operativo derivado de [`SystemResources`] con soporte de overrides por entorno.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResourceBudget {
@@ -191,6 +193,8 @@ pub struct ResourceBudget {
     pub max_concurrent_system_ops: usize,
     /// Concurrencia máxima de operaciones pesadas (`zip`, `audit_verify`, `du`, discos).
     pub max_concurrent_heavy_ops: usize,
+    /// Concurrencia máxima de verificaciones criptográficas de inicio de sesión (PBKDF2).
+    pub max_concurrent_auth_ops: usize,
     /// Concurrencia máxima de hosts remotos simultáneos en `nasctl`.
     pub max_concurrent_remote_hosts: usize,
     /// Trabajos paralelos recomendados para compilación `cargo build`.
@@ -208,6 +212,23 @@ impl ResourceBudget {
         Self::from_resources(resources).with_env_overrides()
     }
 
+    fn min_blocking_threads_for(system_ops: usize, heavy_ops: usize, auth_ops: usize) -> usize {
+        system_ops
+            .saturating_add(heavy_ops)
+            .saturating_add(auth_ops)
+            .saturating_add(BLOCKING_POOL_DB_AUTH_HEADROOM)
+    }
+
+    /// Devuelve el mínimo de hilos bloqueantes requerido para garantizar holgura a DB/auth
+    /// y refrescos en segundo plano aun con los semáforos de sistema/pesados saturados.
+    pub fn min_blocking_threads_for_headroom(&self) -> usize {
+        Self::min_blocking_threads_for(
+            self.max_concurrent_system_ops,
+            self.max_concurrent_heavy_ops,
+            self.max_concurrent_auth_ops,
+        )
+    }
+
     /// Calcula el presupuesto únicamente a partir de una instantánea de recursos.
     pub fn from_resources(resources: SystemResources) -> Self {
         let cpus = resources.effective_cpus.max(1);
@@ -222,11 +243,6 @@ impl ResourceBudget {
             (cpus / 2).clamp(2, 4)
         };
 
-        let mut tokio_blocking_threads = (cpus * 2).clamp(2, 16);
-        if resources.memory_pressure == MemoryPressure::Critical || avail_mb < 512 {
-            tokio_blocking_threads = (tokio_blocking_threads / 2).max(2);
-        }
-
         let mut max_concurrent_system_ops = cpus.clamp(2, 8);
         if resources.memory_pressure != MemoryPressure::Normal || high_cpu_pressure {
             max_concurrent_system_ops = (max_concurrent_system_ops / 2).max(1);
@@ -239,6 +255,26 @@ impl ResourceBudget {
             } else {
                 (cpus / 4).clamp(1, 3)
             };
+
+        let max_concurrent_auth_ops = if cpus <= 2
+            || resources.memory_pressure == MemoryPressure::Critical
+            || high_cpu_pressure
+        {
+            1
+        } else {
+            (cpus / 2).clamp(1, 4)
+        };
+
+        let min_blocking = Self::min_blocking_threads_for(
+            max_concurrent_system_ops,
+            max_concurrent_heavy_ops,
+            max_concurrent_auth_ops,
+        );
+        let mut tokio_blocking_threads = (cpus * 2).clamp(2, 24);
+        if resources.memory_pressure == MemoryPressure::Critical || avail_mb < 512 {
+            tokio_blocking_threads = (tokio_blocking_threads / 2).max(2);
+        }
+        tokio_blocking_threads = tokio_blocking_threads.clamp(min_blocking, 32);
 
         let mut max_concurrent_remote_hosts = (cpus * 2).clamp(2, 8);
         if resources.memory_pressure == MemoryPressure::Critical || high_cpu_pressure {
@@ -265,6 +301,7 @@ impl ResourceBudget {
             tokio_blocking_threads,
             max_concurrent_system_ops,
             max_concurrent_heavy_ops,
+            max_concurrent_auth_ops,
             max_concurrent_remote_hosts,
             cargo_build_jobs,
             exec_output_limit_bytes,
@@ -291,7 +328,8 @@ impl ResourceBudget {
         if let Some(v) = parse_usize("NAS_WEB_WORKERS", 1, 32) {
             self.tokio_worker_threads = v;
         }
-        if let Some(v) = parse_usize("NAS_WEB_BLOCKING_THREADS", 1, 64) {
+        let blocking_override = parse_usize("NAS_WEB_BLOCKING_THREADS", 1, 64);
+        if let Some(v) = blocking_override {
             self.tokio_blocking_threads = v;
         }
         if let Some(v) = parse_usize("NAS_MAX_SYSTEM_OPS", 1, 32) {
@@ -299,6 +337,9 @@ impl ResourceBudget {
         }
         if let Some(v) = parse_usize("NAS_MAX_HEAVY_OPS", 1, 16) {
             self.max_concurrent_heavy_ops = v;
+        }
+        if let Some(v) = parse_usize("NAS_MAX_AUTH_OPS", 1, 16) {
+            self.max_concurrent_auth_ops = v;
         }
         if let Some(v) = parse_usize("NAS_REMOTE_CONCURRENCY", 1, 32) {
             self.max_concurrent_remote_hosts = v;
@@ -308,6 +349,10 @@ impl ResourceBudget {
         }
         if let Some(v) = parse_usize("NAS_EXEC_MAX_OUTPUT_BYTES", 65_536, 134_217_728) {
             self.exec_output_limit_bytes = v;
+        }
+        if blocking_override.is_none() {
+            let min_blocking = self.min_blocking_threads_for_headroom().min(64);
+            self.tokio_blocking_threads = self.tokio_blocking_threads.clamp(min_blocking, 64);
         }
         self
     }
@@ -589,5 +634,56 @@ MemAvailable:    8192000 kB
         assert_eq!(overridden.max_concurrent_remote_hosts, 32);
         assert_eq!(overridden.cargo_build_jobs, 4);
         assert_eq!(overridden.exec_output_limit_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn pool_bloqueante_garantiza_holgura_para_db_y_auth_en_equipos_pequenos() {
+        let scenarios = [
+            // 1 CPU holgado
+            SystemResources::from_snapshot(1, None, 2048, 1536, None, 0.2, 0.0, 0.0, 0.0),
+            // 1 CPU presión crítica
+            SystemResources::from_snapshot(1, None, 1024, 96, None, 2.0, 35.0, 40.0, 10.0),
+            // 2 CPUs holgado
+            SystemResources::from_snapshot(2, None, 4096, 3072, None, 0.4, 0.0, 0.0, 0.0),
+            // 2 CPUs memoria ajustada / elevada
+            SystemResources::from_snapshot(2, None, 2048, 400, None, 1.8, 10.0, 15.0, 5.0),
+            // 2 CPUs presión crítica
+            SystemResources::from_snapshot(2, None, 1024, 100, None, 3.0, 30.0, 35.0, 20.0),
+            // 4, 8 y 16 CPUs
+            SystemResources::from_snapshot(4, None, 8192, 6144, None, 1.0, 0.0, 0.0, 0.0),
+            SystemResources::from_snapshot(8, None, 16384, 12288, None, 1.0, 0.0, 0.0, 0.0),
+            SystemResources::from_snapshot(16, None, 32768, 24576, None, 1.0, 0.0, 0.0, 0.0),
+        ];
+
+        for res in scenarios {
+            let cpus = res.effective_cpus;
+            let pressure = res.memory_pressure;
+            let budget = ResourceBudget::from_resources(res);
+            let reserved_ops = budget.max_concurrent_system_ops
+                + budget.max_concurrent_heavy_ops
+                + budget.max_concurrent_auth_ops;
+            assert!(
+                budget.tokio_blocking_threads >= reserved_ops + BLOCKING_POOL_DB_AUTH_HEADROOM,
+                "holgura insuficiente ({cpus} CPU, {pressure:?}): blk={}, sys={}, heavy={}, auth={}",
+                budget.tokio_blocking_threads,
+                budget.max_concurrent_system_ops,
+                budget.max_concurrent_heavy_ops,
+                budget.max_concurrent_auth_ops,
+            );
+            assert!(
+                budget.tokio_blocking_threads >= budget.min_blocking_threads_for_headroom(),
+                "no cumple min_blocking_threads_for_headroom en {cpus} CPU"
+            );
+        }
+
+        // Override parcial de concurrencia sin tocar NAS_WEB_BLOCKING_THREADS mantiene holgura.
+        let small = SystemResources::from_snapshot(1, None, 2048, 1536, None, 0.1, 0.0, 0.0, 0.0);
+        let base = ResourceBudget::from_resources(small);
+        let mut map = HashMap::new();
+        map.insert("NAS_MAX_SYSTEM_OPS", "8");
+        map.insert("NAS_MAX_HEAVY_OPS", "4");
+        map.insert("NAS_MAX_AUTH_OPS", "2");
+        let adjusted = base.with_env_lookup(|k| map.get(k).map(|v| (*v).to_string()));
+        assert!(adjusted.tokio_blocking_threads >= 8 + 4 + 2 + BLOCKING_POOL_DB_AUTH_HEADROOM);
     }
 }
