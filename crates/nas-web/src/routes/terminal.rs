@@ -117,12 +117,13 @@ pub async fn terminal_session(
     let web_user = user.clone();
     let cols = body.cols;
     let rows = body.rows;
-    let outcome = tokio::task::spawn_blocking(move || {
-        let posix_user = resolve_terminal_posix_user(&web_user)?;
-        nas_engine::terminal::start(&Runner::new(), &posix_user, cols, rows)
-    })
-    .await
-    .unwrap_or_else(|_| Err("apertura de terminal interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            let posix_user = resolve_terminal_posix_user(&web_user)?;
+            nas_engine::terminal::start(&Runner::new(), &posix_user, cols, rows)
+        })
+        .await
+        .unwrap_or_else(|_| Err("apertura de terminal interrumpida".to_string()));
 
     match outcome {
         Ok(session) => {
@@ -134,7 +135,8 @@ pub async fn terminal_session(
                 &session.name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(session, "Sesión de terminal lista")).into_response()
         }
         Err(error) => {
@@ -146,7 +148,8 @@ pub async fn terminal_session(
                 "terminal",
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -154,6 +157,7 @@ pub async fn terminal_session(
 
 /// Envía texto o teclas especiales a la sesión del usuario.
 pub async fn terminal_send(
+    State(state): State<AppState>,
     superadmin: SuperAdminUser,
     axum::Json(body): axum::Json<TerminalSendBody>,
 ) -> Response {
@@ -165,18 +169,19 @@ pub async fn terminal_send(
     let data = body.data;
     let enter = body.enter && !body.raw;
     let raw = body.raw;
-    let outcome = tokio::task::spawn_blocking(move || {
-        let posix_user = resolve_terminal_posix_user(&web_user)?;
-        let name = nas_engine::terminal::session_name(&posix_user);
-        let runner = Runner::new();
-        if !raw && nas_engine::terminal::is_allowed_key(&data) {
-            nas_engine::terminal::send_key(&runner, &posix_user, &name, &data)
-        } else {
-            nas_engine::terminal::send(&runner, &posix_user, &name, &data, enter)
-        }
-    })
-    .await
-    .unwrap_or_else(|_| Err("envío interrumpido".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            let posix_user = resolve_terminal_posix_user(&web_user)?;
+            let name = nas_engine::terminal::session_name(&posix_user);
+            let runner = Runner::new();
+            if !raw && nas_engine::terminal::is_allowed_key(&data) {
+                nas_engine::terminal::send_key(&runner, &posix_user, &name, &data)
+            } else {
+                nas_engine::terminal::send(&runner, &posix_user, &name, &data, enter)
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err("envío interrumpido".to_string()));
 
     match outcome {
         Ok(()) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
@@ -188,17 +193,21 @@ pub async fn terminal_send(
 }
 
 /// Captura el panel visible del terminal.
-pub async fn terminal_capture(superadmin: SuperAdminUser) -> Response {
+pub async fn terminal_capture(
+    State(state): State<AppState>,
+    superadmin: SuperAdminUser,
+) -> Response {
     let web_user = superadmin.user().username().to_string();
-    let outcome = tokio::task::spawn_blocking(move || {
-        let posix_user = resolve_terminal_posix_user(&web_user)?;
-        let name = nas_engine::terminal::session_name(&posix_user);
-        let (output, cwd) =
-            nas_engine::terminal::capture_details(&Runner::new(), &posix_user, &name)?;
-        Ok::<_, String>((output, cwd, posix_user, name))
-    })
-    .await
-    .unwrap_or_else(|_| Err("captura interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            let posix_user = resolve_terminal_posix_user(&web_user)?;
+            let name = nas_engine::terminal::session_name(&posix_user);
+            let (output, cwd) =
+                nas_engine::terminal::capture_details(&Runner::new(), &posix_user, &name)?;
+            Ok::<_, String>((output, cwd, posix_user, name))
+        })
+        .await
+        .unwrap_or_else(|_| Err("captura interrumpida".to_string()));
 
     match outcome {
         Ok((output, cwd, posix_user, name)) => axum::Json(ApiResponse::ok(
@@ -217,6 +226,7 @@ pub async fn terminal_capture(superadmin: SuperAdminUser) -> Response {
 
 /// Redimensiona el terminal.
 pub async fn terminal_resize(
+    State(state): State<AppState>,
     superadmin: SuperAdminUser,
     axum::Json(body): axum::Json<TerminalResizeBody>,
 ) -> Response {
@@ -227,13 +237,14 @@ pub async fn terminal_resize(
     let web_user = superadmin.user().username().to_string();
     let cols = body.cols;
     let rows = body.rows;
-    let outcome = tokio::task::spawn_blocking(move || {
-        let posix_user = resolve_terminal_posix_user(&web_user)?;
-        let name = nas_engine::terminal::session_name(&posix_user);
-        nas_engine::terminal::resize(&Runner::new(), &posix_user, &name, cols, rows)
-    })
-    .await
-    .unwrap_or_else(|_| Err("redimensionado interrumpido".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            let posix_user = resolve_terminal_posix_user(&web_user)?;
+            let name = nas_engine::terminal::session_name(&posix_user);
+            nas_engine::terminal::resize(&Runner::new(), &posix_user, &name, cols, rows)
+        })
+        .await
+        .unwrap_or_else(|_| Err("redimensionado interrumpido".to_string()));
 
     match outcome {
         Ok(()) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
@@ -252,14 +263,15 @@ pub async fn terminal_kill(
 ) -> Response {
     let user = superadmin.user().username().to_string();
     let web_user = user.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        let posix_user = resolve_terminal_posix_user(&web_user)?;
-        let name = nas_engine::terminal::session_name(&posix_user);
-        nas_engine::terminal::kill(&Runner::new(), &posix_user, &name)?;
-        Ok::<_, String>(name)
-    })
-    .await
-    .unwrap_or_else(|_| Err("cierre interrumpido".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            let posix_user = resolve_terminal_posix_user(&web_user)?;
+            let name = nas_engine::terminal::session_name(&posix_user);
+            nas_engine::terminal::kill(&Runner::new(), &posix_user, &name)?;
+            Ok::<_, String>(name)
+        })
+        .await
+        .unwrap_or_else(|_| Err("cierre interrumpido".to_string()));
 
     match outcome {
         Ok(name) => {
@@ -271,7 +283,8 @@ pub async fn terminal_kill(
                 &name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Sesión cerrada")).into_response()
         }
         Err(error) => server_error(&error),
