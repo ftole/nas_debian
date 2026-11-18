@@ -87,7 +87,10 @@ pub async fn files_content(
     };
     let path = query.path.unwrap_or_default();
 
-    match tokio::task::spawn_blocking(move || root.read(&path, 2 * 1024 * 1024)).await {
+    match state
+        .run_system_blocking(move || root.read(&path, 2 * 1024 * 1024))
+        .await
+    {
         Ok(Ok(bytes)) => {
             let content = String::from_utf8_lossy(&bytes).to_string();
             let lines = content.lines().count();
@@ -112,7 +115,10 @@ pub async fn files_save(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match tokio::task::spawn_blocking(move || root.write(&body.path, &body.content)).await {
+    match state
+        .run_system_blocking(move || root.write(&body.path, &body.content))
+        .await
+    {
         Ok(Ok(bytes)) => {
             let formatted = format_bytes_human(bytes);
             axum::Json(serde_json::json!({
