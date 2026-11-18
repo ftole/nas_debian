@@ -139,58 +139,58 @@ pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUs
     let paths = state.paths.clone();
     match state
         .run_system_blocking(move || {
-        let runner = Runner::new();
-        let mut units = Vec::new();
-        if let Ok(overview) = nas_engine::storage::overview_for(&paths, &runner) {
-            units.push(serde_json::json!({
-                "id": "principal",
-                "name": format!("Unidad Principal ({})", overview.path),
-                "path": overview.path,
-                "is_main": true,
-                "filesystem": overview.filesystem,
-                "total_gb": overview.total_gb,
-                "used_gb": overview.used_gb,
-                "free_gb": overview.free_gb,
-                "usage_percent": overview.usage_percent,
-            }));
-        }
+            let runner = Runner::new();
+            let mut units = Vec::new();
+            if let Ok(overview) = nas_engine::storage::overview_for(&paths, &runner) {
+                units.push(serde_json::json!({
+                    "id": "principal",
+                    "name": format!("Unidad Principal ({})", overview.path),
+                    "path": overview.path,
+                    "is_main": true,
+                    "filesystem": overview.filesystem,
+                    "total_gb": overview.total_gb,
+                    "used_gb": overview.used_gb,
+                    "free_gb": overview.free_gb,
+                    "usage_percent": overview.usage_percent,
+                }));
+            }
 
-        let extra_dir = paths.data_root.join("unidades");
-        if let Ok(entries) = std::fs::read_dir(&extra_dir) {
-            let mut dirs: Vec<std::path::PathBuf> = entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.is_dir())
-                .collect();
-            dirs.sort();
-            for unit_path in dirs {
-                let Some(id) = unit_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .filter(|id| nas_engine::storage_ops::valid_name(id))
-                else {
-                    continue;
-                };
-                let mut unit_paths = (*paths).clone();
-                unit_paths.data_root = unit_path.clone();
-                if let Ok(overview) = nas_engine::storage::overview_for(&unit_paths, &runner) {
-                    units.push(serde_json::json!({
-                        "id": id,
-                        "name": format!("Unidad {id} ({})", overview.path),
-                        "path": overview.path,
-                        "is_main": false,
-                        "filesystem": overview.filesystem,
-                        "total_gb": overview.total_gb,
-                        "used_gb": overview.used_gb,
-                        "free_gb": overview.free_gb,
-                        "usage_percent": overview.usage_percent,
-                    }));
+            let extra_dir = paths.data_root.join("unidades");
+            if let Ok(entries) = std::fs::read_dir(&extra_dir) {
+                let mut dirs: Vec<std::path::PathBuf> = entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir())
+                    .collect();
+                dirs.sort();
+                for unit_path in dirs {
+                    let Some(id) = unit_path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .filter(|id| nas_engine::storage_ops::valid_name(id))
+                    else {
+                        continue;
+                    };
+                    let mut unit_paths = (*paths).clone();
+                    unit_paths.data_root = unit_path.clone();
+                    if let Ok(overview) = nas_engine::storage::overview_for(&unit_paths, &runner) {
+                        units.push(serde_json::json!({
+                            "id": id,
+                            "name": format!("Unidad {id} ({})", overview.path),
+                            "path": overview.path,
+                            "is_main": false,
+                            "filesystem": overview.filesystem,
+                            "total_gb": overview.total_gb,
+                            "used_gb": overview.used_gb,
+                            "free_gb": overview.free_gb,
+                            "usage_percent": overview.usage_percent,
+                        }));
+                    }
                 }
             }
-        }
-        units
-    })
-    .await
+            units
+        })
+        .await
     {
         Ok(units) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "units": units }),
@@ -209,40 +209,40 @@ pub async fn storage_subvolumes(
     let paths = state.paths.clone();
     match state
         .run_system_blocking(move || {
-        let runner = Runner::new();
-        let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
-            .map(|o| o.is_btrfs)
-            .unwrap_or(false);
-        if !is_btrfs {
-            return Vec::<serde_json::Value>::new();
-        }
-        let target = paths.data_root.to_string_lossy().to_string();
-        runner
-            .run(
-                &nas_exec::CommandSpec::new("btrfs")
-                    .args(["subvolume", "list", &target])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(15)),
-            )
-            .ok()
-            .filter(|out| out.is_success())
-            .map(|out| {
-                out.stdout
-                    .lines()
-                    .filter_map(|line| {
-                        let (_, rel) = line.split_once(" path ")?;
-                        let id = line.split_whitespace().nth(1).unwrap_or_default();
-                        Some(serde_json::json!({
-                            "id": id,
-                            "name": rel.trim(),
-                            "path": format!("{}/{}", target.trim_end_matches('/'), rel.trim()),
-                        }))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    })
-    .await
+            let runner = Runner::new();
+            let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
+                .map(|o| o.is_btrfs)
+                .unwrap_or(false);
+            if !is_btrfs {
+                return Vec::<serde_json::Value>::new();
+            }
+            let target = paths.data_root.to_string_lossy().to_string();
+            runner
+                .run(
+                    &nas_exec::CommandSpec::new("btrfs")
+                        .args(["subvolume", "list", &target])
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(15)),
+                )
+                .ok()
+                .filter(|out| out.is_success())
+                .map(|out| {
+                    out.stdout
+                        .lines()
+                        .filter_map(|line| {
+                            let (_, rel) = line.split_once(" path ")?;
+                            let id = line.split_whitespace().nth(1).unwrap_or_default();
+                            Some(serde_json::json!({
+                                "id": id,
+                                "name": rel.trim(),
+                                "path": format!("{}/{}", target.trim_end_matches('/'), rel.trim()),
+                            }))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .await
     {
         Ok(subvolumes) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "subvolumes": subvolumes }),
@@ -258,43 +258,43 @@ pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUs
     let paths = state.paths.clone();
     match state
         .run_system_blocking(move || {
-        let runner = Runner::new();
-        let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
-            .map(|o| o.is_btrfs)
-            .unwrap_or(false);
-        if !is_btrfs {
-            return serde_json::json!({
-                "running": false,
-                "status": "no disponible",
-                "errors": 0,
-                "success": true,
-                "output": "El volumen principal no utiliza Btrfs.",
-            });
-        }
-        let target = paths.data_root.to_string_lossy().to_string();
-        match run_json(
-            nas_exec::CommandSpec::new("btrfs")
-                .args(["scrub", "status", &target])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(15)),
-        ) {
-            Ok(text) => {
-                let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
-                let mut payload = serde_json::to_value(&status).unwrap_or_default();
-                payload["success"] = serde_json::json!(true);
-                payload["output"] = serde_json::json!(text);
-                payload
+            let runner = Runner::new();
+            let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
+                .map(|o| o.is_btrfs)
+                .unwrap_or(false);
+            if !is_btrfs {
+                return serde_json::json!({
+                    "running": false,
+                    "status": "no disponible",
+                    "errors": 0,
+                    "success": true,
+                    "output": "El volumen principal no utiliza Btrfs.",
+                });
             }
-            Err(error) => serde_json::json!({
-                "running": false,
-                "status": "no disponible",
-                "errors": 0,
-                "success": true,
-                "output": error,
-            }),
-        }
-    })
-    .await
+            let target = paths.data_root.to_string_lossy().to_string();
+            match run_json(
+                nas_exec::CommandSpec::new("btrfs")
+                    .args(["scrub", "status", &target])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(15)),
+            ) {
+                Ok(text) => {
+                    let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
+                    let mut payload = serde_json::to_value(&status).unwrap_or_default();
+                    payload["success"] = serde_json::json!(true);
+                    payload["output"] = serde_json::json!(text);
+                    payload
+                }
+                Err(error) => serde_json::json!({
+                    "running": false,
+                    "status": "no disponible",
+                    "errors": 0,
+                    "success": true,
+                    "output": error,
+                }),
+            }
+        })
+        .await
     {
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Estado de scrub")).into_response(),
         Err(_) => server_error("consulta de scrub interrumpida"),
