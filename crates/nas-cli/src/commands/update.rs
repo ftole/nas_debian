@@ -617,6 +617,12 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
             let _ = run_step(&runner, &step, sudo, 30);
         } else if Path::new("/usr/local/bin/nas").is_file() {
             let step = vec![
+                "nice".to_string(),
+                "-n".to_string(),
+                "19".to_string(),
+                "ionice".to_string(),
+                "-c".to_string(),
+                "3".to_string(),
                 "/usr/local/bin/nas".to_string(),
                 "backup".to_string(),
                 "deduplicate".to_string(),
