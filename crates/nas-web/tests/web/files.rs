@@ -304,3 +304,116 @@ async fn files_requiere_sesion() {
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn files_upload_rechaza_content_length_mayor_al_espacio_y_satura_cola() {
+    let dir = temp_dir("upload-guards");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut budget = nas_core::ResourceBudget::from_resources(
+        nas_core::SystemResources::from_snapshot(2, None, 2048, 1536, None, 0.1, 0.0, 0.0, 0.0),
+    );
+    budget.max_concurrent_upload_ops = 1;
+    let state = AppState::new(auth, paths_for(&dir), ServerRole::Arquivos).with_budget(budget);
+    let held_queue = state
+        .upload_queue
+        .acquire_many(state.upload_queue.available_permits() as u32)
+        .await
+        .expect("permits");
+    let busy_app = router(state.clone());
+    let cookie = cookie_for(&busy_app).await;
+
+    let boundary = "XBOUNDARYBUSY";
+    let req_busy = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(upload_body(boundary, "", "cola.txt", "hola"))
+        .expect("petición");
+    let res_busy = busy_app
+        .clone()
+        .oneshot(req_busy)
+        .await
+        .expect("upload busy");
+    assert_eq!(res_busy.status(), StatusCode::SERVICE_UNAVAILABLE);
+    drop(held_queue);
+
+    // Content-Length absurdamente grande (10 PiB) debe fallar con 507 antes de escribir bytes.
+    let huge_req = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("content-length", "11258999068426240")
+        .body(upload_body(boundary, "", "grande.txt", "hola"))
+        .expect("petición");
+    let res_huge = busy_app.oneshot(huge_req).await.expect("upload huge");
+    assert_eq!(res_huge.status(), StatusCode::INSUFFICIENT_STORAGE);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn files_upload_usa_staging_de_unidad_cuando_root_viene_en_multipart() {
+    let dir = temp_dir("upload-unit-staging");
+    let paths = paths_for(&dir);
+    let unit_dir = paths.data_root.join("unidades").join("disco2");
+    std::fs::create_dir_all(&unit_dir).expect("unit dir");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let state = AppState::new(auth, paths.clone(), ServerRole::Arquivos);
+    let app = router(state);
+    let cookie = cookie_for(&app).await;
+
+    let boundary = "XUNITBOUNDARY";
+    let body = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"root\"\r\n\r\n\
+         disco2\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"path\"\r\n\r\n\
+         \r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"dato.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\n\
+         contenido en disco2\r\n\
+         --{boundary}--\r\n"
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(body))
+        .expect("petición");
+    let res = app.oneshot(req).await.expect("upload unit");
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        std::fs::read_to_string(unit_dir.join("dato.txt")).expect("archivo destino"),
+        "contenido en disco2"
+    );
+    assert!(
+        unit_dir.join(".nas_staging").is_dir(),
+        "debe crear .nas_staging en la unidad destino"
+    );
+    assert!(
+        !paths.data_root.join(".nas_staging").exists(),
+        "no debe crear .nas_staging en data_root cuando root es disco2"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
