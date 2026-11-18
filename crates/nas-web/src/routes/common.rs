@@ -82,7 +82,9 @@ pub async fn audit_ip(
     let result = result.to_string();
     let detail = detail.to_string();
     if let Err(error) = state
-        .run_db(move |db| db.append_audit_ip(&username, &action, &target, &result, &detail, Some(&ip)))
+        .run_db(move |db| {
+            db.append_audit_ip(&username, &action, &target, &result, &detail, Some(&ip))
+        })
         .await
     {
         eprintln!("aviso: no se pudo registrar auditoría con origen: {error}");
