@@ -13,9 +13,12 @@ pub mod config;
 pub mod contract;
 /// Errores del dominio.
 pub mod error;
+/// Detección inteligente de recursos del sistema y presupuesto dinámico.
+pub mod resources;
 /// Cotización segura de argumentos para shells remotos.
 pub mod shell;
 
 pub use config::{NasPaths, ServerRole};
 pub use contract::ApiResponse;
 pub use error::{NasError, NasResult};
+pub use resources::{MemoryPressure, ResourceBudget, SystemResources};
