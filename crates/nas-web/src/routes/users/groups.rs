@@ -29,30 +29,30 @@ pub struct RenameGroupBody {
 pub async fn groups(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     match state
         .run_system_blocking(|| {
-        let (_, groups) = nas_engine::users::load_local();
-        let list: Vec<serde_json::Value> = groups
-            .into_iter()
-            .filter(|group| group.name.starts_with("grp_"))
-            .map(|group| {
-                let is_special = matches!(
-                    group.name.as_str(),
-                    "grp_samba" | "grp_web" | "grp_superadmin" | "grp_backups"
-                );
-                serde_json::json!({
-                    "name": group.name,
-                    "gid": group.gid,
-                    "members": group.members,
-                    "is_special": is_special,
-                    "is_master": matches!(
+            let (_, groups) = nas_engine::users::load_local();
+            let list: Vec<serde_json::Value> = groups
+                .into_iter()
+                .filter(|group| group.name.starts_with("grp_"))
+                .map(|group| {
+                    let is_special = matches!(
                         group.name.as_str(),
-                        "grp_samba" | "grp_superadmin" | "grp_backups" | "grp_web"
-                    ),
+                        "grp_samba" | "grp_web" | "grp_superadmin" | "grp_backups"
+                    );
+                    serde_json::json!({
+                        "name": group.name,
+                        "gid": group.gid,
+                        "members": group.members,
+                        "is_special": is_special,
+                        "is_master": matches!(
+                            group.name.as_str(),
+                            "grp_samba" | "grp_superadmin" | "grp_backups" | "grp_web"
+                        ),
+                    })
                 })
-            })
-            .collect();
-        list
-    })
-    .await
+                .collect();
+            list
+        })
+        .await
     {
         Ok(list) => axum::Json(ApiResponse::ok(list, "Grupos")).into_response(),
         Err(_) => server_error("inventario de grupos interrumpido"),
