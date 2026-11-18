@@ -28,7 +28,8 @@ pub async fn audit(
     State(state): State<AppState>,
     Query(query): Query<AuditQuery>,
 ) -> Response {
-    match state.auth.db().recent_audit(query.limit.clamp(1, 500)) {
+    let limit = query.limit.clamp(1, 500);
+    match state.run_db(move |db| db.recent_audit(limit)).await {
         Ok(rows) => axum::Json(ApiResponse::ok(rows, "Auditoría del panel")).into_response(),
         Err(error) => error_response(error),
     }
@@ -55,12 +56,13 @@ pub async fn audit_verify(
     }
 
     let log = nas_audit::AuditLog::new(&audit_path);
-    match tokio::task::spawn_blocking(move || {
-        let verify_res = log.verify();
-        let last_hash = log.last_hash().unwrap_or_else(|_| "0".to_string());
-        (verify_res, last_hash)
-    })
-    .await
+    match state
+        .run_heavy_blocking(move || {
+            let verify_res = log.verify();
+            let last_hash = log.last_hash().unwrap_or_else(|_| "0".to_string());
+            (verify_res, last_hash)
+        })
+        .await
     {
         Ok((Ok(count), last_hash)) => axum::Json(ApiResponse::ok(
             serde_json::json!({
