@@ -53,18 +53,19 @@ pub async fn metrics(
     State(state): State<AppState>,
 ) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
-        let runner = Runner::new();
-        let metrics = collect_status(&runner);
-        let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
-        serde_json::json!({
-            "system": metrics,
-            "storage": storage,
-            "services": crate::legacy::service_rows(&runner),
-            "counts": crate::legacy::dashboard_counts(&paths),
+    match state
+        .run_system_blocking(move || {
+            let runner = Runner::new();
+            let metrics = collect_status(&runner);
+            let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
+            serde_json::json!({
+                "system": metrics,
+                "storage": storage,
+                "services": crate::legacy::service_rows(&runner),
+                "counts": crate::legacy::dashboard_counts(&paths),
+            })
         })
-    })
-    .await
+        .await
     {
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Métricas del sistema")).into_response(),
         Err(_) => server_error("no se pudieron recolectar las métricas"),
@@ -77,7 +78,10 @@ pub async fn network(
     State(state): State<AppState>,
 ) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || collect_network(&Runner::new(), &paths)).await {
+    match state
+        .run_system_blocking(move || collect_network(&Runner::new(), &paths))
+        .await
+    {
         Ok(overview) => {
             let mut payload = serde_json::to_value(&overview).unwrap_or_default();
             if let Some(interfaces) = payload
@@ -120,7 +124,8 @@ pub async fn system_reboot(
         "host",
         "REQUESTED",
         "",
-    );
+    )
+    .await;
 
     if std::env::var("NAS_TEST_NO_REBOOT").as_deref() == Ok("1")
         || std::env::var("CARGO_MANIFEST_DIR").is_ok()
@@ -131,23 +136,24 @@ pub async fn system_reboot(
         .into_response();
     }
 
-    match tokio::task::spawn_blocking(|| {
-        run_json(
-            nas_exec::CommandSpec::new("systemd-run")
-                .args(["--no-block", "--collect", "systemctl", "reboot"])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(15)),
-        )
-        .or_else(|_| {
+    match state
+        .run_system_blocking(|| {
             run_json(
-                nas_exec::CommandSpec::new("systemctl")
-                    .arg("reboot")
+                nas_exec::CommandSpec::new("systemd-run")
+                    .args(["--no-block", "--collect", "systemctl", "reboot"])
                     .sudo(nas_exec::SudoMode::Passwordless)
                     .timeout(std::time::Duration::from_secs(15)),
             )
+            .or_else(|_| {
+                run_json(
+                    nas_exec::CommandSpec::new("systemctl")
+                        .arg("reboot")
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(15)),
+                )
+            })
         })
-    })
-    .await
+        .await
     {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Reinicio programado",
@@ -286,8 +292,8 @@ pub async fn system_updates(
 
     let audit_path = state.paths.audit_log();
     let version_for_remote = version_str.clone();
-    let (latest_version, has_updates, update_in_progress, last_update) =
-        tokio::task::spawn_blocking(move || {
+    let (latest_version, has_updates, update_in_progress, last_update) = state
+        .run_system_blocking(move || {
             let (latest_version, has_updates) = if local_only {
                 (version_for_remote.clone(), false)
             } else {
@@ -334,7 +340,8 @@ pub async fn system_applications(
 ) -> Response {
     let paths = state.paths.clone();
     let backup_dir = state.backup_dir.clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let runner = Runner::new();
         let active = |unit: &str| {
             runner
@@ -479,40 +486,42 @@ pub async fn system_update_run(
         "sistema",
         "STARTED",
         "",
-    );
+    )
+    .await;
 
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        if is_system_update_active() {
-            return Err("ya hay una actualización del sistema en ejecución".into());
-        }
+    let result = state
+        .run_system_blocking(move || -> Result<String, String> {
+            if is_system_update_active() {
+                return Err("ya hay una actualización del sistema en ejecución".into());
+            }
 
-        let runner = Runner::new();
-        let output = runner
-            .run(&system_update_command_spec())
-            .map_err(|error| format!("no se pudo iniciar la unidad de actualización: {error}"))?;
+            let runner = Runner::new();
+            let output = runner
+                .run(&system_update_command_spec())
+                .map_err(|error| format!("no se pudo iniciar la unidad de actualización: {error}"))?;
 
-        let combined = [output.stdout.trim(), output.stderr.trim()]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+            let combined = [output.stdout.trim(), output.stderr.trim()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
 
-        if output.is_success() {
-            Ok(if combined.is_empty() {
-                "Unidad nas-system-update iniciada en segundo plano".to_string()
+            if output.is_success() {
+                Ok(if combined.is_empty() {
+                    "Unidad nas-system-update iniciada en segundo plano".to_string()
+                } else {
+                    combined
+                })
             } else {
-                combined
-            })
-        } else {
-            Err(if combined.is_empty() {
-                "systemd-run devolvió un error al iniciar nas-system-update".to_string()
-            } else {
-                combined
-            })
-        }
-    })
-    .await
-    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+                Err(if combined.is_empty() {
+                    "systemd-run devolvió un error al iniciar nas-system-update".to_string()
+                } else {
+                    combined
+                })
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
 
     match result {
         Ok(output) => {
@@ -524,7 +533,8 @@ pub async fn system_update_run(
                 "sistema",
                 "QUEUED",
                 "",
-            );
+            )
+            .await;
             let payload = serde_json::json!({
                 "queued": true,
                 "unit": "nas-system-update",
@@ -546,7 +556,8 @@ pub async fn system_update_run(
                 "sistema",
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
