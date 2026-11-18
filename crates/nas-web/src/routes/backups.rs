@@ -173,9 +173,12 @@ pub async fn backup_plan(
     match state
         .run_system_blocking(move || {
             let tasks = nas_engine::tasks::BackupTask::discover(&dir)?;
-            let task = tasks.into_iter().find(|task| task.id == id).ok_or_else(|| {
-                nas_core::NasError::NotFound(format!("tarea '{id}' no encontrada"))
-            })?;
+            let task = tasks
+                .into_iter()
+                .find(|task| task.id == id)
+                .ok_or_else(|| {
+                    nas_core::NasError::NotFound(format!("tarea '{id}' no encontrada"))
+                })?;
 
             let problems = task.validate();
             if !problems.is_empty() {
