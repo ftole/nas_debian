@@ -21,34 +21,34 @@ pub async fn diagnostics(State(state): State<AppState>, _user: AuthenticatedUser
     let paths = state.paths.clone();
     match state
         .run_system_blocking(move || {
-        let runner = Runner::new();
-        let checks = nas_engine::diagnostics::collect(&paths, &runner);
-        let services = crate::legacy::service_rows(&runner);
-        let active = services.iter().filter(|row| row["active"] == true).count();
-        let total = services.len();
-        let metrics = collect_status(&runner);
-        let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
-        let counts = crate::legacy::dashboard_counts(&paths);
-        let testparm_ok = runner
-            .run(&nas_exec::CommandSpec::new("testparm").arg("-s"))
-            .map(|output| output.is_success())
-            .unwrap_or(false);
-        serde_json::json!({
-            "overall_status": if active == total { "OK" } else { "Warning" },
-            "services_active": active,
-            "services_total": total,
-            "services": services,
-            "storage": storage,
-            "shares_count": counts["shares"],
-            "backups_count": counts["backups"],
-            "testparm_ok": testparm_ok,
-            "hostname": metrics.hostname,
-            "uptime": metrics.uptime,
-            "kernel": metrics.kernel,
-            "checks": checks,
+            let runner = Runner::new();
+            let checks = nas_engine::diagnostics::collect(&paths, &runner);
+            let services = crate::legacy::service_rows(&runner);
+            let active = services.iter().filter(|row| row["active"] == true).count();
+            let total = services.len();
+            let metrics = collect_status(&runner);
+            let storage = nas_engine::storage::overview_for(&paths, &runner).ok();
+            let counts = crate::legacy::dashboard_counts(&paths);
+            let testparm_ok = runner
+                .run(&nas_exec::CommandSpec::new("testparm").arg("-s"))
+                .map(|output| output.is_success())
+                .unwrap_or(false);
+            serde_json::json!({
+                "overall_status": if active == total { "OK" } else { "Warning" },
+                "services_active": active,
+                "services_total": total,
+                "services": services,
+                "storage": storage,
+                "shares_count": counts["shares"],
+                "backups_count": counts["backups"],
+                "testparm_ok": testparm_ok,
+                "hostname": metrics.hostname,
+                "uptime": metrics.uptime,
+                "kernel": metrics.kernel,
+                "checks": checks,
+            })
         })
-    })
-    .await
+        .await
     {
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Diagnóstico integral")).into_response(),
         Err(_) => server_error("diagnóstico interrumpido"),
