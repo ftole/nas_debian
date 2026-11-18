@@ -65,7 +65,8 @@ pub async fn shares_access(State(state): State<AppState>, _user: AuthenticatedUs
     }
     let path = state.paths.samba_conf.clone();
 
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let conf = std::fs::read_to_string(&path).unwrap_or_default();
         let parsed = nas_engine::parsers::smb::parse_shares(&conf);
         let shares: Vec<String> = parsed.iter().map(|share| share.name.clone()).collect();
@@ -173,7 +174,8 @@ pub async fn share_access_update(
     }
     let conf_path = state.paths.samba_conf.clone();
 
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
+    let outcome = state
+        .run_system_blocking(move || -> Result<(), String> {
         let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let mut shares = nas_engine::parsers::smb::parse_shares(&conf);
         let share = shares
@@ -242,7 +244,8 @@ pub async fn share_access_update(
                 &share_name,
                 "SUCCESS",
                 &level_name,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Permiso actualizado",
             ))
@@ -257,7 +260,8 @@ pub async fn share_access_update(
                 &share_name,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -282,7 +286,8 @@ pub async fn share_access_repair(
     };
     let conf_path = state.paths.samba_conf.clone();
 
-    let outcome = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+    let outcome = state
+        .run_system_blocking(move || -> Result<usize, String> {
         let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
         let shares = nas_engine::parsers::smb::parse_shares(&conf);
         let mut applied = 0;
@@ -324,7 +329,8 @@ pub async fn share_access_repair(
                 "shares",
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "applied": applied }),
                 "ACLs reaplicadas",
@@ -340,7 +346,8 @@ pub async fn share_access_repair(
                 "shares",
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -361,7 +368,8 @@ pub async fn shares_access_audit(
         .or(query.path)
         .filter(|value| !value.trim().is_empty());
 
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let conf = std::fs::read_to_string(&path).unwrap_or_default();
         let runner = Runner::new();
         let mut shares = serde_json::Map::new();
