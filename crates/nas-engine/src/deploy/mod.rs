@@ -15,7 +15,7 @@ pub mod web;
 use nas_core::{NasError, NasResult, ServerRole};
 use serde::Serialize;
 
-pub use artifacts::{apply_hardening, update_fstab, Artifact};
+pub use artifacts::{apply_hardening, render_sysctl_tuning, update_fstab, Artifact};
 
 /// Sistema de archivos objetivo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
