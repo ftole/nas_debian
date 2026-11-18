@@ -87,7 +87,7 @@ fi\n"
                 mode: 0o644,
                 content: "SHELL=/bin/bash\n\
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\
-0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1\n"
+0 2 1 * * root nice -n 19 ionice -c 3 btrfs scrub start -B /srv/nas >/dev/null 2>&1\n"
                     .to_string(),
             });
         }
