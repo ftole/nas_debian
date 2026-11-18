@@ -8,6 +8,8 @@ pub const SNAPSHOT_PREFIX: &str = "snapshot_";
 pub const STAGING_PREFIX: &str = ".inprogress_";
 /// Espacio libre mínimo exigido antes de iniciar una copia (2 GiB).
 pub const MIN_FREE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Techo máximo de reserva exigida en volúmenes grandes (32 GiB).
+pub const MAX_HYBRID_FREE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 /// Umbral de advertencia de ocupación (%).
 pub const WARN_USED_PERCENT: f64 = 85.0;
 /// Umbral de cancelación de ocupación (%).
@@ -59,6 +61,64 @@ pub fn retention_victims(existing: &[String], retention: usize) -> Vec<String> {
     sorted.into_iter().take(surplus).collect()
 }
 
+/// Calcula el espacio libre mínimo híbrido según el tamaño total del volumen:
+/// 2% del volumen acotado entre `MIN_FREE_BYTES` (2 GiB) y `MAX_HYBRID_FREE_BYTES` (32 GiB).
+pub fn min_free_bytes_for_volume(total_bytes: u64) -> u64 {
+    if total_bytes == 0 {
+        MIN_FREE_BYTES
+    } else {
+        (total_bytes / 50).clamp(MIN_FREE_BYTES, MAX_HYBRID_FREE_BYTES)
+    }
+}
+
+/// Porcentaje máximo de ocupación permitido antes de abortar según el tamaño del volumen.
+pub fn abort_used_percent_for_volume(total_bytes: u64) -> f64 {
+    if total_bytes >= 2 * 1024 * 1024 * 1024 * 1024 {
+        98.0
+    } else if total_bytes >= 512 * 1024 * 1024 * 1024 {
+        97.0
+    } else {
+        ABORT_USED_PERCENT
+    }
+}
+
+/// Evalúa si se puede iniciar o continuar una copia aplicando umbral híbrido según el volumen.
+pub fn evaluate_space_for_volume(
+    total_bytes: u64,
+    free_bytes: u64,
+    used_percent: f64,
+) -> SpaceDecision {
+    if total_bytes == 0 {
+        return evaluate_space(free_bytes, used_percent);
+    }
+    let abort_pct = abort_used_percent_for_volume(total_bytes);
+    if used_percent > abort_pct {
+        return SpaceDecision::Abort {
+            reason: format!(
+                "ocupación del {used_percent:.1}% superior al límite híbrido del {abort_pct:.0}%"
+            ),
+        };
+    }
+
+    let min_free = min_free_bytes_for_volume(total_bytes);
+    if free_bytes < min_free {
+        return SpaceDecision::Abort {
+            reason: format!(
+                "espacio libre insuficiente: {} MiB (mínimo híbrido {} MiB)",
+                free_bytes / 1024 / 1024,
+                min_free / 1024 / 1024,
+            ),
+        };
+    }
+
+    let warn_pct = (abort_pct - 8.0).max(WARN_USED_PERCENT);
+    if used_percent > warn_pct {
+        return SpaceDecision::Warn { used_percent };
+    }
+
+    SpaceDecision::Ok
+}
+
 /// Evalúa si se puede iniciar una copia con el espacio disponible.
 pub fn evaluate_space(free_bytes: u64, used_percent: f64) -> SpaceDecision {
     if used_percent > ABORT_USED_PERCENT {
@@ -96,19 +156,28 @@ pub struct DfUsage {
 
 /// Interpreta la salida de `df -Pk <ruta>` (segunda línea).
 pub fn parse_df(output: &str) -> Option<DfUsage> {
+    parse_df_with_total(output).map(|(_, usage)| usage)
+}
+
+/// Interpreta la salida de `df -Pk <ruta>` devolviendo `(total_bytes, DfUsage)`.
+pub fn parse_df_with_total(output: &str) -> Option<(u64, DfUsage)> {
     let line = output.lines().nth(1)?;
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 5 {
         return None;
     }
 
+    let total_kb: u64 = fields[1].parse().ok()?;
     let available_kb: u64 = fields[3].parse().ok()?;
     let used_percent: f64 = fields[4].trim_end_matches('%').parse().ok()?;
 
-    Some(DfUsage {
-        free_bytes: available_kb.saturating_mul(1024),
-        used_percent,
-    })
+    Some((
+        total_kb.saturating_mul(1024),
+        DfUsage {
+            free_bytes: available_kb.saturating_mul(1024),
+            used_percent,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -218,6 +287,32 @@ mod tests {
         ));
         assert!(matches!(
             evaluate_space(50 * 1024 * 1024 * 1024, 96.0),
+            SpaceDecision::Abort { .. }
+        ));
+    }
+
+    #[test]
+    fn umbral_hibrido_adapta_limites_a_volumenes_grandes_y_pequenos() {
+        let tb10: u64 = 10 * 1024 * 1024 * 1024 * 1024;
+        // 10 TB al 96% con 400 GiB libres -> solo advierte (no desperdicia 400 GiB).
+        assert_eq!(
+            super::evaluate_space_for_volume(tb10, 400 * 1024 * 1024 * 1024, 96.0),
+            SpaceDecision::Warn { used_percent: 96.0 }
+        );
+        // 10 TB con 20 GiB libres (< 32 GiB mínimos híbridos) -> aborta.
+        assert!(matches!(
+            super::evaluate_space_for_volume(tb10, 20 * 1024 * 1024 * 1024, 97.5),
+            SpaceDecision::Abort { .. }
+        ));
+        // 10 TB al 99% -> aborta.
+        assert!(matches!(
+            super::evaluate_space_for_volume(tb10, 100 * 1024 * 1024 * 1024, 99.0),
+            SpaceDecision::Abort { .. }
+        ));
+        // Volumen pequeño de 20 GiB con 1.5 GiB libres (< 2 GiB piso) -> aborta.
+        let gb20: u64 = 20 * 1024 * 1024 * 1024;
+        assert!(matches!(
+            super::evaluate_space_for_volume(gb20, 1536 * 1024 * 1024, 92.0),
             SpaceDecision::Abort { .. }
         ));
     }
