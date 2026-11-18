@@ -64,8 +64,9 @@ pub async fn cached_host_ip() -> (String, String) {
         .unwrap_or_else(|_| ("SRV-NAS".to_string(), "10.10.1.2".to_string()))
 }
 
-/// Registra auditoría con la IP de origen automáticamente extraída de las cabeceras.
-pub fn audit_ip(
+/// Registra auditoría con la IP de origen automáticamente extraída de las cabeceras
+/// sin bloquear el reactor asíncrono.
+pub async fn audit_ip(
     state: &AppState,
     headers: &HeaderMap,
     username: &str,
@@ -75,11 +76,14 @@ pub fn audit_ip(
     detail: &str,
 ) {
     let ip = extract_client_ip(headers);
-    if let Err(error) =
-        state
-            .auth
-            .db()
-            .append_audit_ip(username, action, target, result, detail, Some(&ip))
+    let username = username.to_string();
+    let action = action.to_string();
+    let target = target.to_string();
+    let result = result.to_string();
+    let detail = detail.to_string();
+    if let Err(error) = state
+        .run_db(move |db| db.append_audit_ip(&username, &action, &target, &result, &detail, Some(&ip)))
+        .await
     {
         eprintln!("aviso: no se pudo registrar auditoría con origen: {error}");
     }
