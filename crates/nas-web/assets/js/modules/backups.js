@@ -1,6 +1,8 @@
 // 6. Módulo: Central de Respaldos (Backups)
 // ==============================================================================
 let _backupRefreshTimer = null;
+let _backupPollFailures = 0;
+let _backupLoadInFlight = false;
 
 let _backupsData = [];
 let _permanentBackupsData = [];
@@ -121,20 +123,25 @@ function renderBackupsTable() {
 
 async function loadBackups() {
   const tbody = document.getElementById('backups-table-body');
-  if (!tbody) return;
+  if (!tbody || _backupLoadInFlight) return;
+  _backupLoadInFlight = true;
 
   try {
     const res = await apiFetch('/api/backups');
     const tasks = res.data || [];
     _backupsData = tasks;
+    _backupPollFailures = 0;
 
     renderBackupsTable();
 
     const anyRunning = tasks.some(t => Boolean(t.running || t.last_status === 'En curso'));
     scheduleBackupRefresh(anyRunning);
   } catch (e) {
+    _backupPollFailures = Math.min(_backupPollFailures + 1, 4);
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
     scheduleBackupRefresh(false);
+  } finally {
+    _backupLoadInFlight = false;
   }
 }
 
@@ -144,9 +151,12 @@ function scheduleBackupRefresh(anyRunning) {
     _backupRefreshTimer = null;
   }
   if (anyRunning && AppState.activeView === 'backups') {
+    const delay = document.hidden
+      ? 10000
+      : Math.min(15000, 2000 * Math.pow(2, _backupPollFailures));
     _backupRefreshTimer = setTimeout(() => {
       if (AppState.activeView === 'backups') loadBackups();
-    }, 2000);
+    }, delay);
   }
 }
 
