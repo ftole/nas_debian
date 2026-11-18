@@ -56,6 +56,8 @@ check "$UNIT" "NoNewPrivileges=no" "unit: NoNewPrivileges documentado"
 
 check "$INSTALL" "nginx -t" "install: valida nginx"
 check "$INSTALL" "systemctl enable --now nas-web.service" "install: habilita servicio"
+check "$INSTALL" "75_aide_nas" "install: exclusiones AIDE NAS"
+check "$SCRIPT_DIR/75_aide_nas" "-/srv/nas$" "aide: excluye /srv/nas"
 
 if [ "$FAILED" -ne 0 ]; then
     echo
