@@ -139,7 +139,8 @@ async function loadBackups() {
   } catch (e) {
     _backupPollFailures = Math.min(_backupPollFailures + 1, 4);
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
-    scheduleBackupRefresh(false);
+    const wasRunning = _backupsData.some(t => Boolean(t.running || t.last_status === 'En curso'));
+    scheduleBackupRefresh(wasRunning);
   } finally {
     _backupLoadInFlight = false;
   }
