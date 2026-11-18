@@ -1,6 +1,6 @@
 //! Artefactos de configuración del sistema, hardening y persistencia en `/etc/fstab`.
 
-use nas_core::{NasError, NasResult};
+use nas_core::{NasError, NasResult, ResourceBudget, SystemResources};
 
 use super::DeployParams;
 
@@ -34,6 +34,31 @@ const AUDIT_RULES: &str = include_str!("../../../../packaging/nas.rules");
 
 const AIDE_NAS_RULES: &str = include_str!("../../../../packaging/75_aide_nas");
 
+/// Renderiza `99-nas-tuning.conf` ajustando `vm.dirty_background_bytes` y `vm.dirty_bytes`
+/// de forma proporcional a la RAM total (`total_mem_mb`).
+pub fn render_sysctl_tuning(total_mem_mb: u64) -> String {
+    let mem = total_mem_mb.max(256);
+    let snap = SystemResources::from_snapshot(1, None, mem, mem, None, 0.0, 0.0, 0.0, 0.0);
+    let (bg_bytes, dirty_bytes) = ResourceBudget::from_resources(snap).sysctl_dirty_bytes();
+
+    let mut lines: Vec<String> = Vec::new();
+    for line in SYSCTL_TUNING.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("vm.dirty_background_bytes") {
+            lines.push(format!("vm.dirty_background_bytes = {bg_bytes}"));
+        } else if trimmed.starts_with("vm.dirty_bytes") {
+            lines.push(format!("vm.dirty_bytes = {dirty_bytes}"));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    let mut rendered = lines.join("\n");
+    if SYSCTL_TUNING.ends_with('\n') && !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
+}
+
 impl DeployParams {
     /// Configuración base limpia `[global]` de Samba optimizada para Debian 13.
     pub fn base_smb_conf(&self) -> String {
@@ -42,6 +67,12 @@ impl DeployParams {
 
     /// Archivos de configuración del sistema que escribe el despliegue nativo.
     pub fn artifacts(&self) -> Vec<Artifact> {
+        let total_mem_mb = SystemResources::detect().total_mem_mb;
+        self.artifacts_for_mem(total_mem_mb)
+    }
+
+    /// Archivos de configuración del sistema calculados para una cantidad dada de RAM (MiB).
+    pub fn artifacts_for_mem(&self, total_mem_mb: u64) -> Vec<Artifact> {
         let mut artifacts = vec![
             Artifact {
                 path: "/etc/nas/role".into(),
@@ -51,7 +82,7 @@ impl DeployParams {
             Artifact {
                 path: "/etc/sysctl.d/99-nas-tuning.conf".into(),
                 mode: 0o644,
-                content: SYSCTL_TUNING.to_string(),
+                content: render_sysctl_tuning(total_mem_mb),
             },
             Artifact {
                 path: "/etc/udev/rules.d/60-nas-readahead.rules".into(),
@@ -364,7 +395,7 @@ mod artifact_tests {
 
     #[test]
     fn artefactos_coinciden_con_packaging() {
-        let artifacts = params(ServerRole::ArquivosBackup).artifacts();
+        let artifacts = params(ServerRole::ArquivosBackup).artifacts_for_mem(4096);
         let sysctl = artifacts
             .iter()
             .find(|a| a.path == "/etc/sysctl.d/99-nas-tuning.conf")
@@ -373,6 +404,14 @@ mod artifact_tests {
             sysctl.content,
             include_str!("../../../../packaging/99-nas-tuning.conf")
         );
+
+        let small_sysctl = super::render_sysctl_tuning(1024);
+        assert!(small_sysctl.contains("vm.dirty_background_bytes = 16777216"));
+        assert!(small_sysctl.contains("vm.dirty_bytes = 67108864"));
+
+        let big_sysctl = super::render_sysctl_tuning(16384);
+        assert!(big_sysctl.contains("vm.dirty_background_bytes = 134217728"));
+        assert!(big_sysctl.contains("vm.dirty_bytes = 536870912"));
         let udev = artifacts
             .iter()
             .find(|a| a.path == "/etc/udev/rules.d/60-nas-readahead.rules")
