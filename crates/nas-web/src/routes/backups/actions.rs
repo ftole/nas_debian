@@ -54,10 +54,10 @@ pub async fn backup_run_id(
         return bad_request("identificador de tarea inválido");
     };
     let task = id.clone();
-    let outcome =
-        tokio::task::spawn_blocking(move || nas_engine::backup_control::run(&Runner::new(), &task))
-            .await
-            .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
+    let outcome = state
+        .run_heavy_blocking(move || nas_engine::backup_control::run(&Runner::new(), &task))
+        .await
+        .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
 
     match outcome {
         Ok(message) => {
@@ -69,7 +69,8 @@ pub async fn backup_run_id(
                 &id,
                 "SUCCESS",
                 &message,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -85,7 +86,8 @@ pub async fn backup_run_id(
                 &id,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(error))
         }
     }
@@ -106,11 +108,10 @@ pub async fn backup_stop_id(
         return bad_request("identificador de tarea inválido");
     };
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::stop(&Runner::new(), &task)
-    })
-    .await
-    .unwrap_or_else(|_| Err("detención interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || nas_engine::backup_control::stop(&Runner::new(), &task))
+        .await
+        .unwrap_or_else(|_| Err("detención interrumpida".to_string()));
 
     match outcome {
         Ok(message) => {
@@ -122,7 +123,8 @@ pub async fn backup_stop_id(
                 &id,
                 "SUCCESS",
                 &message,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -138,7 +140,8 @@ pub async fn backup_stop_id(
                 &id,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(error))
         }
     }
@@ -146,6 +149,7 @@ pub async fn backup_stop_id(
 
 /// Devuelve las últimas líneas de la bitácora de una tarea.
 pub async fn backup_logs_id(
+    State(state): State<AppState>,
     _user: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
     Query(query): Query<ExtQuery>,
@@ -155,11 +159,10 @@ pub async fn backup_logs_id(
     };
     let lines = query.limit.unwrap_or(200);
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::logs(&Runner::new(), &task, lines)
-    })
-    .await
-    .unwrap_or_else(|_| Err("lectura de bitácora interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || nas_engine::backup_control::logs(&Runner::new(), &task, lines))
+        .await
+        .unwrap_or_else(|_| Err("lectura de bitácora interrumpida".to_string()));
 
     match outcome {
         Ok(output) => axum::Json(ApiResponse::ok(
@@ -181,10 +184,11 @@ pub async fn backups_permanent(
         return forbidden("el rol ARCHIVOS no expone respaldos permanentes");
     }
     let task = query.task;
-    match tokio::task::spawn_blocking(move || {
-        nas_engine::helpers::backup::list_permanent_backups(task.as_deref())
-    })
-    .await
+    match state
+        .run_system_blocking(move || {
+            nas_engine::helpers::backup::list_permanent_backups(task.as_deref())
+        })
+        .await
     {
         Ok(Ok(list)) => axum::Json(ApiResponse::ok(list, "Respaldos permanentes")).into_response(),
         Ok(Err(error)) => error_response(error),
@@ -209,11 +213,12 @@ pub async fn backup_freeze_id(
     };
     let tag = body.tag;
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
-    })
-    .await
-    .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
+    let outcome = state
+        .run_heavy_blocking(move || {
+            nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
+        })
+        .await
+        .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
 
     match outcome {
         Ok(msg) => {
@@ -226,7 +231,8 @@ pub async fn backup_freeze_id(
                 &id,
                 "SUCCESS",
                 &msg,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
@@ -238,7 +244,8 @@ pub async fn backup_freeze_id(
                 &id,
                 "FAILED",
                 &err,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(err))
         }
     }
@@ -260,11 +267,12 @@ pub async fn backup_freeze(
     };
     let tag = body.tag;
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
-    })
-    .await
-    .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
+    let outcome = state
+        .run_heavy_blocking(move || {
+            nas_engine::backup_control::freeze(&Runner::new(), &task, tag.as_deref())
+        })
+        .await
+        .unwrap_or_else(|_| Err("congelación interrumpida".to_string()));
 
     match outcome {
         Ok(msg) => {
@@ -277,7 +285,8 @@ pub async fn backup_freeze(
                 &id,
                 "SUCCESS",
                 &msg,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
@@ -289,7 +298,8 @@ pub async fn backup_freeze(
                 &id,
                 "FAILED",
                 &err,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(err))
         }
     }
@@ -312,11 +322,12 @@ pub async fn backup_restore(
     let snap = body.snapshot;
     let tgt = body.target;
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::restore(&Runner::new(), &task, &snap, tgt.as_deref())
-    })
-    .await
-    .unwrap_or_else(|_| Err("restauración interrumpida".to_string()));
+    let outcome = state
+        .run_heavy_blocking(move || {
+            nas_engine::backup_control::restore(&Runner::new(), &task, &snap, tgt.as_deref())
+        })
+        .await
+        .unwrap_or_else(|_| Err("restauración interrumpida".to_string()));
 
     match outcome {
         Ok(msg) => {
@@ -328,7 +339,8 @@ pub async fn backup_restore(
                 &id,
                 "SUCCESS",
                 &msg,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
@@ -340,7 +352,8 @@ pub async fn backup_restore(
                 &id,
                 "FAILED",
                 &err,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(err))
         }
     }
@@ -362,11 +375,12 @@ pub async fn backup_permanent_delete(
     };
     let name = body.name;
     let task = id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::backup_control::delete_permanent(&Runner::new(), &task, &name)
-    })
-    .await
-    .unwrap_or_else(|_| Err("eliminación interrumpida".to_string()));
+    let outcome = state
+        .run_heavy_blocking(move || {
+            nas_engine::backup_control::delete_permanent(&Runner::new(), &task, &name)
+        })
+        .await
+        .unwrap_or_else(|_| Err("eliminación interrumpida".to_string()));
 
     match outcome {
         Ok(msg) => {
@@ -379,7 +393,8 @@ pub async fn backup_permanent_delete(
                 &id,
                 "SUCCESS",
                 &msg,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(serde_json::json!({ "message": msg }), msg)).into_response()
         }
         Err(err) => {
@@ -391,7 +406,8 @@ pub async fn backup_permanent_delete(
                 &id,
                 "FAILED",
                 &err,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(err))
         }
     }
