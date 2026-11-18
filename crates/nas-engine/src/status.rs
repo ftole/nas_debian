@@ -39,6 +39,8 @@ pub struct SystemMetrics {
     pub timezone_offset: i64,
     /// IPv4 primaria detectada.
     pub ip: Option<String>,
+    /// Presupuesto dinámico de recursos detectado en el sistema.
+    pub resource_budget: nas_core::ResourceBudget,
 }
 
 /// Recolecta las métricas del servidor; en plataformas no Linux devuelve datos simulados.
@@ -130,6 +132,7 @@ fn collect_linux(runner: &Runner) -> SystemMetrics {
         timezone_abbr: now.format("%Z").to_string(),
         timezone_offset: offset,
         ip: primary_ip(runner),
+        resource_budget: nas_core::ResourceBudget::detect(),
     }
 }
 
@@ -190,6 +193,7 @@ fn simulated() -> SystemMetrics {
         timezone_abbr: now.format("%Z").to_string(),
         timezone_offset: offset,
         ip: Some("10.10.1.2".to_string()),
+        resource_budget: nas_core::ResourceBudget::detect(),
     }
 }
 
