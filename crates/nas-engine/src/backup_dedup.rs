@@ -922,6 +922,9 @@ fn deduplicate_task(
         }
     }
 
+    let max_cache_entries = nas_core::ResourceBudget::detect()
+        .dedup_max_entries_in_memory
+        .max(1024);
     let mut partial_cache: HashMap<(u64, u64), Option<PartialSig>> = HashMap::new();
     let mut sha_cache: HashMap<(u64, u64), Option<[u8; 32]>> = HashMap::new();
     let mut reclaimed_inodes: HashSet<(u64, u64)> = HashSet::new();
@@ -941,10 +944,15 @@ fn deduplicate_task(
         for &idx in &indices {
             let rec = &all_files[idx];
             let key = (rec.dev, rec.ino);
-            let sig = partial_cache
-                .entry(key)
-                .or_insert_with(|| read_partial_sig(&rec.path, size).ok())
-                .clone();
+            let sig = if let Some(cached) = partial_cache.get(&key) {
+                cached.clone()
+            } else {
+                let computed = read_partial_sig(&rec.path, size).ok();
+                if partial_cache.len() < max_cache_entries {
+                    partial_cache.insert(key, computed.clone());
+                }
+                computed
+            };
             if let Some(s) = sig {
                 by_partial.entry(s).or_default().push(idx);
             }
@@ -964,9 +972,15 @@ fn deduplicate_task(
             for &idx in &p_indices {
                 let rec = &all_files[idx];
                 let key = (rec.dev, rec.ino);
-                let digest = *sha_cache
-                    .entry(key)
-                    .or_insert_with(|| sha256_file(&rec.path).ok());
+                let digest = if let Some(cached) = sha_cache.get(&key) {
+                    *cached
+                } else {
+                    let computed = sha256_file(&rec.path).ok();
+                    if sha_cache.len() < max_cache_entries {
+                        sha_cache.insert(key, computed);
+                    }
+                    computed
+                };
                 if let Some(d) = digest {
                     by_sha.entry(d).or_default().push(idx);
                 }
@@ -1036,6 +1050,10 @@ fn deduplicate_task(
                 }
             }
         }
+
+        // Liberar cachés por cubo `(size, MetaKey)` para mantener la RAM acotada.
+        partial_cache.clear();
+        sha_cache.clear();
     }
 
     // 4. Restaurar inmutabilidad únicamente en los contenedores raíz (sin -R ni chmod -R a-w),
@@ -1105,6 +1123,11 @@ pub fn deduplicate_backups(
     for pair in &roots {
         let task_ids = collect_task_dirs(pair, options.task_filter.as_deref());
         for task_id in task_ids {
+            if nas_core::ResourceBudget::detect().resources.memory_pressure
+                == nas_core::MemoryPressure::Critical
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
             let summary = deduplicate_task(runner, pair, &task_id, options);
             if summary.skipped_locked {
                 report.tasks_skipped += 1;
