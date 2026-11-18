@@ -137,6 +137,7 @@ pub async fn file_root_for_async(
 }
 
 pub async fn stream_resolved_file(
+    state: &AppState,
     root: FileRoot,
     path: String,
     headers: &HeaderMap,
@@ -144,12 +145,14 @@ pub async fn stream_resolved_file(
     disposition: &str,
     name: &str,
 ) -> Response {
-    let (file_path, file_size) =
-        match tokio::task::spawn_blocking(move || root.resolve_file(&path)).await {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(error)) => return error_response(error),
-            Err(_) => return server_error("resolución de archivo interrumpida"),
-        };
+    let (file_path, file_size) = match state
+        .run_system_blocking(move || root.resolve_file(&path))
+        .await
+    {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(error)) => return error_response(error),
+        Err(_) => return server_error("resolución de archivo interrumpida"),
+    };
 
     let mut file = match tokio::fs::File::open(&file_path).await {
         Ok(file) => file,
@@ -291,20 +294,22 @@ pub async fn files_download(
     if is_folder_flow {
         let check_root = root.clone();
         let check_path = path.clone();
-        let is_dir = tokio::task::spawn_blocking(move || {
-            check_root
-                .resolve(&check_path)
-                .map(|resolved| resolved.is_dir())
-                .unwrap_or(false)
-        })
-        .await
-        .unwrap_or(false);
+        let is_dir = state
+            .run_system_blocking(move || {
+                check_root
+                    .resolve(&check_path)
+                    .map(|resolved| resolved.is_dir())
+                    .unwrap_or(false)
+            })
+            .await
+            .unwrap_or(false);
         if is_dir {
             return files_zip(State(state), user, Query(query)).await;
         }
     }
 
     stream_resolved_file(
+        &state,
         root,
         path,
         &headers,
@@ -335,8 +340,8 @@ pub async fn files_zip(
         .map(str::to_string)
         .unwrap_or_else(|| "nas".to_string());
 
-    let (temp_file, file_size) = match state.run_heavy_blocking(move || root.zip_temp(&path)).await
-    {
+    let zip_res = state.run_heavy_blocking(move || root.zip_temp(&path)).await;
+    let (temp_file, file_size) = match zip_res {
         Ok(Ok(pair)) => pair,
         Ok(Err(error)) => return error_response(error),
         Err(_) => return server_error("compresión interrumpida"),
