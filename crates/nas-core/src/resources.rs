@@ -6,6 +6,7 @@
 //! saturar el servidor.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -175,6 +176,16 @@ impl SystemResources {
             cgroup_limited,
         }
     }
+
+    /// Indica si la presión de E/S (`/proc/pressure/io` `some avg10`) es elevada (>= 25%).
+    pub fn is_io_pressured(&self) -> bool {
+        self.io_psi_avg10 >= 25.0
+    }
+
+    /// Indica si la presión de E/S (`/proc/pressure/io` `some avg10`) es crítica (>= 50%).
+    pub fn is_io_critical(&self) -> bool {
+        self.io_psi_avg10 >= 50.0
+    }
 }
 
 const BLOCKING_POOL_DB_AUTH_HEADROOM: usize = 4;
@@ -202,6 +213,10 @@ pub struct ResourceBudget {
     pub exec_output_limit_bytes: usize,
     /// Tope de entradas en memoria para cachés de deduplicación.
     pub dedup_max_entries_in_memory: usize,
+    /// Concurrencia máxima de refrescos en segundo plano de tamaños de respaldo (`du`).
+    pub max_concurrent_background_refreshes: usize,
+    /// Concurrencia máxima de subidas de archivos simultáneas en `nas-web`.
+    pub max_concurrent_upload_ops: usize,
 }
 
 impl ResourceBudget {
@@ -294,6 +309,25 @@ impl ResourceBudget {
         let dedup_max_entries_in_memory =
             usize::try_from(avail_mb.saturating_mul(256).clamp(10_000, 500_000)).unwrap_or(50_000);
 
+        let max_concurrent_background_refreshes = if cpus <= 2
+            || resources.memory_pressure != MemoryPressure::Normal
+            || resources.is_io_pressured()
+        {
+            1
+        } else {
+            (cpus / 2).clamp(2, 4)
+        };
+
+        let max_concurrent_upload_ops = if cpus <= 2
+            || resources.memory_pressure != MemoryPressure::Normal
+            || resources.is_io_pressured()
+            || avail_mb < 1024
+        {
+            1
+        } else {
+            (cpus / 2).clamp(2, 3)
+        };
+
         Self {
             resources,
             tokio_worker_threads,
@@ -305,6 +339,8 @@ impl ResourceBudget {
             cargo_build_jobs,
             exec_output_limit_bytes,
             dedup_max_entries_in_memory,
+            max_concurrent_background_refreshes,
+            max_concurrent_upload_ops,
         }
     }
 
@@ -349,6 +385,12 @@ impl ResourceBudget {
         if let Some(v) = parse_usize("NAS_EXEC_MAX_OUTPUT_BYTES", 65_536, 134_217_728) {
             self.exec_output_limit_bytes = v;
         }
+        if let Some(v) = parse_usize("NAS_MAX_BACKGROUND_REFRESHES", 1, 8) {
+            self.max_concurrent_background_refreshes = v;
+        }
+        if let Some(v) = parse_usize("NAS_MAX_UPLOAD_OPS", 1, 8) {
+            self.max_concurrent_upload_ops = v;
+        }
         if blocking_override.is_none() {
             let min_blocking = self.min_blocking_threads_for_headroom().min(64);
             self.tokio_blocking_threads = self.tokio_blocking_threads.clamp(min_blocking, 64);
@@ -356,10 +398,77 @@ impl ResourceBudget {
         self
     }
 
-    /// Indica si el servidor está bajo presión severa de CPU o memoria.
+    /// Indica si el servidor está bajo presión severa de CPU, memoria o E/S.
     pub fn is_overloaded(&self) -> bool {
         self.resources.memory_pressure == MemoryPressure::Critical
             || self.resources.load_ratio >= 1.2
+            || self.resources.is_io_pressured()
+    }
+
+    /// Calcula cuántos permisos del semáforo `heavy_ops` adquirir y el backoff a aplicar
+    /// según la presión viva de memoria/CPU/E/S en `live`.
+    pub fn heavy_ops_throttle_plan(&self, live: &SystemResources) -> (u32, Duration) {
+        let configured = self.max_concurrent_heavy_ops.max(1);
+        let (effective_cap, backoff) =
+            if live.memory_pressure == MemoryPressure::Critical || live.is_io_critical() {
+                (1usize, Duration::from_millis(150))
+            } else if live.memory_pressure == MemoryPressure::Elevated
+                || live.is_io_pressured()
+                || live.load_ratio >= 1.2
+            {
+                ((configured / 2).max(1), Duration::from_millis(60))
+            } else {
+                (configured, Duration::ZERO)
+            };
+
+        let permits = if effective_cap >= configured {
+            1
+        } else {
+            configured.div_ceil(effective_cap).clamp(1, configured)
+        };
+        (u32::try_from(permits).unwrap_or(1), backoff)
+    }
+
+    /// Cuotas recomendadas de `systemd` para `nas-web`:
+    /// `(MemoryHigh MiB, MemoryMax MiB, CPUQuota %, TasksMax)`.
+    pub fn systemd_resource_limits(&self) -> (u64, u64, usize, usize) {
+        let total_mem_mb = self.resources.total_mem_mb.max(256);
+        let mem_high_mb = (total_mem_mb / 4)
+            .clamp(384, 4096)
+            .min((total_mem_mb * 60 / 100).max(192));
+        let mem_max_cap = (total_mem_mb * 80 / 100).max(256).min(total_mem_mb);
+        let mem_max_mb = (mem_high_mb.saturating_mul(2))
+            .clamp(512, 8192)
+            .min(mem_max_cap)
+            .max(mem_high_mb.saturating_add(64).min(total_mem_mb));
+
+        let cpus = self.resources.effective_cpus.max(1);
+        let cpu_quota_pct = cpus.saturating_mul(75).clamp(100, 800);
+        let tasks_max = cpus.saturating_mul(64).clamp(256, 1024);
+        (mem_high_mb, mem_max_mb, cpu_quota_pct, tasks_max)
+    }
+
+    /// Límites proporcionales de caché sucia del kernel:
+    /// `(vm.dirty_background_bytes, vm.dirty_bytes)`.
+    pub fn sysctl_dirty_bytes(&self) -> (u64, u64) {
+        let dirty_mb = (self.resources.total_mem_mb / 16).clamp(32, 512);
+        let bg_mb = (dirty_mb / 4).clamp(8, 128);
+        (bg_mb * 1024 * 1024, dirty_mb * 1024 * 1024)
+    }
+
+    /// Trabajadores recomendados para hashing en `backup_dedup`:
+    /// estrictamente `1` en almacenamiento rotacional o bajo presión.
+    pub fn dedup_parallel_workers(&self, rotational: bool) -> usize {
+        if rotational
+            || self.resources.effective_cpus < 4
+            || self.resources.memory_pressure != MemoryPressure::Normal
+            || self.resources.is_io_pressured()
+            || self.resources.load_ratio >= 1.0
+        {
+            1
+        } else {
+            (self.resources.effective_cpus / 4).clamp(2, 4)
+        }
     }
 }
 
@@ -684,5 +793,55 @@ MemAvailable:    8192000 kB
         map.insert("NAS_MAX_AUTH_OPS", "2");
         let adjusted = base.with_env_lookup(|k| map.get(k).map(|v| (*v).to_string()));
         assert!(adjusted.tokio_blocking_threads >= 8 + 4 + 2 + BLOCKING_POOL_DB_AUTH_HEADROOM);
+    }
+
+    #[test]
+    fn calcula_plan_reactivo_heavy_ops_y_limites_sistema() {
+        let big =
+            SystemResources::from_snapshot(16, None, 16_384, 12_288, None, 0.5, 0.0, 0.0, 0.0);
+        let budget = ResourceBudget::from_resources(big.clone());
+        assert_eq!(budget.max_concurrent_heavy_ops, 3);
+        assert_eq!(budget.max_concurrent_background_refreshes, 4);
+        assert_eq!(budget.max_concurrent_upload_ops, 3);
+        assert_eq!(budget.heavy_ops_throttle_plan(&big), (1, Duration::ZERO));
+        assert_eq!(budget.dedup_parallel_workers(true), 1);
+        assert_eq!(budget.dedup_parallel_workers(false), 4);
+        assert_eq!(budget.systemd_resource_limits(), (4096, 8192, 800, 1024));
+        assert_eq!(
+            budget.sysctl_dirty_bytes(),
+            (128 * 1024 * 1024, 512 * 1024 * 1024)
+        );
+
+        let io_pressured =
+            SystemResources::from_snapshot(16, None, 16_384, 12_288, None, 0.5, 0.0, 0.0, 30.0);
+        assert!(io_pressured.is_io_pressured());
+        assert!(!io_pressured.is_io_critical());
+        assert!(ResourceBudget::from_resources(io_pressured.clone()).is_overloaded());
+        assert_eq!(
+            budget.heavy_ops_throttle_plan(&io_pressured),
+            (3, Duration::from_millis(60))
+        );
+        assert_eq!(
+            ResourceBudget::from_resources(io_pressured).dedup_parallel_workers(false),
+            1
+        );
+
+        let critical =
+            SystemResources::from_snapshot(16, None, 16_384, 12_288, None, 0.5, 0.0, 0.0, 55.0);
+        assert!(critical.is_io_critical());
+        assert_eq!(
+            budget.heavy_ops_throttle_plan(&critical),
+            (3, Duration::from_millis(150))
+        );
+
+        let small = SystemResources::from_snapshot(1, None, 1024, 768, None, 0.2, 0.0, 0.0, 0.0);
+        let small_budget = ResourceBudget::from_resources(small);
+        assert_eq!(small_budget.max_concurrent_background_refreshes, 1);
+        assert_eq!(small_budget.max_concurrent_upload_ops, 1);
+        assert_eq!(small_budget.systemd_resource_limits(), (384, 768, 100, 256));
+        assert_eq!(
+            small_budget.sysctl_dirty_bytes(),
+            (16 * 1024 * 1024, 64 * 1024 * 1024)
+        );
     }
 }
