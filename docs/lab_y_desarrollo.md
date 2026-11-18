@@ -60,6 +60,7 @@ En `crates/nas-web`, toda la interfaz (`layout.html`, CSS, 28 JS propios, 3 vend
 
 ```bash
 # Compila e instala nas-web (o todo el workspace con --all) y reinicia el servicio
+# Calcula CARGO_BUILD_JOBS automáticamente según CPU y RAM disponible (nice/ionice)
 sudo ./scripts/deploy_local.sh
 
 # Para recompilar todos los binarios (nas, nas-web, nas-tui, nasctl, nas-dev)
@@ -67,11 +68,12 @@ sudo ./scripts/deploy_local.sh --all
 ```
 
 > [!TIP]
+> Tanto `scripts/deploy_local.sh` como `install.sh --build-from-source` calculan `CARGO_BUILD_JOBS` de forma adaptativa (~1.5 GiB de RAM libre por trabajo y hasta `cpus - 1`) y ejecutan `cargo build` con `nice -n 10` e `ionice -c 2 -n 7` para evitar saturar el servidor durante compilaciones `--release` con LTO. Puedes anular el valor exportando `CARGO_BUILD_JOBS=<N>`.
 > El frontend `/js/app.js` se sirve con `Cache-Control: public, max-age=300`. Tras ejecutar `deploy_local.sh`, recarga el navegador con **`Ctrl + Shift + R`** para invalidar la caché local al instante.
 
 ### 3.2 Administración Remota con `nasctl` e `inventory.yaml`
 
-El binario `nasctl` (respaldado por `nas-inventory` y `nas-ssh`) permite operar flotas o pares dev/prod declarados en `/etc/nas/inventory.yaml` sin dependencias Python ni Ansible, validando huellas SSH y llaves dedicadas.
+El binario `nasctl` (respaldado por `nas-inventory` y `nas-ssh`) permite operar flotas o pares dev/prod declarados en `/etc/nas/inventory.yaml` sin dependencias Python ni Ansible, validando huellas SSH y llaves dedicadas, con ejecución paralela acotada por `ResourceBudget` (ajustable con `--concurrency <N>`).
 
 ---
 
