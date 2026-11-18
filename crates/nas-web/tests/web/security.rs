@@ -520,7 +520,9 @@ async fn login_aplica_backpressure_503_cuando_cola_esta_saturada() {
         .uri("/api/auth/login")
         .header("content-type", "application/json")
         .header("x-csrf-token", &login_csrf)
-        .body(Body::from(r#"{"username":"admin","password":"Secreta123"}"#))
+        .body(Body::from(
+            r#"{"username":"admin","password":"Secreta123"}"#,
+        ))
         .expect("req");
     let resp_api = app.clone().oneshot(req_api).await.expect("resp");
     assert_eq!(resp_api.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -557,7 +559,9 @@ async fn login_aplica_backpressure_503_cuando_cola_esta_saturada() {
         .uri("/api/auth/login")
         .header("content-type", "application/json")
         .header("x-csrf-token", &login_csrf)
-        .body(Body::from(r#"{"username":"admin","password":"Secreta123"}"#))
+        .body(Body::from(
+            r#"{"username":"admin","password":"Secreta123"}"#,
+        ))
         .expect("req");
     let resp_ok = app.oneshot(req_ok).await.expect("resp");
     assert_eq!(resp_ok.status(), StatusCode::OK);
