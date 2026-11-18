@@ -119,8 +119,10 @@ async function refreshDashboardMetrics() {
     }
 
     loadDashboardActivity();
+    return true;
   } catch (e) {
     console.error('Error actualizando métricas:', e);
+    return false;
   } finally {
     if (icon) setTimeout(() => icon.classList.remove('spin'), 500);
   }
