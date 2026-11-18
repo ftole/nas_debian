@@ -123,7 +123,9 @@ impl AppState {
         let db = self.auth.db().clone();
         tokio::task::spawn_blocking(move || task(&db))
             .await
-            .map_err(|e| NasError::Database(format!("operación de base de datos interrumpida: {e}")))?
+            .map_err(|e| {
+                NasError::Database(format!("operación de base de datos interrumpida: {e}"))
+            })?
     }
 }
 
