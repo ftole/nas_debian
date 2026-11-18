@@ -30,7 +30,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::Router;
-use nas_core::{NasPaths, ServerRole};
+use nas_core::{NasError, NasPaths, NasResult, ResourceBudget, ServerRole};
 
 /// Estado compartido por los manejadores.
 #[derive(Clone, Debug)]
@@ -43,6 +43,12 @@ pub struct AppState {
     pub role: ServerRole,
     /// Directorio de runners de respaldo.
     pub backup_dir: PathBuf,
+    /// Presupuesto dinámico de recursos del sistema.
+    pub budget: ResourceBudget,
+    /// Semáforo que acota operaciones bloqueantes de sistema (`systemctl`, `lsblk`, `df`, etc.).
+    pub system_ops: Arc<tokio::sync::Semaphore>,
+    /// Semáforo que acota operaciones pesadas de CPU/E/S (`zip`, `audit_verify`, `du`, discos).
+    pub heavy_ops: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -51,19 +57,73 @@ impl AppState {
         let backup_dir = std::env::var("NAS_BACKUP_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/usr/local/bin"));
+        let budget = ResourceBudget::detect();
+        let system_ops = Arc::new(tokio::sync::Semaphore::new(
+            budget.max_concurrent_system_ops.max(1),
+        ));
+        let heavy_ops = Arc::new(tokio::sync::Semaphore::new(
+            budget.max_concurrent_heavy_ops.max(1),
+        ));
 
         Self {
             auth: Arc::new(auth),
             paths: Arc::new(paths),
             role,
             backup_dir,
+            budget,
+            system_ops,
+            heavy_ops,
         }
+    }
+
+    /// Sobrescribe el presupuesto dinámico y reconfigura los semáforos de concurrencia.
+    pub fn with_budget(mut self, budget: ResourceBudget) -> Self {
+        self.system_ops = Arc::new(tokio::sync::Semaphore::new(
+            budget.max_concurrent_system_ops.max(1),
+        ));
+        self.heavy_ops = Arc::new(tokio::sync::Semaphore::new(
+            budget.max_concurrent_heavy_ops.max(1),
+        ));
+        self.budget = budget;
+        self
     }
 
     /// Fija el directorio donde se descubren las tareas de respaldo.
     pub fn with_backup_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.backup_dir = dir.into();
         self
+    }
+
+    /// Ejecuta una operación de sistema bloqueante acotada por el semáforo `system_ops`.
+    pub async fn run_system_blocking<F, T>(&self, task: F) -> Result<T, tokio::task::JoinError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let _permit = self.system_ops.acquire().await.ok();
+        tokio::task::spawn_blocking(task).await
+    }
+
+    /// Ejecuta una operación pesada de CPU/E/S acotada por el semáforo `heavy_ops`.
+    pub async fn run_heavy_blocking<F, T>(&self, task: F) -> Result<T, tokio::task::JoinError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let _permit = self.heavy_ops.acquire().await.ok();
+        tokio::task::spawn_blocking(task).await
+    }
+
+    /// Ejecuta una operación SQLite fuera del reactor asíncrono sin competir con `system_ops`.
+    pub async fn run_db<F, T>(&self, task: F) -> NasResult<T>
+    where
+        F: FnOnce(&Db) -> NasResult<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let db = self.auth.db().clone();
+        tokio::task::spawn_blocking(move || task(&db))
+            .await
+            .map_err(|e| NasError::Database(format!("operación de base de datos interrumpida: {e}")))?
     }
 }
 
