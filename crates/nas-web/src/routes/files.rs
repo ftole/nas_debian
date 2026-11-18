@@ -340,7 +340,11 @@ pub async fn files_zip(
         .map(str::to_string)
         .unwrap_or_else(|| "nas".to_string());
 
-    let zip_res = state.run_heavy_blocking(move || root.zip_temp(&path)).await;
+    let state_dir = state.paths.state_dir.clone();
+    let data_root = state.paths.data_root.clone();
+    let zip_res = state
+        .run_heavy_blocking(move || root.zip_temp_in(&path, Some(&state_dir), Some(&data_root)))
+        .await;
     let (temp_file, file_size) = match zip_res {
         Ok(Ok(pair)) => pair,
         Ok(Err(error)) => return error_response(error),
