@@ -394,7 +394,7 @@ pub fn enable_fstrim(runner: &Runner) -> NasResult<()> {
 
 /// Instala el cron de scrub mensual de Btrfs.
 pub fn install_btrfs_scrub_cron(_runner: &Runner) -> NasResult<()> {
-    let content = "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n0 2 1 * * root btrfs scrub start -B /srv/nas >/dev/null 2>&1\n";
+    let content = "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n0 2 1 * * root nice -n 19 ionice -c 3 btrfs scrub start -B /srv/nas >/dev/null 2>&1\n";
     let path = "/etc/cron.d/nas-btrfs-scrub";
     std::fs::write(path, content)
         .map_err(|e| NasError::Denied(format!("no se pudo escribir {path}: {e}")))?;
