@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use nas_core::NasResult;
+use nas_core::{NasResult, SystemResources};
 use nas_exec::{CommandSpec, Runner};
 
 use crate::samba::ShareSpec;
@@ -46,8 +46,78 @@ impl SharePermissionScheme {
     }
 }
 
-/// Genera la sección `[global]` optimizada de `smb.conf`.
-pub fn global_smb_conf(workgroup: &str, netbios: &str) -> String {
+/// Detecta el límite duro `RLIMIT_NOFILE` aplicable a `smbd` (`systemctl show smbd` o `/proc/self/limits`).
+pub fn detect_rlimit_nofile(runner: &Runner) -> Option<u64> {
+    if let Ok(out) = runner.run(
+        &CommandSpec::new("systemctl")
+            .args(["show", "smbd", "-p", "LimitNOFILE", "--value"])
+            .timeout(Duration::from_secs(5)),
+    ) {
+        if out.is_success() {
+            let trimmed = out.stdout.trim();
+            if let Ok(limit) = trimmed.parse::<u64>() {
+                if limit > 0 {
+                    return Some(limit);
+                }
+            }
+        }
+    }
+
+    if let Ok(raw) = std::fs::read_to_string("/proc/self/limits") {
+        if let Some(limit) = parse_proc_limits_max_open_files(&raw) {
+            return Some(limit);
+        }
+    }
+
+    None
+}
+
+fn parse_proc_limits_max_open_files(raw: &str) -> Option<u64> {
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("Max open files") {
+            let tokens: Vec<&str> = rest.split_whitespace().collect();
+            if tokens.len() >= 2 {
+                // Si el límite duro es `unlimited`, no restringimos por el soft limit (1024).
+                if let Ok(hard) = tokens[1].parse::<u64>() {
+                    if hard > 0 {
+                        return Some(hard);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Calcula `max open files` para Samba acorde a la RAM total y al `RLIMIT_NOFILE` vigente.
+pub fn recommended_max_open_files(total_mem_mb: u64, rlimit_nofile: Option<u64>) -> u64 {
+    let by_ram = if total_mem_mb < 2048 {
+        16_384
+    } else if total_mem_mb < 8192 {
+        32_768
+    } else {
+        65_535
+    };
+
+    match rlimit_nofile {
+        Some(limit) if limit > 0 => {
+            let safe_cap = if limit > 1024 {
+                limit.saturating_sub(64).max(1024)
+            } else {
+                limit
+            };
+            by_ram.min(safe_cap)
+        }
+        _ => by_ram,
+    }
+}
+
+/// Genera la sección `[global]` optimizada de `smb.conf` con un valor explícito de `max open files`.
+pub fn global_smb_conf_with_max_open_files(
+    workgroup: &str,
+    netbios: &str,
+    max_open_files: u64,
+) -> String {
     format!(
         "[global]\n\
    workgroup = {workgroup}\n\
@@ -77,14 +147,23 @@ pub fn global_smb_conf(workgroup: &str, netbios: &str) -> String {
    use sendfile = yes\n\
    aio read size = 16384\n\
    aio write size = 16384\n\
-   max open files = 65535\n\
+   max open files = {max_open_files}\n\
    load printers = no\n\
    printing = bsd\n\
    printcap name = /dev/null\n\
    disable spoolss = yes\n",
         workgroup = workgroup,
         netbios = netbios,
+        max_open_files = max_open_files,
     )
+}
+
+/// Genera la sección `[global]` optimizada de `smb.conf` ajustada al hardware y `RLIMIT_NOFILE`.
+pub fn global_smb_conf(workgroup: &str, netbios: &str) -> String {
+    let mem_mb = SystemResources::detect().total_mem_mb;
+    let rlimit = detect_rlimit_nofile(&Runner::new());
+    let max_open = recommended_max_open_files(mem_mb, rlimit);
+    global_smb_conf_with_max_open_files(workgroup, netbios, max_open)
 }
 
 /// Genera un `smb.conf` completo (global + recursos) a partir de las especificaciones.
@@ -410,5 +489,26 @@ mod tests {
         let runner = Runner::new();
         let res = create_groups(&runner);
         let _ = res;
+    }
+
+    #[test]
+    fn max_open_files_se_ajusta_a_ram_y_rlimit_nofile() {
+        assert_eq!(recommended_max_open_files(1024, None), 16_384);
+        assert_eq!(recommended_max_open_files(4096, None), 32_768);
+        assert_eq!(recommended_max_open_files(16384, None), 65_535);
+        assert_eq!(recommended_max_open_files(16384, Some(16_384)), 16_320);
+        assert_eq!(recommended_max_open_files(16384, Some(524_288)), 65_535);
+        assert_eq!(recommended_max_open_files(4096, Some(1024)), 1024);
+
+        let conf = global_smb_conf_with_max_open_files("WG", "SRV", 16_320);
+        assert!(conf.contains("max open files = 16320"));
+
+        let unlimited = "Limit                     Soft Limit           Hard Limit           Units\n\
+                         Max open files            1024                 unlimited            files\n";
+        assert_eq!(parse_proc_limits_max_open_files(unlimited), None);
+
+        let capped = "Limit                     Soft Limit           Hard Limit           Units\n\
+                      Max open files            1024                 524288               files\n";
+        assert_eq!(parse_proc_limits_max_open_files(capped), Some(524_288));
     }
 }
