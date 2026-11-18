@@ -18,7 +18,9 @@ use serde_json::{json, Value};
 
 use crate::files::{Entry, FileRoot};
 
-pub use backup::{backup_row, backup_row_with_context, backup_row_with_metrics, running_backup_task_ids};
+pub use backup::{
+    backup_row, backup_row_with_context, backup_row_with_metrics, running_backup_task_ids,
+};
 pub use status::classify_backup_status;
 pub use storage::{
     calculate_destination_disk, calculate_dirs_combined_size_ex, calculate_single_dir_size_ex,
