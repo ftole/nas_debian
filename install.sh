@@ -160,7 +160,27 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
     git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
     echo -e " ${C_BOLD}[3/5]${C_RESET} Compilando la plataforma Rust (release)..."
-    cargo build --release --locked --workspace
+    if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+        NAS_CPUS="$(nproc 2>/dev/null || echo 1)"
+        NAS_AVAIL_MB="$(awk '/MemAvailable:/ {printf "%d", $2/1024; found=1} END {if (!found) print 2048}' /proc/meminfo 2>/dev/null || echo 2048)"
+        NAS_MEM_JOBS=$(( NAS_AVAIL_MB / 1536 ))
+        [ "$NAS_MEM_JOBS" -lt 1 ] && NAS_MEM_JOBS=1
+        if [ "$NAS_CPUS" -gt 2 ]; then
+            NAS_CPU_JOBS=$(( NAS_CPUS - 1 ))
+        else
+            NAS_CPU_JOBS=1
+        fi
+        CARGO_BUILD_JOBS="$NAS_CPU_JOBS"
+        [ "$NAS_MEM_JOBS" -lt "$CARGO_BUILD_JOBS" ] && CARGO_BUILD_JOBS="$NAS_MEM_JOBS"
+        [ "$CARGO_BUILD_JOBS" -lt 1 ] && CARGO_BUILD_JOBS=1
+        export CARGO_BUILD_JOBS
+    fi
+    echo "    Presupuesto de compilación: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}"
+    if command -v ionice >/dev/null 2>&1; then
+        nice -n 10 ionice -c 2 -n 7 cargo build --release --locked --workspace
+    else
+        nice -n 10 cargo build --release --locked --workspace
+    fi
 
     echo -e " ${C_BOLD}[4/5]${C_RESET} Instalando binarios y el servicio del panel..."
     for bin in nas nas-web nas-tui nasctl nas-dev; do
