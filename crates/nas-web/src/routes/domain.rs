@@ -31,10 +31,8 @@ pub struct DomainDiscoverBody {
 pub async fn domain_status(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let samba_conf = state.paths.samba_conf.clone();
     match state
-        .run_system_blocking(|| nas_engine::domain::status(&Runner::new()))
-        .await
-    {
-        Ok(status) => {
+        .run_system_blocking(move || {
+            let status = nas_engine::domain::status(&Runner::new());
             let workgroup = std::fs::read_to_string(&samba_conf)
                 .ok()
                 .and_then(|text| {
@@ -46,6 +44,11 @@ pub async fn domain_status(State(state): State<AppState>, _user: AuthenticatedUs
                     })
                 })
                 .unwrap_or_else(|| "WORKGROUP".to_string());
+            (status, workgroup)
+        })
+        .await
+    {
+        Ok((status, workgroup)) => {
             let payload = serde_json::json!({
                 "status": if status.joined { "joined" } else { "not_joined" },
                 "workgroup": workgroup,
