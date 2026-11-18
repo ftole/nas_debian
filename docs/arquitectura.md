@@ -34,8 +34,8 @@ Todos los crates del workspace (`Cargo.toml` versión `0.1.10`, edición Rust `2
 
 | Crate | Tipo | Responsabilidad Principal |
 | :--- | :--- | :--- |
-| `nas-core` | Librería | Tipos base, envoltorio `ApiResponse`, errores `NasError`, rutas `NasPaths`, roles (`ServerRole`) y saneamiento de argumentos (`shell::quote_all`). |
-| `nas-exec` | Librería | Ejecutor `Runner` con `CommandSpec`, arreglo `argv` tipado, limpieza de entorno (`env_clear()`), timeouts, soporte `stdin` y modo `SudoMode`. |
+| `nas-core` | Librería | Tipos base, envoltorio `ApiResponse`, errores `NasError`, rutas `NasPaths`, roles (`ServerRole`), saneamiento de argumentos (`shell::quote_all`) y detector/presupuesto adaptativo de recursos (`resources::ResourceBudget`). |
+| `nas-exec` | Librería | Ejecutor `Runner` con `CommandSpec`, arreglo `argv` tipado, limpieza de entorno (`env_clear()`), timeouts, lectura acotada de `stdout`/`stderr`, sondeo adaptativo, soporte `stdin` y modo `SudoMode`. |
 | `nas-audit` | Librería | Bitácora de auditoría *append-only* con encadenamiento criptográfico SHA-256 verificable y verificación de cadena. |
 | `nas-inventory` | Librería | Parseo y validación de inventarios YAML multi-servidor (`inventory.yaml`) y perfiles (`dev`/`prod`). |
 | `nas-ssh` | Librería | Transporte remoto OpenSSH con verificación estricta de huellas de host y llaves dedicadas. |
@@ -69,9 +69,9 @@ El sistema soporta **3 roles oficiales** definidos en `ServerRole` (`ARCHIVOS`, 
 
 ## 4. Arquitectura del Panel Web (`nas-web`) y Frontend Slate UI
 
-### 4.1 Backend HTTP (`axum` + SQLite WAL)
+### 4.1 Backend HTTP (`axum` + SQLite WAL + Asincronía Acotada)
 
-El binario `nas-web` escucha únicamente en `127.0.0.1:8080` detrás de `Nginx` (TLS 1.2/1.3, `client_max_body_size 50G`). Sus rutas se organizan por dominio mediante routers independientes ensamblados con `.merge()` en `crates/nas-web/src/lib.rs`:
+El binario `nas-web` escucha únicamente en `127.0.0.1:8080` detrás de `Nginx` (TLS 1.2/1.3, `client_max_body_size 50G`). Al arrancar calcula un `ResourceBudget` (`nas-core/src/resources.rs`) leyendo CPUs efectivas (respetando cuotas de `cgroups` v1/v2), `/proc/meminfo`, `/proc/loadavg` e indicadores PSI (`/proc/pressure/*`) para dimensionar el `tokio::runtime::Builder` (`worker_threads` y `max_blocking_threads`) y los semáforos `system_ops` y `heavy_ops` en `AppState`, manteniendo SQLite WAL y subprocesos fuera del reactor asíncrono y bajo cuotas systemd (`MemoryHigh=512M`, `MemoryMax=1G`, `CPUQuota=200%`, `TasksMax=256`, `IOWeight=50`, `Nice=5`). Sus rutas se organizan por dominio mediante routers independientes ensamblados con `.merge()` en `crates/nas-web/src/lib.rs`:
 
 - `routes/auth.rs`: inicio y cierre de sesión, sesión actual, CSRF y rotación de contraseña.
 - `routes/pages.rs`: renderizado de vistas HTML, resumen de dashboard, auditoría, bitácora y métricas en vivo.
