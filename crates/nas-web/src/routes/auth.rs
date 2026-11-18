@@ -91,11 +91,8 @@ pub async fn login_submit(
     let auth = state.auth.clone();
     let login_user = form.username.clone();
     let login_pass = form.password.clone();
-    let login_res = match tokio::task::spawn_blocking(move || {
-        auth.login(&login_user, &login_pass, now)
-    })
-    .await
-    {
+    let task = tokio::task::spawn_blocking(move || auth.login(&login_user, &login_pass, now));
+    let login_res = match task.await {
         Ok(res) => res,
         Err(_) => return server_error("autenticación interrumpida"),
     };
@@ -213,11 +210,8 @@ pub async fn api_login(
     let auth = state.auth.clone();
     let login_user = form.username.clone();
     let login_pass = form.password.clone();
-    let login_res = match tokio::task::spawn_blocking(move || {
-        auth.login(&login_user, &login_pass, now)
-    })
-    .await
-    {
+    let task = tokio::task::spawn_blocking(move || auth.login(&login_user, &login_pass, now));
+    let login_res = match task.await {
         Ok(res) => res,
         Err(_) => return server_error("autenticación interrumpida"),
     };
