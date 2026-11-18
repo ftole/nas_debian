@@ -1,6 +1,8 @@
 //! Despliegue del panel web (nas-web), Nginx, helpers root y sudoers.
 
-use nas_core::{NasError, NasResult};
+use std::path::Path;
+
+use nas_core::{NasError, NasResult, ResourceBudget};
 use nas_exec::{CommandSpec, Runner, SudoMode};
 
 use crate::deploy::Artifact;
@@ -54,6 +56,68 @@ pub fn env_file_content(
     format!(
         "NAS_WEB_BIND={bind}\nNAS_WEB_USER={admin_user}\nNAS_WEB_SECRET={secret}\nNAS_WEB_PASSWORD_SHA256={password_hash}\nNAS_WEB_TTL_SECS=28800\nNAS_REPO_DIR={repo_dir}\nNAS_STATE_DIR={state_dir}\nNAS_DATA_ROOT={data_root}\nNAS_SAMBA_CONF=/etc/samba/smb.conf\nNAS_ROLE_FILE=/etc/nas/role\nNAS_BACKUP_DIR=/usr/local/bin\nNAS_INVENTORY=/etc/nas/inventory.yaml\n"
     )
+}
+
+/// Ruta del drop-in dinámico de cuotas systemd para `nas-web`.
+pub const SYSTEMD_RESOURCES_DROPIN_PATH: &str =
+    "/etc/systemd/system/nas-web.service.d/10-resources.conf";
+
+fn valid_dropin_data_root(path: &str) -> bool {
+    let trimmed = path.trim();
+    trimmed.starts_with('/')
+        && trimmed.len() <= 256
+        && !trimmed.contains("..")
+        && !trimmed.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+/// Obtiene `NAS_DATA_ROOT` desde variable de entorno, `/etc/nas-web.env` o `/srv/nas`.
+pub fn resolve_data_root(env_file: &Path) -> String {
+    if let Ok(val) = std::env::var("NAS_DATA_ROOT") {
+        let trimmed = val.trim();
+        if valid_dropin_data_root(trimmed) {
+            return trimmed.to_string();
+        }
+    }
+    if let Ok(raw) = std::fs::read_to_string(env_file) {
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("NAS_DATA_ROOT=") {
+                let unquoted = rest.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+                if valid_dropin_data_root(unquoted) {
+                    return unquoted.to_string();
+                }
+            }
+        }
+    }
+    "/srv/nas".to_string()
+}
+
+/// Genera el drop-in dinámico `/etc/systemd/system/nas-web.service.d/10-resources.conf`
+/// ajustado a la RAM, CPUs efectivas y `NAS_DATA_ROOT` del servidor.
+pub fn systemd_resource_dropin(budget: &ResourceBudget, data_root: &str) -> String {
+    let (mem_high_mb, mem_max_mb, cpu_quota_pct, tasks_max) = budget.systemd_resource_limits();
+    let mut out = format!(
+        "# Generado automáticamente según hardware y entorno (no editar manualmente)\n\
+         [Service]\n\
+         MemoryHigh={mem_high_mb}M\n\
+         MemoryMax={mem_max_mb}M\n\
+         CPUQuota={cpu_quota_pct}%\n\
+         TasksMax={tasks_max}\n"
+    );
+    let clean_root = data_root.trim().trim_end_matches('/');
+    if !clean_root.is_empty() && clean_root != "/srv/nas" && valid_dropin_data_root(clean_root) {
+        out.push_str(&format!("ReadWritePaths={clean_root}\n"));
+    }
+    out
+}
+
+/// Artefacto del drop-in dinámico de recursos systemd para `nas-web`.
+pub fn resource_dropin_artifact(budget: &ResourceBudget, data_root: &str) -> Artifact {
+    Artifact {
+        path: SYSTEMD_RESOURCES_DROPIN_PATH.into(),
+        mode: 0o644,
+        content: systemd_resource_dropin(budget, data_root),
+    }
 }
 
 /// Conjunto de artefactos estaticos del despliegue web.
@@ -140,11 +204,24 @@ pub fn daemon_reload(runner: &Runner, sudo: bool) -> NasResult<()> {
     Ok(())
 }
 
-/// Aplica el despliegue web completo.
+/// Aplica el drop-in dinámico de recursos systemd para `nas-web` y recarga systemd.
+pub fn apply_resources_dropin(runner: &Runner, env_file: &Path, sudo: bool) -> NasResult<()> {
+    let budget = ResourceBudget::detect();
+    let data_root = resolve_data_root(env_file);
+    let dropin = resource_dropin_artifact(&budget, &data_root);
+    write_artifact(runner, &dropin, sudo)?;
+    daemon_reload(runner, sudo)?;
+    Ok(())
+}
+
+/// Aplica el despliegue web completo (incluyendo drop-in dinámico de recursos systemd).
 pub fn apply_web(runner: &Runner, sudo: bool) -> NasResult<()> {
     for artifact in artifacts() {
         write_artifact(runner, &artifact, sudo)?;
     }
+    let budget = ResourceBudget::detect();
+    let data_root = resolve_data_root(Path::new("/etc/nas-web.env"));
+    write_artifact(runner, &resource_dropin_artifact(&budget, &data_root), sudo)?;
     validate_sudoers(runner, "/etc/sudoers.d/nas-web-rust", sudo)?;
     daemon_reload(runner, sudo)?;
     Ok(())
@@ -221,5 +298,29 @@ mod tests {
             .map(|rel| start + rel + 1)
             .expect("cierre SUDO en packaging/install.sh");
         assert_eq!(SUDOERS, &install_sh[start..end]);
+    }
+
+    #[test]
+    fn dropin_dinamico_escala_con_hardware_y_data_root_personalizado() {
+        let small =
+            nas_core::SystemResources::from_snapshot(1, None, 1024, 768, None, 0.2, 0.0, 0.0, 0.0);
+        let small_budget = ResourceBudget::from_resources(small);
+        let small_conf = systemd_resource_dropin(&small_budget, "/srv/nas");
+        assert!(small_conf.contains("MemoryHigh=384M"));
+        assert!(small_conf.contains("MemoryMax=768M"));
+        assert!(small_conf.contains("CPUQuota=100%"));
+        assert!(small_conf.contains("TasksMax=256"));
+        assert!(!small_conf.contains("ReadWritePaths="));
+
+        let big = nas_core::SystemResources::from_snapshot(
+            16, None, 32768, 24576, None, 0.5, 0.0, 0.0, 0.0,
+        );
+        let big_budget = ResourceBudget::from_resources(big);
+        let big_conf = systemd_resource_dropin(&big_budget, "/mnt/almacenamiento");
+        assert!(big_conf.contains("MemoryHigh=4096M"));
+        assert!(big_conf.contains("MemoryMax=8192M"));
+        assert!(big_conf.contains("CPUQuota=800%"));
+        assert!(big_conf.contains("TasksMax=1024"));
+        assert!(big_conf.contains("ReadWritePaths=/mnt/almacenamiento"));
     }
 }
