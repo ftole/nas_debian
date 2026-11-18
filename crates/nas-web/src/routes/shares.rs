@@ -54,7 +54,10 @@ pub async fn shares(State(state): State<AppState>, _user: AuthenticatedUser) -> 
     }
 
     let path = state.paths.samba_conf.clone();
-    match tokio::task::spawn_blocking(move || std::fs::read_to_string(&path)).await {
+    match state
+        .run_system_blocking(move || std::fs::read_to_string(&path))
+        .await
+    {
         Ok(Ok(text)) => {
             let shares: Vec<serde_json::Value> = parse_shares(&text)
                 .into_iter()
@@ -114,17 +117,18 @@ pub async fn share_create(
     let share_name = spec.name.clone();
     let conf_path = state.paths.samba_conf.clone();
 
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
-        let updated =
-            nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
-        create_share_dir(&spec.name, &unit)?;
-        stage_and_apply(&updated)?;
-        apply_spec_acls(&spec);
-        Ok(())
-    })
-    .await
-    .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || -> Result<(), String> {
+            let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+            let updated =
+                nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
+            create_share_dir(&spec.name, &unit)?;
+            stage_and_apply(&updated)?;
+            apply_spec_acls(&spec);
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
 
     match outcome {
         Ok(()) => {
@@ -136,7 +140,8 @@ pub async fn share_create(
                 &share_name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Recurso creado")).into_response()
         }
         Err(error) => {
@@ -148,7 +153,8 @@ pub async fn share_create(
                 &share_name,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -175,27 +181,28 @@ pub async fn share_update(
     let share_name = body.name.trim().to_string();
     let conf_path = state.paths.samba_conf.clone();
 
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
-        let existing = nas_engine::parsers::smb::parse_shares(&conf)
-            .into_iter()
-            .find(|share| share.name.eq_ignore_ascii_case(body.name.trim()))
-            .ok_or_else(|| format!("no existe el recurso '{}'", body.name))?;
-        let preserved = existing.clone();
-        let path = existing
-            .path
-            .unwrap_or_else(|| share_path(body.name.trim(), "principal"));
-        let spec = share_spec(&body, &path);
-        validate_share_spec(&spec).map_err(|error| error.to_string())?;
-        let updated =
-            nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
-        stage_and_apply(&updated)?;
-        apply_spec_acls(&spec);
-        revoke_removed_acls(&preserved, &spec);
-        Ok(())
-    })
-    .await
-    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || -> Result<(), String> {
+            let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+            let existing = nas_engine::parsers::smb::parse_shares(&conf)
+                .into_iter()
+                .find(|share| share.name.eq_ignore_ascii_case(body.name.trim()))
+                .ok_or_else(|| format!("no existe el recurso '{}'", body.name))?;
+            let preserved = existing.clone();
+            let path = existing
+                .path
+                .unwrap_or_else(|| share_path(body.name.trim(), "principal"));
+            let spec = share_spec(&body, &path);
+            validate_share_spec(&spec).map_err(|error| error.to_string())?;
+            let updated =
+                nas_engine::samba::upsert_share(&conf, &spec).map_err(|error| error.to_string())?;
+            stage_and_apply(&updated)?;
+            apply_spec_acls(&spec);
+            revoke_removed_acls(&preserved, &spec);
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
 
     match outcome {
         Ok(()) => {
@@ -207,7 +214,8 @@ pub async fn share_update(
                 &share_name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Recurso actualizado",
             ))
@@ -222,7 +230,8 @@ pub async fn share_update(
                 &share_name,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -245,14 +254,15 @@ pub async fn share_delete(
 
     let name = body.name.trim().to_string();
     let conf_path = state.paths.samba_conf.clone();
-    let outcome = tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
-        let updated =
-            nas_engine::samba::remove_share(&conf, &name).map_err(|error| error.to_string())?;
-        stage_and_apply(&updated)
-    })
-    .await
-    .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+    let outcome = state
+        .run_system_blocking(move || -> Result<(), String> {
+            let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+            let updated =
+                nas_engine::samba::remove_share(&conf, &name).map_err(|error| error.to_string())?;
+            stage_and_apply(&updated)
+        })
+        .await
+        .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
 
     match outcome {
         Ok(()) => {
@@ -264,7 +274,8 @@ pub async fn share_delete(
                 &body.name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Recurso eliminado",
             ))
@@ -279,7 +290,8 @@ pub async fn share_delete(
                 &body.name,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
