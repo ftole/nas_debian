@@ -8,7 +8,8 @@ use nas_core::ApiResponse;
 use serde::Deserialize;
 
 use super::common::{
-    audit_ip, cached_host_ip, configured_superadmin, cookie_header, extract_client_ip, server_error,
+    audit_ip, cached_host_ip, cached_host_ip_nonblocking, configured_superadmin, cookie_header,
+    extract_client_ip, server_error,
 };
 use crate::extractors::AuthenticatedUser;
 use crate::views;
@@ -98,7 +99,7 @@ pub async fn login_submit(
         Ok(res) => res,
         Err(AuthBlockingError::Busy) => {
             let csrf = state.auth.issue_login_csrf(now);
-            let (host, ip) = cached_host_ip().await;
+            let (host, ip) = cached_host_ip_nonblocking();
             let mut response = (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Html(views::login_with_context(
