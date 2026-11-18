@@ -197,9 +197,7 @@ pub fn exec(
 
                 let result = match outcome {
                     Ok(output) if output.is_success() => match parse_envelope(&output.stdout) {
-                        Some(envelope)
-                            if envelope["success"] == serde_json::Value::Bool(true) =>
-                        {
+                        Some(envelope) if envelope["success"] == serde_json::Value::Bool(true) => {
                             ExecResult {
                                 host: host.alias.clone(),
                                 address: host.address.clone(),
