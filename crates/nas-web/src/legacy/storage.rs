@@ -157,6 +157,8 @@ fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
         }
     }
 
+    let id_for_name = task.id.clone();
+    let id_for_err = task.id.clone();
     let work = move || {
         let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
         store_task_storage(&task.id, fresh);
@@ -168,12 +170,12 @@ fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         drop(handle.spawn_blocking(work));
     } else if std::thread::Builder::new()
-        .name(format!("storage-refresh-{}", task.id))
+        .name(format!("storage-refresh-{id_for_name}"))
         .spawn(work)
         .is_err()
     {
         if let Ok(mut set) = in_flight_refreshes().lock() {
-            set.remove(&task.id);
+            set.remove(&id_for_err);
         }
     }
 }
