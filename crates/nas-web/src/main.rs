@@ -3,12 +3,11 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
-use nas_core::{NasPaths, ServerRole};
+use nas_core::{NasPaths, ResourceBudget, ServerRole};
 use nas_web::{router, AppState, Auth, Db};
 use sha2::{Digest, Sha256};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("nas-web {}", env!("CARGO_PKG_VERSION"));
@@ -21,6 +20,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+
+    let budget = ResourceBudget::detect();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(budget.tokio_worker_threads)
+        .max_blocking_threads(budget.tokio_blocking_threads)
+        .thread_name("nas-web-worker")
+        .enable_all()
+        .build()?;
+
+    runtime.block_on(async_main(budget))
+}
+
+async fn async_main(budget: ResourceBudget) -> Result<(), Box<dyn std::error::Error>> {
 
     let bind = std::env::var("NAS_WEB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let user = std::env::var("NAS_WEB_USER").unwrap_or_else(|_| "admin".to_string());
@@ -67,15 +79,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state_dir_for_mig = paths.state_dir.clone();
     let data_root_for_mig = paths.data_root.clone();
     let auth = Auth::with_csrf_secret(db, ttl_secs, secure_cookie, csrf_secret);
-    let state = AppState::new(auth, paths, role);
+    let state = AppState::new(auth, paths, role).with_budget(budget.clone());
     let app = router(state);
 
     let addr: SocketAddr = bind.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     println!(
-        "nas-web escuchando en http://{addr} (rol {}, sqlite {})",
+        "nas-web escuchando en http://{addr} (rol {}, sqlite {}, workers {}, blocking {}, sys_ops {}, heavy_ops {})",
         role.as_str(),
-        db_path.display()
+        db_path.display(),
+        budget.tokio_worker_threads,
+        budget.tokio_blocking_threads,
+        budget.max_concurrent_system_ops,
+        budget.max_concurrent_heavy_ops,
     );
 
     maybe_trigger_backup_dedup_migration(&state_dir_for_mig, &data_root_for_mig);
@@ -102,17 +118,15 @@ fn maybe_trigger_backup_dedup_migration(state_dir: &Path, data_root: &Path) {
         return;
     }
 
-    let _ = std::thread::Builder::new()
-        .name("backup-dedup-mig".to_string())
-        .spawn(|| {
-            let runner = nas_exec::Runner::new();
-            let _ = runner.run(
-                &nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                    .args(["helper", "backup-dedup-migration"])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(30)),
-            );
-        });
+    drop(tokio::task::spawn_blocking(|| {
+        let runner = nas_exec::Runner::new();
+        let _ = runner.run(
+            &nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["helper", "backup-dedup-migration"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(30)),
+        );
+    }));
 }
 
 fn load_or_create_csrf_secret(state_dir: &Path) -> [u8; 32] {
