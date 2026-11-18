@@ -133,10 +133,27 @@ else
     BINS_TO_INSTALL=("$TARGET_BIN")
 fi
 
+resolve_target_dir() {
+    if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+        printf '%s' "$CARGO_TARGET_DIR"
+        return 0
+    fi
+    local meta_dir=""
+    meta_dir="$(cargo metadata --no-deps --format-version 1 --offline 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    if [ -n "$meta_dir" ]; then
+        printf '%s' "$meta_dir"
+    else
+        printf '%s' "$REPO_DIR/target"
+    fi
+}
+
+TARGET_ROOT="$(resolve_target_dir)"
+
 echo "[2/3] Instalando binario(s) en $PREFIX..."
 "${SUDO_CMD[@]}" install -d -m 0755 "$PREFIX"
 for bin in "${BINS_TO_INSTALL[@]}"; do
-    SRC="$REPO_DIR/target/release/$bin"
+    SRC="$TARGET_ROOT/release/$bin"
     if [ ! -f "$SRC" ]; then
         echo "[-] Error: No se encontró el binario compilado $SRC" >&2
         exit 1
