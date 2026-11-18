@@ -368,6 +368,7 @@ mod tests {
             timezone_abbr: "UTC".into(),
             timezone_offset: 0,
             ip: Some("10.10.1.2".into()),
+            resource_budget: nas_core::ResourceBudget::detect(),
         });
 
         let backend = TestBackend::new(100, 30);
