@@ -2,12 +2,43 @@
 
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nas_core::{NasError, NasResult};
+use nas_core::{NasError, NasResult, ResourceBudget};
 
 use crate::redact::Redactor;
+
+fn default_max_output_bytes() -> usize {
+    static LIMIT: OnceLock<usize> = OnceLock::new();
+    *LIMIT.get_or_init(|| ResourceBudget::detect().exec_output_limit_bytes.max(65_536))
+}
+
+fn read_bounded<R: Read>(mut reader: R, limit: usize) -> (Vec<u8>, bool) {
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if out.len() < limit {
+                    let take = n.min(limit - out.len());
+                    out.extend_from_slice(&chunk[..take]);
+                    if take < n {
+                        truncated = true;
+                    }
+                } else {
+                    truncated = true;
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    (out, truncated)
+}
 
 /// Valor secreto que solo puede viajar por `stdin`.
 #[derive(Clone, PartialEq, Eq)]
@@ -59,6 +90,8 @@ pub struct CommandSpec {
     pub env: Vec<(String, String)>,
     /// Conserva espacios iniciales/finales en `stdout` sin recortar.
     pub preserve_whitespace: bool,
+    /// Límite máximo de bytes capturados por flujo (`stdout` y `stderr`).
+    pub max_output_bytes: usize,
 }
 
 impl CommandSpec {
@@ -72,7 +105,14 @@ impl CommandSpec {
             sudo: SudoMode::None,
             env: Vec::new(),
             preserve_whitespace: false,
+            max_output_bytes: default_max_output_bytes(),
         }
+    }
+
+    /// Ajusta el límite máximo de bytes capturados por flujo (`stdout` / `stderr`).
+    pub fn max_output_bytes(mut self, bytes: usize) -> Self {
+        self.max_output_bytes = bytes.max(1024);
+        self
     }
 
     /// Conserva los espacios en blanco de `stdout` tal cual los emite el proceso.
@@ -295,19 +335,13 @@ impl Runner {
             .take()
             .ok_or_else(|| NasError::Invalid("stderr no disponible".into()))?;
 
-        let stdout_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stdout_pipe.read_to_end(&mut buf);
-            buf
-        });
-        let stderr_handle = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stderr_pipe.read_to_end(&mut buf);
-            buf
-        });
+        let max_bytes = spec.max_output_bytes.max(1024);
+        let stdout_handle = thread::spawn(move || read_bounded(stdout_pipe, max_bytes));
+        let stderr_handle = thread::spawn(move || read_bounded(stderr_pipe, max_bytes));
 
         let mut timed_out = false;
         let code;
+        let mut poll_ms = 2u64;
 
         loop {
             match child.try_wait() {
@@ -319,7 +353,8 @@ impl Runner {
                 Err(e) => return Err(NasError::io(&spec.program, e)),
             }
 
-            if started.elapsed() >= spec.timeout {
+            let elapsed = started.elapsed();
+            if elapsed >= spec.timeout {
                 let _ = child.kill();
                 let _ = child.wait();
                 timed_out = true;
@@ -327,13 +362,22 @@ impl Runner {
                 break;
             }
 
-            thread::sleep(Duration::from_millis(20));
+            let remaining = spec.timeout.saturating_sub(elapsed);
+            let sleep_for = Duration::from_millis(poll_ms).min(remaining);
+            thread::sleep(sleep_for);
+            poll_ms = (poll_ms.saturating_mul(2)).min(25);
         }
 
-        let stdout_raw = stdout_handle.join().unwrap_or_default();
-        let stderr_raw = stderr_handle.join().unwrap_or_default();
-        let stdout = self.redactor.redact(&String::from_utf8_lossy(&stdout_raw));
-        let stderr = self.redactor.redact(&String::from_utf8_lossy(&stderr_raw));
+        let (stdout_raw, stdout_truncated) = stdout_handle.join().unwrap_or_default();
+        let (stderr_raw, stderr_truncated) = stderr_handle.join().unwrap_or_default();
+        let mut stdout = self.redactor.redact(&String::from_utf8_lossy(&stdout_raw));
+        let mut stderr = self.redactor.redact(&String::from_utf8_lossy(&stderr_raw));
+        if stdout_truncated {
+            stdout.push_str("\n[salida truncada al superar límite de memoria]");
+        }
+        if stderr_truncated {
+            stderr.push_str("\n[error truncado al superar límite de memoria]");
+        }
 
         let stdout_final = if spec.preserve_whitespace {
             stdout
@@ -434,5 +478,23 @@ mod tests {
             .expect("ejecución sin salto");
         assert!(sin_salto.is_success());
         assert_eq!(sin_salto.stdout, "nas:Clave123\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acota_memoria_de_salida_sin_bloquear_proceso() {
+        let runner = Runner::new();
+        let payload = "A".repeat(4096);
+        let out = runner
+            .run(
+                &CommandSpec::new("printf")
+                    .arg("%s")
+                    .arg(&payload)
+                    .max_output_bytes(1024),
+            )
+            .expect("ejecución acotada");
+        assert!(out.is_success());
+        assert!(out.stdout.contains("[salida truncada al superar límite de memoria]"));
+        assert!(out.stdout.len() < 1200);
     }
 }
