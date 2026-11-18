@@ -42,8 +42,10 @@ pub const SERVICE_LABELS: [(&str, &str); 6] = [
 const SERVICE_ROWS_TTL: Duration = Duration::from_secs(3);
 const ID_MAP_CACHE_TTL: Duration = Duration::from_secs(10);
 
-fn service_rows_cache() -> &'static Mutex<Option<(Instant, Vec<Value>)>> {
-    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<Value>)>>> = OnceLock::new();
+type ServiceRowsCache = Mutex<Option<(Instant, Vec<Value>)>>;
+
+fn service_rows_cache() -> &'static ServiceRowsCache {
+    static CACHE: OnceLock<ServiceRowsCache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
