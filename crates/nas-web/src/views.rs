@@ -102,23 +102,16 @@ fn detect_storage_info() -> (String, String) {
             let fstype_upper = fs.to_uppercase();
             let mut dev_type = "HDD / SSD".to_string();
 
-            let dev_name = device_path.trim_start_matches("/dev/");
-            let parent_disk = if dev_name.starts_with("nvme") {
-                if let Some(pos) = dev_name.find('p') {
-                    &dev_name[..pos]
-                } else {
-                    dev_name
-                }
-            } else {
-                dev_name.trim_end_matches(|c: char| c.is_ascii_digit())
-            };
-
-            let rota_path = format!("/sys/block/{parent_disk}/queue/rotational");
-            if let Ok(rota) = std::fs::read_to_string(&rota_path) {
-                if rota.trim() == "0" {
-                    dev_type = "SSD (Flash)".to_string();
-                } else if rota.trim() == "1" {
+            if let Some(rotational) = nas_engine::storage::detect_device_rotational(
+                &nas_exec::Runner::new(),
+                &device_path,
+            ) {
+                if rotational {
                     dev_type = "HDD (Mecánico)".to_string();
+                } else if device_path.contains("nvme") {
+                    dev_type = "NVMe (Flash)".to_string();
+                } else {
+                    dev_type = "SSD (Flash)".to_string();
                 }
             } else if device_path.contains("nvme") {
                 dev_type = "NVMe (Flash)".to_string();
