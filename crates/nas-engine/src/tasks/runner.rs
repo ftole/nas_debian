@@ -10,7 +10,8 @@ use nas_exec::{CommandOutput, CommandSpec, Runner, SudoMode};
 use serde::Serialize;
 
 use crate::backup::{
-    evaluate_space, parse_df, retention_victims, snapshot_dir_name, DfUsage, SpaceDecision,
+    evaluate_space_for_volume, parse_df_with_total, retention_victims, snapshot_dir_name, DfUsage,
+    SpaceDecision,
 };
 use crate::lock::TaskLock;
 
@@ -210,8 +211,8 @@ pub fn run(
     } else {
         PathBuf::from(&task.destination_root)
     };
-    let space = space_usage(runner, &df_target).map_or(SpaceDecision::Ok, |usage| {
-        evaluate_space(usage.free_bytes, usage.used_percent)
+    let space = space_usage(runner, &df_target).map_or(SpaceDecision::Ok, |(total, usage)| {
+        evaluate_space_for_volume(total, usage.free_bytes, usage.used_percent)
     });
 
     if let SpaceDecision::Abort { reason } = &space {
@@ -250,6 +251,31 @@ pub fn run(
 
     let lock_path = options.lock_dir.join(format!("backup_{}.lock", task.id));
     let _lock = TaskLock::acquire(&lock_path)?;
+
+    let pool_key = destination_pool_key(runner, &df_target);
+    let pool_slots = if crate::storage::detect_path_rotational(runner, &df_target).unwrap_or(true) {
+        1
+    } else {
+        2
+    };
+    let _pool_lock = TaskLock::acquire_pool_slot(
+        &options.lock_dir,
+        &pool_key,
+        &task.id,
+        pool_slots,
+        Duration::from_secs(21_600),
+    )?;
+
+    let post_lock_space = space_usage(runner, &df_target)
+        .map_or(SpaceDecision::Ok, |(total, usage)| {
+            evaluate_space_for_volume(total, usage.free_bytes, usage.used_percent)
+        });
+    if let SpaceDecision::Abort { reason } = &post_lock_space {
+        return Err(NasError::Denied(format!(
+            "espacio insuficiente en {} tras esperar cola de volumen: {reason}",
+            df_target.display()
+        )));
+    }
 
     let log_path = PathBuf::from(&task.log_dir).join(format!("backup_{}.log", task.id));
     append_log(
@@ -358,7 +384,38 @@ fn snapshot_names(task: &BackupTask) -> Vec<String> {
     names
 }
 
-fn space_usage(runner: &Runner, target: &Path) -> Option<DfUsage> {
+fn destination_pool_key(runner: &Runner, target: &Path) -> String {
+    let mut existing = target;
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else {
+            break;
+        };
+        if parent.as_os_str().is_empty() {
+            existing = Path::new("/");
+            break;
+        }
+        existing = parent;
+    }
+    if let Ok(out) = runner.run(
+        &CommandSpec::new("df")
+            .args(["-Pk", &existing.to_string_lossy()])
+            .timeout(Duration::from_secs(10)),
+    ) {
+        if out.is_success() {
+            if let Some(src) = out
+                .stdout
+                .lines()
+                .nth(1)
+                .and_then(|l| l.split_whitespace().next())
+            {
+                return src.to_string();
+            }
+        }
+    }
+    target.to_string_lossy().to_string()
+}
+
+fn space_usage(runner: &Runner, target: &Path) -> Option<(u64, DfUsage)> {
     let output = runner
         .run(
             &CommandSpec::new("df")
@@ -369,7 +426,7 @@ fn space_usage(runner: &Runner, target: &Path) -> Option<DfUsage> {
     if !output.is_success() {
         return None;
     }
-    parse_df(&output.stdout)
+    parse_df_with_total(&output.stdout)
 }
 
 fn run_step(
