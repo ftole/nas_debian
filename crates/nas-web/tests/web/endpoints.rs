@@ -372,7 +372,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
     let cases: [(&str, usize, &[&str]); 5] = [
         (
             "/js/modules/storage.js",
-            41365,
+            nas_web::assets::MODULE_STORAGE_JS.len(),
             &[
                 "renderStorageOverview",
                 "onStorageDeviceChange",
@@ -381,7 +381,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/users.js",
-            51952,
+            nas_web::assets::MODULE_USERS_JS.len(),
             &[
                 "renderUsersTableBody",
                 "loadUsersAndGroups",
@@ -390,7 +390,7 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/backups.js",
-            30901,
+            nas_web::assets::MODULE_BACKUPS_JS.len(),
             &[
                 "renderBackupsTable",
                 "runBackupTask",
@@ -399,12 +399,12 @@ async fn modulos_js_compuestos_se_sirven_completos() {
         ),
         (
             "/js/modules/system.js",
-            26462,
+            nas_web::assets::MODULE_SYSTEM_JS.len(),
             &["loadUpdates", "loadApplications", "confirmRebootServer"],
         ),
         (
             "/js/modules/files.js",
-            90403,
+            nas_web::assets::MODULE_FILES_JS.len(),
             &[
                 "getFileTypeMeta",
                 "loadFiles",
