@@ -309,7 +309,7 @@ if [ -x "$PREFIX/nas" ]; then
                 -p Nice=19 -p IOSchedulingClass=idle \
                 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
         else
-            "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
+            nice -n 19 ionice -c 3 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
         fi
     fi
 fi
