@@ -493,3 +493,70 @@ async fn api_login_devuelve_rol_y_csrf_en_spawn_blocking() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn login_aplica_backpressure_503_cuando_cola_esta_saturada() {
+    let dir = temp_dir("login-backpressure");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("superadmin");
+    let auth = Auth::with_csrf_secret(db, 3600, false, [0x33u8; 32]);
+    let login_csrf = auth.issue_login_csrf(chrono::Utc::now().timestamp());
+    let state = AppState::new(auth, paths_for(&dir), ServerRole::Arquivos);
+    let app = router(state.clone());
+
+    let mut held = Vec::new();
+    while let Ok(permit) = state.auth_queue.try_acquire() {
+        held.push(permit);
+    }
+    assert!(!held.is_empty());
+
+    let req_api = Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header("content-type", "application/json")
+        .header("x-csrf-token", &login_csrf)
+        .body(Body::from(r#"{"username":"admin","password":"Secreta123"}"#))
+        .expect("req");
+    let resp_api = app.clone().oneshot(req_api).await.expect("resp");
+    assert_eq!(resp_api.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp_api
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok()),
+        Some("2")
+    );
+
+    let req_form = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!(
+            "username=admin&password=Secreta123&csrf_token={login_csrf}"
+        )))
+        .expect("req");
+    let resp_form = app.clone().oneshot(req_form).await.expect("resp");
+    assert_eq!(resp_form.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        resp_form
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok()),
+        Some("2")
+    );
+
+    drop(held);
+
+    let req_ok = Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header("content-type", "application/json")
+        .header("x-csrf-token", &login_csrf)
+        .body(Body::from(r#"{"username":"admin","password":"Secreta123"}"#))
+        .expect("req");
+    let resp_ok = app.oneshot(req_ok).await.expect("resp");
+    assert_eq!(resp_ok.status(), StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
