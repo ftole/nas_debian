@@ -233,104 +233,117 @@ pub async fn system_updates(
     Query(query): Query<UpdatesQuery>,
 ) -> Response {
     let local_only = matches!(query.local.as_deref(), Some("1" | "true" | "yes"));
-    let candidates = [
-        state.paths.repo.join("current/version.json"),
-        state.paths.repo.join("version.json"),
-        std::path::PathBuf::from("/opt/nas_debian/current/version.json"),
-        std::path::PathBuf::from("/etc/nas/version.json"),
-        std::path::PathBuf::from("/opt/nas_debian/version.json"),
-        std::path::PathBuf::from("/opt/nas/version.json"),
-    ];
-    let version = candidates
-        .iter()
-        .find_map(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "commit": "local",
-            })
-        });
-
-    let ed25519_verified = version
-        .get("ed25519_verified")
-        .and_then(|v| v.as_bool())
-        .or_else(|| version.get("signature_verified").and_then(|v| v.as_bool()))
-        .or_else(|| version.get("gpg_verified").and_then(|v| v.as_bool()))
-        .unwrap_or(false);
-
-    let version_str = version
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or(env!("CARGO_PKG_VERSION"))
-        .trim_start_matches('v')
-        .to_string();
-    let commit_str = version
-        .get("commit")
-        .and_then(|v| v.as_str())
-        .unwrap_or("release")
-        .to_string();
-    let channel_str = version
-        .get("channel")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stable")
-        .to_string();
-    let signature_scheme = version
-        .get("signature_scheme")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Ed25519")
-        .to_string();
-    let commit_date = version
-        .get("date")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let notes_str = version
-        .get("notes")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Release oficial verificado con firma Ed25519")
-        .to_string();
-
+    let repo_dir = state.paths.repo.clone();
     let audit_path = state.paths.audit_log();
-    let version_for_remote = version_str.clone();
-    let (latest_version, has_updates, update_in_progress, last_update) = state
+
+    let collected = state
         .run_system_blocking(move || {
+            let candidates = [
+                repo_dir.join("current/version.json"),
+                repo_dir.join("version.json"),
+                std::path::PathBuf::from("/opt/nas_debian/current/version.json"),
+                std::path::PathBuf::from("/etc/nas/version.json"),
+                std::path::PathBuf::from("/opt/nas_debian/version.json"),
+                std::path::PathBuf::from("/opt/nas/version.json"),
+            ];
+            let version = candidates
+                .iter()
+                .find_map(|path| std::fs::read_to_string(path).ok())
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "commit": "local",
+                    })
+                });
+
+            let ed25519_verified = version
+                .get("ed25519_verified")
+                .and_then(|v| v.as_bool())
+                .or_else(|| version.get("signature_verified").and_then(|v| v.as_bool()))
+                .or_else(|| version.get("gpg_verified").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+
+            let version_str = version
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or(env!("CARGO_PKG_VERSION"))
+                .trim_start_matches('v')
+                .to_string();
+            let commit_str = version
+                .get("commit")
+                .and_then(|v| v.as_str())
+                .unwrap_or("release")
+                .to_string();
+            let channel_str = version
+                .get("channel")
+                .and_then(|v| v.as_str())
+                .unwrap_or("stable")
+                .to_string();
+            let signature_scheme = version
+                .get("signature_scheme")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Ed25519")
+                .to_string();
+            let commit_date = version
+                .get("date")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let notes_str = version
+                .get("notes")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Release oficial verificado con firma Ed25519")
+                .to_string();
+
             let (latest_version, has_updates) = if local_only {
-                (version_for_remote.clone(), false)
+                (version_str.clone(), false)
             } else {
                 match query_github_latest() {
                     Some(release) => {
                         let latest = release.tag_name.trim_start_matches('v').to_string();
-                        let newer = is_newer_version(&latest, &version_for_remote);
+                        let newer = is_newer_version(&latest, &version_str);
                         (latest, newer)
                     }
-                    None => (version_for_remote.clone(), false),
+                    None => (version_str.clone(), false),
                 }
             };
-            let in_progress = is_system_update_active();
+            let update_in_progress = is_system_update_active();
             let last_update = latest_update_audit_entry(&audit_path);
-            (latest_version, has_updates, in_progress, last_update)
+
+            serde_json::json!({
+                "version": version_str,
+                "latest_version": latest_version,
+                "installed_commit": commit_str,
+                "commit_date": commit_date,
+                "has_updates": has_updates,
+                "update_in_progress": update_in_progress,
+                "last_update": last_update,
+                "channel": channel_str,
+                "signature_scheme": signature_scheme,
+                "ed25519_verified": ed25519_verified,
+                "release_notes": notes_str,
+                "commit": commit_str,
+            })
         })
         .await
-        .unwrap_or_else(|_| (version_str.clone(), false, false, None));
+        .unwrap_or_else(|_| {
+            serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "latest_version": env!("CARGO_PKG_VERSION"),
+                "installed_commit": "local",
+                "commit_date": serde_json::Value::Null,
+                "has_updates": false,
+                "update_in_progress": false,
+                "last_update": serde_json::Value::Null,
+                "channel": "stable",
+                "signature_scheme": "Ed25519",
+                "ed25519_verified": false,
+                "release_notes": "Release oficial verificado con firma Ed25519",
+                "commit": "local",
+            })
+        });
 
-    axum::Json(ApiResponse::ok(
-        serde_json::json!({
-            "version": version_str,
-            "latest_version": latest_version,
-            "installed_commit": commit_str,
-            "commit_date": commit_date,
-            "has_updates": has_updates,
-            "update_in_progress": update_in_progress,
-            "last_update": last_update,
-            "channel": channel_str,
-            "signature_scheme": signature_scheme,
-            "ed25519_verified": ed25519_verified,
-            "release_notes": notes_str,
-            "commit": commit_str,
-        }),
-        "Información de actualizaciones",
-    ))
-    .into_response()
+    axum::Json(ApiResponse::ok(collected, "Información de actualizaciones")).into_response()
 }
 
 /// Estado de las aplicaciones y tecnologías.
@@ -342,129 +355,129 @@ pub async fn system_applications(
     let backup_dir = state.backup_dir.clone();
     match state
         .run_system_blocking(move || {
-        let runner = Runner::new();
-        let active = |unit: &str| {
-            runner
+            let runner = Runner::new();
+            let active = |unit: &str| {
+                runner
+                    .run(
+                        &nas_exec::CommandSpec::new("systemctl")
+                            .args(["is-active", unit])
+                            .timeout(std::time::Duration::from_secs(10)),
+                    )
+                    .map(|out| out.stdout == "active")
+                    .unwrap_or(false)
+            };
+
+            let smbstatus = runner
                 .run(
-                    &nas_exec::CommandSpec::new("systemctl")
-                        .args(["is-active", unit])
-                        .timeout(std::time::Duration::from_secs(10)),
+                    &nas_exec::CommandSpec::new("smbstatus")
+                        .arg("-b")
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(15)),
                 )
-                .map(|out| out.stdout == "active")
-                .unwrap_or(false)
-        };
-
-        let smbstatus = runner
-            .run(
-                &nas_exec::CommandSpec::new("smbstatus")
-                    .arg("-b")
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(15)),
-            )
-            .ok();
-        let mut sessions_list = Vec::new();
-        if let Some(out) = &smbstatus {
-            for line in out.stdout.lines() {
-                let trimmed = line.trim_start();
-                if !trimmed.starts_with(|c: char| c.is_ascii_digit()) {
-                    continue;
-                }
-                let cols: Vec<&str> = trimmed.split_whitespace().collect();
-                if cols.len() >= 4 {
-                    sessions_list.push(serde_json::json!({
-                        "pid": cols[0],
-                        "username": cols[1],
-                        "group": cols[2],
-                        "machine": cols[3],
-                        "ip": cols.get(4).copied().unwrap_or(""),
-                    }));
+                .ok();
+            let mut sessions_list = Vec::new();
+            if let Some(out) = &smbstatus {
+                for line in out.stdout.lines() {
+                    let trimmed = line.trim_start();
+                    if !trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+                        continue;
+                    }
+                    let cols: Vec<&str> = trimmed.split_whitespace().collect();
+                    if cols.len() >= 4 {
+                        sessions_list.push(serde_json::json!({
+                            "pid": cols[0],
+                            "username": cols[1],
+                            "group": cols[2],
+                            "machine": cols[3],
+                            "ip": cols.get(4).copied().unwrap_or(""),
+                        }));
+                    }
                 }
             }
-        }
-        let sessions = sessions_list.len();
+            let sessions = sessions_list.len();
 
-        let tasks = nas_engine::tasks::BackupTask::discover(&backup_dir)
-            .map(|tasks| tasks.len())
-            .unwrap_or(0);
-        let overview = nas_engine::storage::overview_for(&paths, &runner).ok();
-        let fs = overview
-            .as_ref()
-            .map(|o| o.filesystem.clone())
-            .unwrap_or_else(|| "desconocido".into());
-        let is_btrfs = overview.as_ref().is_some_and(|o| o.is_btrfs);
-        let smbd_active = active("smbd");
-        let nginx_active = active("nginx");
-        let wsdd_active = active("wsdd2");
-        let nmbd_active = active("nmbd");
-        let auditd_active = active("auditd");
-        let aide_active = active("dailyaidecheck.timer");
-        let has_nas_rules = std::path::Path::new("/etc/audit/rules.d/nas.rules").is_file();
-        let audit_rules = if has_nas_rules {
-            "reglas activas (/etc/audit/rules.d/nas.rules)"
-        } else if auditd_active {
-            "protección activa del kernel"
-        } else {
-            "sin reglas personalizadas"
-        };
-        let fim_status = if std::path::Path::new("/usr/bin/aide").is_file()
-            || std::path::Path::new("/usr/sbin/aide").is_file()
-        {
-            if aide_active {
-                "AIDE activo (escaneo programado)"
+            let tasks = nas_engine::tasks::BackupTask::discover(&backup_dir)
+                .map(|tasks| tasks.len())
+                .unwrap_or(0);
+            let overview = nas_engine::storage::overview_for(&paths, &runner).ok();
+            let fs = overview
+                .as_ref()
+                .map(|o| o.filesystem.clone())
+                .unwrap_or_else(|| "desconocido".into());
+            let is_btrfs = overview.as_ref().is_some_and(|o| o.is_btrfs);
+            let smbd_active = active("smbd");
+            let nginx_active = active("nginx");
+            let wsdd_active = active("wsdd2");
+            let nmbd_active = active("nmbd");
+            let auditd_active = active("auditd");
+            let aide_active = active("dailyaidecheck.timer");
+            let has_nas_rules = std::path::Path::new("/etc/audit/rules.d/nas.rules").is_file();
+            let audit_rules = if has_nas_rules {
+                "reglas activas (/etc/audit/rules.d/nas.rules)"
+            } else if auditd_active {
+                "protección activa del kernel"
             } else {
-                "AIDE preparado"
-            }
-        } else {
-            "Auditoría activa del kernel"
-        };
+                "sin reglas personalizadas"
+            };
+            let fim_status = if std::path::Path::new("/usr/bin/aide").is_file()
+                || std::path::Path::new("/usr/sbin/aide").is_file()
+            {
+                if aide_active {
+                    "AIDE activo (escaneo programado)"
+                } else {
+                    "AIDE preparado"
+                }
+            } else {
+                "Auditoría activa del kernel"
+            };
 
-        serde_json::json!({
-            "samba": {
-                "active": smbd_active,
-                "status": if smbd_active { "activo" } else { "inactivo" },
-                "version": "4.x (Debian 13)",
-                "sessions": sessions,
-                "sessions_list": sessions_list,
-                "vfs_modules": ["acl_xattr", "streams_xattr"],
-            },
-            "wsdd2": {
-                "active": wsdd_active,
-                "nmbd_active": nmbd_active,
-                "wsdd_active": wsdd_active,
-                "protocol": "WSD/LLMNR",
-            },
-            "wsdd": { "active": wsdd_active },
-            "web": {
-                "active": nginx_active,
-                "status": if nginx_active { "activo" } else { "inactivo" },
-                "pool_mode": "axum/tokio",
-                "rust_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
-                "memory_mb": process_rss_mb(),
-            },
-            "btrfs": {
-                "active": is_btrfs,
-                "filesystem": fs,
-                "compression": if is_btrfs { "zstd:3" } else { "n/a" },
-                "scrub_status": if is_btrfs { "programado" } else { "no disponible" },
-                "scrub_errors": "0 errores",
-                "schedule": "mensual (día 1, 02:00)",
-            },
-            "rsync": {
-                "tasks_count": tasks,
-                "protocols": ["CIFS 3.1.1", "SSH"],
-                "deduplication": ">85% (link-dest)",
-                "staging": "atómico",
-            },
-            "security": {
-                "active": auditd_active,
-                "auditd_active": auditd_active,
-                "aide_active": aide_active,
-                "audit_rules": audit_rules,
-                "fim_status": fim_status,
-            },
+            serde_json::json!({
+                "samba": {
+                    "active": smbd_active,
+                    "status": if smbd_active { "activo" } else { "inactivo" },
+                    "version": "4.x (Debian 13)",
+                    "sessions": sessions,
+                    "sessions_list": sessions_list,
+                    "vfs_modules": ["acl_xattr", "streams_xattr"],
+                },
+                "wsdd2": {
+                    "active": wsdd_active,
+                    "nmbd_active": nmbd_active,
+                    "wsdd_active": wsdd_active,
+                    "protocol": "WSD/LLMNR",
+                },
+                "wsdd": { "active": wsdd_active },
+                "web": {
+                    "active": nginx_active,
+                    "status": if nginx_active { "activo" } else { "inactivo" },
+                    "pool_mode": "axum/tokio",
+                    "rust_version": format!("Rust {}", env!("CARGO_PKG_VERSION")),
+                    "memory_mb": process_rss_mb(),
+                },
+                "btrfs": {
+                    "active": is_btrfs,
+                    "filesystem": fs,
+                    "compression": if is_btrfs { "zstd:3" } else { "n/a" },
+                    "scrub_status": if is_btrfs { "programado" } else { "no disponible" },
+                    "scrub_errors": "0 errores",
+                    "schedule": "mensual (día 1, 02:00)",
+                },
+                "rsync": {
+                    "tasks_count": tasks,
+                    "protocols": ["CIFS 3.1.1", "SSH"],
+                    "deduplication": ">85% (link-dest)",
+                    "staging": "atómico",
+                },
+                "security": {
+                    "active": auditd_active,
+                    "auditd_active": auditd_active,
+                    "aide_active": aide_active,
+                    "audit_rules": audit_rules,
+                    "fim_status": fim_status,
+                },
+            })
         })
-    })
-    .await
+        .await
     {
         Ok(payload) => axum::Json(ApiResponse::ok(payload, "Aplicaciones")).into_response(),
         Err(_) => server_error("consulta de aplicaciones interrumpida"),
@@ -496,9 +509,9 @@ pub async fn system_update_run(
             }
 
             let runner = Runner::new();
-            let output = runner
-                .run(&system_update_command_spec())
-                .map_err(|error| format!("no se pudo iniciar la unidad de actualización: {error}"))?;
+            let output = runner.run(&system_update_command_spec()).map_err(|error| {
+                format!("no se pudo iniciar la unidad de actualización: {error}")
+            })?;
 
             let combined = [output.stdout.trim(), output.stderr.trim()]
                 .into_iter()
