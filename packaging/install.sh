@@ -190,8 +190,12 @@ install -d -m 2770 -o root -g "$SERVICE_USER" /var/lib/nas/staging 2>/dev/null |
 
 if [ -f "$SCRIPT_DIR/99-nas-tuning.conf" ]; then
     install -d -m 0755 /etc/sysctl.d
-    install -m 0644 "$SCRIPT_DIR/99-nas-tuning.conf" /etc/sysctl.d/99-nas-tuning.conf
-    sysctl -p /etc/sysctl.d/99-nas-tuning.conf >/dev/null 2>&1 || true
+    if [ -x "$PREFIX/nas" ] && "$PREFIX/nas" deploy resources --only-sysctl >/dev/null 2>&1; then
+        true
+    else
+        install -m 0644 "$SCRIPT_DIR/99-nas-tuning.conf" /etc/sysctl.d/99-nas-tuning.conf
+        sysctl -p /etc/sysctl.d/99-nas-tuning.conf >/dev/null 2>&1 || true
+    fi
 fi
 
 if [ -f "$SCRIPT_DIR/60-nas-readahead.rules" ]; then
@@ -231,6 +235,9 @@ chmod 0755 /etc/cron.daily/nas-recycle-purge
 
 echo "[5/7] Instalando unidad systemd"
 install -m 0644 "$SCRIPT_DIR/nas-web.service" "$UNIT_FILE"
+if [ -x "$PREFIX/nas" ]; then
+    "$PREFIX/nas" deploy resources --only-systemd --env-file "$ENV_FILE" >/dev/null 2>&1 || true
+fi
 systemctl daemon-reload
 systemctl enable --now nas-web.service
 systemctl restart nas-web.service
