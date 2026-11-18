@@ -144,15 +144,20 @@ pub fn invalidate_task_storage_cache(task_id: &str) {
     }
 }
 
-const MAX_CONCURRENT_BACKGROUND_REFRESHES: usize = 2;
+fn max_concurrent_background_refreshes() -> usize {
+    nas_core::ResourceBudget::detect()
+        .max_concurrent_background_refreshes
+        .max(1)
+}
 
 fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
     let id = task.id.clone();
+    let max_refreshes = max_concurrent_background_refreshes();
     {
         let Ok(mut set) = in_flight_refreshes().lock() else {
             return;
         };
-        if set.len() >= MAX_CONCURRENT_BACKGROUND_REFRESHES || !set.insert(id.clone()) {
+        if set.len() >= max_refreshes || !set.insert(id.clone()) {
             return;
         }
     }
