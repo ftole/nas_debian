@@ -23,7 +23,7 @@ pub struct StorageMultiBody {
     pub confirm: String,
 }
 
-fn audit_storage(
+async fn audit_storage(
     state: &AppState,
     headers: &HeaderMap,
     actor: &str,
@@ -32,7 +32,7 @@ fn audit_storage(
     status: &str,
     detail: &str,
 ) {
-    audit_ip(state, headers, actor, action, target, status, detail);
+    audit_ip(state, headers, actor, action, target, status, detail).await;
 }
 
 async fn storage_operation<F>(
@@ -49,7 +49,8 @@ where
     let actor = admin.user().username().to_string();
 
     let audited_target = target.clone();
-    let outcome = tokio::task::spawn_blocking(operation)
+    let outcome = state
+        .run_heavy_blocking(operation)
         .await
         .unwrap_or_else(|_| Err("operación interrumpida".to_string()));
 
@@ -63,7 +64,8 @@ where
                 &audited_target,
                 "SUCCESS",
                 &message,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::ok(
                 serde_json::json!({ "message": message }),
                 message,
@@ -79,7 +81,8 @@ where
                 &audited_target,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(error))
         }
     }
@@ -219,32 +222,33 @@ pub async fn storage_extend_pool_multi(
     let devices = body.devices.clone();
     let confirm = body.confirm.clone();
     let target = devices.join(", ");
-    let outcome = tokio::task::spawn_blocking(move || {
-        let runner = Runner::new();
-        let mut results: Vec<serde_json::Value> = Vec::new();
-        let mut failed = false;
-        for device in &devices {
-            match nas_engine::storage_ops::extend_pool(&runner, device, &confirm) {
-                Ok(message) => results.push(serde_json::json!({
-                    "device": device,
-                    "success": true,
-                    "message": message,
-                })),
-                Err(error) => {
-                    failed = true;
-                    results.push(serde_json::json!({
+    let outcome = state
+        .run_heavy_blocking(move || {
+            let runner = Runner::new();
+            let mut results: Vec<serde_json::Value> = Vec::new();
+            let mut failed = false;
+            for device in &devices {
+                match nas_engine::storage_ops::extend_pool(&runner, device, &confirm) {
+                    Ok(message) => results.push(serde_json::json!({
                         "device": device,
-                        "success": false,
-                        "message": error,
-                    }));
-                    break;
+                        "success": true,
+                        "message": message,
+                    })),
+                    Err(error) => {
+                        failed = true;
+                        results.push(serde_json::json!({
+                            "device": device,
+                            "success": false,
+                            "message": error,
+                        }));
+                        break;
+                    }
                 }
             }
-        }
-        Ok::<_, String>((results, failed))
-    })
-    .await
-    .unwrap_or_else(|_| Err("operación interrumpida".to_string()));
+            Ok::<_, String>((results, failed))
+        })
+        .await
+        .unwrap_or_else(|_| Err("operación interrumpida".to_string()));
 
     match outcome {
         Ok((results, failed)) => {
@@ -257,7 +261,8 @@ pub async fn storage_extend_pool_multi(
                 &target,
                 status,
                 &format!("{:?}", results),
-            );
+            )
+            .await;
             let message = if failed {
                 "Ampliación parcial: revisa los resultados por disco."
             } else {
@@ -278,7 +283,8 @@ pub async fn storage_extend_pool_multi(
                 &target,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             error_response(NasError::Invalid(error))
         }
     }
