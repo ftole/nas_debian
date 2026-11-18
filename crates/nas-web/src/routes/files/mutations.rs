@@ -278,7 +278,7 @@ pub async fn files_upload(
                 .into_response();
         }
         let destination = target_dir.join(filename);
-        if destination.exists() {
+        if tokio::fs::try_exists(&destination).await.unwrap_or(false) {
             for (temp, _) in &staged_files {
                 let _ = tokio::fs::remove_file(temp).await;
             }
