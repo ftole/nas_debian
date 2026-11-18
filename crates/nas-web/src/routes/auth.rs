@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::header::SET_COOKIE;
+use axum::http::header::{RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Form;
@@ -12,7 +12,7 @@ use super::common::{
 };
 use crate::extractors::AuthenticatedUser;
 use crate::views;
-use crate::AppState;
+use crate::{AppState, AuthBlockingError};
 
 /// Credenciales enviadas por el formulario.
 #[derive(Debug, Deserialize)]
@@ -91,10 +91,30 @@ pub async fn login_submit(
     let auth = state.auth.clone();
     let login_user = form.username.clone();
     let login_pass = form.password.clone();
-    let task = tokio::task::spawn_blocking(move || auth.login(&login_user, &login_pass, now));
-    let login_res = match task.await {
+    let login_res = match state
+        .run_auth_blocking(move || auth.login(&login_user, &login_pass, now))
+        .await
+    {
         Ok(res) => res,
-        Err(_) => return server_error("autenticación interrumpida"),
+        Err(AuthBlockingError::Busy) => {
+            let csrf = state.auth.issue_login_csrf(now);
+            let (host, ip) = cached_host_ip().await;
+            let mut response = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Html(views::login_with_context(
+                    &host,
+                    &ip,
+                    &csrf,
+                    Some("Demasiados inicios de sesión simultáneos. Intente en unos segundos."),
+                )),
+            )
+                .into_response();
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from_static("2"));
+            return response;
+        }
+        Err(AuthBlockingError::Failed) => return server_error("autenticación interrumpida"),
     };
     let session = match login_res {
         Ok(Some(session)) => {
@@ -210,10 +230,25 @@ pub async fn api_login(
     let auth = state.auth.clone();
     let login_user = form.username.clone();
     let login_pass = form.password.clone();
-    let task = tokio::task::spawn_blocking(move || auth.login(&login_user, &login_pass, now));
-    let login_res = match task.await {
+    let login_res = match state
+        .run_auth_blocking(move || auth.login(&login_user, &login_pass, now))
+        .await
+    {
         Ok(res) => res,
-        Err(_) => return server_error("autenticación interrumpida"),
+        Err(AuthBlockingError::Busy) => {
+            let mut response = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(ApiResponse::<serde_json::Value>::error(
+                    "Demasiados inicios de sesión simultáneos. Espere un momento.",
+                )),
+            )
+                .into_response();
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from_static("2"));
+            return response;
+        }
+        Err(AuthBlockingError::Failed) => return server_error("autenticación interrumpida"),
     };
     match login_res {
         Ok(Some(session)) => {
@@ -302,8 +337,9 @@ pub async fn logout(
     headers: HeaderMap,
 ) -> Response {
     let cookies = cookie_header(&headers).to_string();
-    let auth = state.auth.clone();
-    let _ = tokio::task::spawn_blocking(move || auth.logout(&cookies)).await;
+    if let Some(session_id) = crate::auth::cookie_value(&cookies).map(str::to_string) {
+        let _ = state.run_db(move |db| db.delete_session(&session_id)).await;
+    }
 
     let mut response = Redirect::to("/login").into_response();
     if let Ok(header) = HeaderValue::from_str(&state.auth.clear_cookie_header()) {
