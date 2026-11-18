@@ -160,7 +160,8 @@ pub async fn users(
     State(state): State<AppState>,
 ) -> Response {
     let db = state.auth.db().clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let (mut users, groups) = nas_engine::users::load_local();
         users.retain(|user| !user.system);
 
@@ -246,8 +247,13 @@ pub async fn user_create(
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
+    let check_name = body.username.clone();
+    let protected = state
+        .run_system_blocking(move || is_protected_posix_account(&check_name))
+        .await
+        .unwrap_or(true);
     if !valid_username(&body.username)
-        || is_protected_posix_account(&body.username)
+        || protected
         || !body.groups.iter().all(|group| valid_grp(group))
     {
         return bad_request("usuario o grupo inválido o reservado");
@@ -270,42 +276,44 @@ pub async fn user_create(
     let can_web = body.can_web || grant_admin;
     let password = body.password.clone();
 
-    let result = tokio::task::spawn_blocking(move || {
-        let hash = if can_web {
-            Some(
-                crate::Auth::hash_password(&password)
-                    .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
-            )
-        } else {
-            None
-        };
-        run_accounts(
-            &[
-                "create-user",
-                &username,
-                &full_name,
-                "-",
-                if grant_admin { "1" } else { "0" },
-                if can_web { "1" } else { "0" },
-                samba,
-                &groups,
-            ],
-            Some(&password),
-        )?;
-        Ok::<_, String>(hash)
-    })
-    .await
-    .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+    let result = state
+        .run_system_blocking(move || {
+            let hash = if can_web {
+                Some(
+                    crate::Auth::hash_password(&password)
+                        .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
+                )
+            } else {
+                None
+            };
+            run_accounts(
+                &[
+                    "create-user",
+                    &username,
+                    &full_name,
+                    "-",
+                    if grant_admin { "1" } else { "0" },
+                    if can_web { "1" } else { "0" },
+                    samba,
+                    &groups,
+                ],
+                Some(&password),
+            )?;
+            Ok::<_, String>(hash)
+        })
+        .await
+        .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
 
     match result {
         Ok(maybe_hash) => {
             if can_web {
                 let Some(hash) = maybe_hash else {
                     let rollback_user = body.username.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        let _ = run_accounts(&["delete-user", &rollback_user], None);
-                    })
-                    .await;
+                    let _ = state
+                        .run_system_blocking(move || {
+                            let _ = run_accounts(&["delete-user", &rollback_user], None);
+                        })
+                        .await;
                     return server_error("no se pudo generar el hash de acceso web");
                 };
                 let role = if body.is_superadmin {
@@ -315,12 +323,17 @@ pub async fn user_create(
                 } else {
                     "operator"
                 };
-                if let Err(err) = state.auth.db().upsert_user(&body.username, &hash, role) {
+                let uname = body.username.clone();
+                if let Err(err) = state
+                    .run_db(move |db| db.upsert_user(&uname, &hash, role))
+                    .await
+                {
                     let rollback_user = body.username.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        let _ = run_accounts(&["delete-user", &rollback_user], None);
-                    })
-                    .await;
+                    let _ = state
+                        .run_system_blocking(move || {
+                            let _ = run_accounts(&["delete-user", &rollback_user], None);
+                        })
+                        .await;
                     return server_error(&format!(
                         "no se pudo registrar el acceso web en SQLite: {err}"
                     ));
@@ -334,7 +347,8 @@ pub async fn user_create(
                 &body.username,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Usuario creado")).into_response()
         }
         Err(error) => server_error(&error),
@@ -349,13 +363,23 @@ pub async fn user_update(
     axum::Json(body): axum::Json<UserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
+    let check_name = body.username.clone();
+    let state_for_check = state.clone();
+    let (protected, target_is_super) = state
+        .run_system_blocking(move || {
+            (
+                is_protected_posix_account(&check_name),
+                is_target_superadmin(&state_for_check, &check_name),
+            )
+        })
+        .await
+        .unwrap_or((true, false));
     if !valid_username(&body.username)
-        || is_protected_posix_account(&body.username)
+        || protected
         || !body.groups.iter().all(|group| valid_grp(group))
     {
         return bad_request("usuario o grupo inválido o reservado");
     }
-    let target_is_super = is_target_superadmin(&state, &body.username);
     if (target_is_super || body.is_superadmin) && !admin.is_superadmin() {
         return forbidden("no se puede modificar el rango del superadministrador");
     }
@@ -382,41 +406,42 @@ pub async fn user_update(
         None
     };
 
-    let result = tokio::task::spawn_blocking(move || {
-        let pass_mode = if password.is_empty() {
-            "--keep-password"
-        } else {
-            "-"
-        };
-        let secret = if password.is_empty() {
-            None
-        } else {
-            Some(password.as_str())
-        };
-        run_accounts(
-            &[
-                "update-user",
-                &username,
-                &full_name,
-                pass_mode,
-                if grant_admin { "1" } else { "0" },
-                if can_web { "1" } else { "0" },
-                samba,
-                &groups,
-            ],
-            secret,
-        )?;
-        let web_hash = match hash_password {
-            Some(pw) => Some(
-                crate::Auth::hash_password(&pw)
-                    .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
-            ),
-            None => None,
-        };
-        Ok::<_, String>(web_hash)
-    })
-    .await
-    .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
+    let result = state
+        .run_system_blocking(move || {
+            let pass_mode = if password.is_empty() {
+                "--keep-password"
+            } else {
+                "-"
+            };
+            let secret = if password.is_empty() {
+                None
+            } else {
+                Some(password.as_str())
+            };
+            run_accounts(
+                &[
+                    "update-user",
+                    &username,
+                    &full_name,
+                    pass_mode,
+                    if grant_admin { "1" } else { "0" },
+                    if can_web { "1" } else { "0" },
+                    samba,
+                    &groups,
+                ],
+                secret,
+            )?;
+            let web_hash = match hash_password {
+                Some(pw) => Some(
+                    crate::Auth::hash_password(&pw)
+                        .map_err(|err| format!("no se pudo generar el hash web: {err}"))?,
+                ),
+                None => None,
+            };
+            Ok::<_, String>(web_hash)
+        })
+        .await
+        .unwrap_or_else(|_| Err("actualización interrumpida".to_string()));
 
     match result {
         Ok(web_hash) => {
@@ -427,44 +452,31 @@ pub async fn user_update(
             } else {
                 "operator"
             };
-            if can_web {
-                if !body.password.is_empty() {
-                    if let Some(hash) = web_hash {
-                        if let Err(err) = state.auth.db().upsert_user(&body.username, &hash, role) {
-                            return server_error(&format!(
-                                "no se pudo actualizar el acceso web en SQLite: {err}"
-                            ));
-                        }
-                    }
-                } else {
-                    match state.auth.db().user_hash(&body.username) {
-                        Ok(Some(existing_hash)) => {
-                            if let Err(err) =
-                                state
-                                    .auth
-                                    .db()
-                                    .upsert_user(&body.username, &existing_hash, role)
-                            {
-                                return server_error(&format!(
-                                    "no se pudo actualizar el rol web en SQLite: {err}"
-                                ));
+            let uname = body.username.clone();
+            let has_new_password = !body.password.is_empty();
+            let db_res = state
+                .run_db(move |db| {
+                    if can_web {
+                        if has_new_password {
+                            if let Some(hash) = web_hash {
+                                db.upsert_user(&uname, &hash, role)?;
                             }
+                        } else if let Some(existing_hash) = db.user_hash(&uname)? {
+                            db.upsert_user(&uname, &existing_hash, role)?;
                         }
-                        Ok(None) => {}
-                        Err(err) => {
-                            return server_error(&format!(
-                                "no se pudo consultar el acceso web en SQLite: {err}"
-                            ));
-                        }
+                    } else {
+                        db.delete_user(&uname)?;
                     }
-                }
-            } else if let Err(err) = state.auth.db().delete_user(&body.username) {
+                    if has_new_password {
+                        let _ = db.delete_user_sessions(&uname);
+                    }
+                    Ok(())
+                })
+                .await;
+            if let Err(err) = db_res {
                 return server_error(&format!(
-                    "no se pudo revocar el acceso web en SQLite: {err}"
+                    "no se pudo actualizar el acceso web en SQLite: {err}"
                 ));
-            }
-            if !body.password.is_empty() {
-                let _ = state.auth.db().delete_user_sessions(&body.username);
             }
             audit_ip(
                 &state,
@@ -474,7 +486,8 @@ pub async fn user_update(
                 &body.username,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Usuario actualizado",
             ))
@@ -492,25 +505,38 @@ pub async fn user_toggle(
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
-    if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
+    let check_name = body.username.clone();
+    let state_for_check = state.clone();
+    let (protected, target_is_super) = state
+        .run_system_blocking(move || {
+            (
+                is_protected_posix_account(&check_name),
+                is_target_superadmin(&state_for_check, &check_name),
+            )
+        })
+        .await
+        .unwrap_or((true, false));
+    if !valid_username(&body.username) || protected {
         return bad_request("usuario inválido o reservado del sistema");
     }
-    if !body.enabled && (body.username == actor || is_target_superadmin(&state, &body.username)) {
+    if !body.enabled && (body.username == actor || target_is_super) {
         return forbidden("no se puede suspender la cuenta propia ni al superadministrador");
     }
 
     let username = body.username.clone();
     let enabled = if body.enabled { "1" } else { "0" };
-    let result = tokio::task::spawn_blocking(move || {
-        run_accounts(&["toggle-user", &username, enabled], None)
-    })
-    .await
-    .unwrap_or_else(|_| Err("cambio de estado interrumpido".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&["toggle-user", &username, enabled], None))
+        .await
+        .unwrap_or_else(|_| Err("cambio de estado interrumpido".to_string()));
 
     match result {
         Ok(_) => {
             if !body.enabled {
-                let _ = state.auth.db().delete_user_sessions(&body.username);
+                let uname = body.username.clone();
+                let _ = state
+                    .run_db(move |db| db.delete_user_sessions(&uname).map(|_| ()))
+                    .await;
             }
             audit_ip(
                 &state,
@@ -520,7 +546,8 @@ pub async fn user_toggle(
                 &body.username,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Estado actualizado",
             ))
@@ -538,22 +565,34 @@ pub async fn user_delete(
     axum::Json(body): axum::Json<ToggleUserBody>,
 ) -> Response {
     let actor = admin.username().to_string();
-    if !valid_username(&body.username) || is_protected_posix_account(&body.username) {
+    let check_name = body.username.clone();
+    let state_for_check = state.clone();
+    let (protected, target_is_super) = state
+        .run_system_blocking(move || {
+            (
+                is_protected_posix_account(&check_name),
+                is_target_superadmin(&state_for_check, &check_name),
+            )
+        })
+        .await
+        .unwrap_or((true, false));
+    if !valid_username(&body.username) || protected {
         return bad_request("usuario inválido o protegido del sistema");
     }
-    if body.username == actor || is_target_superadmin(&state, &body.username) {
+    if body.username == actor || target_is_super {
         return forbidden("no se puede eliminar la cuenta propia ni al superadministrador");
     }
 
     let username = body.username.clone();
-    let result =
-        tokio::task::spawn_blocking(move || run_accounts(&["delete-user", &username], None))
-            .await
-            .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&["delete-user", &username], None))
+        .await
+        .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
 
     match result {
         Ok(_) => {
-            if let Err(err) = state.auth.db().delete_user(&body.username) {
+            let uname = body.username.clone();
+            if let Err(err) = state.run_db(move |db| db.delete_user(&uname)).await {
                 return server_error(&format!(
                     "cuenta eliminada del sistema, pero falló SQLite: {err}"
                 ));
@@ -566,7 +605,8 @@ pub async fn user_delete(
                 &body.username,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Usuario eliminado",
             ))
