@@ -32,6 +32,26 @@ use axum::routing::{get, post};
 use axum::Router;
 use nas_core::{NasError, NasPaths, NasResult, ResourceBudget, ServerRole};
 
+/// Error devuelto al ejecutar una operación criptográfica de autenticación acotada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthBlockingError {
+    /// Cola de inicios de sesión simultáneos saturada (aplicar backpressure HTTP 503).
+    Busy,
+    /// La tarea bloqueante fue interrumpida antes de finalizar.
+    Failed,
+}
+
+fn auth_semaphores(
+    budget: &ResourceBudget,
+) -> (Arc<tokio::sync::Semaphore>, Arc<tokio::sync::Semaphore>) {
+    let auth_permits = budget.max_concurrent_auth_ops.max(1);
+    let queue_permits = auth_permits.saturating_mul(4).max(4);
+    (
+        Arc::new(tokio::sync::Semaphore::new(auth_permits)),
+        Arc::new(tokio::sync::Semaphore::new(queue_permits)),
+    )
+}
+
 /// Estado compartido por los manejadores.
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -49,6 +69,10 @@ pub struct AppState {
     pub system_ops: Arc<tokio::sync::Semaphore>,
     /// Semáforo que acota operaciones pesadas de CPU/E/S (`zip`, `audit_verify`, `du`, discos).
     pub heavy_ops: Arc<tokio::sync::Semaphore>,
+    /// Semáforo que acota verificaciones criptográficas simultáneas de login (PBKDF2).
+    pub auth_ops: Arc<tokio::sync::Semaphore>,
+    /// Semáforo que acota la cola total de inicios de sesión en espera para aplicar backpressure.
+    pub auth_queue: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -64,6 +88,7 @@ impl AppState {
         let heavy_ops = Arc::new(tokio::sync::Semaphore::new(
             budget.max_concurrent_heavy_ops.max(1),
         ));
+        let (auth_ops, auth_queue) = auth_semaphores(&budget);
 
         Self {
             auth: Arc::new(auth),
@@ -73,6 +98,8 @@ impl AppState {
             budget,
             system_ops,
             heavy_ops,
+            auth_ops,
+            auth_queue,
         }
     }
 
@@ -84,6 +111,9 @@ impl AppState {
         self.heavy_ops = Arc::new(tokio::sync::Semaphore::new(
             budget.max_concurrent_heavy_ops.max(1),
         ));
+        let (auth_ops, auth_queue) = auth_semaphores(&budget);
+        self.auth_ops = auth_ops;
+        self.auth_queue = auth_queue;
         self.budget = budget;
         self
     }
@@ -112,6 +142,30 @@ impl AppState {
     {
         let _permit = self.heavy_ops.acquire().await.ok();
         tokio::task::spawn_blocking(task).await
+    }
+
+    /// Ejecuta una operación criptográfica de autenticación (PBKDF2) con concurrencia
+    /// y cola de espera acotadas para evitar saturación de CPU y del pool bloqueante.
+    pub async fn run_auth_blocking<F, T>(&self, task: F) -> Result<T, AuthBlockingError>
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let queue_permit = self
+            .auth_queue
+            .try_acquire()
+            .map_err(|_| AuthBlockingError::Busy)?;
+        let exec_permit = self
+            .auth_ops
+            .acquire()
+            .await
+            .map_err(|_| AuthBlockingError::Failed)?;
+        let result = tokio::task::spawn_blocking(task)
+            .await
+            .map_err(|_| AuthBlockingError::Failed);
+        drop(exec_permit);
+        drop(queue_permit);
+        result
     }
 
     /// Ejecuta una operación SQLite fuera del reactor asíncrono sin competir con `system_ops`.
