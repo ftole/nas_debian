@@ -28,12 +28,18 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
             "--ext4 y --btrfs son mutuamente excluyentes".into(),
         ));
     }
+    if request.ssd && request.hdd {
+        return Err(NasError::Invalid(
+            "--ssd y --hdd son mutuamente excluyentes".into(),
+        ));
+    }
 
     let role = nas_engine::deploy::env::normalize_role(&request.role)
         .ok_or_else(|| NasError::Invalid(format!("rol inválido: {}", request.role)))?;
 
+    let runner = Runner::new();
     let netbios = if request.netbios.trim().is_empty() {
-        nas_engine::deploy::env::default_netbios(&Runner::new())
+        nas_engine::deploy::env::default_netbios(&runner)
     } else {
         request.netbios.clone()
     };
@@ -51,7 +57,16 @@ pub fn build_deploy_params(request: &DeployArgs) -> NasResult<DeployParams> {
         role,
     );
     params.keep_data = request.keep_data;
-    params.rotational = !request.ssd;
+    params.rotational = if request.ssd {
+        false
+    } else if request.hdd {
+        true
+    } else if params.disk == "LOCAL" {
+        nas_engine::storage::detect_path_rotational(&runner, std::path::Path::new("/"))
+            .unwrap_or(true)
+    } else {
+        nas_engine::deploy::env::disk_rotational(&runner, &params.disk).unwrap_or(true)
+    };
 
     nas_engine::deploy::env::validate_keep_data(&params.disk, params.keep_data)?;
     let disk_problems =
@@ -422,5 +437,53 @@ pub fn deploy_apply(
         println!("Pasos ejecutados: {}", steps_executed);
     }
 
+    Ok(ExitCode::SUCCESS)
+}
+
+pub fn deploy_resources(
+    env_file: &std::path::Path,
+    only_systemd: bool,
+    only_sysctl: bool,
+    sudo: bool,
+    json: bool,
+) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let apply_systemd = only_systemd || !only_sysctl;
+    let apply_sysctl = only_sysctl || !only_systemd;
+
+    let mut applied = Vec::new();
+    if apply_sysctl {
+        let total_mem_mb = nas_core::SystemResources::detect().total_mem_mb;
+        let sysctl_artifact = nas_engine::deploy::Artifact {
+            path: "/etc/sysctl.d/99-nas-tuning.conf".into(),
+            mode: 0o644,
+            content: nas_engine::deploy::render_sysctl_tuning(total_mem_mb),
+        };
+        nas_engine::deploy::web::write_artifact(&runner, &sysctl_artifact, sudo)?;
+        let mut spec = CommandSpec::new("sysctl")
+            .args(["-p", "/etc/sysctl.d/99-nas-tuning.conf"])
+            .timeout(Duration::from_secs(15));
+        if sudo {
+            spec = spec.sudo(nas_exec::SudoMode::Passwordless);
+        }
+        let _ = runner.run(&spec);
+        applied.push(sysctl_artifact.path);
+    }
+
+    if apply_systemd {
+        nas_engine::deploy::web::apply_resources_dropin(&runner, env_file, sudo)?;
+        applied.push(nas_engine::deploy::web::SYSTEMD_RESOURCES_DROPIN_PATH.to_string());
+    }
+
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "applied": applied }),
+            "Recursos del sistema ajustados al hardware",
+        ))?;
+    } else {
+        for path in &applied {
+            println!("Aplicado: {path}");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }
