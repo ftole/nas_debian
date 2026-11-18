@@ -126,29 +126,13 @@ fn partition_for(device: &str) -> String {
 }
 
 pub(super) fn mount_options_for(runner: &Runner, fstype: &str, device: &str) -> String {
+    let is_hdd = crate::storage::detect_device_rotational(runner, device).unwrap_or(true);
     if fstype == "btrfs" {
-        return "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string();
+        if is_hdd {
+            return "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string();
+        }
+        return "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string();
     }
-    let is_hdd = runner
-        .run(&CommandSpec::new("lsblk").args(["-ndo", "ROTA", device]))
-        .ok()
-        .and_then(|out| {
-            out.stdout
-                .lines()
-                .find(|l| !l.trim().is_empty())
-                .and_then(|l| l.trim().parse::<u8>().ok())
-        })
-        .map(|rota| rota == 1)
-        .unwrap_or_else(|| {
-            let disk_name = device.trim_start_matches("/dev/");
-            let parent = crate::storage_ops::parent_disk(runner, device)
-                .unwrap_or_else(|| format!("/dev/{disk_name}"));
-            let parent_name = parent.trim_start_matches("/dev/");
-            let rota_path = format!("/sys/block/{parent_name}/queue/rotational");
-            std::fs::read_to_string(&rota_path)
-                .map(|s| s.trim() == "1")
-                .unwrap_or(false)
-        });
     if is_hdd {
         "rw,noatime,commit=2,errors=remount-ro".to_string()
     } else {
