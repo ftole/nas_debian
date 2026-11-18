@@ -505,11 +505,15 @@ async fn login_aplica_backpressure_503_cuando_cola_esta_saturada() {
     let state = AppState::new(auth, paths_for(&dir), ServerRole::Arquivos);
     let app = router(state.clone());
 
+    let expected_auth = state.budget.max_concurrent_auth_ops.max(1);
+    let expected_queue = expected_auth.saturating_mul(4).max(4);
+    assert_eq!(state.auth_ops.available_permits(), expected_auth);
+
     let mut held = Vec::new();
     while let Ok(permit) = state.auth_queue.try_acquire() {
         held.push(permit);
     }
-    assert!(!held.is_empty());
+    assert_eq!(held.len(), expected_queue);
 
     let req_api = Request::builder()
         .method("POST")
