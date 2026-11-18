@@ -159,21 +159,7 @@ where
             }
         };
 
-        // 2. Validar sesión en SQLite
-        let now = chrono::Utc::now().timestamp();
-        let username = match app_state.auth.authenticate(cookie_str, now) {
-            Ok(Some(user)) => user,
-            Ok(None) => {
-                return Err(if is_api {
-                    unauthorized_response()
-                } else {
-                    Redirect::to("/login").into_response()
-                });
-            }
-            Err(e) => return Err(server_error_response(&e.to_string())),
-        };
-
-        // 3. Validación CSRF para métodos mutantes (POST, PUT, DELETE, PATCH)
+        // 2. Validación CSRF para métodos mutantes (POST, PUT, DELETE, PATCH) — HMAC en memoria.
         let is_mutating = matches!(
             parts.method,
             Method::POST | Method::PUT | Method::DELETE | Method::PATCH
@@ -189,17 +175,38 @@ where
             }
         }
 
-        // 4. Resolver rol del usuario en SQLite (priorizando superadministrador configurado)
-        let role = if crate::routes::configured_superadmin().as_deref() == Some(&username) {
-            "superadmin".to_string()
-        } else {
-            app_state
-                .auth
-                .db()
-                .user_role(&username)
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "operator".to_string())
+        // 3. Validar sesión y resolver rol fuera del reactor Tokio (SQLite + archivo superadmin).
+        let now = chrono::Utc::now().timestamp();
+        let auth = app_state.auth.clone();
+        let cookie_owned = cookie_str.to_string();
+        let auth_res = tokio::task::spawn_blocking(move || {
+            let Some(username) = auth.authenticate(&cookie_owned, now)? else {
+                return Ok(None);
+            };
+            let role = if crate::routes::configured_superadmin().as_deref() == Some(&username) {
+                "superadmin".to_string()
+            } else {
+                auth.db()
+                    .user_role(&username)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "operator".to_string())
+            };
+            Ok::<_, nas_core::NasError>(Some((username, role)))
+        })
+        .await;
+
+        let (username, role) = match auth_res {
+            Ok(Ok(Some(pair))) => pair,
+            Ok(Ok(None)) => {
+                return Err(if is_api {
+                    unauthorized_response()
+                } else {
+                    Redirect::to("/login").into_response()
+                });
+            }
+            Ok(Err(e)) => return Err(server_error_response(&e.to_string())),
+            Err(_) => return Err(server_error_response("validación de sesión interrumpida")),
         };
 
         Ok(AuthenticatedUser {
