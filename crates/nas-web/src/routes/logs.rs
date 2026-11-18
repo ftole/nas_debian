@@ -27,6 +27,8 @@ pub async fn logs(
     let search = query.q.clone().unwrap_or_default();
     let grouped = query.grouped != Some(0);
 
+    let db = state.auth.db().clone();
+    let paths = state.paths.clone();
     let outcome = state
         .run_system_blocking(move || {
             let selected = nas_engine::LogSource::parse(&source).map(|choice| vec![choice]);
@@ -50,7 +52,7 @@ pub async fn logs(
             }
 
             if wants(nas_engine::LogSource::Admin) {
-                if let Ok(rows) = state.auth.db().recent_audit(limit) {
+                if let Ok(rows) = db.recent_audit(limit) {
                     let events: Vec<nas_engine::AdminEvent<'_>> = rows
                         .iter()
                         .map(|row| nas_engine::AdminEvent {
@@ -71,8 +73,7 @@ pub async fn logs(
                 let path = std::env::var("NAS_BACKUP_MASTER_LOG")
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| {
-                        state
-                            .paths
+                        paths
                             .data_root
                             .join("LOGS_BACKUP")
                             .join("backups_master.log")
