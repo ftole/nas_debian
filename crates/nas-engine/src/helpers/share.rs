@@ -164,16 +164,18 @@ pub fn apply_share_acl(
     }
 }
 
-/// Purga archivos en las papeleras de reciclaje Samba (.recycle) con más de `days` días.
-pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
+/// Purga archivos en las papeleras de reciclaje Samba (`.recycle`) dentro de `data_root`
+/// con más de `days` días.
+pub fn purge_recycle_in(runner: &Runner, data_root: &Path, days: u32) -> NasResult<String> {
     let days = days.max(1);
     let mtime_arg = format!("+{days}");
+    let root_str = data_root.to_string_lossy();
 
-    // 1. Eliminar archivos mayores a `days` días en cualquier directorio .recycle dentro de /srv/nas
+    // 1. Eliminar archivos mayores a `days` días en cualquier directorio .recycle dentro de `data_root`
     let purge_files = runner.run(
         &CommandSpec::new("find")
             .args([
-                "/srv/nas",
+                root_str.as_ref(),
                 "-type",
                 "f",
                 "-path",
@@ -189,7 +191,7 @@ pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
     let _ = runner.run(
         &CommandSpec::new("find")
             .args([
-                "/srv/nas",
+                root_str.as_ref(),
                 "-type",
                 "d",
                 "-path",
@@ -211,6 +213,12 @@ pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
         }),
         Err(e) => Err(e),
     }
+}
+
+/// Purga archivos en las papeleras de reciclaje Samba (.recycle) con más de `days` días.
+pub fn purge_recycle(runner: &Runner, days: u32) -> NasResult<String> {
+    let data_root = nas_core::NasPaths::from_env().data_root;
+    purge_recycle_in(runner, &data_root, days)
 }
 
 #[cfg(test)]
