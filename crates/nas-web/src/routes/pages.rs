@@ -22,41 +22,42 @@ pub async fn render_shell(
     let is_super = user.is_superadmin();
     let csrf = state.auth.csrf_for_cookies(cookie_header(headers));
     let samba_conf = state.paths.samba_conf.clone();
-    let (host, workgroup, ip) = tokio::task::spawn_blocking(move || {
-        let workgroup = std::fs::read_to_string(&samba_conf)
-            .ok()
-            .and_then(|text| nas_core::config::parse_workgroup(&text))
-            .unwrap_or_else(|| "N/D".to_string());
-        (hostname(), workgroup, server_ip())
-    })
-    .await
-    .unwrap_or_else(|_| {
-        (
-            "SRV-NAS".to_string(),
-            "N/D".to_string(),
-            "127.0.0.1".to_string(),
-        )
-    });
-
-    let shell = views::Shell {
-        active,
-        user: user.username(),
-        hostname: &host,
-        workgroup: &workgroup,
-        role_label: if is_super {
-            "Superadministrador"
-        } else if is_admin {
-            "Administrador"
-        } else {
-            "Operador Web"
-        },
-        server_role: state.role.as_str(),
-        is_admin,
-        is_super,
-        ip: &ip,
+    let username = user.username().to_string();
+    let role_label = if is_super {
+        "Superadministrador"
+    } else if is_admin {
+        "Administrador"
+    } else {
+        "Operador Web"
     };
+    let server_role = state.role.as_str();
+    let active_owned = active.to_string();
 
-    Html(views::shell(&shell, &csrf)).into_response()
+    let html = state
+        .run_system_blocking(move || {
+            let workgroup = std::fs::read_to_string(&samba_conf)
+                .ok()
+                .and_then(|text| nas_core::config::parse_workgroup(&text))
+                .unwrap_or_else(|| "N/D".to_string());
+            let host = hostname();
+            let ip = server_ip();
+            let shell = views::Shell {
+                active: &active_owned,
+                user: &username,
+                hostname: &host,
+                workgroup: &workgroup,
+                role_label,
+                server_role,
+                is_admin,
+                is_super,
+                ip: &ip,
+            };
+            views::shell(&shell, &csrf)
+        })
+        .await
+        .unwrap_or_else(|_| "Error interno al renderizar el panel".to_string());
+
+    Html(html).into_response()
 }
 
 /// Hoja de estilos del panel.
