@@ -178,6 +178,11 @@ if [ -f "$REPO_DIR/packaging/nas.rules" ] && [ -d /etc/audit ]; then
     fi
 fi
 
+# Desplegar exclusiones AIDE si el subsistema está instalado
+if [ -f "$REPO_DIR/packaging/75_aide_nas" ] && [ -d /etc/aide/aide.conf.d ]; then
+    "${SUDO_CMD[@]}" install -m 0644 "$REPO_DIR/packaging/75_aide_nas" /etc/aide/aide.conf.d/75_aide_nas 2>/dev/null || true
+fi
+
 if [ "$RESTART_SERVICE" -eq 1 ]; then
     for bin in "${BINS_TO_INSTALL[@]}"; do
         if [ "$bin" = "nas-web" ]; then
