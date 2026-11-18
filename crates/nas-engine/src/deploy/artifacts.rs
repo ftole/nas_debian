@@ -32,6 +32,8 @@ const LOGROTATE_BACKUPS: &str = "/srv/nas/LOGS_BACKUP/*.log {
 
 const AUDIT_RULES: &str = include_str!("../../../../packaging/nas.rules");
 
+const AIDE_NAS_RULES: &str = include_str!("../../../../packaging/75_aide_nas");
+
 impl DeployParams {
     /// Configuración base limpia `[global]` de Samba optimizada para Debian 13.
     pub fn base_smb_conf(&self) -> String {
@@ -65,6 +67,11 @@ impl DeployParams {
                 path: "/etc/audit/rules.d/nas.rules".into(),
                 mode: 0o640,
                 content: AUDIT_RULES.to_string(),
+            },
+            Artifact {
+                path: "/etc/aide/aide.conf.d/75_aide_nas".into(),
+                mode: 0o644,
+                content: AIDE_NAS_RULES.to_string(),
             },
             Artifact {
                 path: "/etc/cron.daily/nas-recycle-purge".into(),
@@ -264,6 +271,7 @@ mod artifact_tests {
         assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules"));
         assert!(paths.contains(&"/etc/logrotate.d/nas-backups"));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules"));
+        assert!(paths.contains(&"/etc/aide/aide.conf.d/75_aide_nas"));
         assert!(paths.contains(&"/etc/cron.daily/nas-recycle-purge"));
 
         let role = artifacts
@@ -295,7 +303,7 @@ mod artifact_tests {
             .find(|a| a.path == "/etc/audit/rules.d/nas.rules")
             .expect("audit");
         assert_eq!(audit.mode, 0o640);
-        assert_eq!(artifacts.len(), 7);
+        assert_eq!(artifacts.len(), 8);
         assert!(audit.content.contains("-D"));
         assert!(audit.content.contains("-b 8192"));
         assert!(audit.content.contains("-f 1"));
@@ -372,6 +380,14 @@ mod artifact_tests {
         assert_eq!(
             udev.content,
             include_str!("../../../../packaging/60-nas-readahead.rules")
+        );
+        let aide = artifacts
+            .iter()
+            .find(|a| a.path == "/etc/aide/aide.conf.d/75_aide_nas")
+            .expect("aide");
+        assert_eq!(
+            aide.content,
+            include_str!("../../../../packaging/75_aide_nas")
         );
     }
 
