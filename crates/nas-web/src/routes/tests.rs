@@ -57,6 +57,21 @@ fn run_json_redacta_secretos_de_stdin_en_errores() {
     assert!(err.contains("***"));
 }
 
+#[tokio::test]
+async fn cached_host_ip_nonblocking_responde_y_calienta_cache() {
+    let (host_nb, ip_nb) = crate::routes::common::cached_host_ip_nonblocking();
+    assert!(!host_nb.is_empty());
+    assert!(!ip_nb.is_empty());
+
+    let (host, ip) = crate::routes::common::cached_host_ip().await;
+    assert!(!host.is_empty());
+    assert!(!ip.is_empty());
+
+    let (host_warm, ip_warm) = crate::routes::common::cached_host_ip_nonblocking();
+    assert_eq!(host_warm, host);
+    assert_eq!(ip_warm, ip);
+}
+
 mod semver_tests {
     use crate::routes::system::parse_semver;
 
