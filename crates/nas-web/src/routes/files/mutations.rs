@@ -2,17 +2,18 @@ use std::path::PathBuf;
 
 use axum::{
     extract::{Multipart, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use tokio::io::AsyncWriteExt;
 
 use super::{
-    file_root_for_async, CreateFileBody, MoveBody, PathBody, RenameBody, MAX_UPLOAD_FILE_SIZE,
+    file_root_for, file_root_for_async, CreateFileBody, MoveBody, PathBody, RenameBody,
+    MAX_UPLOAD_FILE_SIZE,
 };
 use crate::{
     extractors::AuthenticatedUser,
-    files::sanitize_filename,
+    files::{free_and_total_bytes_at, sanitize_filename},
     routes::common::{bad_request, error_response, random_hex, server_error, ApiResponse},
     AppState,
 };
@@ -109,17 +110,129 @@ pub async fn files_rename(
     }
 }
 
+const UPLOAD_SPACE_CHECK_INTERVAL_BYTES: u64 = 16 * 1024 * 1024;
+
+fn upload_reserve_bytes(total_fs_bytes: u64) -> u64 {
+    (total_fs_bytes / 50).clamp(16 * 1024 * 1024, 512 * 1024 * 1024)
+}
+
+fn insufficient_storage_response(message: String) -> Response {
+    (
+        StatusCode::INSUFFICIENT_STORAGE,
+        axum::Json(ApiResponse::<serde_json::Value>::error(message)),
+    )
+        .into_response()
+}
+
+fn prepare_upload_staging_dir(state: &AppState, requested_root: Option<&str>) -> PathBuf {
+    let base_root = if let Some(req) = requested_root.map(str::trim).filter(|s| !s.is_empty()) {
+        file_root_for(state, Some(req))
+            .ok()
+            .filter(|r| r.is_protected_path("").is_none())
+            .map(|r| r.root().to_path_buf())
+            .unwrap_or_else(|| state.paths.data_root.clone())
+    } else {
+        state.paths.data_root.clone()
+    };
+
+    let staging = base_root.join(".nas_staging");
+    if std::fs::create_dir_all(&staging).is_ok() && staging.is_dir() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o700));
+        }
+        return staging;
+    }
+    state.paths.data_root.clone()
+}
+
+async fn check_staging_space(
+    state: &AppState,
+    dir: &std::path::Path,
+    content_len: Option<u64>,
+) -> Option<Response> {
+    let check_dir = dir.to_path_buf();
+    if let Ok(Some((free, total_fs))) = state
+        .run_system_blocking(move || free_and_total_bytes_at(&check_dir))
+        .await
+    {
+        let reserve = upload_reserve_bytes(total_fs);
+        if free <= reserve {
+            return Some(insufficient_storage_response(format!(
+                "espacio libre insuficiente en el volumen de destino ({} MiB disponibles, reserva mínima {} MiB)",
+                free / 1024 / 1024,
+                reserve / 1024 / 1024
+            )));
+        }
+        if let Some(expected_bytes) = content_len {
+            if expected_bytes.saturating_add(reserve) > free {
+                return Some(insufficient_storage_response(format!(
+                    "espacio insuficiente para la carga ({} MiB requeridos con reserva, {} MiB disponibles)",
+                    expected_bytes.saturating_add(reserve) / 1024 / 1024,
+                    free / 1024 / 1024
+                )));
+            }
+        }
+    }
+    None
+}
+
+async fn resolve_staging_dir_async(state: &AppState, root_name: Option<&str>) -> PathBuf {
+    let state_for_staging = state.clone();
+    let req_root_clone = root_name.map(str::to_string);
+    match state
+        .run_system_blocking(move || {
+            prepare_upload_staging_dir(&state_for_staging, req_root_clone.as_deref())
+        })
+        .await
+    {
+        Ok(dir) => dir,
+        Err(_) => state.paths.data_root.clone(),
+    }
+}
+
 /// Sube uno o varios archivos a un directorio, escribiendo por streaming.
 pub async fn files_upload(
     State(state): State<AppState>,
     _user: AuthenticatedUser,
     Query(query): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
+    let Ok(_queue_permit) = state.upload_queue.try_acquire() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(ApiResponse::<serde_json::Value>::error(
+                "cola de cargas simultáneas saturada; reintente en unos momentos",
+            )),
+        )
+            .into_response();
+    };
+    let Ok(_upload_permit) = state.upload_ops.acquire().await else {
+        return server_error("semáforo de carga cerrado");
+    };
+
     let mut root_name: Option<String> = query.get("root").cloned();
     let mut directory: Option<String> = query.get("path").cloned();
+    let content_len = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok());
+
+    let mut staging_dir: Option<PathBuf> = None;
+    if root_name.is_some() {
+        let dir = resolve_staging_dir_async(&state, root_name.as_deref()).await;
+        if let Some(resp) = check_staging_space(&state, &dir, content_len).await {
+            return resp;
+        }
+        staging_dir = Some(dir);
+    }
+
     let mut staged_files: Vec<(PathBuf, String)> = Vec::new();
     let mut saved: Vec<String> = Vec::new();
+    let mut total_written_all: u64 = 0;
+    let mut last_space_check: u64 = 0;
 
     loop {
         let field = match multipart.next_field().await {
@@ -136,7 +249,12 @@ pub async fn files_upload(
         let name = field.name().unwrap_or_default().to_string();
         if name == "root" {
             match field.text().await {
-                Ok(text) => root_name = Some(text),
+                Ok(text) => {
+                    if staging_dir.is_some() && root_name.as_deref() != Some(text.as_str()) {
+                        staging_dir = None;
+                    }
+                    root_name = Some(text);
+                }
                 Err(error) => {
                     for (temp, _) in &staged_files {
                         let _ = tokio::fs::remove_file(temp).await;
@@ -162,6 +280,21 @@ pub async fn files_upload(
             continue;
         }
 
+        let active_staging_dir = match &staging_dir {
+            Some(dir) => dir.clone(),
+            None => {
+                let dir = resolve_staging_dir_async(&state, root_name.as_deref()).await;
+                if let Some(resp) = check_staging_space(&state, &dir, content_len).await {
+                    for (temp, _) in &staged_files {
+                        let _ = tokio::fs::remove_file(temp).await;
+                    }
+                    return resp;
+                }
+                staging_dir = Some(dir.clone());
+                dir
+            }
+        };
+
         let filename = match sanitize_filename(field.file_name().unwrap_or_default()) {
             Ok(name) => name,
             Err(error) => {
@@ -172,10 +305,7 @@ pub async fn files_upload(
             }
         };
 
-        let temporary = state
-            .paths
-            .data_root
-            .join(format!(".upload-{}", random_hex()));
+        let temporary = active_staging_dir.join(format!(".upload-{}", random_hex()));
         let mut file = match tokio::fs::File::create(&temporary).await {
             Ok(file) => file,
             Err(error) => {
@@ -193,6 +323,7 @@ pub async fn files_upload(
             match field.chunk().await {
                 Ok(Some(chunk)) => {
                     total += chunk.len() as u64;
+                    total_written_all = total_written_all.saturating_add(chunk.len() as u64);
                     if total > MAX_UPLOAD_FILE_SIZE {
                         let _ = tokio::fs::remove_file(&temporary).await;
                         for (temp, _) in &staged_files {
@@ -205,6 +336,27 @@ pub async fn files_upload(
                             )),
                         )
                             .into_response();
+                    }
+                    if total_written_all.saturating_sub(last_space_check)
+                        >= UPLOAD_SPACE_CHECK_INTERVAL_BYTES
+                    {
+                        last_space_check = total_written_all;
+                        let check_dir = active_staging_dir.clone();
+                        if let Ok(Some((free_now, total_fs_now))) = state
+                            .run_system_blocking(move || free_and_total_bytes_at(&check_dir))
+                            .await
+                        {
+                            let reserve_now = upload_reserve_bytes(total_fs_now);
+                            if free_now <= reserve_now {
+                                let _ = tokio::fs::remove_file(&temporary).await;
+                                for (temp, _) in &staged_files {
+                                    let _ = tokio::fs::remove_file(temp).await;
+                                }
+                                return insufficient_storage_response(
+                                    "carga abortada: espacio libre agotándose en el volumen de almacenamiento".to_string(),
+                                );
+                            }
+                        }
                     }
                     if let Err(error) = file.write_all(&chunk).await {
                         let _ = tokio::fs::remove_file(&temporary).await;
@@ -302,14 +454,36 @@ pub async fn files_upload(
         }
     }
 
-    for (temporary, filename) in staged_files {
-        let destination = target_dir.join(&filename);
-        if let Err(_error) = tokio::fs::rename(&temporary, &destination).await {
-            if let Err(cp_err) = tokio::fs::copy(&temporary, &destination).await {
-                let _ = tokio::fs::remove_file(&temporary).await;
+    for (idx, (temporary, filename)) in staged_files.iter().enumerate() {
+        let destination = target_dir.join(filename);
+        if let Err(_error) = tokio::fs::rename(temporary, &destination).await {
+            let staged_size = tokio::fs::metadata(temporary)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let check_target = target_dir.clone();
+            if let Ok(Some((free_dest, total_dest))) = state
+                .run_system_blocking(move || free_and_total_bytes_at(&check_target))
+                .await
+            {
+                let reserve = upload_reserve_bytes(total_dest);
+                if staged_size.saturating_add(reserve) > free_dest {
+                    for (rem, _) in &staged_files[idx..] {
+                        let _ = tokio::fs::remove_file(rem).await;
+                    }
+                    return insufficient_storage_response(format!(
+                        "espacio insuficiente en el volumen destino para '{}'",
+                        filename
+                    ));
+                }
+            }
+            if let Err(cp_err) = tokio::fs::copy(temporary, &destination).await {
+                for (rem, _) in &staged_files[idx..] {
+                    let _ = tokio::fs::remove_file(rem).await;
+                }
                 return server_error(&format!("no se pudo promover la carga: {cp_err}"));
             }
-            let _ = tokio::fs::remove_file(&temporary).await;
+            let _ = tokio::fs::remove_file(temporary).await;
         }
         let dest_for_perms = destination.clone();
         let _ = state
@@ -317,7 +491,7 @@ pub async fn files_upload(
             .await;
 
         saved.push(if target_dir_str.is_empty() {
-            filename
+            filename.clone()
         } else {
             format!("{target_dir_str}/{filename}")
         });
