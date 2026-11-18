@@ -412,12 +412,31 @@ function initApp() {
 
   switchView(initialView, false);
 
-  // Polling ligero de métricas cada 30 segundos
-  AppState.refreshInterval = setInterval(() => {
-    if (AppState.activeView === 'dashboard') {
-      refreshDashboardMetrics();
+  // Polling adaptativo de métricas (pausado en pestaña oculta y con backoff ante fallos)
+  let _metricsDelayMs = 30000;
+  let _metricsInFlight = false;
+  const scheduleMetricsPoll = (delay = _metricsDelayMs) => {
+    if (AppState.refreshInterval) clearTimeout(AppState.refreshInterval);
+    AppState.refreshInterval = setTimeout(async () => {
+      if (!document.hidden && AppState.activeView === 'dashboard' && !_metricsInFlight) {
+        _metricsInFlight = true;
+        try {
+          const ok = await refreshDashboardMetrics();
+          _metricsDelayMs = ok === false ? Math.min(120000, _metricsDelayMs * 2) : 30000;
+        } finally {
+          _metricsInFlight = false;
+        }
+      }
+      scheduleMetricsPoll(_metricsDelayMs);
+    }, delay);
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && AppState.activeView === 'dashboard') {
+      _metricsDelayMs = 30000;
+      scheduleMetricsPoll(250);
     }
-  }, 30000);
+  });
+  scheduleMetricsPoll(_metricsDelayMs);
 }
 
 // ==============================================================================
