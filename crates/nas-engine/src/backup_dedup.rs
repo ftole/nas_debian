@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::lock::TaskLock;
 
 /// Nombre del archivo marcador de migración completada (una sola vez).
-pub const DEDUP_MIGRATION_MARKER: &str = "migrations/backup_dedup_v1.done";
+pub const DEDUP_MIGRATION_MARKER: &str = "migrations/backup_dedup_v2.done";
 
 const PARTIAL_SAMPLE_BYTES: usize = 4096;
 const THROTTLE_CHECK_OPS: usize = 512;
@@ -301,6 +301,18 @@ pub fn patch_runner_content(content: &str) -> String {
                 "if cp -al \"$FINAL\" \"$PERM_DEST\" 2>/dev/null || cp -a --reflink=always \"$FINAL\" \"$PERM_DEST\" 2>/dev/null; then",
             );
         }
+        if updated.contains("mount -t cifs") {
+            if updated.contains("file_mode=0755,dir_mode=0755") {
+                updated = updated.replace(
+                    "file_mode=0755,dir_mode=0755",
+                    "file_mode=0777,dir_mode=0777",
+                );
+            } else if updated.contains(",nobrl\"") {
+                updated = updated.replace(",nobrl\"", ",nobrl,file_mode=0777,dir_mode=0777\"");
+            } else if updated.contains(",soft\"") {
+                updated = updated.replace(",soft\"", ",soft,nobrl,file_mode=0777,dir_mode=0777\"");
+            }
+        }
         out.push(updated);
     }
 
@@ -411,7 +423,7 @@ pub fn repair_runners(runner: &Runner, bin_dir: &Path) -> NasResult<RunnerRepair
 #[derive(Debug, Clone)]
 struct FileMetaRecord {
     container_idx: usize,
-    path: PathBuf,
+    rel_path: Box<Path>,
     dev: u64,
     ino: u64,
     size: u64,
@@ -438,14 +450,18 @@ struct MetaKey {
 }
 
 impl FileMetaRecord {
-    fn meta_key(&self) -> MetaKey {
+    fn meta_key(&self, ignore_mode: bool) -> MetaKey {
         MetaKey {
             uid: self.uid,
             gid: self.gid,
-            mode: self.mode,
+            mode: if ignore_mode { 0 } else { self.mode },
             mtime_sec: self.mtime_sec,
             mtime_nsec: self.mtime_nsec,
         }
+    }
+
+    fn full_path(&self, containers: &[PathBuf]) -> PathBuf {
+        containers[self.container_idx].join(&self.rel_path)
     }
 }
 
@@ -573,8 +589,15 @@ where
 
             let is_freeze_meta = ft.is_file() && file_name == ".freeze_meta.json";
             let mode = meta.permissions().mode() & 0o7777;
-            if !is_freeze_meta && (mode & 0o200) == 0 {
-                let new_mode = if is_cifs { mode | 0o222 } else { mode | 0o200 };
+            // En tareas CIFS los permisos POSIX provienen del montaje (históricamente 0755/0555 y ahora 0777);
+            // unificar todo a 0777 garantiza compatibilidad inmediata con `rsync -a --link-dest` y MetaKey.
+            let needs_perm_fix = if is_cifs {
+                (mode & 0o777) != 0o777
+            } else {
+                (mode & 0o200) == 0
+            };
+            if !is_freeze_meta && needs_perm_fix {
+                let new_mode = if is_cifs { mode | 0o777 } else { mode | 0o200 };
                 if !dry_run {
                     if let Err(e) = fs::set_permissions(&path, fs::Permissions::from_mode(new_mode))
                     {
@@ -595,8 +618,13 @@ where
 
     if let Ok(meta) = fs::symlink_metadata(root) {
         let mode = meta.permissions().mode() & 0o7777;
-        if (mode & 0o200) == 0 {
-            let new_mode = if is_cifs { mode | 0o222 } else { mode | 0o200 };
+        let needs_root_fix = if is_cifs {
+            (mode & 0o777) != 0o777
+        } else {
+            (mode & 0o200) == 0
+        };
+        if needs_root_fix {
+            let new_mode = if is_cifs { mode | 0o777 } else { mode | 0o200 };
             if !dry_run {
                 if let Err(e) = fs::set_permissions(root, fs::Permissions::from_mode(new_mode)) {
                     errors.push(format!("{}: chmod raíz fallo: {e}", root.display()));
@@ -660,9 +688,10 @@ fn collect_files_in_container<F>(
                 if name == ".freeze_meta.json" || name.starts_with(".nas_dedup_") {
                     continue;
                 }
+                let rel_path = path.strip_prefix(container).unwrap_or(&path);
                 out.push(FileMetaRecord {
                     container_idx,
-                    path,
+                    rel_path: PathBuf::from(rel_path).into_boxed_path(),
                     dev: meta.dev(),
                     ino: meta.ino(),
                     size: meta.size(),
@@ -1030,17 +1059,33 @@ where
     }
     summary.files_scanned = all_files.len() as u64;
 
-    // 3. Agrupar primero por (tamaño > 0, MetaKey exacto) en memoria para evitar leer/hashear
-    // archivos cuyos metadatos nunca permitirían hardlink.
+    // 3. Agrupar primero por (tamaño > 0, MetaKey) en memoria para evitar leer/hashear
+    // archivos cuyos metadatos nunca permitirían hardlink (en CIFS los modos se normalizan a 0777).
     let mut by_size_meta: HashMap<(u64, MetaKey), Vec<usize>> = HashMap::new();
     for (idx, rec) in all_files.iter().enumerate() {
         if rec.size > 0 {
             by_size_meta
-                .entry((rec.size, rec.meta_key()))
+                .entry((rec.size, rec.meta_key(is_cifs)))
                 .or_default()
                 .push(idx);
         }
     }
+
+    // Priorizar cubos con mayor ahorro potencial en bytes (archivos grandes duplicados primero)
+    // y descartar de inmediato archivos únicos para reducir consumo de memoria.
+    let mut candidate_buckets: Vec<(u64, u64, Vec<usize>)> = Vec::new();
+    for ((size, _mk), indices) in by_size_meta {
+        let unique_inodes: HashSet<(u64, u64)> = indices
+            .iter()
+            .map(|&i| (all_files[i].dev, all_files[i].ino))
+            .collect();
+        if unique_inodes.len() < 2 {
+            continue;
+        }
+        let potential = size.saturating_mul((unique_inodes.len() - 1) as u64);
+        candidate_buckets.push((potential, size, indices));
+    }
+    candidate_buckets.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
 
     let max_cache_entries = ResourceBudget::detect()
         .dedup_max_entries_in_memory
@@ -1050,17 +1095,10 @@ where
     let mut reclaimed_inodes: HashSet<(u64, u64)> = HashSet::new();
     let mut seq = 0u64;
 
-    for ((size, _mk), indices) in by_size_meta {
+    for (_potential, size, indices) in candidate_buckets {
         if throttle.tick(1) == PressureAction::PauseCritical {
             partial_cache.clear();
             sha_cache.clear();
-        }
-        let unique_inodes: HashSet<(u64, u64)> = indices
-            .iter()
-            .map(|&i| (all_files[i].dev, all_files[i].ino))
-            .collect();
-        if unique_inodes.len() < 2 {
-            continue;
         }
 
         // Sub-agrupar por firma rápida (4 KiB inicio + 4 KiB final).
@@ -1071,7 +1109,8 @@ where
             let sig = if let Some(cached) = partial_cache.get(&key) {
                 cached.clone()
             } else {
-                let computed = read_partial_sig(&rec.path, size).ok();
+                let path = rec.full_path(&containers);
+                let computed = read_partial_sig(&path, size).ok();
                 if partial_cache.len() < max_cache_entries {
                     partial_cache.insert(key, computed.clone());
                 }
@@ -1103,7 +1142,8 @@ where
                 let digest = if let Some(cached) = sha_cache.get(&key) {
                     *cached
                 } else {
-                    let (computed, saw_critical) = match sha256_file(&rec.path, throttle) {
+                    let path = rec.full_path(&containers);
+                    let (computed, saw_critical) = match sha256_file(&path, throttle) {
                         Ok((digest, saw_critical)) => (Some(digest), saw_critical),
                         Err(_) => (None, false),
                     };
@@ -1132,7 +1172,7 @@ where
                 let canon_container_idx = all_files[canon_idx].container_idx;
                 let canon_dev = all_files[canon_idx].dev;
                 let canon_ino = all_files[canon_idx].ino;
-                let canon_path = all_files[canon_idx].path.clone();
+                let canon_path = all_files[canon_idx].full_path(&containers);
 
                 for &dup_idx in &meta_indices[1..] {
                     if throttle.tick(1) == PressureAction::PauseCritical {
@@ -1143,6 +1183,7 @@ where
                     if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
                         continue;
                     }
+                    let dup_path = dup.full_path(&containers);
                     let cross_dev = dup.dev != canon_dev;
                     if cross_dev {
                         let same_btrfs_fs = match (
@@ -1153,7 +1194,7 @@ where
                             _ => false,
                         };
                         if !same_btrfs_fs
-                            || files_share_physical_extents(runner, &canon_path, &dup.path)
+                            || files_share_physical_extents(runner, &canon_path, &dup_path)
                         {
                             continue;
                         }
@@ -1171,7 +1212,7 @@ where
                         }
                     } else {
                         seq += 1;
-                        match replace_with_link_or_reflink(runner, &canon_path, &dup.path, seq) {
+                        match replace_with_link_or_reflink(runner, &canon_path, &dup_path, seq) {
                             Ok(LinkOutcome::Hardlinked) => {
                                 summary.hardlinks_created += 1;
                                 if reclaimed_inodes.insert((dup.dev, dup.ino)) {
@@ -2017,6 +2058,141 @@ Filesystem type is: 9123683e
         assert_eq!(digest, expected);
         assert!(saw_critical);
         assert!(probes.load(Ordering::Relaxed) >= 1);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn patch_runner_content_normaliza_cifs_file_mode_0777() {
+        let old = "#!/bin/bash\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl,file_mode=0755,dir_mode=0755\" 2>> \"$LOG\"\n";
+        let patched = patch_runner_content(old);
+        assert!(patched.contains("file_mode=0777,dir_mode=0777"));
+        assert!(!patched.contains("file_mode=0755"));
+        assert_eq!(patch_runner_content(&patched), patched);
+
+        let legacy_no_mode = "#!/bin/bash\nmount -t cifs \"//$SRC_IP/$SRC_SHARE\" \"$MOUNT\" -o \"credentials=$CRED,ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl\" 2>> \"$LOG\"\n";
+        let patched2 = patch_runner_content(legacy_no_mode);
+        assert!(patched2.contains(",nobrl,file_mode=0777,dir_mode=0777\""));
+        assert_eq!(patch_runner_content(&patched2), patched2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deduplica_cifs_0755_y_0777_y_prepara_link_dest() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let root = temp_root("cifs-mode-unify");
+        let hist = root.join("BACKUPS_HISTORICOS");
+        let perm = root.join("BACKUPS_PERMANENTES");
+        let runner_dir = root.join("bin");
+        let lock_dir = root.join("lock");
+        let log_dir = root.join("logs");
+        let cifs_src = root.join("cifs_src");
+        fs::create_dir_all(&runner_dir).unwrap();
+        fs::create_dir_all(&lock_dir).unwrap();
+        fs::create_dir_all(&log_dir).unwrap();
+        fs::create_dir_all(&cifs_src).unwrap();
+
+        fs::write(
+            runner_dir.join("backup_didi_cifs.sh"),
+            "#!/bin/bash\nSOURCE_TYPE='cifs'\n",
+        )
+        .unwrap();
+
+        let s_old = hist.join("didi_cifs/snapshot_2026-11-04_230001");
+        let s_new = hist.join("didi_cifs/snapshot_2026-11-17_230001");
+        let s_next = hist.join("didi_cifs/snapshot_2026-11-18_230001");
+        fs::create_dir_all(&s_old).unwrap();
+        fs::create_dir_all(&s_new).unwrap();
+
+        let payload = vec![0x42u8; 24 * 1024];
+        let fixed_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_123);
+
+        for p in [
+            s_old.join("reporte.xlsx"),
+            s_new.join("reporte.xlsx"),
+            cifs_src.join("reporte.xlsx"),
+        ] {
+            fs::write(&p, &payload).unwrap();
+            let f = File::options().write(true).open(&p).unwrap();
+            f.set_modified(fixed_time).unwrap();
+        }
+        // Simular snapshots antiguos 0755 vs recientes 0555/0777 y montaje CIFS 0777.
+        fs::set_permissions(&s_old, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(
+            s_old.join("reporte.xlsx"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        fs::set_permissions(&s_new, fs::Permissions::from_mode(0o777)).unwrap();
+        fs::set_permissions(
+            s_new.join("reporte.xlsx"),
+            fs::Permissions::from_mode(0o777),
+        )
+        .unwrap();
+        fs::set_permissions(
+            cifs_src.join("reporte.xlsx"),
+            fs::Permissions::from_mode(0o777),
+        )
+        .unwrap();
+
+        let opts = DeduplicateOptions {
+            roots: vec![BackupRootPair {
+                hist_root: hist,
+                perm_root: perm,
+            }],
+            runner_dir,
+            lock_dir,
+            log_dir,
+            task_filter: None,
+            dry_run: true,
+            use_flock: true,
+        };
+
+        let dry = deduplicate_backups(&Runner::new(), &opts).unwrap();
+        assert_eq!(dry.total_hardlinks, 1);
+        assert_eq!(dry.total_bytes_reclaimed, 24 * 1024);
+
+        let real = deduplicate_backups(
+            &Runner::new(),
+            &DeduplicateOptions {
+                dry_run: false,
+                ..opts
+            },
+        )
+        .unwrap();
+        assert!(real.errors.is_empty(), "errores: {:?}", real.errors);
+        assert_eq!(real.total_hardlinks, 1);
+        assert_eq!(
+            fs::metadata(s_old.join("reporte.xlsx")).unwrap().ino(),
+            fs::metadata(s_new.join("reporte.xlsx")).unwrap().ino()
+        );
+        assert_eq!(
+            fs::metadata(s_old.join("reporte.xlsx"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o777
+        );
+
+        // El siguiente rsync --link-dest con file_mode=0777 contra s_new debe crear hardlink (sin copiar).
+        let r = Runner::new()
+            .run(&CommandSpec::new("rsync").args([
+                "-aAXH",
+                "--numeric-ids",
+                "--link-dest",
+                &s_new.to_string_lossy(),
+                &format!("{}/", cifs_src.display()),
+                &format!("{}/", s_next.display()),
+            ]))
+            .unwrap();
+        assert!(r.is_success(), "rsync falló: {}", r.stderr);
+        assert_eq!(
+            fs::metadata(s_next.join("reporte.xlsx")).unwrap().ino(),
+            fs::metadata(s_new.join("reporte.xlsx")).unwrap().ino(),
+            "rsync --link-dest debe compartir inodo tras normalizar 0755 -> 0777"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
