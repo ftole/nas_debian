@@ -77,6 +77,7 @@ async fn async_main(budget: ResourceBudget) -> Result<(), Box<dyn std::error::Er
     let role = ServerRole::from_file(&paths.role_file)?.unwrap_or(ServerRole::ArquivosBackup);
     let state_dir_for_mig = paths.state_dir.clone();
     let data_root_for_mig = paths.data_root.clone();
+    let paths_for_cleanup = paths.clone();
     let auth = Auth::with_csrf_secret(db, ttl_secs, secure_cookie, csrf_secret);
     let state = AppState::new(auth, paths, role).with_budget(budget.clone());
     let app = router(state);
@@ -93,10 +94,41 @@ async fn async_main(budget: ResourceBudget) -> Result<(), Box<dyn std::error::Er
         budget.max_concurrent_heavy_ops,
     );
 
+    spawn_startup_temp_cleanup(paths_for_cleanup);
     maybe_trigger_backup_dedup_migration(&state_dir_for_mig, &data_root_for_mig);
 
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn cleanup_orphan_temp_files(paths: &NasPaths) {
+    if let Ok(custom) = std::env::var("NAS_ZIP_STAGING_DIR") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            nas_web::files::clean_stale_staging_files_in(Path::new(trimmed), 0);
+        }
+    }
+    nas_web::files::clean_stale_staging_files_in(&paths.state_dir.join("staging"), 0);
+    nas_web::files::clean_stale_staging_files_in(&paths.data_root, 0);
+    nas_web::files::clean_stale_staging_files_in(&paths.data_root.join(".nas_staging"), 0);
+
+    if let Ok(entries) = std::fs::read_dir(paths.data_root.join("unidades")) {
+        for entry in entries.flatten() {
+            let unit = entry.path();
+            if unit.is_dir() {
+                nas_web::files::clean_stale_staging_files_in(&unit, 0);
+                nas_web::files::clean_stale_staging_files_in(&unit.join(".nas_staging"), 0);
+            }
+        }
+    }
+
+    nas_web::files::clean_stale_staging_files_in(&std::env::temp_dir(), 3600);
+}
+
+fn spawn_startup_temp_cleanup(paths: NasPaths) {
+    drop(tokio::task::spawn_blocking(move || {
+        cleanup_orphan_temp_files(&paths);
+    }));
 }
 
 fn maybe_trigger_backup_dedup_migration(state_dir: &Path, data_root: &Path) {
