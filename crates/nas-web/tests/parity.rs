@@ -69,11 +69,14 @@ fn app() -> Router {
     let db = Db::in_memory().expect("db");
     db.upsert_user("admin", &hex("Secreta123"), "superadmin")
         .expect("usuario");
-    router(AppState::new(
-        Auth::new(db, 3600, false),
-        paths,
-        ServerRole::ArquivosBackup,
-    ))
+    router(
+        AppState::new(
+            Auth::new(db, 3600, false),
+            paths,
+            ServerRole::ArquivosBackup,
+        )
+        .with_backup_dir(dir.join("bin")),
+    )
 }
 
 fn hex(value: &str) -> String {
