@@ -58,7 +58,39 @@ pub fn server_ip() -> String {
     resolved
 }
 
+fn cached_host_ip_snapshot(allow_stale: bool) -> Option<(String, String)> {
+    let host = HOSTNAME_CACHE.get()?.clone();
+    let lock = SERVER_IP_CACHE.get_or_init(|| Mutex::new(None));
+    let guard = lock.try_lock().ok()?;
+    let (captured_at, ip) = guard.as_ref()?;
+    if allow_stale || captured_at.elapsed() < SERVER_IP_TTL {
+        Some((host, ip.clone()))
+    } else {
+        None
+    }
+}
+
+pub fn cached_host_ip_nonblocking() -> (String, String) {
+    if let Some(pair) = cached_host_ip_snapshot(true) {
+        return pair;
+    }
+    let host = HOSTNAME_CACHE
+        .get()
+        .cloned()
+        .unwrap_or_else(|| "SRV-NAS".to_string());
+    let ip = SERVER_IP_CACHE
+        .get_or_init(|| Mutex::new(None))
+        .try_lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|(_, ip)| ip.clone()))
+        .unwrap_or_else(|| "10.10.1.2".to_string());
+    (host, ip)
+}
+
 pub async fn cached_host_ip() -> (String, String) {
+    if let Some(pair) = cached_host_ip_snapshot(false) {
+        return pair;
+    }
     tokio::task::spawn_blocking(|| (hostname(), server_ip()))
         .await
         .unwrap_or_else(|_| ("SRV-NAS".to_string(), "10.10.1.2".to_string()))
