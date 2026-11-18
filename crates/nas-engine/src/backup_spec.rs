@@ -318,6 +318,9 @@ mod tests {
         assert!(runner.contains("nobrl"));
         assert!(runner.contains("BKP_DIR=\"${BKP_DIR:-$DEST_ROOT/$TASK}\""));
         assert!(!runner.contains("BKP_DIR=\"${BKP_DIR:-'"));
+        assert!(runner.contains("nas-pool-"));
+        assert!(runner.contains("check_volume_space"));
+        assert!(runner.contains("SPACE_WATCHDOG_PID"));
 
         let cron = spec.render_cron();
         assert!(cron.contains("0 2 * * * root /usr/local/bin/backup_contabilidad.sh"));
@@ -468,5 +471,155 @@ mod tests {
             has_sshpass,
             "una tarea SSH sin clave debe planificar con sshpass"
         );
+    }
+
+    #[test]
+    fn runner_generado_pasa_validacion_de_sintaxis_bash() {
+        let runner = nas_exec::Runner::new();
+        let mut spec = cifs();
+        spec.id = "t_cifs".into();
+        let dir = std::env::temp_dir().join(format!(
+            "nas-runner-syntax-{}-{}",
+            std::process::id(),
+            spec.id
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        for (proto_name, proto) in [
+            ("cifs", Proto::Cifs),
+            ("ssh", Proto::Ssh),
+            ("local", Proto::Local),
+        ] {
+            let mut s = spec.clone();
+            s.proto = proto_name.into();
+            if proto != Proto::Cifs {
+                s.path = "/var/data".into();
+            }
+            let script = s.render_runner(proto);
+            let script_path = dir.join(format!("backup_{proto_name}.sh"));
+            std::fs::write(&script_path, script).unwrap();
+            let out = runner
+                .run(
+                    &nas_exec::CommandSpec::new("bash")
+                        .args(["-n", &script_path.to_string_lossy()]),
+                )
+                .unwrap();
+            assert!(
+                out.is_success(),
+                "bash -n falló para {proto_name}: {}",
+                out.stderr
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runner_generado_aborta_por_watchdog_de_espacio_y_respeta_cola_pool() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-runner-wd-{}-{nanos}", std::process::id()));
+        let bin_dir = root.join("bin");
+        let src_dir = root.join("src");
+        let bkp_dir = root.join("bkp");
+        let perm_dir = root.join("perm");
+        let lock_dir = root.join("lock");
+        let log_file = root.join("backup_wd.log");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&bkp_dir).unwrap();
+        std::fs::create_dir_all(&perm_dir).unwrap();
+        std::fs::create_dir_all(&lock_dir).unwrap();
+        std::fs::write(src_dir.join("archivo.txt"), b"hola").unwrap();
+
+        // df simulado: las 2 primeras consultas (POOL_SRC + check_volume_space inicial)
+        // reportan volumen amplio; las siguientes (watchdog) reportan 100 MiB libres (abortar).
+        let df_counter = root.join("df_count");
+        let df_script = format!(
+            "#!/bin/bash\n\
+             COUNT=0\n\
+             if [ -f {cnt} ]; then COUNT=$(cat {cnt}); fi\n\
+             COUNT=$((COUNT + 1))\n\
+             printf '%s' \"$COUNT\" > {cnt}\n\
+             echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n\
+             if [ \"$COUNT\" -le 2 ]; then\n\
+                 echo '/dev/nvme0n1p1 100000000 10000000 90000000 10% /srv/nas'\n\
+             else\n\
+                 echo '/dev/nvme0n1p1 100000000 99897600 102400 99% /srv/nas'\n\
+             fi\n",
+            cnt = shell_single_quote(&df_counter.to_string_lossy())
+        );
+        std::fs::write(bin_dir.join("df"), df_script).unwrap();
+        std::fs::write(bin_dir.join("lsblk"), "#!/bin/bash\necho 0\n").unwrap();
+        let rsync_script = "#!/bin/bash\n\
+             for last; do :; done\n\
+             mkdir -p \"$last\"\n\
+             echo 'parcial' > \"$last/parcial.bin\"\n\
+             sleep 8\n\
+             exit 0\n";
+        std::fs::write(bin_dir.join("rsync"), rsync_script).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for f in ["df", "lsblk", "rsync"] {
+                std::fs::set_permissions(bin_dir.join(f), std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
+            }
+        }
+
+        let mut spec = cifs();
+        spec.id = "t_wd".into();
+        spec.proto = "local".into();
+        spec.path = src_dir.to_string_lossy().to_string();
+        let script = spec.render_runner(Proto::Local);
+        let script_path = root.join("backup_t_wd.sh");
+        std::fs::write(&script_path, script).unwrap();
+
+        let orig_path = std::env::var("PATH").unwrap_or_default();
+        let test_path = format!("{}:{orig_path}", bin_dir.display());
+        let task_bkp_dir = bkp_dir.join("t_wd");
+        let task_perm_dir = perm_dir.join("t_wd");
+
+        let out = std::process::Command::new("bash")
+            .arg(&script_path)
+            .env("PATH", &test_path)
+            .env("BKP_DIR", &task_bkp_dir)
+            .env("PERM_DIR", &task_perm_dir)
+            .env("LOG_DIR", &root)
+            .env("LOG_FILE", &log_file)
+            .env("LOCK_DIR", &lock_dir)
+            .env("NAS_BACKUP_SPACE_CHECK_SECS", "1")
+            .output()
+            .expect("ejecutar runner");
+        assert!(!out.status.success(), "watchdog debió abortar el runner");
+        let log_txt = std::fs::read_to_string(&log_file).unwrap_or_default();
+        assert!(
+            log_txt.contains("ABORTADO EN CURSO"),
+            "log sin evento de aborto en curso: {log_txt}"
+        );
+        let has_leftover = std::fs::read_dir(&task_bkp_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                let n = e.file_name().to_string_lossy().to_string();
+                n.starts_with(".inprogress_") || n.starts_with("snapshot_")
+            });
+        assert!(
+            !has_leftover,
+            "no deben quedar staging ni snapshots tras aborto de espacio"
+        );
+        // Verificar que se creó el lock de pool esperado para /dev/nvme0n1p1.
+        assert!(lock_dir
+            .join("nas-pool-_dev_nvme0n1p1_slot_1.lock")
+            .exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn shell_single_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
