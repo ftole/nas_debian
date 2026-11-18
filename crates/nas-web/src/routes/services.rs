@@ -19,9 +19,12 @@ pub struct ServiceBody {
 /// Estado de los demonios clave.
 pub async fn services(
     _user: crate::extractors::AuthenticatedUser,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Response {
-    match tokio::task::spawn_blocking(|| crate::legacy::service_rows(&Runner::new())).await {
+    match state
+        .run_system_blocking(|| crate::legacy::service_rows(&Runner::new()))
+        .await
+    {
         Ok(list) => axum::Json(ApiResponse::ok(list, "Estado de servicios")).into_response(),
         Err(_) => server_error("consulta de servicios interrumpida"),
     }
@@ -46,20 +49,23 @@ pub async fn service_manage(
             &body.service,
             "DENIED",
             &body.action,
-        );
+        )
+        .await;
         return bad_request("servicio o acción no permitidos");
     }
 
     let service = body.service.clone();
     let action = body.action.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::services::manage(&Runner::new(), &service, &action, true)
-    })
-    .await
-    .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            nas_engine::services::manage(&Runner::new(), &service, &action, true)
+        })
+        .await
+        .unwrap_or_else(|_| Err("ejecución interrumpida".to_string()));
 
     match outcome {
         Ok(()) => {
+            crate::legacy::invalidate_service_rows_cache();
             audit_ip(
                 &state,
                 &headers,
@@ -68,7 +74,8 @@ pub async fn service_manage(
                 &body.service,
                 "SUCCESS",
                 &body.action,
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(format!(
                 "{} {} ejecutado",
                 body.action, body.service
@@ -84,7 +91,8 @@ pub async fn service_manage(
                 &body.service,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
