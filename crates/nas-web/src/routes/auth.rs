@@ -58,8 +58,11 @@ pub async fn login_submit(
             .into_response();
     }
     let rate_key = format!("login_fail:{client_ip}");
+    let rate_key_check = rate_key.clone();
     if matches!(
-        state.auth.db().is_rate_limited(&rate_key, now, 60, 5),
+        state
+            .run_db(move |db| db.is_rate_limited(&rate_key_check, now, 60, 5))
+            .await,
         Ok(true)
     ) {
         audit_ip(
@@ -70,7 +73,8 @@ pub async fn login_submit(
             "web",
             "DENIED",
             "rate_limit",
-        );
+        )
+        .await;
         let csrf = state.auth.issue_login_csrf(now);
         let (host, ip) = cached_host_ip().await;
         return (
@@ -105,11 +109,15 @@ pub async fn login_submit(
                 "web",
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             session
         }
         Ok(None) => {
-            let hits = state.auth.db().check_rate_limit(&rate_key, now, 60, 5);
+            let rate_key_hit = rate_key.clone();
+            let hits = state
+                .run_db(move |db| db.check_rate_limit(&rate_key_hit, now, 60, 5))
+                .await;
             audit_ip(
                 &state,
                 &headers,
@@ -118,7 +126,8 @@ pub async fn login_submit(
                 "web",
                 "FAILED",
                 "",
-            );
+            )
+            .await;
             let blocked = matches!(hits, Ok(false));
             let csrf = state.auth.issue_login_csrf(now);
             let (host, ip) = cached_host_ip().await;
@@ -176,8 +185,11 @@ pub async fn api_login(
             .into_response();
     }
     let rate_key = format!("login_fail:{client_ip}");
+    let rate_key_check = rate_key.clone();
     if matches!(
-        state.auth.db().is_rate_limited(&rate_key, now, 60, 5),
+        state
+            .run_db(move |db| db.is_rate_limited(&rate_key_check, now, 60, 5))
+            .await,
         Ok(true)
     ) {
         audit_ip(
@@ -188,7 +200,8 @@ pub async fn api_login(
             "api",
             "DENIED",
             "rate_limit",
-        );
+        )
+        .await;
         return (
             StatusCode::TOO_MANY_REQUESTS,
             axum::Json(ApiResponse::<serde_json::Value>::error(
@@ -218,18 +231,23 @@ pub async fn api_login(
                 "api",
                 "SUCCESS",
                 "",
-            );
-            let role = if configured_superadmin().as_deref() == Some(form.username.as_str()) {
-                "superadmin".to_string()
-            } else {
-                state
-                    .auth
-                    .db()
-                    .user_role(&form.username)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "admin".into())
-            };
+            )
+            .await;
+            let uname = form.username.clone();
+            let role = state
+                .run_db(move |db| {
+                    if configured_superadmin().as_deref() == Some(uname.as_str()) {
+                        Ok("superadmin".to_string())
+                    } else {
+                        Ok(db
+                            .user_role(&uname)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| "admin".into()))
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| "admin".into());
             let csrf = state.auth.csrf_for_session(&session);
             let mut response = axum::Json(ApiResponse::ok(
                 serde_json::json!({
@@ -247,7 +265,10 @@ pub async fn api_login(
             response
         }
         Ok(None) => {
-            let hits = state.auth.db().check_rate_limit(&rate_key, now, 60, 5);
+            let rate_key_hit = rate_key.clone();
+            let hits = state
+                .run_db(move |db| db.check_rate_limit(&rate_key_hit, now, 60, 5))
+                .await;
             audit_ip(
                 &state,
                 &headers,
@@ -256,7 +277,8 @@ pub async fn api_login(
                 "api",
                 "FAILED",
                 "",
-            );
+            )
+            .await;
             let blocked = matches!(hits, Ok(false));
             if blocked {
                 return (
@@ -285,7 +307,9 @@ pub async fn logout(
     _user: AuthenticatedUser,
     headers: HeaderMap,
 ) -> Response {
-    let _ = state.auth.logout(cookie_header(&headers));
+    let cookies = cookie_header(&headers).to_string();
+    let auth = state.auth.clone();
+    let _ = tokio::task::spawn_blocking(move || auth.logout(&cookies)).await;
 
     let mut response = Redirect::to("/login").into_response();
     if let Ok(header) = HeaderValue::from_str(&state.auth.clear_cookie_header()) {
