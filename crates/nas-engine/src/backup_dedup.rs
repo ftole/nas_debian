@@ -9,9 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use nas_core::{NasError, NasResult};
+use nas_core::{MemoryPressure, NasError, NasResult, ResourceBudget};
 use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -22,6 +22,75 @@ use crate::lock::TaskLock;
 pub const DEDUP_MIGRATION_MARKER: &str = "migrations/backup_dedup_v1.done";
 
 const PARTIAL_SAMPLE_BYTES: usize = 4096;
+const THROTTLE_CHECK_OPS: usize = 512;
+const THROTTLE_CHECK_INTERVAL: Duration = Duration::from_millis(250);
+const THROTTLE_SHA_CHUNK_OPS: usize = 256;
+const THROTTLE_PAUSE_OVERLOADED: Duration = Duration::from_millis(25);
+const THROTTLE_PAUSE_CRITICAL: Duration = Duration::from_millis(50);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressureAction {
+    Continue,
+    PauseOverloaded,
+    PauseCritical,
+}
+
+struct DedupThrottle<F>
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
+    ops_since_check: usize,
+    last_check: Instant,
+    check_every_ops: usize,
+    check_interval: Duration,
+    probe: F,
+}
+
+impl<F> DedupThrottle<F>
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
+    fn new(check_every_ops: usize, check_interval: Duration, probe: F) -> Self {
+        Self {
+            ops_since_check: 0,
+            last_check: Instant::now(),
+            check_every_ops: check_every_ops.max(1),
+            check_interval,
+            probe,
+        }
+    }
+
+    fn tick_with_sleep(&mut self, units: usize, sleep_fn: impl FnOnce(Duration)) -> PressureAction {
+        self.ops_since_check = self.ops_since_check.saturating_add(units);
+        if self.ops_since_check < self.check_every_ops
+            && self.last_check.elapsed() < self.check_interval
+        {
+            return PressureAction::Continue;
+        }
+        self.ops_since_check = 0;
+        self.last_check = Instant::now();
+
+        let (pressure, overloaded) = (self.probe)();
+        if pressure == MemoryPressure::Critical {
+            sleep_fn(THROTTLE_PAUSE_CRITICAL);
+            PressureAction::PauseCritical
+        } else if overloaded {
+            sleep_fn(THROTTLE_PAUSE_OVERLOADED);
+            PressureAction::PauseOverloaded
+        } else {
+            PressureAction::Continue
+        }
+    }
+
+    fn tick(&mut self, units: usize) -> PressureAction {
+        self.tick_with_sleep(units, std::thread::sleep)
+    }
+}
+
+fn live_pressure_probe() -> (MemoryPressure, bool) {
+    let budget = ResourceBudget::detect();
+    (budget.resources.memory_pressure, budget.is_overloaded())
+}
 
 /// Par de directorios de respaldos (históricos y permanentes) en una misma unidad.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -467,12 +536,16 @@ fn list_completed_containers(hist_task_dir: &Path, perm_task_dir: &Path) -> Vec<
 }
 
 #[cfg(unix)]
-fn repair_container_permissions(
+fn repair_container_permissions<F>(
     root: &Path,
     is_cifs: bool,
     dry_run: bool,
     errors: &mut Vec<String>,
-) -> u64 {
+    throttle: &mut DedupThrottle<F>,
+) -> u64
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
     use std::os::unix::fs::PermissionsExt;
 
     let mut repaired = 0u64;
@@ -482,6 +555,7 @@ fn repair_container_permissions(
             continue;
         };
         for entry in entries.flatten() {
+            throttle.tick(1);
             let path = entry.path();
             let Ok(meta) = fs::symlink_metadata(&path) else {
                 continue;
@@ -539,21 +613,28 @@ fn repair_container_permissions(
 }
 
 #[cfg(not(unix))]
-fn repair_container_permissions(
+fn repair_container_permissions<F>(
     _root: &Path,
     _is_cifs: bool,
     _dry_run: bool,
     _errors: &mut Vec<String>,
-) -> u64 {
+    _throttle: &mut DedupThrottle<F>,
+) -> u64
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
     0
 }
 
 #[cfg(unix)]
-fn collect_files_in_container(
+fn collect_files_in_container<F>(
     container_idx: usize,
     container: &Path,
     out: &mut Vec<FileMetaRecord>,
-) {
+    throttle: &mut DedupThrottle<F>,
+) where
+    F: FnMut() -> (MemoryPressure, bool),
+{
     use std::os::unix::fs::MetadataExt;
 
     let mut stack = vec![container.to_path_buf()];
@@ -564,6 +645,7 @@ fn collect_files_in_container(
         let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         children.sort();
         for path in children {
+            throttle.tick(1);
             let Ok(meta) = fs::symlink_metadata(&path) else {
                 continue;
             };
@@ -596,11 +678,14 @@ fn collect_files_in_container(
 }
 
 #[cfg(not(unix))]
-fn collect_files_in_container(
+fn collect_files_in_container<F>(
     _container_idx: usize,
     _container: &Path,
     _out: &mut Vec<FileMetaRecord>,
-) {
+    _throttle: &mut DedupThrottle<F>,
+) where
+    F: FnMut() -> (MemoryPressure, bool),
+{
 }
 
 fn query_container_fs(runner: &Runner, dir: &Path) -> Option<ContainerFsInfo> {
@@ -716,18 +801,30 @@ fn read_partial_sig(path: &Path, size: u64) -> std::io::Result<PartialSig> {
     Ok(PartialSig { head, tail })
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+fn sha256_file<F>(path: &Path, throttle: &mut DedupThrottle<F>) -> std::io::Result<([u8; 32], bool)>
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
+    let mut chunks = 0usize;
+    let mut saw_critical = false;
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
+        chunks += 1;
+        if chunks >= THROTTLE_SHA_CHUNK_OPS {
+            chunks = 0;
+            if throttle.tick(1) == PressureAction::PauseCritical {
+                saw_critical = true;
+            }
+        }
     }
-    Ok(hasher.finalize().into())
+    Ok((hasher.finalize().into(), saw_critical))
 }
 
 fn temp_link_path(target_file: &Path, seq: u64) -> Option<PathBuf> {
@@ -804,6 +901,24 @@ fn deduplicate_task(
     task_id: &str,
     options: &DeduplicateOptions,
 ) -> TaskDedupSummary {
+    let mut throttle = DedupThrottle::new(
+        THROTTLE_CHECK_OPS,
+        THROTTLE_CHECK_INTERVAL,
+        live_pressure_probe,
+    );
+    deduplicate_task_with_throttle(runner, pair, task_id, options, &mut throttle)
+}
+
+fn deduplicate_task_with_throttle<F>(
+    runner: &Runner,
+    pair: &BackupRootPair,
+    task_id: &str,
+    options: &DeduplicateOptions,
+    throttle: &mut DedupThrottle<F>,
+) -> TaskDedupSummary
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
     let mut summary = TaskDedupSummary {
         task: task_id.to_string(),
         ..Default::default()
@@ -892,8 +1007,13 @@ fn deduplicate_task(
                     .timeout(Duration::from_secs(30)),
             );
         }
-        summary.permissions_repaired +=
-            repair_container_permissions(container, is_cifs, options.dry_run, &mut summary.errors);
+        summary.permissions_repaired += repair_container_permissions(
+            container,
+            is_cifs,
+            options.dry_run,
+            &mut summary.errors,
+            throttle,
+        );
     }
 
     let container_fs: Vec<Option<ContainerFsInfo>> = containers
@@ -905,7 +1025,7 @@ fn deduplicate_task(
     let mut all_files = Vec::new();
     for (c_idx, container) in containers.iter().enumerate() {
         if container_writable[c_idx] {
-            collect_files_in_container(c_idx, container, &mut all_files);
+            collect_files_in_container(c_idx, container, &mut all_files, throttle);
         }
     }
     summary.files_scanned = all_files.len() as u64;
@@ -922,7 +1042,7 @@ fn deduplicate_task(
         }
     }
 
-    let max_cache_entries = nas_core::ResourceBudget::detect()
+    let max_cache_entries = ResourceBudget::detect()
         .dedup_max_entries_in_memory
         .max(1024);
     let mut partial_cache: HashMap<(u64, u64), Option<PartialSig>> = HashMap::new();
@@ -931,6 +1051,10 @@ fn deduplicate_task(
     let mut seq = 0u64;
 
     for ((size, _mk), indices) in by_size_meta {
+        if throttle.tick(1) == PressureAction::PauseCritical {
+            partial_cache.clear();
+            sha_cache.clear();
+        }
         let unique_inodes: HashSet<(u64, u64)> = indices
             .iter()
             .map(|&i| (all_files[i].dev, all_files[i].ino))
@@ -953,6 +1077,10 @@ fn deduplicate_task(
                 }
                 computed
             };
+            if throttle.tick(1) == PressureAction::PauseCritical {
+                partial_cache.clear();
+                sha_cache.clear();
+            }
             if let Some(s) = sig {
                 by_partial.entry(s).or_default().push(idx);
             }
@@ -975,12 +1103,22 @@ fn deduplicate_task(
                 let digest = if let Some(cached) = sha_cache.get(&key) {
                     *cached
                 } else {
-                    let computed = sha256_file(&rec.path).ok();
-                    if sha_cache.len() < max_cache_entries {
+                    let (computed, saw_critical) = match sha256_file(&rec.path, throttle) {
+                        Ok((digest, saw_critical)) => (Some(digest), saw_critical),
+                        Err(_) => (None, false),
+                    };
+                    if saw_critical {
+                        partial_cache.clear();
+                        sha_cache.clear();
+                    } else if sha_cache.len() < max_cache_entries {
                         sha_cache.insert(key, computed);
                     }
                     computed
                 };
+                if throttle.tick(1) == PressureAction::PauseCritical {
+                    partial_cache.clear();
+                    sha_cache.clear();
+                }
                 if let Some(d) = digest {
                     by_sha.entry(d).or_default().push(idx);
                 }
@@ -997,6 +1135,10 @@ fn deduplicate_task(
                 let canon_path = all_files[canon_idx].path.clone();
 
                 for &dup_idx in &meta_indices[1..] {
+                    if throttle.tick(1) == PressureAction::PauseCritical {
+                        partial_cache.clear();
+                        sha_cache.clear();
+                    }
                     let dup = &all_files[dup_idx];
                     if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
                         continue;
@@ -1123,10 +1265,11 @@ pub fn deduplicate_backups(
     for pair in &roots {
         let task_ids = collect_task_dirs(pair, options.task_filter.as_deref());
         for task_id in task_ids {
-            if nas_core::ResourceBudget::detect().resources.memory_pressure
-                == nas_core::MemoryPressure::Critical
-            {
-                std::thread::sleep(Duration::from_millis(25));
+            let (pressure, overloaded) = live_pressure_probe();
+            if pressure == MemoryPressure::Critical {
+                std::thread::sleep(THROTTLE_PAUSE_CRITICAL);
+            } else if overloaded {
+                std::thread::sleep(THROTTLE_PAUSE_OVERLOADED);
             }
             let summary = deduplicate_task(runner, pair, &task_id, options);
             if summary.skipped_locked {
@@ -1703,6 +1846,140 @@ Filesystem type is: 9123683e
         let file_mode = fs::metadata(&marker_path).unwrap().permissions().mode() & 0o777;
         assert_eq!(parent_mode, 0o755);
         assert_eq!(file_mode, 0o644);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dedup_throttle_pausa_segun_presion_e_intervalo() {
+        use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let mode = Arc::new(AtomicU8::new(0));
+        let probes = Arc::new(AtomicUsize::new(0));
+        let mode_clone = Arc::clone(&mode);
+        let probes_clone = Arc::clone(&probes);
+
+        let mut throttle = DedupThrottle::new(4, Duration::from_secs(60), move || {
+            probes_clone.fetch_add(1, Ordering::Relaxed);
+            match mode_clone.load(Ordering::Relaxed) {
+                1 => (MemoryPressure::Elevated, true),
+                2 => (MemoryPressure::Critical, true),
+                _ => (MemoryPressure::Normal, false),
+            }
+        });
+
+        let mut slept = Vec::new();
+        for _ in 0..3 {
+            assert_eq!(
+                throttle.tick_with_sleep(1, |d| slept.push(d)),
+                PressureAction::Continue
+            );
+        }
+        assert_eq!(probes.load(Ordering::Relaxed), 0);
+
+        // 4a operación dispara verificación con presión Normal -> sin pausa.
+        assert_eq!(
+            throttle.tick_with_sleep(1, |d| slept.push(d)),
+            PressureAction::Continue
+        );
+        assert_eq!(probes.load(Ordering::Relaxed), 1);
+        assert!(slept.is_empty());
+
+        // Sobrecarga -> pausa corta.
+        mode.store(1, Ordering::Relaxed);
+        assert_eq!(
+            throttle.tick_with_sleep(4, |d| slept.push(d)),
+            PressureAction::PauseOverloaded
+        );
+        assert_eq!(slept, vec![THROTTLE_PAUSE_OVERLOADED]);
+
+        // Presión crítica -> pausa mayor.
+        mode.store(2, Ordering::Relaxed);
+        assert_eq!(
+            throttle.tick_with_sleep(4, |d| slept.push(d)),
+            PressureAction::PauseCritical
+        );
+        assert_eq!(
+            slept,
+            vec![THROTTLE_PAUSE_OVERLOADED, THROTTLE_PAUSE_CRITICAL]
+        );
+
+        // Intervalo vencido también dispara aunque ops < check_every_ops.
+        let mut time_throttle =
+            DedupThrottle::new(10_000, Duration::ZERO, || (MemoryPressure::Critical, true));
+        let mut time_slept = Vec::new();
+        assert_eq!(
+            time_throttle.tick_with_sleep(1, |d| time_slept.push(d)),
+            PressureAction::PauseCritical
+        );
+        assert_eq!(time_slept, vec![THROTTLE_PAUSE_CRITICAL]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regulacion_intra_tarea_ejecuta_sondeos_periodicos_dentro_de_una_sola_tarea() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let root = temp_root("intra-throttle");
+        let hist = root.join("BACKUPS_HISTORICOS");
+        let perm = root.join("BACKUPS_PERMANENTES");
+        let runner_dir = root.join("bin");
+        let lock_dir = root.join("lock");
+        let log_dir = root.join("logs");
+        fs::create_dir_all(&runner_dir).unwrap();
+        fs::create_dir_all(&lock_dir).unwrap();
+        fs::create_dir_all(&log_dir).unwrap();
+
+        let s1 = hist.join("t1/snapshot_2026-11-10_020000");
+        let s2 = hist.join("t1/snapshot_2026-11-11_020000");
+        fs::create_dir_all(&s1).unwrap();
+        fs::create_dir_all(&s2).unwrap();
+
+        let fixed_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        for i in 0..300 {
+            let content = format!("archivo-duplicado-{i:04}-datos-para-hashing");
+            for dir in [&s1, &s2] {
+                let p = dir.join(format!("f_{i:04}.txt"));
+                fs::write(&p, content.as_bytes()).unwrap();
+                let f = File::options().write(true).open(&p).unwrap();
+                f.set_modified(fixed_time).unwrap();
+            }
+        }
+
+        let pair = BackupRootPair {
+            hist_root: hist,
+            perm_root: perm,
+        };
+        let opts = DeduplicateOptions {
+            roots: vec![pair.clone()],
+            runner_dir,
+            lock_dir,
+            log_dir,
+            task_filter: None,
+            dry_run: false,
+            use_flock: true,
+        };
+
+        let probes = Arc::new(AtomicUsize::new(0));
+        let probes_clone = Arc::clone(&probes);
+        let mut throttle =
+            DedupThrottle::new(THROTTLE_CHECK_OPS, THROTTLE_CHECK_INTERVAL, move || {
+                probes_clone.fetch_add(1, Ordering::Relaxed);
+                (MemoryPressure::Critical, true)
+            });
+
+        let summary =
+            deduplicate_task_with_throttle(&Runner::new(), &pair, "t1", &opts, &mut throttle);
+        assert!(summary.errors.is_empty(), "errores: {:?}", summary.errors);
+        assert_eq!(summary.files_scanned, 600);
+        assert_eq!(summary.hardlinks_created, 300);
+        assert!(
+            probes.load(Ordering::Relaxed) >= 3,
+            "se esperaban múltiples sondeos intra-tarea, hubo {}",
+            probes.load(Ordering::Relaxed)
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
