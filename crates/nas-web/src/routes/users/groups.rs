@@ -26,8 +26,9 @@ pub struct RenameGroupBody {
 }
 
 /// Grupos corporativos (formato que consume `app.js`).
-pub async fn groups(_user: AuthenticatedUser) -> Response {
-    match tokio::task::spawn_blocking(|| {
+pub async fn groups(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
+    match state
+        .run_system_blocking(|| {
         let (_, groups) = nas_engine::users::load_local();
         let list: Vec<serde_json::Value> = groups
             .into_iter()
@@ -59,11 +60,17 @@ pub async fn groups(_user: AuthenticatedUser) -> Response {
 }
 
 /// Añade o quita un miembro de un grupo.
-pub async fn user_groups(_admin: AdminUser, axum::Json(body): axum::Json<MemberBody>) -> Response {
-    if !valid_username(&body.username)
-        || is_protected_posix_account(&body.username)
-        || !valid_grp(&body.group)
-    {
+pub async fn user_groups(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    axum::Json(body): axum::Json<MemberBody>,
+) -> Response {
+    let check_user = body.username.clone();
+    let protected = state
+        .run_system_blocking(move || is_protected_posix_account(&check_user))
+        .await
+        .unwrap_or(true);
+    if !valid_username(&body.username) || protected || !valid_grp(&body.group) {
         return bad_request("usuario o grupo inválido");
     }
     if body.group == "grp_superadmin" {
@@ -77,10 +84,10 @@ pub async fn user_groups(_admin: AdminUser, axum::Json(body): axum::Json<MemberB
     };
     let username = body.username.clone();
     let group = body.group.clone();
-    let result =
-        tokio::task::spawn_blocking(move || run_accounts(&[action, &username, &group], None))
-            .await
-            .unwrap_or_else(|_| Err("membresía interrumpida".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&[action, &username, &group], None))
+        .await
+        .unwrap_or_else(|_| Err("membresía interrumpida".to_string()));
 
     match result {
         Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
@@ -112,10 +119,10 @@ pub async fn group_create(
     }
 
     let created = name.clone();
-    let result =
-        tokio::task::spawn_blocking(move || run_accounts(&["create-group", &created], None))
-            .await
-            .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&["create-group", &created], None))
+        .await
+        .unwrap_or_else(|_| Err("creación interrumpida".to_string()));
 
     match result {
         Ok(_) => {
@@ -127,7 +134,8 @@ pub async fn group_create(
                 &name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty("Grupo creado")).into_response()
         }
         Err(error) => server_error(&error),
@@ -136,6 +144,7 @@ pub async fn group_create(
 
 /// Renombra un grupo.
 pub async fn group_rename(
+    State(state): State<AppState>,
     _admin: AdminUser,
     axum::Json(body): axum::Json<RenameGroupBody>,
 ) -> Response {
@@ -157,10 +166,10 @@ pub async fn group_rename(
 
     let old = body.old.clone();
     let target = new_name.clone();
-    let result =
-        tokio::task::spawn_blocking(move || run_accounts(&["rename-group", &old, &target], None))
-            .await
-            .unwrap_or_else(|_| Err("renombrado interrumpido".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&["rename-group", &old, &target], None))
+        .await
+        .unwrap_or_else(|_| Err("renombrado interrumpido".to_string()));
 
     match result {
         Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
@@ -185,10 +194,10 @@ pub async fn group_delete(
     }
 
     let target = name.clone();
-    let result =
-        tokio::task::spawn_blocking(move || run_accounts(&["delete-group", &target], None))
-            .await
-            .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
+    let result = state
+        .run_system_blocking(move || run_accounts(&["delete-group", &target], None))
+        .await
+        .unwrap_or_else(|_| Err("borrado interrumpido".to_string()));
 
     match result {
         Ok(_) => {
@@ -200,7 +209,8 @@ pub async fn group_delete(
                 &name,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Grupo eliminado",
             ))
