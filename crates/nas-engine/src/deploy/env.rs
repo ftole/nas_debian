@@ -209,33 +209,12 @@ pub fn os_disk(runner: &Runner) -> Option<String> {
 
 /// Interpreta el valor de rotación de `lsblk`/sysfs.
 pub fn parse_rotational(raw: &str) -> Option<bool> {
-    match raw.trim().to_lowercase().as_str() {
-        "1" | "true" | "yes" => Some(true),
-        "0" | "false" | "no" => Some(false),
-        _ => None,
-    }
+    crate::storage::parse_rotational_flag(raw)
 }
 
-/// Detecta si un disco es mecánico (`rotational=true`).
+/// Detecta si un disco (físico, LVM, MD RAID o VM) es mecánico (`rotational=true`).
 pub fn disk_rotational(runner: &Runner, device: &str) -> Option<bool> {
-    if let Ok(out) = runner.run(
-        &CommandSpec::new("lsblk")
-            .args(["-d", "-no", "ROta", device])
-            .timeout(Duration::from_secs(5)),
-    ) {
-        if out.is_success() {
-            if let Some(value) = parse_rotational(&out.stdout) {
-                return Some(value);
-            }
-        }
-    }
-
-    let name = device.trim().trim_start_matches("/dev/");
-    if let Ok(text) = std::fs::read_to_string(format!("/sys/block/{name}/queue/rotational")) {
-        return parse_rotational(&text);
-    }
-
-    None
+    crate::storage::detect_device_rotational(runner, device)
 }
 
 /// Detecta si un disco está en uso (montado, PV de LVM o miembro de RAID).
