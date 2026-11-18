@@ -77,14 +77,14 @@ SRC_PORT={port}
 RETENTION={retention}
 AUTO_PERMANENT={auto_permanent}
 DEST_ROOT={q_dest_root}
-LOG_DIR='/srv/nas/LOGS_BACKUP'
+LOG_DIR="${{LOG_DIR:-/srv/nas/LOGS_BACKUP}}"
 CRED_FILE={q_cred}
 KEY_FILE={q_key}
 MODE="$SOURCE_TYPE"
 CRED="$CRED_FILE"
 # Destino: {dest}
 BKP_DIR="${{BKP_DIR:-$DEST_ROOT/$TASK}}"
-PERM_DIR="${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK"
+PERM_DIR="${{PERM_DIR:-${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK}}"
 LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
 MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
 PROG_FILE="/run/nas-backup-$TASK.progress"
@@ -92,12 +92,19 @@ DATE_STR=$(date +%Y-%m-%d_%H%M%S)
 START_TIME=$(date +%s)
 STAGE="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL="$BKP_DIR/snapshot_$DATE_STR"
+SPACE_ABORT_FLAG="$BKP_DIR/.space_abort_$DATE_STR"
+SPACE_WATCHDOG_PID=""
 SNAPSHOT_OK=false
 
 log() {{ printf '[%s] [%s] %s\n' "$(date '+%F %T')" "$TASK" "$*" >> "$LOG"; }}
 cleanup() {{
     local status=$?
-    rm -f "$PROG_FILE" "${{PROG_FILE}}.tmp."* 2>/dev/null || true
+    if [ -n "${{SPACE_WATCHDOG_PID:-}}" ]; then
+        kill "$SPACE_WATCHDOG_PID" 2>/dev/null || true
+        wait "$SPACE_WATCHDOG_PID" 2>/dev/null || true
+        SPACE_WATCHDOG_PID=""
+    fi
+    rm -f "$PROG_FILE" "${{PROG_FILE}}.tmp."* "$SPACE_ABORT_FLAG" 2>/dev/null || true
     if mountpoint -q "$MOUNT" 2>/dev/null; then umount "$MOUNT" || true; fi
     if [ "$status" -eq 143 ] || [ "$status" -eq 130 ]; then
         log "=== RESPALDO CANCELADO: la ejecucion fue detenida manualmente por el usuario (codigo de salida $status) ==="
@@ -137,13 +144,69 @@ chmod 2770 "$PERM_DIR" 2>/dev/null || true
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
 flock -n 9 || {{ log "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ==="; exit 0; }}
 
-read -r AVAIL PCT < <(df -Pk "$BKP_DIR" | awk 'NR==2 {{gsub("%","",$5); print $4, $5}}')
-if [ "${{AVAIL:-0}}" -lt 2097152 ] || [ "${{PCT:-0}}" -gt 95 ]; then
-    log "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($AVAIL KB, $PCT%) ==="
-    exit 1
+POOL_SRC=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $1}}' || true)
+POOL_DEV="${{POOL_SRC%%\[*}}"
+POOL_KEY=$(printf '%s' "${{POOL_DEV:-$DEST_ROOT}}" | tr -c 'A-Za-z0-9_-' '_')
+POOL_SLOTS="${{NAS_BACKUP_POOL_SLOTS:-}}"
+if [ -z "$POOL_SLOTS" ]; then
+    POOL_SLOTS=1
+    if [ -n "$POOL_DEV" ] && [ "${{POOL_DEV#/dev/}}" != "$POOL_DEV" ]; then
+        ROTA_OUT=$(lsblk -nso ROTA "$POOL_DEV" 2>/dev/null | tr -d ' ' || true)
+        if [ -n "$ROTA_OUT" ] && ! printf '%s\n' "$ROTA_OUT" | grep -qx '1'; then
+            POOL_SLOTS=2
+        fi
+    fi
 fi
-if [ "${{PCT:-0}}" -gt 85 ]; then
-    log "alerta preventiva: ocupación del volumen en $PCT%"
+if [ "$POOL_SLOTS" -lt 1 ] 2>/dev/null; then POOL_SLOTS=1; fi
+POOL_LOCKED=false
+for ((slot = 1; slot <= POOL_SLOTS; slot++)); do
+    exec 8>"${{LOCK_DIR:-/var/lock}}/nas-pool-${{POOL_KEY}}_slot_${{slot}}.lock"
+    if flock -n 8; then
+        POOL_LOCKED=true
+        break
+    fi
+done
+if [ "$POOL_LOCKED" != "true" ]; then
+    HASH_NUM=$(printf '%s' "$TASK" | cksum | awk '{{print $1}}')
+    WAIT_SLOT=$(( (HASH_NUM % POOL_SLOTS) + 1 ))
+    exec 8>"${{LOCK_DIR:-/var/lock}}/nas-pool-${{POOL_KEY}}_slot_${{WAIT_SLOT}}.lock"
+    log "esperando turno de escritura en el volumen $POOL_KEY (maximo $POOL_SLOTS simultaneos)"
+    if ! flock -w 21600 8; then
+        log "=== ABORTADO: tiempo de espera agotado en cola de volumen $POOL_KEY ==="
+        exit 1
+    fi
+fi
+
+LAST_AVAIL_KB=0
+LAST_USED_PCT=0
+check_volume_space() {{
+    local total_kb avail_kb pct min_kb abort_pct warn_pct
+    read -r total_kb avail_kb pct < <(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{gsub("%","",$5); print $2, $4, $5}}')
+    if [ -z "${{avail_kb:-}}" ] || [ -z "${{pct:-}}" ]; then
+        return 0
+    fi
+    total_kb="${{total_kb:-0}}"
+    min_kb=$(( total_kb / 50 ))
+    [ "$min_kb" -lt 2097152 ] && min_kb=2097152
+    [ "$min_kb" -gt 33554432 ] && min_kb=33554432
+    abort_pct=95
+    [ "$total_kb" -ge 536870912 ] && abort_pct=97
+    [ "$total_kb" -ge 2147483648 ] && abort_pct=98
+    warn_pct=$(( abort_pct - 8 ))
+    [ "$warn_pct" -lt 85 ] && warn_pct=85
+    LAST_AVAIL_KB="$avail_kb"
+    LAST_USED_PCT="$pct"
+    if [ "$avail_kb" -lt "$min_kb" ] || [ "$pct" -gt "$abort_pct" ]; then
+        return 1
+    fi
+    if [ "${{1:-}}" = "warn" ] && [ "$pct" -gt "$warn_pct" ]; then
+        log "alerta preventiva: ocupación del volumen en $pct%"
+    fi
+    return 0
+}}
+if ! check_volume_space warn; then
+    log "=== ABORTADO: espacio libre insuficiente en $BKP_DIR ($LAST_AVAIL_KB KB, $LAST_USED_PCT%) ==="
+    exit 1
 fi
 
 mapfile -t PREV_SNAPS < <(find "$BKP_DIR" -maxdepth 1 -type d -name 'snapshot_*' | LC_ALL=C sort)
@@ -165,7 +228,38 @@ mkdir -p "$STAGE"
 log "inicio ($MODE): $SRC"
 printf '{{"percent":0,"speed":"0.00kB/s","elapsed":"00:00:00","remaining":"--:--:--","bytes":"0"}}\n' > "$PROG_FILE" 2>/dev/null || true
 chmod 0644 "$PROG_FILE" 2>/dev/null || true
+rm -f "$SPACE_ABORT_FLAG" 2>/dev/null || true
+SPACE_CHECK_INTERVAL="${{NAS_BACKUP_SPACE_CHECK_SECS:-15}}"
+if [ "$SPACE_CHECK_INTERVAL" -lt 1 ] 2>/dev/null; then SPACE_CHECK_INTERVAL=15; fi
+(
+    exec 8>&- 9>&-
+    trap 'exit 0' TERM INT
+    while [ -d "$STAGE" ]; do
+        for ((_i = 0; _i < SPACE_CHECK_INTERVAL; _i++)); do
+            sleep 1 || exit 0
+            [ -d "$STAGE" ] || exit 0
+        done
+        if ! check_volume_space; then
+            printf '1\n' > "$SPACE_ABORT_FLAG" 2>/dev/null || true
+            log "=== ABORTADO EN CURSO: espacio libre insuficiente durante la copia ($LAST_AVAIL_KB KB, $LAST_USED_PCT%) ==="
+            pkill -TERM -f "$STAGE" 2>/dev/null || true
+            sleep 2 || true
+            pkill -KILL -f "$STAGE" 2>/dev/null || true
+            exit 0
+        fi
+    done
+) &
+SPACE_WATCHDOG_PID=$!
 {rsync}
+if [ -n "${{SPACE_WATCHDOG_PID:-}}" ]; then
+    kill "$SPACE_WATCHDOG_PID" 2>/dev/null || true
+    wait "$SPACE_WATCHDOG_PID" 2>/dev/null || true
+    SPACE_WATCHDOG_PID=""
+fi
+if [ -f "$SPACE_ABORT_FLAG" ]; then
+    rm -f "$SPACE_ABORT_FLAG" 2>/dev/null || true
+    exit 1
+fi
 if [ "$RSYNC_RC" -eq 0 ]; then
     log "replicacion rsync completada con exito (codigo 0)"
 elif [ "$RSYNC_RC" -eq 24 ]; then
