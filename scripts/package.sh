@@ -9,7 +9,15 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 VERSION="${1:-}"
 OUT_DIR="${2:-$REPO_DIR/dist/out}"
-BUILD_DIR="${3:-$REPO_DIR/target/release}"
+DEFAULT_BUILD_DIR="${CARGO_TARGET_DIR:-$REPO_DIR/target}/release"
+if [ -z "${3:-}" ] && [ -z "${CARGO_TARGET_DIR:-}" ] && command -v cargo >/dev/null 2>&1; then
+    META_TARGET="$(cargo metadata --no-deps --format-version 1 --offline 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    if [ -n "$META_TARGET" ]; then
+        DEFAULT_BUILD_DIR="${META_TARGET}/release"
+    fi
+fi
+BUILD_DIR="${3:-$DEFAULT_BUILD_DIR}"
 
 if [ -z "$VERSION" ]; then
     VERSION=$(grep -m 1 '^version = ' "$REPO_DIR/Cargo.toml" | cut -d'"' -f2)
