@@ -253,13 +253,23 @@ pub async fn files_upload(
     };
 
     let target_dir_str = directory.unwrap_or_default();
-    let target_dir = match root.resolve_dir(&target_dir_str) {
-        Ok(dir) => dir,
-        Err(error) => {
+    let target_dir_arg = target_dir_str.clone();
+    let target_dir = match state
+        .run_system_blocking(move || root.resolve_dir(&target_dir_arg))
+        .await
+    {
+        Ok(Ok(dir)) => dir,
+        Ok(Err(error)) => {
             for (temp, _) in &staged_files {
                 let _ = tokio::fs::remove_file(temp).await;
             }
             return error_response(error);
+        }
+        Err(_) => {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return server_error("resolución de directorio interrumpida");
         }
     };
 
