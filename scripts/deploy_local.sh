@@ -93,13 +93,43 @@ fi
 
 cd "$REPO_DIR"
 
+compute_cargo_jobs() {
+    local cpus avail_mb mem_jobs cpu_jobs jobs
+    cpus="$(nproc 2>/dev/null || echo 1)"
+    avail_mb="$(awk '/MemAvailable:/ {printf "%d", $2/1024; found=1} END {if (!found) print 2048}' /proc/meminfo 2>/dev/null || echo 2048)"
+    mem_jobs=$(( avail_mb / 1536 ))
+    [ "$mem_jobs" -lt 1 ] && mem_jobs=1
+    if [ "$cpus" -gt 2 ]; then
+        cpu_jobs=$(( cpus - 1 ))
+    else
+        cpu_jobs=1
+    fi
+    jobs="$cpu_jobs"
+    [ "$mem_jobs" -lt "$jobs" ] && jobs="$mem_jobs"
+    [ "$jobs" -lt 1 ] && jobs=1
+    printf '%s' "$jobs"
+}
+
+if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+    CARGO_BUILD_JOBS="$(compute_cargo_jobs)"
+    export CARGO_BUILD_JOBS
+fi
+
+run_cargo_build() {
+    if command -v ionice >/dev/null 2>&1; then
+        nice -n 10 ionice -c 2 -n 7 cargo "$@"
+    else
+        nice -n 10 cargo "$@"
+    fi
+}
+
 if [ "$BUILD_ALL" -eq 1 ]; then
-    echo "[1/3] Compilando workspace completo en modo --release..."
-    cargo build --workspace --release --locked
+    echo "[1/3] Compilando workspace completo en modo --release (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})..."
+    run_cargo_build build --workspace --release --locked
     BINS_TO_INSTALL=("nas" "nas-web" "nas-tui" "nasctl" "nas-dev")
 else
-    echo "[1/3] Compilando paquete '$TARGET_BIN' en modo --release..."
-    cargo build --release --locked -p "$TARGET_BIN"
+    echo "[1/3] Compilando paquete '$TARGET_BIN' en modo --release (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})..."
+    run_cargo_build build --release --locked -p "$TARGET_BIN"
     BINS_TO_INSTALL=("$TARGET_BIN")
 fi
 
