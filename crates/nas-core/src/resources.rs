@@ -151,16 +151,15 @@ impl SystemResources {
             100.0
         };
 
-        let memory_pressure =
-            if (total_mem_mb > 0 && (avail_pct < 12.0 || available_mem_mb < 192))
-                || mem_psi_avg10 >= 30.0
-            {
-                MemoryPressure::Critical
-            } else if (total_mem_mb > 0 && avail_pct < 25.0) || mem_psi_avg10 >= 10.0 {
-                MemoryPressure::Elevated
-            } else {
-                MemoryPressure::Normal
-            };
+        let memory_pressure = if (total_mem_mb > 0 && (avail_pct < 12.0 || available_mem_mb < 192))
+            || mem_psi_avg10 >= 30.0
+        {
+            MemoryPressure::Critical
+        } else if (total_mem_mb > 0 && avail_pct < 25.0) || mem_psi_avg10 >= 10.0 {
+            MemoryPressure::Elevated
+        } else {
+            MemoryPressure::Normal
+        };
 
         Self {
             host_cpus,
@@ -248,13 +247,14 @@ impl ResourceBudget {
             max_concurrent_system_ops = (max_concurrent_system_ops / 2).max(1);
         }
 
-        let max_concurrent_heavy_ops =
-            if cpus <= 2 || resources.memory_pressure == MemoryPressure::Critical || avail_mb < 1024
-            {
-                1
-            } else {
-                (cpus / 4).clamp(1, 3)
-            };
+        let max_concurrent_heavy_ops = if cpus <= 2
+            || resources.memory_pressure == MemoryPressure::Critical
+            || avail_mb < 1024
+        {
+            1
+        } else {
+            (cpus / 4).clamp(1, 3)
+        };
 
         let max_concurrent_auth_ops = if cpus <= 2
             || resources.memory_pressure == MemoryPressure::Critical
@@ -292,8 +292,7 @@ impl ResourceBudget {
         };
 
         let dedup_max_entries_in_memory =
-            usize::try_from(avail_mb.saturating_mul(256).clamp(10_000, 500_000))
-                .unwrap_or(50_000);
+            usize::try_from(avail_mb.saturating_mul(256).clamp(10_000, 500_000)).unwrap_or(50_000);
 
         Self {
             resources,
