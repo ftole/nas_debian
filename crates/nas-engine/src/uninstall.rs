@@ -52,7 +52,12 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
         ),
         step(
             "retirar la unidad systemd",
-            &["rm", "-f", "/etc/systemd/system/nas-web.service"],
+            &[
+                "rm",
+                "-rf",
+                "/etc/systemd/system/nas-web.service",
+                "/etc/systemd/system/nas-web.service.d",
+            ],
             true,
         ),
         step("recargar systemd", &["systemctl", "daemon-reload"], true),
