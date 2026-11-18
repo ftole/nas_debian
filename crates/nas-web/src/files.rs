@@ -21,7 +21,7 @@ pub use util::{
     dir_size_recursive, dir_size_recursive_bounded, sanitize_filename, set_file_permissions,
 };
 use util::{entry_metadata, set_dir_permissions};
-pub use zip::ZIP_MAX_BYTES;
+pub use zip::{clean_stale_staging_files_in, free_and_total_bytes_at, ZIP_MAX_BYTES};
 
 /// Entrada de un directorio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -149,6 +149,9 @@ impl FileRoot {
         if root_name == ".trash" {
             return Some("la papelera de reciclaje interna");
         }
+        if root_name == ".nas_staging" {
+            return Some("el área temporal interna (.nas_staging)");
+        }
 
         let clean = relative
             .trim_matches(['/', '\\'].as_ref())
@@ -161,6 +164,7 @@ impl FileRoot {
             }
             "LOGS_BACKUP" => Some("los registros de respaldo del sistema (LOGS_BACKUP)"),
             ".trash" => Some("la papelera de reciclaje interna (.trash)"),
+            ".nas_staging" => Some("el área temporal interna (.nas_staging)"),
             _ => None,
         }
     }
@@ -178,7 +182,11 @@ impl FileRoot {
         for item in std::fs::read_dir(&dir).map_err(|e| NasError::io(&dir, e))? {
             let item = item.map_err(|e| NasError::io(&dir, e))?;
             let name = item.file_name().to_string_lossy().to_string();
-            if name == ".trash" {
+            if name == ".trash"
+                || name == ".nas_staging"
+                || name.starts_with(".upload-")
+                || (name.starts_with("zip_") && name.ends_with(".tmp"))
+            {
                 continue;
             }
             let metadata = entry_metadata(&item);
