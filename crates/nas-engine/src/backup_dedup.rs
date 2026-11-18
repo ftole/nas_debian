@@ -1820,13 +1820,20 @@ Filesystem type is: 9123683e
         let state_dir = root.join("state");
         let runner_dir = root.join("bin");
         let lock_dir = root.join("lock");
+        let hist_root = root.join("hist");
+        let perm_root = root.join("perm");
         fs::create_dir_all(&runner_dir).unwrap();
         fs::create_dir_all(&lock_dir).unwrap();
+        fs::create_dir_all(&hist_root).unwrap();
+        fs::create_dir_all(&perm_root).unwrap();
 
         let opts = MigrationOptions {
             state_dir: state_dir.clone(),
             dedup: DeduplicateOptions {
-                roots: Vec::new(),
+                roots: vec![BackupRootPair {
+                    hist_root,
+                    perm_root,
+                }],
                 runner_dir,
                 lock_dir,
                 log_dir: root.join("logs"),
