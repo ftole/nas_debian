@@ -30,7 +30,10 @@ pub struct DomainDiscoverBody {
 /// Estado de la integración con Active Directory.
 pub async fn domain_status(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let samba_conf = state.paths.samba_conf.clone();
-    match tokio::task::spawn_blocking(|| nas_engine::domain::status(&Runner::new())).await {
+    match state
+        .run_system_blocking(|| nas_engine::domain::status(&Runner::new()))
+        .await
+    {
         Ok(status) => {
             let workgroup = std::fs::read_to_string(&samba_conf)
                 .ok()
@@ -78,18 +81,20 @@ pub async fn domain_join(
             &body.domain,
             "DENIED",
             "parámetros inválidos",
-        );
+        )
+        .await;
         return bad_request("dominio o usuario inválidos");
     }
 
     let domain = body.domain.clone();
     let domain_user = body.user.clone();
     let password = body.password.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        nas_engine::domain::join(&Runner::new(), &domain, &domain_user, &password)
-    })
-    .await
-    .unwrap_or_else(|_| Err("unión interrumpida".to_string()));
+    let outcome = state
+        .run_system_blocking(move || {
+            nas_engine::domain::join(&Runner::new(), &domain, &domain_user, &password)
+        })
+        .await
+        .unwrap_or_else(|_| Err("unión interrumpida".to_string()));
 
     match outcome {
         Ok(()) => {
@@ -101,7 +106,8 @@ pub async fn domain_join(
                 &body.domain,
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Equipo unido al dominio",
             ))
@@ -116,7 +122,8 @@ pub async fn domain_join(
                 &body.domain,
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
@@ -130,7 +137,8 @@ pub async fn domain_leave(
 ) -> Response {
     let user = admin.user().username().to_string();
 
-    let outcome = tokio::task::spawn_blocking(|| nas_engine::domain::leave(&Runner::new()))
+    let outcome = state
+        .run_system_blocking(|| nas_engine::domain::leave(&Runner::new()))
         .await
         .unwrap_or_else(|_| Err("salida interrumpida".to_string()));
 
@@ -144,7 +152,8 @@ pub async fn domain_leave(
                 "domain",
                 "SUCCESS",
                 "",
-            );
+            )
+            .await;
             axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Equipo retirado del dominio",
             ))
@@ -159,13 +168,15 @@ pub async fn domain_leave(
                 "domain",
                 "FAILED",
                 &error,
-            );
+            )
+            .await;
             server_error(&error)
         }
     }
 }
 
 pub async fn domain_discover(
+    State(state): State<AppState>,
     _admin: AdminUser,
     axum::Json(body): axum::Json<DomainDiscoverBody>,
 ) -> Response {
@@ -174,15 +185,16 @@ pub async fn domain_discover(
     }
 
     let domain = body.domain.clone();
-    match tokio::task::spawn_blocking(move || {
-        run_json(
-            nas_exec::CommandSpec::new("realm")
-                .args(["discover", "--verbose", &domain])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(30)),
-        )
-    })
-    .await
+    match state
+        .run_system_blocking(move || {
+            run_json(
+                nas_exec::CommandSpec::new("realm")
+                    .args(["discover", "--verbose", &domain])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(30)),
+            )
+        })
+        .await
     {
         Ok(Ok(raw)) => {
             let realm = raw
