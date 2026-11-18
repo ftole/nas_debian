@@ -38,20 +38,9 @@ impl FileSystem {
     }
 }
 
-/// Detecta si el disco es mecánico consultando `/sys/block`.
+/// Detecta si el disco (físico, LVM, MD o VM) es mecánico consultando sysfs `slaves/*` y `lsblk`.
 pub fn detect_rotational(runner: &Runner, device: &str) -> NasResult<bool> {
-    let name = device
-        .trim_start_matches("/dev/")
-        .trim_end_matches(|c: char| !c.is_alphanumeric());
-    let path = format!("/sys/block/{name}/queue/rotational");
-    match runner.run(
-        &CommandSpec::new("cat")
-            .arg(&path)
-            .timeout(Duration::from_secs(5)),
-    ) {
-        Ok(out) if out.is_success() => Ok(out.stdout.trim() == "1"),
-        _ => Ok(true),
-    }
+    Ok(crate::storage::detect_device_rotational(runner, device).unwrap_or(true))
 }
 
 /// Ruta de la primera partición de un disco.
