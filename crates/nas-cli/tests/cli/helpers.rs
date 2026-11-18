@@ -329,10 +329,14 @@ fn helper_accounts_aliases_reconocidos() {
 
 #[test]
 fn helper_purge_recycle_valida_o_ejecuta() {
+    let dir = std::env::temp_dir().join(format!("nas-cli-purge-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
     let output = nas()
+        .env("NAS_DATA_ROOT", &dir)
         .args(["--json", "helper", "purge-recycle", "--days", "15"])
         .output()
         .expect("ejecuta");
+    let _ = std::fs::remove_dir_all(&dir);
     let text = if !output.stderr.is_empty() {
         String::from_utf8_lossy(&output.stderr).to_string()
     } else {
