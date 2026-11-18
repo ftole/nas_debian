@@ -216,6 +216,21 @@ enum DeployAction {
         #[arg(long)]
         sudo: bool,
     },
+    /// Aplica cuotas dinámicas de systemd (`10-resources.conf`) y tuning sysctl según el hardware.
+    Resources {
+        /// Ruta del archivo de entorno para resolver `NAS_DATA_ROOT`.
+        #[arg(long, default_value = "/etc/nas-web.env")]
+        env_file: PathBuf,
+        /// Aplica únicamente el drop-in de recursos systemd para `nas-web`.
+        #[arg(long)]
+        only_systemd: bool,
+        /// Aplica únicamente `/etc/sysctl.d/99-nas-tuning.conf`.
+        #[arg(long)]
+        only_sysctl: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+    },
 }
 
 /// Argumentos comunes de despliegue.
@@ -251,9 +266,12 @@ pub struct DeployArgs {
     /// Fuerza Btrfs (por defecto se deriva del rol).
     #[arg(long)]
     pub btrfs: bool,
-    /// El disco es SSD (afecta a las opciones de montaje).
+    /// El disco es SSD/NVMe (fuerza opciones de montaje para flash).
     #[arg(long)]
     pub ssd: bool,
+    /// El disco es HDD mecánico (fuerza opciones de montaje rotacionales).
+    #[arg(long)]
+    pub hdd: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -540,6 +558,18 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                     format_token,
                     sudo,
                 },
+                cli.json,
+            ),
+            DeployAction::Resources {
+                env_file,
+                only_systemd,
+                only_sysctl,
+                sudo,
+            } => commands::deploy::deploy_resources(
+                &env_file,
+                only_systemd,
+                only_sysctl,
+                sudo,
                 cli.json,
             ),
         },
