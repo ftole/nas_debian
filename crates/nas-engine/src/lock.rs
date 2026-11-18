@@ -7,6 +7,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use fs2::FileExt;
 use nas_core::{NasError, NasResult};
@@ -47,6 +48,56 @@ impl TaskLock {
         writeln!(file, "{}", std::process::id()).map_err(|e| NasError::io(&path, e))?;
 
         Ok(Self { file, path })
+    }
+
+    /// Intenta adquirir el bloqueo con espera acotada hasta `timeout`.
+    pub fn acquire_with_timeout(path: impl Into<PathBuf>, timeout: Duration) -> NasResult<Self> {
+        let path = path.into();
+        let deadline = Instant::now() + timeout;
+        loop {
+            match Self::acquire(&path) {
+                Ok(guard) => return Ok(guard),
+                Err(err) => {
+                    if Instant::now() >= deadline {
+                        return Err(err);
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
+    }
+
+    /// Adquiere un slot de concurrencia acotada por volumen/pool de destino.
+    pub fn acquire_pool_slot(
+        lock_dir: &Path,
+        pool_key: &str,
+        task_id: &str,
+        max_slots: usize,
+        wait_timeout: Duration,
+    ) -> NasResult<Self> {
+        let slots = max_slots.max(1);
+        let safe_key: String = pool_key
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        for slot in 1..=slots {
+            let slot_path = lock_dir.join(format!("nas-pool-{safe_key}_slot_{slot}.lock"));
+            if let Ok(guard) = Self::acquire(&slot_path) {
+                return Ok(guard);
+            }
+        }
+        let hash: usize = task_id.bytes().fold(0usize, |acc, b| {
+            acc.wrapping_mul(31).wrapping_add(b as usize)
+        });
+        let wait_slot = (hash % slots) + 1;
+        let wait_path = lock_dir.join(format!("nas-pool-{safe_key}_slot_{wait_slot}.lock"));
+        Self::acquire_with_timeout(wait_path, wait_timeout)
     }
 
     /// Ruta del archivo de bloqueo.
