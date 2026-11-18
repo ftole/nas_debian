@@ -91,7 +91,10 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
 /// Resumen del volumen de datos.
 pub async fn storage(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
+    match state
+        .run_system_blocking(move || collect_storage_payload(&paths))
+        .await
+    {
         Ok(Ok(payload)) => axum::Json(ApiResponse::ok(payload, "Almacenamiento")).into_response(),
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("consulta de almacenamiento interrumpida"),
@@ -101,7 +104,10 @@ pub async fn storage(State(state): State<AppState>, _user: AuthenticatedUser) ->
 /// Discos físicos detectados y resumen de capacidad (contrato consumido por `loadStorage()`).
 pub async fn storage_disks(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || collect_storage_payload(&paths)).await {
+    match state
+        .run_system_blocking(move || collect_storage_payload(&paths))
+        .await
+    {
         Ok(Ok(payload)) => {
             axum::Json(ApiResponse::ok(payload, "Discos detectados")).into_response()
         }
@@ -112,11 +118,13 @@ pub async fn storage_disks(State(state): State<AppState>, _user: AuthenticatedUs
 
 /// Inspección de un dispositivo concreto.
 pub async fn storage_inspect(
+    State(state): State<AppState>,
     _admin: AdminUser,
     axum::Json(body): axum::Json<DeviceBody>,
 ) -> Response {
     let device = body.device;
-    match tokio::task::spawn_blocking(move || nas_engine::storage::inspect(&Runner::new(), &device))
+    match state
+        .run_heavy_blocking(move || nas_engine::storage::inspect(&Runner::new(), &device))
         .await
     {
         Ok(Ok(payload)) => {
@@ -129,7 +137,8 @@ pub async fn storage_inspect(
 
 pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let runner = Runner::new();
         let mut units = Vec::new();
         if let Ok(overview) = nas_engine::storage::overview_for(&paths, &runner) {
@@ -198,7 +207,8 @@ pub async fn storage_subvolumes(
     _user: AuthenticatedUser,
 ) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let runner = Runner::new();
         let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
             .map(|o| o.is_btrfs)
@@ -246,7 +256,8 @@ pub async fn storage_subvolumes(
 /// Estado del scrub Btrfs (responde `200` degradado si `/srv/nas` no es Btrfs).
 pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let runner = Runner::new();
         let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
             .map(|o| o.is_btrfs)
@@ -293,15 +304,16 @@ pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUs
 /// Inicia el scrub Btrfs.
 pub async fn storage_scrub_start(State(state): State<AppState>, _admin: AdminUser) -> Response {
     let target = state.paths.data_root.to_string_lossy().to_string();
-    match tokio::task::spawn_blocking(move || {
-        run_json(
-            nas_exec::CommandSpec::new("btrfs")
-                .args(["scrub", "start", &target])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(30)),
-        )
-    })
-    .await
+    match state
+        .run_heavy_blocking(move || {
+            run_json(
+                nas_exec::CommandSpec::new("btrfs")
+                    .args(["scrub", "start", &target])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(30)),
+            )
+        })
+        .await
     {
         Ok(Ok(text)) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "output": text }),
@@ -316,15 +328,16 @@ pub async fn storage_scrub_start(State(state): State<AppState>, _admin: AdminUse
 /// Ejecuta fstrim sobre el volumen.
 pub async fn storage_trim(State(state): State<AppState>, _admin: AdminUser) -> Response {
     let target = state.paths.data_root.to_string_lossy().to_string();
-    match tokio::task::spawn_blocking(move || {
-        run_json(
-            nas_exec::CommandSpec::new("fstrim")
-                .args(["-v", &target])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(120)),
-        )
-    })
-    .await
+    match state
+        .run_heavy_blocking(move || {
+            run_json(
+                nas_exec::CommandSpec::new("fstrim")
+                    .args(["-v", &target])
+                    .sudo(nas_exec::SudoMode::Passwordless)
+                    .timeout(std::time::Duration::from_secs(120)),
+            )
+        })
+        .await
     {
         Ok(Ok(text)) => axum::Json(ApiResponse::ok(
             serde_json::json!({ "output": text }),
