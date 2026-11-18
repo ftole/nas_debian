@@ -326,11 +326,11 @@ impl Runner {
             }
         }
 
-        let mut stdout_pipe = child
+        let stdout_pipe = child
             .stdout
             .take()
             .ok_or_else(|| NasError::Invalid("stdout no disponible".into()))?;
-        let mut stderr_pipe = child
+        let stderr_pipe = child
             .stderr
             .take()
             .ok_or_else(|| NasError::Invalid("stderr no disponible".into()))?;
@@ -494,7 +494,9 @@ mod tests {
             )
             .expect("ejecución acotada");
         assert!(out.is_success());
-        assert!(out.stdout.contains("[salida truncada al superar límite de memoria]"));
+        assert!(out
+            .stdout
+            .contains("[salida truncada al superar límite de memoria]"));
         assert!(out.stdout.len() < 1200);
     }
 }
