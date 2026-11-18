@@ -320,9 +320,13 @@ impl Runner {
                 if !data.ends_with(b"\n") {
                     data.push(b'\n');
                 }
-                stdin
-                    .write_all(&data)
-                    .map_err(|e| NasError::io(&spec.program, e))?;
+                if let Err(err) = stdin.write_all(&data) {
+                    // Si el proceso hijo cerró stdin o salió rápido (p. ej. fallo temprano de argumentos),
+                    // conservamos su stderr/stdout y código de salida reales en lugar de abortar por EPIPE.
+                    if err.kind() != std::io::ErrorKind::BrokenPipe {
+                        return Err(NasError::io(&spec.program, err));
+                    }
+                }
             }
         }
 
@@ -498,5 +502,24 @@ mod tests {
             .stdout
             .contains("[salida truncada al superar límite de memoria]"));
         assert!(out.stdout.len() < 1200);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignora_epipe_en_stdin_y_conserva_stderr_redactado() {
+        let secret = "MiSecretoPipe99";
+        let runner = Runner::new().with_secret(secret);
+        for _ in 0..10 {
+            let out = runner
+                .run(
+                    &CommandSpec::new("sh")
+                        .args(["-c", "exec <&-; echo fallo MiSecretoPipe99 >&2; exit 1"])
+                        .stdin_secret(SecretInput::new(secret)),
+                )
+                .expect("debe capturar stderr incluso con EPIPE en stdin");
+            assert!(!out.is_success());
+            assert!(out.stderr.contains("fallo ***"), "stderr: {}", out.stderr);
+            assert!(!out.stderr.contains(secret));
+        }
     }
 }
