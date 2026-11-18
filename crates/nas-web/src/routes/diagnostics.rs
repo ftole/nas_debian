@@ -19,7 +19,8 @@ pub struct DiagBody {
 
 pub async fn diagnostics(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
     let paths = state.paths.clone();
-    match tokio::task::spawn_blocking(move || {
+    match state
+        .run_system_blocking(move || {
         let runner = Runner::new();
         let checks = nas_engine::diagnostics::collect(&paths, &runner);
         let services = crate::legacy::service_rows(&runner);
@@ -66,34 +67,35 @@ pub async fn diagnostics_run(
     };
     let data_root = state.paths.data_root.to_string_lossy().to_string();
 
-    let outcome = tokio::task::spawn_blocking(move || match kind.as_str() {
-        "ping" => run_json(
-            nas_exec::CommandSpec::new("ping")
-                .args(["-c", "1", "-W", "2", "1.1.1.1"])
-                .timeout(std::time::Duration::from_secs(10)),
-        ),
-        "dns" => run_json(
-            nas_exec::CommandSpec::new("getent")
-                .args(["hosts", "localhost"])
-                .timeout(std::time::Duration::from_secs(10)),
-        ),
-        "samba" => run_json(
-            nas_exec::CommandSpec::new("testparm")
-                .arg("-s")
-                .timeout(std::time::Duration::from_secs(15)),
-        ),
-        "disk" => run_json(
-            nas_exec::CommandSpec::new("df")
-                .args(["-Pk", &data_root])
-                .timeout(std::time::Duration::from_secs(10)),
-        ),
-        _ => run_json(
-            nas_exec::CommandSpec::new("systemctl")
-                .args(["is-active", "smbd"])
-                .timeout(std::time::Duration::from_secs(10)),
-        ),
-    })
-    .await;
+    let outcome = state
+        .run_system_blocking(move || match kind.as_str() {
+            "ping" => run_json(
+                nas_exec::CommandSpec::new("ping")
+                    .args(["-c", "1", "-W", "2", "1.1.1.1"])
+                    .timeout(std::time::Duration::from_secs(10)),
+            ),
+            "dns" => run_json(
+                nas_exec::CommandSpec::new("getent")
+                    .args(["hosts", "localhost"])
+                    .timeout(std::time::Duration::from_secs(10)),
+            ),
+            "samba" => run_json(
+                nas_exec::CommandSpec::new("testparm")
+                    .arg("-s")
+                    .timeout(std::time::Duration::from_secs(15)),
+            ),
+            "disk" => run_json(
+                nas_exec::CommandSpec::new("df")
+                    .args(["-Pk", &data_root])
+                    .timeout(std::time::Duration::from_secs(10)),
+            ),
+            _ => run_json(
+                nas_exec::CommandSpec::new("systemctl")
+                    .args(["is-active", "smbd"])
+                    .timeout(std::time::Duration::from_secs(10)),
+            ),
+        })
+        .await;
 
     match outcome {
         Ok(Ok(output)) => axum::Json(serde_json::json!({
