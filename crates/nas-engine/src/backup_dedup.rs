@@ -5,13 +5,14 @@
 //! y recupera el espacio duplicado en producción de forma idempotente y atómica,
 //! sin alterar el contenido ni los metadatos de los respaldos existentes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use nas_core::{MemoryPressure, NasError, NasResult, ResourceBudget};
+use nas_core::{MemoryPressure, NasError, NasResult, ResourceBudget, SystemResources};
 use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -87,9 +88,22 @@ where
     }
 }
 
+fn pressure_probe_from_resources(res: &SystemResources) -> (MemoryPressure, bool) {
+    let effective_pressure =
+        if res.memory_pressure == MemoryPressure::Critical || res.is_io_critical() {
+            MemoryPressure::Critical
+        } else {
+            res.memory_pressure
+        };
+    let overloaded = effective_pressure == MemoryPressure::Critical
+        || res.load_ratio >= 1.2
+        || res.is_io_pressured();
+    (effective_pressure, overloaded)
+}
+
 fn live_pressure_probe() -> (MemoryPressure, bool) {
     let budget = ResourceBudget::detect();
-    (budget.resources.memory_pressure, budget.is_overloaded())
+    pressure_probe_from_resources(&budget.resources)
 }
 
 /// Par de directorios de respaldos (históricos y permanentes) en una misma unidad.
@@ -654,11 +668,29 @@ where
     0
 }
 
+fn bucket_partition_hash(size: u64, meta_key: &MetaKey) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    size.hash(&mut hasher);
+    meta_key.hash(&mut hasher);
+    hasher.finish()
+}
+
+struct CollectBudget {
+    is_first_walk: bool,
+    divisor: u64,
+    remainder: u64,
+    max_records_in_ram: usize,
+    is_cifs: bool,
+    total_scanned: u64,
+    pending_subpartitions: VecDeque<(u64, u64)>,
+}
+
 #[cfg(unix)]
-fn collect_files_in_container<F>(
+fn collect_files_in_container_partitioned<F>(
     container_idx: usize,
     container: &Path,
     out: &mut Vec<FileMetaRecord>,
+    budget: &mut CollectBudget,
     throttle: &mut DedupThrottle<F>,
 ) where
     F: FnMut() -> (MemoryPressure, bool),
@@ -688,29 +720,67 @@ fn collect_files_in_container<F>(
                 if name == ".freeze_meta.json" || name.starts_with(".nas_dedup_") {
                     continue;
                 }
+                if budget.is_first_walk {
+                    budget.total_scanned += 1;
+                }
+                let size = meta.size();
+                if size == 0 {
+                    continue;
+                }
                 let rel_path = path.strip_prefix(container).unwrap_or(&path);
-                out.push(FileMetaRecord {
+                let rec = FileMetaRecord {
                     container_idx,
                     rel_path: PathBuf::from(rel_path).into_boxed_path(),
                     dev: meta.dev(),
                     ino: meta.ino(),
-                    size: meta.size(),
+                    size,
                     mtime_sec: meta.mtime(),
                     mtime_nsec: meta.mtime_nsec(),
                     uid: meta.uid(),
                     gid: meta.gid(),
                     mode: meta.mode() & 0o7777,
-                });
+                };
+                let mk = rec.meta_key(budget.is_cifs);
+                let part_hash = bucket_partition_hash(rec.size, &mk);
+
+                if budget.divisor > 1 && (part_hash % budget.divisor) != budget.remainder {
+                    continue;
+                }
+
+                while out.len() >= budget.max_records_in_ram && budget.divisor < 4096 {
+                    let old_div = budget.divisor;
+                    let old_rem = budget.remainder;
+                    let new_div = old_div.saturating_mul(2);
+                    budget.divisor = new_div;
+                    budget
+                        .pending_subpartitions
+                        .push_back((new_div, old_rem + old_div));
+                    let is_cifs = budget.is_cifs;
+                    out.retain(|r| {
+                        (bucket_partition_hash(r.size, &r.meta_key(is_cifs)) % new_div) == old_rem
+                    });
+                    if (part_hash % new_div) != old_rem {
+                        break;
+                    }
+                }
+
+                if (budget.divisor > 1 && (part_hash % budget.divisor) != budget.remainder)
+                    || out.len() >= budget.max_records_in_ram
+                {
+                    continue;
+                }
+                out.push(rec);
             }
         }
     }
 }
 
 #[cfg(not(unix))]
-fn collect_files_in_container<F>(
+fn collect_files_in_container_partitioned<F>(
     _container_idx: usize,
     _container: &Path,
     _out: &mut Vec<FileMetaRecord>,
+    _budget: &mut CollectBudget,
     _throttle: &mut DedupThrottle<F>,
 ) where
     F: FnMut() -> (MemoryPressure, bool),
@@ -935,15 +1005,155 @@ fn deduplicate_task(
         THROTTLE_CHECK_INTERVAL,
         live_pressure_probe,
     );
-    deduplicate_task_with_throttle(runner, pair, task_id, options, &mut throttle)
+    let budget = ResourceBudget::detect();
+    let max_records_in_ram = usize::try_from(
+        budget
+            .resources
+            .available_mem_mb
+            .saturating_mul(1024)
+            .clamp(50_000, 1_500_000),
+    )
+    .unwrap_or(100_000);
+    let is_rotational = crate::storage::detect_path_rotational(runner, &pair.hist_root)
+        .or_else(|| crate::storage::detect_path_rotational(runner, &pair.perm_root))
+        .unwrap_or(true);
+    let workers = budget.dedup_parallel_workers(is_rotational);
+    deduplicate_task_inner(
+        runner,
+        pair,
+        task_id,
+        options,
+        &mut throttle,
+        max_records_in_ram,
+        workers,
+    )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn deduplicate_task_with_throttle<F>(
     runner: &Runner,
     pair: &BackupRootPair,
     task_id: &str,
     options: &DeduplicateOptions,
     throttle: &mut DedupThrottle<F>,
+) -> TaskDedupSummary
+where
+    F: FnMut() -> (MemoryPressure, bool),
+{
+    deduplicate_task_inner(runner, pair, task_id, options, throttle, 500_000, 1)
+}
+
+fn compact_candidate_records(
+    all_files: Vec<FileMetaRecord>,
+    candidate_buckets: &mut [(u64, u64, Vec<usize>)],
+) -> Vec<FileMetaRecord> {
+    let mut remap: HashMap<usize, usize> = HashMap::new();
+    let mut needed_slots: Vec<Option<FileMetaRecord>> = all_files.into_iter().map(Some).collect();
+    let mut compacted = Vec::new();
+    for (_pot, _sz, indices) in candidate_buckets.iter_mut() {
+        for idx in indices.iter_mut() {
+            let old = *idx;
+            if let Some(&new_idx) = remap.get(&old) {
+                *idx = new_idx;
+            } else if let Some(rec) = needed_slots[old].take() {
+                let new_idx = compacted.len();
+                compacted.push(rec);
+                remap.insert(old, new_idx);
+                *idx = new_idx;
+            }
+        }
+    }
+    compacted
+}
+
+fn compute_partial_sigs_parallel(
+    items: Vec<((u64, u64), PathBuf)>,
+    size: u64,
+    workers: usize,
+) -> Vec<((u64, u64), Option<PartialSig>)> {
+    let worker_count = workers.clamp(1, items.len().max(1));
+    if worker_count <= 1 || items.len() < 4 {
+        return items
+            .into_iter()
+            .map(|(k, p)| (k, read_partial_sig(&p, size).ok()))
+            .collect();
+    }
+    let chunk_size = items.len().div_ceil(worker_count);
+    let mut out = Vec::with_capacity(items.len());
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in items.chunks(chunk_size) {
+            handles.push(scope.spawn(move || {
+                chunk
+                    .iter()
+                    .map(|(k, p)| (*k, read_partial_sig(p, size).ok()))
+                    .collect::<Vec<_>>()
+            }));
+        }
+        for handle in handles {
+            if let Ok(part) = handle.join() {
+                out.extend(part);
+            }
+        }
+    });
+    out
+}
+
+type InodeShaResults = Vec<((u64, u64), Option<[u8; 32]>)>;
+
+fn compute_sha256_parallel(
+    items: Vec<((u64, u64), PathBuf)>,
+    workers: usize,
+) -> (InodeShaResults, bool) {
+    let worker_count = workers.clamp(1, items.len().max(1));
+    let chunk_size = items.len().div_ceil(worker_count);
+    let mut out = Vec::with_capacity(items.len());
+    let mut saw_critical = false;
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in items.chunks(chunk_size) {
+            handles.push(scope.spawn(move || {
+                let mut local_throttle = DedupThrottle::new(
+                    THROTTLE_CHECK_OPS,
+                    THROTTLE_CHECK_INTERVAL,
+                    live_pressure_probe,
+                );
+                let mut local_critical = false;
+                let mut results = Vec::with_capacity(chunk.len());
+                for (k, p) in chunk {
+                    match sha256_file(p, &mut local_throttle) {
+                        Ok((digest, crit)) => {
+                            if crit {
+                                local_critical = true;
+                            }
+                            results.push((*k, Some(digest)));
+                        }
+                        Err(_) => results.push((*k, None)),
+                    }
+                }
+                (results, local_critical)
+            }));
+        }
+        for handle in handles {
+            if let Ok((part, crit)) = handle.join() {
+                if crit {
+                    saw_critical = true;
+                }
+                out.extend(part);
+            }
+        }
+    });
+    (out, saw_critical)
+}
+
+fn deduplicate_task_inner<F>(
+    runner: &Runner,
+    pair: &BackupRootPair,
+    task_id: &str,
+    options: &DeduplicateOptions,
+    throttle: &mut DedupThrottle<F>,
+    max_records_in_ram: usize,
+    workers: usize,
 ) -> TaskDedupSummary
 where
     F: FnMut() -> (MemoryPressure, bool),
@@ -1050,108 +1260,112 @@ where
         .map(|c| query_container_fs(runner, c))
         .collect();
 
-    // 2. Recolectar archivos regulares en orden canónico (newest snapshot_* primero).
-    let mut all_files = Vec::new();
-    for (c_idx, container) in containers.iter().enumerate() {
-        if container_writable[c_idx] {
-            collect_files_in_container(c_idx, container, &mut all_files, throttle);
-        }
-    }
-    summary.files_scanned = all_files.len() as u64;
-
-    // 3. Agrupar primero por (tamaño > 0, MetaKey) en memoria para evitar leer/hashear
-    // archivos cuyos metadatos nunca permitirían hardlink (en CIFS los modos se normalizan a 0777).
-    let mut by_size_meta: HashMap<(u64, MetaKey), Vec<usize>> = HashMap::new();
-    for (idx, rec) in all_files.iter().enumerate() {
-        if rec.size > 0 {
-            by_size_meta
-                .entry((rec.size, rec.meta_key(is_cifs)))
-                .or_default()
-                .push(idx);
-        }
-    }
-
-    // Priorizar cubos con mayor ahorro potencial en bytes (archivos grandes duplicados primero)
-    // y descartar de inmediato archivos únicos para reducir consumo de memoria.
-    let mut candidate_buckets: Vec<(u64, u64, Vec<usize>)> = Vec::new();
-    for ((size, _mk), indices) in by_size_meta {
-        let unique_inodes: HashSet<(u64, u64)> = indices
-            .iter()
-            .map(|&i| (all_files[i].dev, all_files[i].ino))
-            .collect();
-        if unique_inodes.len() < 2 {
-            continue;
-        }
-        let potential = size.saturating_mul((unique_inodes.len() - 1) as u64);
-        candidate_buckets.push((potential, size, indices));
-    }
-    candidate_buckets.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-
+    // 2 y 3. Recolectar archivos en orden canónico (newest snapshot_* primero) con cota estricta
+    // de RAM (particionado multi-pasada si la tarea supera `max_records_in_ram`) y compactación
+    // inmediata antes de leer o calcular SHA-256.
     let max_cache_entries = ResourceBudget::detect()
         .dedup_max_entries_in_memory
         .max(1024);
-    let mut partial_cache: HashMap<(u64, u64), Option<PartialSig>> = HashMap::new();
-    let mut sha_cache: HashMap<(u64, u64), Option<[u8; 32]>> = HashMap::new();
     let mut reclaimed_inodes: HashSet<(u64, u64)> = HashSet::new();
     let mut seq = 0u64;
+    let mut collect_budget = CollectBudget {
+        is_first_walk: true,
+        divisor: 1,
+        remainder: 0,
+        max_records_in_ram: max_records_in_ram.max(1),
+        is_cifs,
+        total_scanned: 0,
+        pending_subpartitions: VecDeque::from([(1u64, 0u64)]),
+    };
 
-    for (_potential, size, indices) in candidate_buckets {
-        if throttle.tick(1) == PressureAction::PauseCritical {
-            partial_cache.clear();
-            sha_cache.clear();
+    while let Some((divisor, remainder)) = collect_budget.pending_subpartitions.pop_front() {
+        collect_budget.divisor = divisor;
+        collect_budget.remainder = remainder;
+        let mut all_files = Vec::new();
+        for (c_idx, container) in containers.iter().enumerate() {
+            if container_writable[c_idx] {
+                collect_files_in_container_partitioned(
+                    c_idx,
+                    container,
+                    &mut all_files,
+                    &mut collect_budget,
+                    throttle,
+                );
+            }
+        }
+        if collect_budget.is_first_walk {
+            summary.files_scanned = collect_budget.total_scanned;
+            collect_budget.is_first_walk = false;
         }
 
-        // Sub-agrupar por firma rápida (4 KiB inicio + 4 KiB final).
-        let mut by_partial: HashMap<PartialSig, Vec<usize>> = HashMap::new();
-        for &idx in &indices {
-            let rec = &all_files[idx];
-            let key = (rec.dev, rec.ino);
-            let sig = if let Some(cached) = partial_cache.get(&key) {
-                cached.clone()
-            } else {
-                let path = rec.full_path(&containers);
-                let computed = read_partial_sig(&path, size).ok();
-                if partial_cache.len() < max_cache_entries {
-                    partial_cache.insert(key, computed.clone());
-                }
-                computed
-            };
+        // Agrupar por `(tamaño > 0, MetaKey)` para descartar archivos únicos antes de hashear.
+        let mut by_size_meta: HashMap<(u64, MetaKey), Vec<usize>> = HashMap::new();
+        for (idx, rec) in all_files.iter().enumerate() {
+            if rec.size > 0 {
+                by_size_meta
+                    .entry((rec.size, rec.meta_key(is_cifs)))
+                    .or_default()
+                    .push(idx);
+            }
+        }
+
+        let mut candidate_buckets: Vec<(u64, u64, Vec<usize>)> = Vec::new();
+        for ((size, _mk), indices) in by_size_meta {
+            let unique_inodes: HashSet<(u64, u64)> = indices
+                .iter()
+                .map(|&i| (all_files[i].dev, all_files[i].ino))
+                .collect();
+            if unique_inodes.len() < 2 {
+                continue;
+            }
+            let potential = size.saturating_mul((unique_inodes.len() - 1) as u64);
+            candidate_buckets.push((potential, size, indices));
+        }
+        candidate_buckets.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+        // Liberar todos los FileMetaRecord sin duplicados potenciales de la RAM antes de I/O.
+        let all_files = compact_candidate_records(all_files, &mut candidate_buckets);
+
+        let mut partial_cache: HashMap<(u64, u64), Option<PartialSig>> = HashMap::new();
+        let mut sha_cache: HashMap<(u64, u64), Option<[u8; 32]>> = HashMap::new();
+
+        for (_potential, size, indices) in candidate_buckets {
             if throttle.tick(1) == PressureAction::PauseCritical {
                 partial_cache.clear();
                 sha_cache.clear();
             }
-            if let Some(s) = sig {
-                by_partial.entry(s).or_default().push(idx);
-            }
-        }
 
-        for (_psig, p_indices) in by_partial {
-            let unique_p: HashSet<(u64, u64)> = p_indices
-                .iter()
-                .map(|&i| (all_files[i].dev, all_files[i].ino))
-                .collect();
-            if unique_p.len() < 2 {
-                continue;
+            if workers > 1 {
+                let mut seen_missing = HashSet::new();
+                let mut missing_items = Vec::new();
+                for &idx in &indices {
+                    let rec = &all_files[idx];
+                    let key = (rec.dev, rec.ino);
+                    if !partial_cache.contains_key(&key) && seen_missing.insert(key) {
+                        missing_items.push((key, rec.full_path(&containers)));
+                    }
+                }
+                if missing_items.len() >= 4 {
+                    for (key, sig) in compute_partial_sigs_parallel(missing_items, size, workers) {
+                        if partial_cache.len() < max_cache_entries {
+                            partial_cache.insert(key, sig);
+                        }
+                    }
+                }
             }
 
-            // Verificación criptográfica completa SHA-256.
-            let mut by_sha: HashMap<[u8; 32], Vec<usize>> = HashMap::new();
-            for &idx in &p_indices {
+            // Sub-agrupar por firma rápida (4 KiB inicio + 4 KiB final).
+            let mut by_partial: HashMap<PartialSig, Vec<usize>> = HashMap::new();
+            for &idx in &indices {
                 let rec = &all_files[idx];
                 let key = (rec.dev, rec.ino);
-                let digest = if let Some(cached) = sha_cache.get(&key) {
-                    *cached
+                let sig = if let Some(cached) = partial_cache.get(&key) {
+                    cached.clone()
                 } else {
                     let path = rec.full_path(&containers);
-                    let (computed, saw_critical) = match sha256_file(&path, throttle) {
-                        Ok((digest, saw_critical)) => (Some(digest), saw_critical),
-                        Err(_) => (None, false),
-                    };
-                    if saw_critical {
-                        partial_cache.clear();
-                        sha_cache.clear();
-                    } else if sha_cache.len() < max_cache_entries {
-                        sha_cache.insert(key, computed);
+                    let computed = read_partial_sig(&path, size).ok();
+                    if partial_cache.len() < max_cache_entries {
+                        partial_cache.insert(key, computed.clone());
                     }
                     computed
                 };
@@ -1159,84 +1373,152 @@ where
                     partial_cache.clear();
                     sha_cache.clear();
                 }
-                if let Some(d) = digest {
-                    by_sha.entry(d).or_default().push(idx);
+                if let Some(s) = sig {
+                    by_partial.entry(s).or_default().push(idx);
                 }
             }
 
-            for (_sha, meta_indices) in by_sha {
-                if meta_indices.len() < 2 {
+            for (_psig, p_indices) in by_partial {
+                let unique_p: HashSet<(u64, u64)> = p_indices
+                    .iter()
+                    .map(|&i| (all_files[i].dev, all_files[i].ino))
+                    .collect();
+                if unique_p.len() < 2 {
                     continue;
                 }
-                let canon_idx = meta_indices[0];
-                let canon_container_idx = all_files[canon_idx].container_idx;
-                let canon_dev = all_files[canon_idx].dev;
-                let canon_ino = all_files[canon_idx].ino;
-                let canon_path = all_files[canon_idx].full_path(&containers);
 
-                for &dup_idx in &meta_indices[1..] {
+                if workers > 1 {
+                    let mut seen_missing = HashSet::new();
+                    let mut missing_sha = Vec::new();
+                    for &idx in &p_indices {
+                        let rec = &all_files[idx];
+                        let key = (rec.dev, rec.ino);
+                        if !sha_cache.contains_key(&key) && seen_missing.insert(key) {
+                            missing_sha.push((key, rec.full_path(&containers)));
+                        }
+                    }
+                    if missing_sha.len() >= 4 || (missing_sha.len() >= 2 && size >= 256 * 1024) {
+                        let (computed_list, saw_critical) =
+                            compute_sha256_parallel(missing_sha, workers);
+                        if saw_critical {
+                            partial_cache.clear();
+                            sha_cache.clear();
+                        }
+                        for (key, digest) in computed_list {
+                            if sha_cache.len() < max_cache_entries {
+                                sha_cache.insert(key, digest);
+                            }
+                        }
+                    }
+                }
+
+                // Verificación criptográfica completa SHA-256.
+                let mut by_sha: HashMap<[u8; 32], Vec<usize>> = HashMap::new();
+                for &idx in &p_indices {
+                    let rec = &all_files[idx];
+                    let key = (rec.dev, rec.ino);
+                    let digest = if let Some(cached) = sha_cache.get(&key) {
+                        *cached
+                    } else {
+                        let path = rec.full_path(&containers);
+                        let (computed, saw_critical) = match sha256_file(&path, throttle) {
+                            Ok((digest, saw_critical)) => (Some(digest), saw_critical),
+                            Err(_) => (None, false),
+                        };
+                        if saw_critical {
+                            partial_cache.clear();
+                            sha_cache.clear();
+                        } else if sha_cache.len() < max_cache_entries {
+                            sha_cache.insert(key, computed);
+                        }
+                        computed
+                    };
                     if throttle.tick(1) == PressureAction::PauseCritical {
                         partial_cache.clear();
                         sha_cache.clear();
                     }
-                    let dup = &all_files[dup_idx];
-                    if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
+                    if let Some(d) = digest {
+                        by_sha.entry(d).or_default().push(idx);
+                    }
+                }
+
+                for (_sha, meta_indices) in by_sha {
+                    if meta_indices.len() < 2 {
                         continue;
                     }
-                    let dup_path = dup.full_path(&containers);
-                    let cross_dev = dup.dev != canon_dev;
-                    if cross_dev {
-                        let same_btrfs_fs = match (
-                            &container_fs[canon_container_idx],
-                            &container_fs[dup.container_idx],
-                        ) {
-                            (Some(cfs), Some(dfs)) => cfs.fsid == dfs.fsid && cfs.fstype == "btrfs",
-                            _ => false,
-                        };
-                        if !same_btrfs_fs
-                            || files_share_physical_extents(runner, &canon_path, &dup_path)
-                        {
+                    let canon_idx = meta_indices[0];
+                    let canon_container_idx = all_files[canon_idx].container_idx;
+                    let canon_dev = all_files[canon_idx].dev;
+                    let canon_ino = all_files[canon_idx].ino;
+                    let canon_path = all_files[canon_idx].full_path(&containers);
+
+                    for &dup_idx in &meta_indices[1..] {
+                        if throttle.tick(1) == PressureAction::PauseCritical {
+                            partial_cache.clear();
+                            sha_cache.clear();
+                        }
+                        let dup = &all_files[dup_idx];
+                        if (dup.dev, dup.ino) == (canon_dev, canon_ino) {
                             continue;
                         }
-                    }
-
-                    if options.dry_run {
+                        let dup_path = dup.full_path(&containers);
+                        let cross_dev = dup.dev != canon_dev;
                         if cross_dev {
-                            summary.reflinks_created += 1;
-                        } else {
-                            summary.hardlinks_created += 1;
-                        }
-                        if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                            summary.bytes_reclaimed =
-                                summary.bytes_reclaimed.saturating_add(dup.size);
-                        }
-                    } else {
-                        seq += 1;
-                        match replace_with_link_or_reflink(runner, &canon_path, &dup_path, seq) {
-                            Ok(LinkOutcome::Hardlinked) => {
-                                summary.hardlinks_created += 1;
-                                if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                                    summary.bytes_reclaimed =
-                                        summary.bytes_reclaimed.saturating_add(dup.size);
+                            let same_btrfs_fs = match (
+                                &container_fs[canon_container_idx],
+                                &container_fs[dup.container_idx],
+                            ) {
+                                (Some(cfs), Some(dfs)) => {
+                                    cfs.fsid == dfs.fsid && cfs.fstype == "btrfs"
                                 }
+                                _ => false,
+                            };
+                            if !same_btrfs_fs
+                                || files_share_physical_extents(runner, &canon_path, &dup_path)
+                            {
+                                continue;
                             }
-                            Ok(LinkOutcome::Reflinked) => {
+                        }
+
+                        if options.dry_run {
+                            if cross_dev {
                                 summary.reflinks_created += 1;
-                                if reclaimed_inodes.insert((dup.dev, dup.ino)) {
-                                    summary.bytes_reclaimed =
-                                        summary.bytes_reclaimed.saturating_add(dup.size);
-                                }
+                            } else {
+                                summary.hardlinks_created += 1;
                             }
-                            Err(err) => summary.errors.push(err),
+                            if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                                summary.bytes_reclaimed =
+                                    summary.bytes_reclaimed.saturating_add(dup.size);
+                            }
+                        } else {
+                            seq += 1;
+                            match replace_with_link_or_reflink(runner, &canon_path, &dup_path, seq)
+                            {
+                                Ok(LinkOutcome::Hardlinked) => {
+                                    summary.hardlinks_created += 1;
+                                    if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                                        summary.bytes_reclaimed =
+                                            summary.bytes_reclaimed.saturating_add(dup.size);
+                                    }
+                                }
+                                Ok(LinkOutcome::Reflinked) => {
+                                    summary.reflinks_created += 1;
+                                    if reclaimed_inodes.insert((dup.dev, dup.ino)) {
+                                        summary.bytes_reclaimed =
+                                            summary.bytes_reclaimed.saturating_add(dup.size);
+                                    }
+                                }
+                                Err(err) => summary.errors.push(err),
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Liberar cachés por cubo `(size, MetaKey)` para mantener la RAM acotada.
-        partial_cache.clear();
-        sha_cache.clear();
+            // Liberar cachés por cubo `(size, MetaKey)` para mantener la RAM acotada.
+            partial_cache.clear();
+            sha_cache.clear();
+        }
     }
 
     // 4. Restaurar inmutabilidad únicamente en los contenedores raíz (sin -R ni chmod -R a-w),
@@ -2195,5 +2477,87 @@ Filesystem type is: 9123683e
         );
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn probe_considera_io_psi_y_particionado_acota_ram_sin_perder_hardlinks() {
+        let io_high =
+            SystemResources::from_snapshot(4, None, 4096, 3072, None, 0.2, 0.0, 0.0, 30.0);
+        assert_eq!(
+            pressure_probe_from_resources(&io_high),
+            (MemoryPressure::Normal, true)
+        );
+        let io_crit =
+            SystemResources::from_snapshot(4, None, 4096, 3072, None, 0.2, 0.0, 0.0, 55.0);
+        assert_eq!(
+            pressure_probe_from_resources(&io_crit),
+            (MemoryPressure::Critical, true)
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let root = temp_root("partitioned-parallel");
+            let hist = root.join("BACKUPS_HISTORICOS");
+            let perm = root.join("BACKUPS_PERMANENTES");
+            let runner_dir = root.join("bin");
+            let lock_dir = root.join("lock");
+            let log_dir = root.join("logs");
+            fs::create_dir_all(&runner_dir).unwrap();
+            fs::create_dir_all(&lock_dir).unwrap();
+            fs::create_dir_all(&log_dir).unwrap();
+
+            let s1 = hist.join("t_part/snapshot_2026-11-10_020000");
+            let s2 = hist.join("t_part/snapshot_2026-11-11_020000");
+            fs::create_dir_all(&s1).unwrap();
+            fs::create_dir_all(&s2).unwrap();
+
+            let fixed_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_555);
+            for i in 0..24u32 {
+                let data = vec![b'X' + (i % 12) as u8; 4096 + (i as usize * 17)];
+                for dir in [&s1, &s2] {
+                    let p = dir.join(format!("item_{i:02}.bin"));
+                    fs::write(&p, &data).unwrap();
+                    let f = File::options().write(true).open(&p).unwrap();
+                    f.set_modified(fixed_time).unwrap();
+                }
+            }
+
+            let pair = BackupRootPair {
+                hist_root: hist,
+                perm_root: perm,
+            };
+            let opts = DeduplicateOptions {
+                roots: vec![pair.clone()],
+                runner_dir,
+                lock_dir,
+                log_dir,
+                task_filter: None,
+                dry_run: false,
+                use_flock: true,
+            };
+
+            let mut throttle = DedupThrottle::new(100, Duration::from_secs(60), || {
+                (MemoryPressure::Normal, false)
+            });
+            // Con techo agresivo (max_records_in_ram = 6) y 4 workers en SSD simulado.
+            let summary =
+                deduplicate_task_inner(&Runner::new(), &pair, "t_part", &opts, &mut throttle, 6, 4);
+            assert!(summary.errors.is_empty(), "errores: {:?}", summary.errors);
+            assert_eq!(summary.files_scanned, 48);
+            assert_eq!(summary.hardlinks_created, 24);
+            for i in 0..24u32 {
+                assert_eq!(
+                    fs::metadata(s1.join(format!("item_{i:02}.bin")))
+                        .unwrap()
+                        .ino(),
+                    fs::metadata(s2.join(format!("item_{i:02}.bin")))
+                        .unwrap()
+                        .ino()
+                );
+            }
+
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 }
