@@ -168,7 +168,16 @@ pub async fn files_raw(
         "inline"
     };
 
-    stream_resolved_file(root, path, &headers, content_type, disposition, &name).await
+    stream_resolved_file(
+        &state,
+        root,
+        path,
+        &headers,
+        content_type,
+        disposition,
+        &name,
+    )
+    .await
 }
 
 /// Router del dominio de previsualización de archivos.
