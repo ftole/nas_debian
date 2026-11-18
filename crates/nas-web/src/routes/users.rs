@@ -162,77 +162,77 @@ pub async fn users(
     let db = state.auth.db().clone();
     match state
         .run_system_blocking(move || {
-        let (mut users, groups) = nas_engine::users::load_local();
-        users.retain(|user| !user.system);
+            let (mut users, groups) = nas_engine::users::load_local();
+            users.retain(|user| !user.system);
 
-        let status_map = run_accounts(&["status"], None)
-            .ok()
-            .map(|tsv| parse_accounts_status_tsv(&tsv))
-            .filter(|map| !map.is_empty());
-
-        let fallback_samba = if status_map.is_none() {
-            Runner::new()
-                .run(
-                    &nas_exec::CommandSpec::new("pdbedit")
-                        .args(["-L", "-s"])
-                        .sudo(nas_exec::SudoMode::Passwordless)
-                        .timeout(std::time::Duration::from_secs(15)),
-                )
+            let status_map = run_accounts(&["status"], None)
                 .ok()
-                .map(|output| {
-                    output
-                        .stdout
-                        .lines()
-                        .filter_map(|line| line.split(':').next().map(str::to_string))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+                .map(|tsv| parse_accounts_status_tsv(&tsv))
+                .filter(|map| !map.is_empty());
 
-        let list: Vec<serde_json::Value> = users
-            .into_iter()
-            .map(|user| {
-                let member_of: Vec<String> = groups
-                    .iter()
-                    .filter(|group| group.members.iter().any(|member| member == &user.name))
-                    .map(|group| group.name.clone())
-                    .collect();
-                let role = db.user_role(&user.name).ok().flatten();
-                let is_superadmin = role.as_deref() == Some("superadmin");
-                let is_admin = matches!(role.as_deref(), Some("admin") | Some("superadmin"));
-                let can_web = role.is_some();
-                let runtime = status_map
-                    .as_ref()
-                    .and_then(|map| map.get(&user.name).copied())
-                    .unwrap_or_else(|| {
-                        let in_samba = fallback_samba.iter().any(|name| name == &user.name);
-                        AccountRuntimeStatus {
-                            enabled: true,
-                            is_samba: in_samba,
-                            samba_enabled: in_samba,
-                        }
-                    });
-                serde_json::json!({
-                    "username": user.name,
-                    "full_name": user.full_name,
-                    "uid": user.uid,
-                    "shell": user.shell,
-                    "home": user.home,
-                    "groups": member_of,
-                    "is_admin": is_admin,
-                    "is_superadmin": is_superadmin,
-                    "can_web": can_web,
-                    "samba_enabled": runtime.samba_enabled,
-                    "is_samba": runtime.is_samba,
-                    "enabled": runtime.enabled,
+            let fallback_samba = if status_map.is_none() {
+                Runner::new()
+                    .run(
+                        &nas_exec::CommandSpec::new("pdbedit")
+                            .args(["-L", "-s"])
+                            .sudo(nas_exec::SudoMode::Passwordless)
+                            .timeout(std::time::Duration::from_secs(15)),
+                    )
+                    .ok()
+                    .map(|output| {
+                        output
+                            .stdout
+                            .lines()
+                            .filter_map(|line| line.split(':').next().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            let list: Vec<serde_json::Value> = users
+                .into_iter()
+                .map(|user| {
+                    let member_of: Vec<String> = groups
+                        .iter()
+                        .filter(|group| group.members.iter().any(|member| member == &user.name))
+                        .map(|group| group.name.clone())
+                        .collect();
+                    let role = db.user_role(&user.name).ok().flatten();
+                    let is_superadmin = role.as_deref() == Some("superadmin");
+                    let is_admin = matches!(role.as_deref(), Some("admin") | Some("superadmin"));
+                    let can_web = role.is_some();
+                    let runtime = status_map
+                        .as_ref()
+                        .and_then(|map| map.get(&user.name).copied())
+                        .unwrap_or_else(|| {
+                            let in_samba = fallback_samba.iter().any(|name| name == &user.name);
+                            AccountRuntimeStatus {
+                                enabled: true,
+                                is_samba: in_samba,
+                                samba_enabled: in_samba,
+                            }
+                        });
+                    serde_json::json!({
+                        "username": user.name,
+                        "full_name": user.full_name,
+                        "uid": user.uid,
+                        "shell": user.shell,
+                        "home": user.home,
+                        "groups": member_of,
+                        "is_admin": is_admin,
+                        "is_superadmin": is_superadmin,
+                        "can_web": can_web,
+                        "samba_enabled": runtime.samba_enabled,
+                        "is_samba": runtime.is_samba,
+                        "enabled": runtime.enabled,
+                    })
                 })
-            })
-            .collect();
-        list
-    })
-    .await
+                .collect();
+            list
+        })
+        .await
     {
         Ok(list) => axum::Json(ApiResponse::ok(list, "Usuarios")).into_response(),
         Err(_) => server_error("inventario de usuarios interrumpido"),
