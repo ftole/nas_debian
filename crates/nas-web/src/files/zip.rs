@@ -14,22 +14,30 @@ use super::{FileRoot, TempFile};
 /// (`secure_temp_zip_path`, nunca en RAM) para permitir tamaños grandes.
 pub const ZIP_MAX_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 
-fn clean_stale_staging_files(staging: &Path) {
+/// Limpia archivos temporales huérfanos (`zip_*.tmp` y `.upload-*`) en `staging`
+/// cuya antigüedad supere `max_age_secs` (`0` elimina cualquiera existente).
+pub fn clean_stale_staging_files_in(staging: &Path, max_age_secs: u64) {
     let Ok(entries) = std::fs::read_dir(staging) else {
         return;
     };
     let now = std::time::SystemTime::now();
     for entry in entries.flatten() {
         let path = entry.path();
-        let is_zip_tmp = path
+        let is_temp = path
             .file_name()
             .and_then(|s| s.to_str())
-            .is_some_and(|name| name.starts_with("zip_") && name.ends_with(".tmp"));
-        if is_zip_tmp {
+            .is_some_and(|name| {
+                (name.starts_with("zip_") && name.ends_with(".tmp")) || name.starts_with(".upload-")
+            });
+        if is_temp {
+            if max_age_secs == 0 {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(age) = now.duration_since(modified) {
-                        if age.as_secs() > 3600 {
+                        if age.as_secs() > max_age_secs {
                             let _ = std::fs::remove_file(&path);
                         }
                     }
@@ -39,26 +47,84 @@ fn clean_stale_staging_files(staging: &Path) {
     }
 }
 
-fn secure_temp_zip_path() -> PathBuf {
-    let staging = Path::new("/var/lib/nas/staging");
-    let base_dir = if std::fs::create_dir_all(staging).is_ok() && staging.is_dir() {
-        #[cfg(unix)]
+fn clean_stale_staging_files(staging: &Path) {
+    clean_stale_staging_files_in(staging, 3600);
+}
+
+fn ensure_writable_dir(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() || !dir.is_dir() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == "staging" || n == ".nas_staging")
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(staging, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
-        clean_stale_staging_files(staging);
-        staging.to_path_buf()
+    }
+    let mut rand_bytes = [0u8; 4];
+    let _ = getrandom::getrandom(&mut rand_bytes);
+    let probe = dir.join(format!(
+        ".nas_probe_{}_{}",
+        std::process::id(),
+        hex::encode(rand_bytes)
+    ));
+    if create_secure_temp_file(&probe).is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        true
     } else {
-        let tmp = std::env::temp_dir();
-        clean_stale_staging_files(&tmp);
-        tmp
-    };
+        false
+    }
+}
+
+fn select_staging_dir_from_candidates(
+    candidates: &[PathBuf],
+    required_free: u64,
+    prefer_headroom_check: bool,
+) -> Option<(PathBuf, Option<u64>)> {
+    let mut writable: Vec<(PathBuf, Option<u64>)> = Vec::new();
+    for dir in candidates {
+        if ensure_writable_dir(dir) {
+            let free = free_bytes_at(dir, false);
+            writable.push((dir.clone(), free));
+        }
+    }
+    if writable.is_empty() {
+        return None;
+    }
+
+    if prefer_headroom_check {
+        let min_headroom = required_free.max(1024 * 1024 * 1024).saturating_mul(2);
+        if let Some((first_dir, Some(free))) = writable.first() {
+            if *free >= min_headroom && *free >= 2 * 1024 * 1024 * 1024 {
+                return Some((first_dir.clone(), Some(*free)));
+            }
+        }
+    }
+
+    writable
+        .into_iter()
+        .max_by_key(|(_, free)| free.unwrap_or(0))
+}
+
+fn build_temp_zip_path_in(base_dir: &Path) -> PathBuf {
+    clean_stale_staging_files(base_dir);
     let mut random_bytes = [0u8; 8];
     let _ = getrandom::getrandom(&mut random_bytes);
     let rand_hex = hex::encode(random_bytes);
     let stamp = chrono::Local::now().format("%Y%m%d%H%M%S");
     base_dir.join(format!("zip_{stamp}_{}_{rand_hex}.tmp", std::process::id()))
+}
+
+fn effective_zip_ceiling(free_bytes: Option<u64>) -> u64 {
+    match free_bytes {
+        Some(free) => ZIP_MAX_BYTES.min(free.saturating_mul(80) / 100).max(1),
+        None => ZIP_MAX_BYTES,
+    }
 }
 
 fn create_secure_temp_file(path: &Path) -> NasResult<std::fs::File> {
@@ -86,9 +152,20 @@ fn create_secure_temp_file(path: &Path) -> NasResult<std::fs::File> {
 
 impl FileRoot {
     /// Comprime una carpeta (o archivo) hacia un archivo temporal seguro en disco
-    /// con cuota máxima definida por `ZIP_MAX_BYTES` (50 GiB), retornando la guarda
-    /// para borrado automático y el tamaño.
+    /// seleccionando inteligentemente el volumen de staging con mayor holgura y
+    /// ajustando el techo dinámico al espacio libre disponible.
     pub fn zip_temp(&self, relative: &str) -> NasResult<(TempFile, u64)> {
+        let paths = nas_core::NasPaths::from_env();
+        self.zip_temp_in(relative, Some(&paths.state_dir), Some(&paths.data_root))
+    }
+
+    /// Variante explícita de [`Self::zip_temp`] con rutas de estado y datos configurables.
+    pub fn zip_temp_in(
+        &self,
+        relative: &str,
+        state_dir: Option<&Path>,
+        data_root: Option<&Path>,
+    ) -> NasResult<(TempFile, u64)> {
         use std::io::BufWriter;
         use zip::write::SimpleFileOptions;
 
@@ -97,24 +174,49 @@ impl FileRoot {
             return Err(NasError::NotFound(format!("no existe: {relative}")));
         }
 
-        // El ZIP se escribe a disco temporal (generalmente /var o /tmp), por lo
-        // que hay que validar que exista espacio disponible en ese FS. Regla
-        // operativa: exigir al menos el 110% del tamaño del original y
-        // al menos 1 GiB libres, para que la compresión Deflated no muera a
-        // media escritura con "No space left on device".
         let needed = source_available_estimate(&source);
         let required_free = needed.saturating_mul(11) / 10;
-        let temp_path = secure_temp_zip_path();
-        if let Some(free) = free_bytes_at(&temp_path, false) {
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(custom) = std::env::var("NAS_ZIP_STAGING_DIR") {
+            let trimmed = custom.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+        let state_staging = state_dir
+            .map(|p| p.join("staging"))
+            .unwrap_or_else(|| PathBuf::from("/var/lib/nas/staging"));
+        candidates.push(state_staging);
+
+        if self.is_protected_path("").is_none() {
+            candidates.push(self.root().join(".nas_staging"));
+        }
+        if let Some(dr) = data_root {
+            let data_staging = dr.join(".nas_staging");
+            if !candidates.contains(&data_staging) {
+                candidates.push(data_staging);
+            }
+        }
+        candidates.push(std::env::temp_dir());
+
+        let (staging_dir, free_opt) =
+            select_staging_dir_from_candidates(&candidates, required_free, true).ok_or_else(
+                || NasError::Denied("no se encontró un directorio de staging escribible".into()),
+            )?;
+
+        if let Some(free) = free_opt {
             if free < required_free || free < 1024 * 1024 * 1024 {
-                let _ = std::fs::remove_file(&temp_path);
                 return Err(NasError::Denied(format!(
-                    "espacio insuficiente para comprimir en disco: requeridos al menos {}, disponibles {}. Libera espacio en el volumen temporal o intenta una descarga más pequeña.",
-                    human_bytes_lossy(required_free),
+                    "espacio insuficiente para comprimir en disco: requeridos al menos {}, disponibles {}. Libera espacio en el volumen o intenta una descarga más pequeña.",
+                    human_bytes_lossy(required_free.max(1024 * 1024 * 1024)),
                     human_bytes_lossy(free)
                 )));
             }
         }
+
+        let max_zip_bytes = effective_zip_ceiling(free_opt);
+        let temp_path = build_temp_zip_path_in(&staging_dir);
         let file = create_secure_temp_file(&temp_path)?;
         let temp_guard = TempFile::new(temp_path);
 
@@ -124,22 +226,36 @@ impl FileRoot {
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let mut total: u64 = 0;
 
+        let mut total_written: u64 = 0;
+        let mut last_space_check_bytes: u64 = 0;
+
         if source.is_file() {
             let name = source
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "archivo".to_string());
-            add_to_zip(&mut writer, &options, &source, &name, &mut total)?;
+            let mut progress = ZipWriteProgress {
+                total: &mut total_written,
+                max_bytes: max_zip_bytes,
+                staging_path: temp_guard.path(),
+                last_space_check: &mut last_space_check_bytes,
+            };
+            add_to_zip(&mut writer, &options, &source, &name, &mut progress)?;
         } else {
-            let entries = collect_files(&source, &mut total)?;
-            let mut total_written: u64 = 0;
+            let entries = collect_files(&source, &mut total, max_zip_bytes)?;
+            let mut progress = ZipWriteProgress {
+                total: &mut total_written,
+                max_bytes: max_zip_bytes,
+                staging_path: temp_guard.path(),
+                last_space_check: &mut last_space_check_bytes,
+            };
             for (absolute, relative_name) in entries {
                 add_to_zip(
                     &mut writer,
                     &options,
                     &absolute,
                     &relative_name,
-                    &mut total_written,
+                    &mut progress,
                 )?;
             }
         }
@@ -178,10 +294,8 @@ fn source_available_estimate(source: &std::path::Path) -> u64 {
     crate::files::dir_size_recursive_bounded(source, 200_000)
 }
 
-/// Espacio libre en bytes del filesystem que aloja `path`.
-/// Si la consulta falla, devuelve `None` (se omite el guard).
-fn free_bytes_at(path: &std::path::Path, _strict: bool) -> Option<u64> {
-    // Resuelve a un ancestro existente (secure_temp_zip_path puede no existir aún).
+/// Devuelve `(bytes_libres, bytes_totales)` del sistema de archivos que aloja `path`.
+pub fn free_and_total_bytes_at(path: &std::path::Path) -> Option<(u64, u64)> {
     let mut current: Option<std::path::PathBuf> = Some(path.to_path_buf());
     while let Some(p) = current {
         if p.exists() {
@@ -190,26 +304,43 @@ fn free_bytes_at(path: &std::path::Path, _strict: bool) -> Option<u64> {
                 let output = Runner::new()
                     .run(
                         &nas_exec::CommandSpec::new("df")
-                            .args(["-B1", "--output=avail", canon_str.as_str()])
+                            .args(["-Pk", canon_str.as_str()])
                             .timeout(std::time::Duration::from_secs(3)),
                     )
                     .ok()?;
-                let value = output
-                    .stdout
-                    .lines()
-                    .last()
-                    .and_then(|line| line.trim().parse::<u64>().ok())?;
-                return Some(value);
+                if output.is_success() {
+                    if let Some(line) = output.stdout.lines().nth(1) {
+                        let fields: Vec<&str> = line.split_whitespace().collect();
+                        if fields.len() >= 4 {
+                            if let (Ok(total_kb), Ok(avail_kb)) =
+                                (fields[1].parse::<u64>(), fields[3].parse::<u64>())
+                            {
+                                return Some((
+                                    avail_kb.saturating_mul(1024),
+                                    total_kb.saturating_mul(1024),
+                                ));
+                            }
+                        }
+                    }
+                }
             }
-            current = p.parent().map(|parent| parent.to_path_buf());
-        } else {
-            current = p.parent().map(|parent| parent.to_path_buf());
         }
+        current = p.parent().map(|parent| parent.to_path_buf());
     }
     None
 }
 
-fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String)>> {
+/// Espacio libre en bytes del filesystem que aloja `path`.
+/// Si la consulta falla, devuelve `None` (se omite el guard).
+fn free_bytes_at(path: &std::path::Path, _strict: bool) -> Option<u64> {
+    free_and_total_bytes_at(path).map(|(avail, _)| avail)
+}
+
+fn collect_files(
+    root: &Path,
+    total: &mut u64,
+    max_zip_bytes: u64,
+) -> NasResult<Vec<(PathBuf, String)>> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
 
@@ -217,6 +348,15 @@ fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String
         let entries = std::fs::read_dir(&dir).map_err(|e| NasError::io(&dir, e))?;
         for entry in entries.flatten() {
             let path = entry.path();
+            let entry_name = entry.file_name();
+            let entry_name_str = entry_name.to_string_lossy();
+            if entry_name_str == ".trash"
+                || entry_name_str == ".nas_staging"
+                || entry_name_str.starts_with(".upload-")
+                || (entry_name_str.starts_with("zip_") && entry_name_str.ends_with(".tmp"))
+            {
+                continue;
+            }
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
@@ -228,10 +368,10 @@ fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String
                 continue;
             }
             *total = total.saturating_add(metadata.len());
-            if *total > ZIP_MAX_BYTES {
+            if *total > max_zip_bytes {
                 return Err(NasError::Denied(format!(
                     "la carpeta supera el límite de descarga ZIP ({}); contenido actual: {}. Si necesita una descarga mayor, haga un respaldo permanente o descargue los snapshots por partes.",
-                    human_bytes_lossy(ZIP_MAX_BYTES),
+                    human_bytes_lossy(max_zip_bytes),
                     human_bytes_lossy(*total)
                 )));
             }
@@ -247,20 +387,27 @@ fn collect_files(root: &Path, total: &mut u64) -> NasResult<Vec<(PathBuf, String
     Ok(files)
 }
 
+struct ZipWriteProgress<'a> {
+    total: &'a mut u64,
+    max_bytes: u64,
+    staging_path: &'a Path,
+    last_space_check: &'a mut u64,
+}
+
 fn add_to_zip<W: std::io::Write + std::io::Seek>(
     writer: &mut zip::ZipWriter<W>,
     options: &zip::write::SimpleFileOptions,
     path: &Path,
     name: &str,
-    total: &mut u64,
+    progress: &mut ZipWriteProgress<'_>,
 ) -> NasResult<()> {
-    use std::io::Read;
+    use std::io::{Read, Write};
 
     let metadata = std::fs::metadata(path).map_err(|e| NasError::io(path, e))?;
-    if total.saturating_add(metadata.len()) > ZIP_MAX_BYTES {
+    if progress.total.saturating_add(metadata.len()) > progress.max_bytes {
         return Err(NasError::Denied(format!(
             "el contenido supera el límite de descarga ZIP ({}); al menos {} en la carpeta actual.",
-            human_bytes_lossy(ZIP_MAX_BYTES),
+            human_bytes_lossy(progress.max_bytes),
             human_bytes_lossy(metadata.len())
         )));
     }
@@ -270,14 +417,33 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
         .map_err(|error| NasError::Invalid(format!("zip: {error}")))?;
 
     let mut file = std::fs::File::open(path).map_err(|e| NasError::io(path, e))?;
-    let mut limited = (&mut file).take(ZIP_MAX_BYTES.saturating_sub(*total) + 1);
-    let copied = std::io::copy(&mut limited, writer).map_err(|e| NasError::io(path, e))?;
-    *total = total.saturating_add(copied);
-    if *total > ZIP_MAX_BYTES {
-        return Err(NasError::Denied(format!(
-            "el contenido supera el límite de descarga ZIP ({})",
-            human_bytes_lossy(ZIP_MAX_BYTES)
-        )));
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        if progress.total.saturating_sub(*progress.last_space_check) >= 128 * 1024 * 1024 {
+            *progress.last_space_check = *progress.total;
+            if let Some(free_now) = free_bytes_at(progress.staging_path, false) {
+                if free_now < 512 * 1024 * 1024 {
+                    return Err(NasError::Denied(format!(
+                        "espacio libre agotándose durante la compresión ({} disponibles); operación abortada para proteger el volumen",
+                        human_bytes_lossy(free_now)
+                    )));
+                }
+            }
+        }
+        let read_n = file.read(&mut buf).map_err(|e| NasError::io(path, e))?;
+        if read_n == 0 {
+            break;
+        }
+        *progress.total = progress.total.saturating_add(read_n as u64);
+        if *progress.total > progress.max_bytes {
+            return Err(NasError::Denied(format!(
+                "el contenido supera el límite de descarga ZIP ({})",
+                human_bytes_lossy(progress.max_bytes)
+            )));
+        }
+        writer
+            .write_all(&buf[..read_n])
+            .map_err(|e| NasError::io(path, e))?;
     }
 
     Ok(())
@@ -424,5 +590,58 @@ mod ziptests {
     fn limite_zip_corresponde_a_cincuenta_gib() {
         assert_eq!(super::ZIP_MAX_BYTES, 50 * 1024 * 1024 * 1024);
         assert_eq!(super::human_bytes_lossy(super::ZIP_MAX_BYTES), "50.0 GB");
+    }
+
+    #[test]
+    fn techo_zip_se_ajusta_al_espacio_libre_del_volumen() {
+        assert_eq!(super::effective_zip_ceiling(None), super::ZIP_MAX_BYTES);
+        assert_eq!(
+            super::effective_zip_ceiling(Some(10 * 1024 * 1024 * 1024)),
+            8 * 1024 * 1024 * 1024
+        );
+        assert_eq!(
+            super::effective_zip_ceiling(Some(200 * 1024 * 1024 * 1024)),
+            super::ZIP_MAX_BYTES
+        );
+    }
+
+    #[test]
+    fn limpia_temporales_huerfanos_de_upload_y_zip() {
+        let root = root("clean-orphans");
+        let dir = root.root();
+        std::fs::write(dir.join(".upload-abc"), b"1").unwrap();
+        std::fs::write(dir.join("zip_123.tmp"), b"2").unwrap();
+        std::fs::write(dir.join("archivo.txt"), b"3").unwrap();
+
+        super::clean_stale_staging_files_in(dir, 0);
+        assert!(!dir.join(".upload-abc").exists());
+        assert!(!dir.join("zip_123.tmp").exists());
+        assert!(dir.join("archivo.txt").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn zip_excluye_staging_y_temporales_del_archivo_generado() {
+        let root = root("exclude-staging");
+        let base = root.root();
+        let target = base.join("carpeta");
+        std::fs::create_dir_all(target.join(".nas_staging")).unwrap();
+        std::fs::write(target.join(".nas_staging/zip_activo.tmp"), b"secreto").unwrap();
+        std::fs::write(target.join(".upload-xyz"), b"parcial").unwrap();
+        std::fs::write(target.join("zip_viejo.tmp"), b"viejo").unwrap();
+        std::fs::write(target.join("valido.txt"), b"ok").unwrap();
+
+        let staging_state = base.join("_state");
+        let (temp_zip, _) = root
+            .zip_temp_in("carpeta", Some(&staging_state), Some(base))
+            .unwrap();
+        let file = std::fs::File::open(temp_zip.path()).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert_eq!(names, vec!["valido.txt".to_string()]);
+        drop(temp_zip);
+        let _ = std::fs::remove_dir_all(base);
     }
 }
