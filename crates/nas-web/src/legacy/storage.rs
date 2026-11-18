@@ -144,27 +144,38 @@ pub fn invalidate_task_storage_cache(task_id: &str) {
     }
 }
 
+const MAX_CONCURRENT_BACKGROUND_REFRESHES: usize = 2;
+
 fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
     let id = task.id.clone();
     {
         let Ok(mut set) = in_flight_refreshes().lock() else {
             return;
         };
-        if !set.insert(id.clone()) {
+        if set.len() >= MAX_CONCURRENT_BACKGROUND_REFRESHES || !set.insert(id.clone()) {
             return;
         }
     }
 
-    std::thread::Builder::new()
-        .name(format!("storage-refresh-{id}"))
-        .spawn(move || {
-            let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
-            store_task_storage(&task.id, fresh);
-            if let Ok(mut set) = in_flight_refreshes().lock() {
-                set.remove(&id);
-            }
-        })
-        .ok();
+    let work = move || {
+        let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
+        store_task_storage(&task.id, fresh);
+        if let Ok(mut set) = in_flight_refreshes().lock() {
+            set.remove(&id);
+        }
+    };
+
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        drop(handle.spawn_blocking(work));
+    } else if std::thread::Builder::new()
+        .name(format!("storage-refresh-{}", task.id))
+        .spawn(work)
+        .is_err()
+    {
+        if let Ok(mut set) = in_flight_refreshes().lock() {
+            set.remove(&task.id);
+        }
+    }
 }
 
 /// Recorre múltiples directorios deduplicando por `(dev, ino)` con un límite de entradas.
