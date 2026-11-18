@@ -74,12 +74,21 @@ impl ReleaseManifest {
         )
     }
 
-    /// Verifica que el artefacto coincida con el SHA-256 declarado.
+    /// Verifica que el artefacto coincida con el SHA-256 declarado mediante lectura en streaming O(1).
     pub fn verify_artifact(&self, artifact: impl AsRef<Path>) -> NasResult<()> {
+        use std::io::Read;
+
         let path = artifact.as_ref();
-        let bytes = std::fs::read(path).map_err(|e| NasError::io(path, e))?;
+        let mut file = std::fs::File::open(path).map_err(|e| NasError::io(path, e))?;
         let mut hasher = Sha256::new();
-        hasher.update(&bytes);
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut buffer).map_err(|e| NasError::io(path, e))?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
         let digest = hex::encode(hasher.finalize());
 
         if digest.eq_ignore_ascii_case(&self.sha256) {
@@ -386,6 +395,27 @@ mod tests {
 
         release.sha256 = "ff".repeat(32);
         assert!(release.verify_artifact(&artifact).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verifica_sha256_por_streaming_en_artefacto_multibloque() {
+        use sha2::{Digest, Sha256};
+
+        let dir = std::env::temp_dir().join(format!("nas-update-stream-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let artifact = dir.join("nas-stream.tar.gz");
+        let payload = vec![0x5Au8; 256 * 1024];
+        std::fs::write(&artifact, &payload).expect("write");
+
+        let mut hasher = Sha256::new();
+        hasher.update(&payload);
+        let digest = hex::encode(hasher.finalize());
+
+        let mut release = manifest();
+        release.sha256 = digest;
+        assert!(release.verify_artifact(&artifact).is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
