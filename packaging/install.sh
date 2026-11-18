@@ -211,6 +211,10 @@ if [ -f "$SCRIPT_DIR/nas.rules" ]; then
     fi
 fi
 
+if [ -f "$SCRIPT_DIR/75_aide_nas" ] && [ -d /etc/aide/aide.conf.d ]; then
+    install -m 0644 "$SCRIPT_DIR/75_aide_nas" /etc/aide/aide.conf.d/75_aide_nas
+fi
+
 echo "    Instalando tarea diaria de auto-purga de papelera Samba..."
 install -d -m 0755 /etc/cron.daily
 cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'
