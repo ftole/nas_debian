@@ -49,7 +49,7 @@ pub async fn files_mkdir(
         }
     };
 
-    match tokio::task::spawn_blocking(move || root.mkdir(&target)).await {
+    match state.run_system_blocking(move || root.mkdir(&target)).await {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Directorio creado",
         ))
@@ -96,7 +96,10 @@ pub async fn files_rename(
         (src_clean.to_string(), dest)
     };
 
-    match tokio::task::spawn_blocking(move || root.rename(&from, &to)).await {
+    match state
+        .run_system_blocking(move || root.rename(&from, &to))
+        .await
+    {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Elemento renombrado",
         ))
@@ -298,7 +301,10 @@ pub async fn files_upload(
             }
             let _ = tokio::fs::remove_file(&temporary).await;
         }
-        crate::files::set_file_permissions(&destination);
+        let dest_for_perms = destination.clone();
+        let _ = state
+            .run_system_blocking(move || crate::files::set_file_permissions(&dest_for_perms))
+            .await;
 
         saved.push(if target_dir_str.is_empty() {
             filename
@@ -327,7 +333,7 @@ pub async fn files_create(
 
     if body.name.trim().is_empty() {
         let path = body.path.trim().to_string();
-        return match tokio::task::spawn_blocking(move || root.mkdir(&path)).await {
+        return match state.run_system_blocking(move || root.mkdir(&path)).await {
             Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
                 "Directorio creado",
             ))
@@ -351,14 +357,15 @@ pub async fn files_create(
     let is_folder = body.r#type == "folder" || body.r#type == "dir";
     let content = body.content;
 
-    let outcome = tokio::task::spawn_blocking(move || {
-        if is_folder {
-            root.mkdir(&rel).map(|_| 0u64)
-        } else {
-            root.write(&rel, &content)
-        }
-    })
-    .await;
+    let outcome = state
+        .run_system_blocking(move || {
+            if is_folder {
+                root.mkdir(&rel).map(|_| 0u64)
+            } else {
+                root.write(&rel, &content)
+            }
+        })
+        .await;
 
     match outcome {
         Ok(Ok(bytes)) => axum::Json(ApiResponse::ok(
@@ -414,7 +421,10 @@ pub async fn files_move(
         (source, dest)
     };
 
-    match tokio::task::spawn_blocking(move || root.rename(&from, &to)).await {
+    match state
+        .run_system_blocking(move || root.rename(&from, &to))
+        .await
+    {
         Ok(Ok(_)) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
             "Elemento movido exitosamente",
         ))
