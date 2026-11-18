@@ -125,9 +125,12 @@ pub async fn file_root_for_async(
     state: &AppState,
     root: Option<&str>,
 ) -> Result<FileRoot, Box<Response>> {
-    let state = state.clone();
+    let state_clone = state.clone();
     let root = root.map(str::to_string);
-    match tokio::task::spawn_blocking(move || file_root_for(&state, root.as_deref())).await {
+    match state
+        .run_system_blocking(move || file_root_for(&state_clone, root.as_deref()))
+        .await
+    {
         Ok(res) => res,
         Err(_) => Err(Box::new(server_error("resolución de raíz interrumpida"))),
     }
@@ -243,11 +246,12 @@ pub async fn files_list(
     };
     let path = query.path;
 
-    match tokio::task::spawn_blocking(move || {
-        let entries = root.list(&path)?;
-        Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
-    })
-    .await
+    match state
+        .run_system_blocking(move || {
+            let entries = root.list(&path)?;
+            Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
+        })
+        .await
     {
         Ok(Ok(payload)) => {
             axum::Json(ApiResponse::ok(payload, "Contenido del directorio")).into_response()
@@ -331,12 +335,12 @@ pub async fn files_zip(
         .map(str::to_string)
         .unwrap_or_else(|| "nas".to_string());
 
-    let (temp_file, file_size) =
-        match tokio::task::spawn_blocking(move || root.zip_temp(&path)).await {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(error)) => return error_response(error),
-            Err(_) => return server_error("compresión interrumpida"),
-        };
+    let (temp_file, file_size) = match state.run_heavy_blocking(move || root.zip_temp(&path)).await
+    {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(error)) => return error_response(error),
+        Err(_) => return server_error("compresión interrumpida"),
+    };
 
     let tokio_file = match tokio::fs::File::open(temp_file.path()).await {
         Ok(f) => f,
@@ -378,11 +382,12 @@ pub async fn files_list_rooted(
     };
     let path = query.path;
 
-    match tokio::task::spawn_blocking(move || {
-        let entries = root.list(&path)?;
-        Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
-    })
-    .await
+    match state
+        .run_system_blocking(move || {
+            let entries = root.list(&path)?;
+            Ok::<_, nas_core::NasError>(crate::legacy::file_listing(&root, &path, &entries))
+        })
+        .await
     {
         Ok(Ok(payload)) => {
             axum::Json(ApiResponse::ok(payload, "Contenido del directorio")).into_response()
