@@ -33,7 +33,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn async_main(budget: ResourceBudget) -> Result<(), Box<dyn std::error::Error>> {
-
     let bind = std::env::var("NAS_WEB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let user = std::env::var("NAS_WEB_USER").unwrap_or_else(|_| "admin".to_string());
 
