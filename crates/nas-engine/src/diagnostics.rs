@@ -85,6 +85,24 @@ pub fn collect(paths: &NasPaths, runner: &Runner) -> Vec<Check> {
         ip.unwrap_or_else(|| "sin IPv4 global".to_string()),
     ));
 
+    let budget = nas_core::ResourceBudget::detect();
+    let res = &budget.resources;
+    checks.push(Check::new(
+        "recursos",
+        res.total_mem_mb == 0 || res.available_mem_mb >= 64,
+        format!(
+            "{} CPUs efec. ({} host), {} / {} MiB disp., presión={}, workers={}, sys_ops={}, heavy_ops={}",
+            res.effective_cpus,
+            res.host_cpus,
+            res.available_mem_mb,
+            res.total_mem_mb,
+            res.memory_pressure.as_str(),
+            budget.tokio_worker_threads,
+            budget.max_concurrent_system_ops,
+            budget.max_concurrent_heavy_ops,
+        ),
+    ));
+
     checks
 }
 
