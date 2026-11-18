@@ -132,6 +132,7 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
                 "/etc/logrotate.d/nas-backups",
                 "/etc/audit/rules.d/nas.rules",
                 "/etc/cron.d/nas-btrfs-scrub",
+                "/etc/aide/aide.conf.d/75_aide_nas",
             ],
             true,
         ));
@@ -230,6 +231,7 @@ mod os_tests {
         assert!(paths.contains(&"/etc/udev/rules.d/60-nas-readahead.rules".to_string()));
         assert!(!paths.contains(&"/etc/udev/rules.d/80-udisks2-hide-os.rules".to_string()));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules".to_string()));
+        assert!(paths.contains(&"/etc/aide/aide.conf.d/75_aide_nas".to_string()));
         assert!(paths.contains(&"sysctl".to_string()));
         assert!(paths.contains(&"augenrules".to_string()));
         assert!(paths.contains(&"auditd".to_string()));
