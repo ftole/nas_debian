@@ -138,22 +138,38 @@ async function startTerminalSession() {
   }
 }
 
+let _terminalPollInFlight = false;
+let _terminalPollDelayMs = 900;
+
 function startTerminalPolling() {
   if (AppState.terminal.ptyTimer) return;
-  AppState.terminal.ptyTimer = setInterval(refreshTerminalPane, 900);
+  _terminalPollDelayMs = 900;
+  const tick = async () => {
+    if (!AppState.terminal.ptyTimer) return;
+    if (!document.hidden && AppState.activeView === 'terminal' && !_terminalPollInFlight) {
+      const ok = await refreshTerminalPane();
+      _terminalPollDelayMs = ok ? 900 : Math.min(5000, _terminalPollDelayMs * 2);
+    }
+    if (AppState.terminal.ptyTimer) {
+      const delay = document.hidden ? 3000 : _terminalPollDelayMs;
+      AppState.terminal.ptyTimer = setTimeout(tick, delay);
+    }
+  };
+  AppState.terminal.ptyTimer = setTimeout(tick, _terminalPollDelayMs);
   refreshTerminalPane();
 }
 
 function stopTerminalPolling() {
   if (AppState.terminal.ptyTimer) {
-    clearInterval(AppState.terminal.ptyTimer);
+    clearTimeout(AppState.terminal.ptyTimer);
     AppState.terminal.ptyTimer = null;
   }
 }
 
 async function refreshTerminalPane() {
   const output = document.getElementById('terminal-output');
-  if (!output) return;
+  if (!output || _terminalPollInFlight) return true;
+  _terminalPollInFlight = true;
   try {
     const res = await apiFetch('/api/terminal/capture', { silentToast: true });
     const payload = res.data ?? res;
@@ -178,8 +194,12 @@ async function refreshTerminalPane() {
     if (isNearBottom) {
       output.scrollTop = output.scrollHeight;
     }
+    return true;
   } catch (e) {
     // Silencioso: la sesión puede estar reiniciándose
+    return false;
+  } finally {
+    _terminalPollInFlight = false;
   }
 }
 
