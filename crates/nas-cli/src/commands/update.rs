@@ -659,21 +659,7 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         || Path::new("/srv/nas/unidades").is_dir();
     if !dedup_marker.is_file() && has_backup_dirs {
         if Path::new("/run/systemd/system").exists() && Path::new("/run/systemd/private").exists() {
-            let step = vec![
-                "systemd-run".to_string(),
-                "--quiet".to_string(),
-                "--no-block".to_string(),
-                "--collect".to_string(),
-                "--unit=nas-backup-dedup-migration".to_string(),
-                "-p".to_string(),
-                "Nice=19".to_string(),
-                "-p".to_string(),
-                "IOSchedulingClass=idle".to_string(),
-                "/usr/local/bin/nas".to_string(),
-                "backup".to_string(),
-                "deduplicate".to_string(),
-                "--migration".to_string(),
-            ];
+            let step = nas_engine::backup_dedup::migration_systemd_run_args("/usr/local/bin/nas");
             let _ = run_step(&runner, &step, sudo, 30);
         } else if Path::new("/usr/local/bin/nas").is_file() {
             let step = vec![
