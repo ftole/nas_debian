@@ -130,6 +130,29 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 | **Semanal (Manual)** | Respaldo de estado del panel | Copia segura de `/var/lib/nas/nas.sqlite`, `/etc/nas/`, `/etc/samba/smb.conf` y `/etc/cron.d/backup_*` | Permite restaurar configuración, usuarios web y tareas cron ante fallo de disco raíz. |
 | **Mensual (Manual)** | Verificación de auditoría y actualización | `nas audit verify` y `sudo nas update apply` | Comprueba integridad SHA-256 de la bitácora y aplica parches firmados `Ed25519`. |
 
+### 4.1 Parámetros de Montaje y Verificación Rápida en Consola
+
+* **Opciones de montaje aplicadas por rol y hardware:**
+  * **`ext4` (`ARCHIVOS`):** `rw,noatime,commit=5,errors=remount-ro` + `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` en HDD y `1024 KB` en SSD (`fstrim.timer`).
+  * **`Btrfs` (`BACKUP` / `ARCHIVOS_BACKUP`):** `rw,noatime,compress=zstd:3,space_cache=v2` (`ssd` en flash, sin `autodefrag` ni `discard=async` continuo); *scrub* mensual y deduplicación `rsync --link-dest` (`--no-o --no-g` en CIFS, `stdbuf -oL` y progreso `to-chk`/`ir-chk`).
+  * **Resiliencia en `/etc/fstab` y disco del SO:** entradas secundarias con `nofail,x-systemd.device-timeout=15s`; cuota `journald` en `/etc/systemd/journald.conf.d/99-nas-limits.conf` (`SystemMaxUse=256M`); cálculo de ocupación de backups con `du -sc -B1`.
+
+```bash
+# 1. Salud general del servidor, servicios y diagnósticos
+sudo nas status
+sudo nas diag
+systemctl is-active nas-web smbd nmbd wsdd2 nginx
+
+# 2. Almacenamiento: discos, disco protegido del SO, montaje y S.M.A.R.T.
+lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+findmnt /srv/nas
+sudo smartctl -H /dev/sdb
+
+# 3. Auditoría criptográfica y cuotas dinámicas cgroups de nas-web
+sudo nas audit verify
+systemctl cat nas-web | grep -E "MemoryHigh|MemoryMax|CPUQuota|TasksMax"
+```
+
 ---
 
 ## 5. Checklist de Endurecimiento Manual en Debian 13
