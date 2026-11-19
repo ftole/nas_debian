@@ -171,16 +171,7 @@ impl DeployParams {
 
     /// Opciones de montaje derivadas del rol y del tipo de disco.
     pub fn mount_options(&self) -> String {
-        match (self.filesystem, self.rotational) {
-            (FileSystem::Ext4, true) => "rw,noatime,commit=2".to_string(),
-            (FileSystem::Ext4, false) => "rw,noatime,commit=5".to_string(),
-            (FileSystem::Btrfs, true) => {
-                "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string()
-            }
-            (FileSystem::Btrfs, false) => {
-                "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string()
-            }
-        }
+        storage::mount_options_str(self.filesystem.as_str(), self.rotational)
     }
 
     /// Ruta de la partición principal del disco indicado.
@@ -355,6 +346,14 @@ fn tips(steps: &mut Vec<Vec<String>>, admin_user: &str) {
     steps.push(vec!["augenrules".into(), "--load".into()]);
     steps.push(vec!["systemctl".into(), "enable".into(), "auditd".into()]);
     steps.push(vec!["systemctl".into(), "restart".into(), "auditd".into()]);
+    steps.push(vec![
+        "systemctl".into(),
+        "mask".into(),
+        "sleep.target".into(),
+        "suspend.target".into(),
+        "hibernate.target".into(),
+        "hybrid-sleep.target".into(),
+    ]);
 }
 
 #[cfg(test)]
@@ -380,20 +379,21 @@ mod tests {
     fn opciones_de_montaje_por_hardware() {
         let mut hdd = params(ServerRole::Arquivos);
         hdd.rotational = true;
-        assert_eq!(hdd.mount_options(), "rw,noatime,commit=2");
+        assert_eq!(hdd.mount_options(), "rw,noatime,commit=5,errors=remount-ro");
 
         let mut ssd = params(ServerRole::Arquivos);
         ssd.rotational = false;
-        assert_eq!(ssd.mount_options(), "rw,noatime,commit=5");
+        assert_eq!(ssd.mount_options(), "rw,noatime,commit=5,errors=remount-ro");
 
         let mut bkp = params(ServerRole::Backup);
         bkp.rotational = true;
         assert!(bkp.mount_options().contains("compress=zstd:3"));
-        assert!(bkp.mount_options().contains("autodefrag"));
+        assert!(!bkp.mount_options().contains("autodefrag"));
 
         let mut bkp_ssd = params(ServerRole::Backup);
         bkp_ssd.rotational = false;
-        assert!(bkp_ssd.mount_options().contains("discard=async"));
+        assert!(bkp_ssd.mount_options().contains("ssd"));
+        assert!(!bkp_ssd.mount_options().contains("discard=async"));
     }
 
     #[test]
