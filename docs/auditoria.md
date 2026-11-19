@@ -1,7 +1,7 @@
 # Auditoría Técnica: Código Real vs. Documentación (`main` `0f7a272`)
 
 > [!IMPORTANT]
-> **Alcance estrictamente diagnóstico:** Esta auditoría refleja la inspección directa del código fuente en `main` (`0f7a272`) frente a la documentación histórica del proyecto. **No se modificó código Rust, Bash ni JavaScript** para corregir ni maquillar los hallazgos aquí registrados.
+> **Documento histórico (línea base `main` `0f7a272`):** Esta auditoría corresponde a la revisión inicial tras la migración a Rust. Sus hallazgos centrales (`A-01`, `A-02`, `A-03`, `A-04`, `A-06` y `A-09`) quedaron resueltos en `v0.1.11`–`v0.1.12`. Para el estado vivo actual código por código, consulta **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
 
 ---
 
