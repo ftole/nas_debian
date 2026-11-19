@@ -97,7 +97,23 @@ pub fn backup_row_with_context(
             } else {
                 prog.speed
             };
-            let elap = if prog.elapsed.is_empty() {
+            let elap = if prog.started_at > 0 {
+                let now_unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if now_unix >= prog.started_at {
+                    let secs = now_unix - prog.started_at;
+                    format!(
+                        "{:02}:{:02}:{:02}",
+                        secs / 3600,
+                        (secs % 3600) / 60,
+                        secs % 60
+                    )
+                } else {
+                    prog.elapsed
+                }
+            } else if prog.elapsed.is_empty() {
                 "00:00:00".to_string()
             } else {
                 prog.elapsed
@@ -206,6 +222,8 @@ struct BackupProgress {
     elapsed: String,
     #[serde(default)]
     remaining: String,
+    #[serde(default)]
+    started_at: u64,
 }
 
 fn read_backup_progress(id: &str) -> Option<BackupProgress> {
