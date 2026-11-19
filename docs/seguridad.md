@@ -1,7 +1,7 @@
 # Seguridad y Endurecimiento del Sistema
 
 > [!IMPORTANT]
-> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) brechas abiertas verificadas** sobre `main` (`0f7a272`).
+> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) riesgos/brechas abiertas** sobre la plataforma actual (`v0.1.12`; detalle completo en [docs/deuda_tecnica.md](./deuda_tecnica.md)).
 
 ![Modelo de Seguridad en Profundidad](./assets/modelo_seguridad.svg)
 
@@ -49,7 +49,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 
 ### 1.4 Kernel, Samba, Auditoría y Actualizaciones Firmadas
 
-- **Kernel (`packaging/99-nas-tuning.conf`):** activa `net.ipv4.conf.*.rp_filter=1` (anti-*spoofing*), `net.ipv4.tcp_syncookies=1`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2` y desactiva IPv6 (`disable_ipv6=1`).
+- **Kernel (`packaging/99-nas-tuning.conf` y `packaging/99-nas-journald.conf`):** activa `net.ipv4.conf.*.rp_filter=2` (modo laxo RFC 3704, compatible con múltiples interfaces/VLANs), `net.ipv4.tcp_syncookies=1`, `vm.vfs_cache_pressure=100`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2`, desactiva IPv6 (`disable_ipv6=1`), enmascara objetivos de suspensión/hibernación (`sleep.target`) y limita `systemd-journald` a `SystemMaxUse=256M`.
 - **Samba 4:** `server min protocol = SMB2_10`, `server max protocol = SMB3_11`, `server signing = mandatory`, `smb encrypt = desired`, `map to guest = Bad User`, directorios de respaldo `2770` (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`, con soporte para recursos ocultos `$`) y permisos POSIX `2770` + `default ACL`.
 - **Auditoría triple:**
   1. `web_audit` en SQLite con usuario e IP de origen (`origin_ip`).
@@ -71,23 +71,22 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 | **Prevención de intrusiones** | `fail2ban` (`/etc/fail2ban/jail.local`) | Bloqueo automático de IPs por intentos repetidos en `sshd` y endpoints Nginx. | **No instalado ni configurado automáticamente.** |
 | **Parches automáticos OS** | `unattended-upgrades` | Instalación automática de parches de seguridad de Debian 13 (`Debian-Security`). | **No configurado automáticamente.** |
 | **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`, exclusiones `packaging/75_aide_nas`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda excluyendo `/srv/nas`, `/var/lib/nas` y desarrollo. | **No inicializado** (exclusiones instaladas si existe `/etc/aide/aide.conf.d`; ejecutar `aideinit` tras cerrar la configuración). |
-| **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **No enmascarado automáticamente.** |
+| **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **Automatizado** en `packaging/install.sh` y `nas deploy apply`. |
+| **Protección eléctrica (UPS)** | No-Break / `nut` o `apcupsd` + SSD con PLP en `/` | Evita corrupción FTL y bloqueo en solo lectura desde el controlador tras cortes de energía en hardware consumidor. | **Requisito operativo obligatorio** en producción. |
 | **Certificado TLS definitivo** | `/etc/ssl/certs/nas-web.crt` y `.key` | Reemplazar el certificado autofirmado inicial generado por `packaging/install.sh` por uno emitido por la CA corporativa o ACME. | **Autofirmado** (generado por 3650 días en `packaging/install.sh`). |
 
 Los comandos concretos paso a paso para aplicar cada uno de estos puntos figuran en la sección de Endurecimiento Manual de [docs/manual.md](./manual.md).
 
 ---
 
-## 3. Estado de Brechas y Riesgos Operativos (`v0.1.11`)
+## 3. Estado de Brechas y Riesgos Operativos (`v0.1.12`)
 
-La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró cuatro brechas técnicas que quedaron **resueltas en `v0.1.11`**:
-- `system_update_run` ahora delega en `sudo /usr/bin/systemd-run --no-block --collect --unit=nas-system-update` (regla `sudoers` acotada) con seguimiento asíncrono desde el panel.
-- `crates/nas-engine/src/deploy/` unificó las plantillas con `packaging/` (`include_str!` para `nas-web.service`, `nginx-nas-web.conf`, `99-nas-tuning.conf`, `60-nas-readahead.rules`, `75_aide_nas` y paridad de `sudoers`/helpers).
-- `packaging/install.sh` actualiza correctamente `web_users` en `/var/lib/nas/nas.sqlite` (`INSERT ... ON CONFLICT`) y `LOGROTATE_BACKUPS` incluye `su root grp_samba`.
+La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró hallazgos críticos resueltos en `v0.1.11`–`v0.1.12` (`system_update_run` vía `systemd-run`, unificación de plantillas `packaging/` ↔ `deploy/` vía `include_str!`, `su root grp_samba` en `logrotate`, actualización de `web_users` en `packaging/install.sh` y sincronización post-update).
 
-**Riesgos / acciones operativas vigentes:**
+**Riesgos operativos vigentes y registro de deuda técnica:**
 1. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado emitido por CA interna / ACME en producción.
 2. **Actualización desde versiones `<= 0.1.10`:** en servidores instalados antes de `v0.1.11`, el primer paso debe hacerse por consola (`sudo rm -f /var/lock/nas-update.lock` si quedó huérfano, `sudo nas update apply --repo ftole/nas_debian --yes` y `sudo bash /opt/nas_debian/current/packaging/install.sh`) para aplicar la nueva regla `sudoers` de `nas-system-update`.
+3. **Brechas abiertas en código actual:** la verificación faltante de firma Ed25519 en `install.sh` (`DT-C02`), `FileRoot::resolve_dir` sin filtro de rutas protegidas (`DT-C01`) y otros hallazgos verificados código por código están registrados para corrección en **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
 
 ---
 
