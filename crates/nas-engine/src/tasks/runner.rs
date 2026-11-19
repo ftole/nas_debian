@@ -120,13 +120,18 @@ impl BackupTask {
         destination: &str,
         last_snapshot: Option<&Path>,
     ) -> Vec<String> {
-        let mut step = vec![
-            "rsync".into(),
-            "-aAXH".into(),
+        let mut step = vec!["rsync".into(), "-aAXH".into()];
+        if self.kind == SourceKind::Cifs {
+            // El cliente SMB/CIFS sintetiza uid=0/gid=0 en el punto de montaje; omitir comparación
+            // evita rechazar hardlinks cuando el snapshot previo heredó otro gid (ej. grp_samba).
+            step.push("--no-o".into());
+            step.push("--no-g".into());
+        }
+        step.extend([
             "--numeric-ids".into(),
             "--safe-links".into(),
             "--timeout=300".into(),
-        ];
+        ]);
 
         if let Some(last) = last_snapshot {
             step.push(format!("--link-dest={}", to_unix(last)));
@@ -251,6 +256,7 @@ pub fn run(
 
     let lock_path = options.lock_dir.join(format!("backup_{}.lock", task.id));
     let _lock = TaskLock::acquire(&lock_path)?;
+    crate::backup::clean_orphan_inprogress_dirs(&df_target);
 
     let pool_key = destination_pool_key(runner, &df_target);
     let pool_slots = if crate::storage::detect_path_rotational(runner, &df_target).unwrap_or(true) {
