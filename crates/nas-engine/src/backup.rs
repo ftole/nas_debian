@@ -1,5 +1,7 @@
 //! Políticas de respaldo: nombres de snapshots, retención y control de espacio.
 
+use std::path::Path;
+
 use chrono::{DateTime, Local};
 
 /// Nombres de snapshot aceptados por el repositorio histórico.
@@ -180,6 +182,27 @@ pub fn parse_df_with_total(output: &str) -> Option<(u64, DfUsage)> {
     ))
 }
 
+/// Elimina directorios temporales huérfanos `.inprogress_*` dentro de `task_dir`
+/// cuando ninguna ejecución de la tarea mantiene el cerrojo exclusivo.
+pub fn clean_orphan_inprogress_dirs(task_dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(task_dir) else {
+        return 0;
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if !name_str.starts_with(STAGING_PREFIX) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() && std::fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -315,5 +338,24 @@ mod tests {
             super::evaluate_space_for_volume(gb20, 1536 * 1024 * 1024, 92.0),
             SpaceDecision::Abort { .. }
         ));
+    }
+
+    #[test]
+    fn limpia_solo_directorios_inprogress_huerfanos() {
+        let root = std::env::temp_dir().join(format!("nas-orphan-inprog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".inprogress_2026-11-18_100000")).unwrap();
+        std::fs::write(
+            root.join(".inprogress_2026-11-18_100000/archivo.bin"),
+            b"abc",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("snapshot_2026-11-18_090000")).unwrap();
+
+        assert_eq!(super::clean_orphan_inprogress_dirs(&root), 1);
+        assert!(!root.join(".inprogress_2026-11-18_100000").exists());
+        assert!(root.join("snapshot_2026-11-18_090000").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
