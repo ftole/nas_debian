@@ -1,7 +1,7 @@
 # Arquitectura del Sistema
 
 > [!NOTE]
-> Documento técnico actualizado respecto al estado real del repositorio (`main` `0f7a272`, plataforma Rust `0.1.10` sobre Debian 13 Trixie `x86_64`).
+> Documento técnico actualizado respecto al estado real del repositorio (plataforma Rust `0.1.12` sobre Debian 13 Trixie `x86_64`).
 
 El sistema **NAS & Central de Respaldos Multiplataforma** está construido como un **workspace de Rust con 11 crates**, un backend HTTP en **`axum` 0.8** servido detrás de **Nginx**, una interfaz web **Slate UI 100% offline** con recursos embebidos en el binario, un asistente interactivo de terminal (**`nas-tui`**) y **7 helpers privilegiados** ejecutados bajo reglas estrictas de `sudoers`.
 
@@ -30,7 +30,7 @@ El sistema **NAS & Central de Respaldos Multiplataforma** está construido como 
 
 ## 2. Inventario del Workspace Rust (11 Crates)
 
-Todos los crates del workspace (`Cargo.toml` versión `0.1.10`, edición Rust `2021`, MSRV `1.80`) prohíben el uso de código inseguro (`unsafe_code = "forbid"`).
+Todos los crates del workspace (`Cargo.toml` versión `0.1.12`, edición Rust `2021`, MSRV `1.80`) prohíben el uso de código inseguro (`unsafe_code = "forbid"`).
 
 | Crate | Tipo | Responsabilidad Principal |
 | :--- | :--- | :--- |
@@ -56,8 +56,8 @@ El sistema soporta **3 roles oficiales** definidos en `ServerRole` (`ARCHIVOS`, 
 
 | Rol | Uso Previsto | Sistema de Archivos por Defecto | Opciones y Mantenimiento Clave |
 | :--- | :--- | :--- | :--- |
-| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) con carpetas visibles en red y alta concurrencia (+100 puestos). | **`ext4`** (sobreescribible con `--btrfs`) | `rw,noatime,commit=2` (HDD) / `commit=5` (SSD); `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` (HDD) / `1024 KB` (SSD); `fstrim.timer` en SSD; purga diaria de `.recycle` (>15 días). |
-| **`BACKUP`** | Central de respaldos (`SRV-BKP`) con directorios dedicados (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`). | **`Btrfs`** (sobreescribible con `--ext4`) | `compress=zstd:3,space_cache=v2`; `autodefrag` en HDD / `ssd,discard=async` en SSD; tarea mensual `nas-btrfs-scrub` (día 1 a las 02:00) para prevenir *Bit Rot*; deduplicación `rsync --link-dest` y soporte de recursos ocultos `$` en Samba. |
+| **`ARCHIVOS`** | Servidor NAS departamental (`SRV-NAS`) con carpetas visibles en red y alta concurrencia (+100 puestos). | **`ext4`** (sobreescribible con `--btrfs`) | `rw,noatime,commit=5,errors=remount-ro` + `nofail,x-systemd.device-timeout=15s` en `fstab`; `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` (HDD) / `1024 KB` (SSD); `fstrim.timer` en SSD; purga diaria de `.recycle` (>15 días). |
+| **`BACKUP`** | Central de respaldos (`SRV-BKP`) con directorios dedicados (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`). | **`Btrfs`** (sobreescribible con `--ext4`) | `compress=zstd:3,space_cache=v2` (`ssd` en flash, sin `autodefrag` ni `discard=async` continuo); `nofail,x-systemd.device-timeout=15s` en `fstab`; tarea mensual `nas-btrfs-scrub` (día 1 a las 02:00) para prevenir *Bit Rot*; deduplicación `rsync --link-dest` y soporte de recursos ocultos `$` en Samba. |
 | **`ARCHIVOS_BACKUP`** | Nodo híbrido unificado que combina recursos departamentales compartidos y repositorio de respaldos. | **`Btrfs`** (sobreescribible con `--ext4`) | Combina `/srv/nas/SISTEMAS` y carpetas de respaldo (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`), compresión `zstd:3`, *scrub* mensual automático y soporte completo de subvolúmenes Btrfs y volúmenes LVM desde el panel. |
 
 ### Protección del Disco del Sistema Operativo (`is_os_disk`) y `--keep-data`
@@ -127,8 +127,8 @@ Actualmente existen en el repositorio dos caminos que escriben artefactos del si
 1. **Instalación principal recomendada (`install.sh` -> `packaging/install.sh`):** descarga o compila los binarios Rust, crea el usuario `nas-web` y grupos base, instala los 7 helpers, genera `/etc/nas-web.env`, instala las reglas `sysctl`/`udev`/`auditd`/`logrotate`/cron de papelera, despliega `packaging/nas-web.service` (con endurecimiento completo `systemd`), `packaging/nginx-nas-web.conf` y `/etc/sudoers.d/nas-web-rust` completo.
 2. **Motor interno `nas deploy apply` (`crates/nas-engine/src/deploy/` + shim `src/core/deploy.sh`):** se encarga de particionar, formatear y montar `/srv/nas`, aplicar el rol (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`), generar `/etc/samba/smb.conf` y configurar la cuenta administradora.
 
-> [!WARNING]
-> **Deriva documentada:** Como detalla [docs/auditoria.md](./auditoria.md), las plantillas embebidas dentro de `crates/nas-engine/src/deploy/web.rs`, `helpers.rs` y `artifacts.rs` presentan diferencias severas respecto a `packaging/` (entre ellas una lista `sudoers` incompleta, unidad `systemd` sin directivas de endurecimiento y ausencia de `nas-share-dir` en `ROOT_HELPERS`). Revise la auditoría antes de automatizar re-despliegues no supervisados.
+> [!NOTE]
+> **Plantillas unificadas desde `v0.1.11`:** `crates/nas-engine/src/deploy/{web,artifacts,samba}.rs` consumen mediante `include_str!` las plantillas canónicas de `packaging/` (`nas-web.service`, `nginx-nas-web.conf`, `99-nas-tuning.conf`, `99-nas-journald.conf`, `60-nas-readahead.rules`, `nas.rules`, `75_aide_nas`) verificadas con tests de paridad en CI. Para deuda abierta pendiente en consolidación interna (`deploy/storage.rs` vs `helpers/storage.rs`), consulta [docs/deuda_tecnica.md](./deuda_tecnica.md).
 
 ---
 
@@ -139,4 +139,5 @@ Actualmente existen en el repositorio dos caminos que escriben artefactos del si
 - [Seguridad y Endurecimiento](./seguridad.md)
 - [Manual Operativo y Diagnóstico](./manual.md)
 - [Laboratorio, Desarrollo y Releases](./lab_y_desarrollo.md)
-- [Auditoría Técnica Código vs. Documentación](./auditoria.md)
+- [Deuda Técnica Activa (`v0.1.12+`)](./deuda_tecnica.md)
+- [Auditoría Histórica (`0f7a272`)](./auditoria.md)
