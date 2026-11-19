@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 510" width="100%" height="100%" style="background:#0b1120; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <!-- Encabezado -->
+  <rect x="24" y="18" width="912" height="54" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+  <g transform="translate(42, 33)" fill="none" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    <path d="m9 12 2 2 4-4"/>
+  </g>
+  <text x="78" y="42" fill="#f8fafc" font-size="16" font-weight="700">Frontera de Privilegios y 7 Asistentes Root</text>
+  <text x="78" y="59" fill="#94a3b8" font-size="11.5">El panel web nunca corre como root: toda elevación atraviesa sudo -n hacia lista blanca en /usr/local/sbin/</text>
+
+  <!-- Flujo superior de 4 pasos -->
+  <g transform="translate(24, 86)">
+    <rect x="0" y="0" width="208" height="58" rx="8" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="14" y="23" fill="#38bdf8" font-size="11" font-weight="700">1. Petición HTTPS</text>
+    <text x="14" y="41" fill="#94a3b8" font-size="10">Nginx TLS ➔ Sesión + CSRF</text>
+
+    <line x1="208" y1="29" x2="232" y2="29" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+    <rect x="235" y="0" width="214" height="58" rx="8" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="249" y="23" fill="#38bdf8" font-size="11" font-weight="700">2. nas-web (sin root)</text>
+    <text x="249" y="41" fill="#94a3b8" font-size="10">Extractors + ResourceBudget</text>
+
+    <line x1="449" y1="29" x2="473" y2="29" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+    <rect x="476" y="0" width="210" height="58" rx="8" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="490" y="23" fill="#fbbf24" font-size="11" font-weight="700">3. nas-exec + sudo -n</text>
+    <text x="490" y="41" fill="#94a3b8" font-size="10">Argv tipado, sin /bin/sh -c</text>
+
+    <line x1="686" y1="29" x2="710" y2="29" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+    <rect x="713" y="0" width="199" height="58" rx="8" fill="#111827" stroke="#f59e0b" stroke-width="1"/>
+    <text x="727" y="23" fill="#10b981" font-size="11" font-weight="700">4. Helper acotado</text>
+    <text x="727" y="41" fill="#94a3b8" font-size="10">Valida y registra en nas-audit</text>
+  </g>
+
+  <!-- Tabla SVG de 7 Helpers -->
+  <rect x="24" y="160" width="912" height="330" rx="10" fill="#0f172a" stroke="#263244" stroke-width="1"/>
+  <rect x="24" y="160" width="912" height="36" rx="10" fill="#111827"/>
+  <rect x="24" y="184" width="912" height="12" fill="#111827"/>
+  <line x1="24" y1="196" x2="936" y2="196" stroke="#263244" stroke-width="1"/>
+
+  <text x="44" y="183" fill="#94a3b8" font-size="10.5" font-weight="700" letter-spacing="0.8">HELPER (/usr/local/sbin/)</text>
+  <text x="248" y="183" fill="#94a3b8" font-size="10.5" font-weight="700" letter-spacing="0.8">SUBCOMANDO</text>
+  <text x="392" y="183" fill="#94a3b8" font-size="10.5" font-weight="700" letter-spacing="0.8">CONTROL DE SEGURIDAD</text>
+  <text x="645" y="183" fill="#94a3b8" font-size="10.5" font-weight="700" letter-spacing="0.8">RECURSO QUE ADMINISTRA</text>
+
+  <!-- 1 -->
+  <rect x="25" y="197" width="910" height="41" fill="#0f172a"/>
+  <text x="44" y="222" fill="#f8fafc" font-size="12" font-weight="600">nas-samba-apply</text>
+  <text x="248" y="222" fill="#38bdf8" font-size="11">samba-apply</text>
+  <text x="392" y="222" fill="#94a3b8" font-size="11">Valida sintaxis previa con testparm</text>
+  <text x="645" y="222" fill="#cbd5e1" font-size="11">/etc/samba/smb.conf y recarga smbd</text>
+  <line x1="24" y1="238" x2="936" y2="238" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 2 -->
+  <rect x="25" y="239" width="910" height="41" fill="#111827"/>
+  <text x="44" y="264" fill="#f8fafc" font-size="12" font-weight="600">nas-share-dir</text>
+  <text x="248" y="264" fill="#38bdf8" font-size="11">share-dir</text>
+  <text x="392" y="264" fill="#94a3b8" font-size="11">Impide rutas fuera de /srv/nas</text>
+  <text x="645" y="264" fill="#cbd5e1" font-size="11">Alta y baja de carpetas compartidas</text>
+  <line x1="24" y1="280" x2="936" y2="280" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 3 -->
+  <rect x="25" y="281" width="910" height="41" fill="#0f172a"/>
+  <text x="44" y="306" fill="#f8fafc" font-size="12" font-weight="600">nas-share-acl</text>
+  <text x="248" y="306" fill="#38bdf8" font-size="11">share-acl</text>
+  <text x="392" y="306" fill="#94a3b8" font-size="11">Lista blanca de grupos y niveles RW/RO</text>
+  <text x="645" y="306" fill="#cbd5e1" font-size="11">Permisos 2770 y default ACL (setfacl)</text>
+  <line x1="24" y1="322" x2="936" y2="322" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 4 -->
+  <rect x="25" y="323" width="910" height="41" fill="#111827"/>
+  <text x="44" y="348" fill="#f8fafc" font-size="12" font-weight="600">nas-accounts</text>
+  <text x="248" y="348" fill="#38bdf8" font-size="11">accounts</text>
+  <text x="392" y="348" fill="#94a3b8" font-size="11">Protege root, superadmin y sistema</text>
+  <text x="645" y="348" fill="#cbd5e1" font-size="11">Cuentas Linux, grupos y pdbedit Samba</text>
+  <line x1="24" y1="364" x2="936" y2="364" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 5 -->
+  <rect x="25" y="365" width="910" height="41" fill="#0f172a"/>
+  <text x="44" y="390" fill="#f8fafc" font-size="12" font-weight="600">nas-backup-manage</text>
+  <text x="248" y="390" fill="#10b981" font-size="11">backup-manage</text>
+  <text x="392" y="390" fill="#94a3b8" font-size="11">Recibe JSON y secretos solo por stdin</text>
+  <text x="645" y="390" fill="#cbd5e1" font-size="11">Runners, /etc/cron.d/ y .cred (0600)</text>
+  <line x1="24" y1="406" x2="936" y2="406" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 6 -->
+  <rect x="25" y="407" width="910" height="41" fill="#111827"/>
+  <text x="44" y="432" fill="#f8fafc" font-size="12" font-weight="600">nas-terminal</text>
+  <text x="248" y="432" fill="#fbbf24" font-size="11">terminal</text>
+  <text x="392" y="432" fill="#94a3b8" font-size="11">Solo SuperAdminUser + lista de acciones</text>
+  <text x="645" y="432" fill="#cbd5e1" font-size="11">Sesiones PTY aisladas sobre tmux</text>
+  <line x1="24" y1="448" x2="936" y2="448" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- 7 -->
+  <rect x="25" y="449" width="910" height="40" rx="8" fill="#0f172a"/>
+  <text x="44" y="473" fill="#f8fafc" font-size="12" font-weight="600">nas-storage-apply</text>
+  <text x="248" y="473" fill="#fbbf24" font-size="11">storage-apply</text>
+  <text x="392" y="473" fill="#94a3b8" font-size="11">is_os_disk() + S.M.A.R.T. + SI-FORMATEAR</text>
+  <text x="645" y="473" fill="#cbd5e1" font-size="11">Particionado, LVM, Btrfs, montaje y fstab</text>
+</svg>
