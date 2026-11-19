@@ -585,11 +585,13 @@ struct MetaKey {
 }
 
 impl FileMetaRecord {
-    fn meta_key(&self, ignore_mode: bool) -> MetaKey {
+    fn meta_key(&self, is_cifs: bool) -> MetaKey {
         MetaKey {
-            uid: self.uid,
-            gid: self.gid,
-            mode: if ignore_mode { 0 } else { self.mode },
+            // En montajes SMB/CIFS, uid/gid/mode provienen de parámetros de montaje y pueden
+            // diferir entre snapshots históricos (ej. gid=grp_samba vs gid=0).
+            uid: if is_cifs { 0 } else { self.uid },
+            gid: if is_cifs { 0 } else { self.gid },
+            mode: if is_cifs { 0 } else { self.mode },
             mtime_sec: self.mtime_sec,
             mtime_nsec: self.mtime_nsec,
         }
