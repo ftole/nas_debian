@@ -571,10 +571,45 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         }
     }
 
-    // Detener procesos remanentes
+    // Detener procesos remanentes esperando a que cleanup() desmonte y borre `.inprogress_*`
     let _ = runner.run(&CommandSpec::new("pkill").args(["-TERM", "-f", &pattern]));
-    std::thread::sleep(Duration::from_millis(500));
-    let _ = runner.run(&CommandSpec::new("pkill").args(["-KILL", "-f", &pattern]));
+    for _ in 0..60 {
+        let alive = runner
+            .run(
+                &CommandSpec::new("pgrep")
+                    .args(["-f", &pattern])
+                    .timeout(Duration::from_secs(3)),
+            )
+            .is_ok_and(|out| out.is_success());
+        if !alive {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    if runner
+        .run(
+            &CommandSpec::new("pgrep")
+                .args(["-f", &pattern])
+                .timeout(Duration::from_secs(3)),
+        )
+        .is_ok_and(|out| out.is_success())
+    {
+        let _ = runner.run(&CommandSpec::new("pkill").args(["-KILL", "-f", &pattern]));
+    }
+
+    // Limpiar posibles carpetas `.inprogress_*` huérfanas de esta tarea
+    let mut dirs_to_clean = vec![PathBuf::from(format!("/srv/nas/BACKUPS_HISTORICOS/{id}"))];
+    if let Ok(units) = std::fs::read_dir("/srv/nas/unidades") {
+        for entry in units.flatten() {
+            let candidate = entry.path().join("BACKUPS_HISTORICOS").join(id);
+            if candidate.is_dir() {
+                dirs_to_clean.push(candidate);
+            }
+        }
+    }
+    for dir in dirs_to_clean {
+        crate::backup::clean_orphan_inprogress_dirs(&dir);
+    }
     let _ = std::fs::remove_file(format!("/run/nas-backup-{id}.progress"));
     let _ = std::fs::remove_file(format!("/tmp/nas-backup-{id}.progress"));
 
