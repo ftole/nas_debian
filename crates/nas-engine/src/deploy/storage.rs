@@ -59,15 +59,26 @@ pub fn partition_path(device: &str) -> Option<String> {
 /// Opciones de montaje derivadas del sistema de archivos y del tipo de disco.
 pub fn mount_options(fs: FileSystem, rotational: bool) -> String {
     match (fs, rotational) {
-        (FileSystem::Ext4, true) => "rw,noatime,commit=2".to_string(),
-        (FileSystem::Ext4, false) => "rw,noatime,commit=5".to_string(),
-        (FileSystem::Btrfs, true) => {
-            "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string()
-        }
-        (FileSystem::Btrfs, false) => {
-            "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string()
+        (FileSystem::Ext4, true | false) => "rw,noatime,commit=5,errors=remount-ro".to_string(),
+        (FileSystem::Btrfs, true) => "rw,noatime,compress=zstd:3,space_cache=v2".to_string(),
+        (FileSystem::Btrfs, false) => "rw,noatime,compress=zstd:3,space_cache=v2,ssd".to_string(),
+    }
+}
+
+/// Valida que el dispositivo no sea el del SO y no presente fallo S.M.A.R.T. explícito antes de formatear.
+pub fn ensure_disk_ready_for_format(
+    runner: &Runner,
+    device: &str,
+    keep_data: bool,
+) -> NasResult<()> {
+    ensure_not_os_disk(runner, device, keep_data)?;
+    if device != "LOCAL" && !keep_data {
+        let health = crate::storage::check_block_health(runner, device);
+        if !health.healthy {
+            return Err(NasError::Denied(health.detail));
         }
     }
+    Ok(())
 }
 
 /// Opciones de montaje a partir de cadenas.
@@ -119,7 +130,7 @@ pub fn format_ext4(runner: &Runner, device: &str, keep_data: bool) -> NasResult<
     if keep_data {
         return Ok(());
     }
-    ensure_not_os_disk(runner, device, keep_data)?;
+    ensure_disk_ready_for_format(runner, device, keep_data)?;
     let Some(part) = partition_path(device) else {
         return Ok(());
     };
@@ -158,7 +169,7 @@ pub fn format_btrfs(runner: &Runner, device: &str, keep_data: bool) -> NasResult
     if keep_data {
         return Ok(());
     }
-    ensure_not_os_disk(runner, device, keep_data)?;
+    ensure_disk_ready_for_format(runner, device, keep_data)?;
     let Some(part) = partition_path(device) else {
         return Ok(());
     };
@@ -421,14 +432,17 @@ mod tests {
 
     #[test]
     fn mount_options_ext4_hdd() {
-        assert_eq!(mount_options(FileSystem::Ext4, true), "rw,noatime,commit=2");
+        assert_eq!(
+            mount_options(FileSystem::Ext4, true),
+            "rw,noatime,commit=5,errors=remount-ro"
+        );
     }
 
     #[test]
     fn mount_options_ext4_ssd() {
         assert_eq!(
             mount_options(FileSystem::Ext4, false),
-            "rw,noatime,commit=5"
+            "rw,noatime,commit=5,errors=remount-ro"
         );
     }
 
@@ -436,13 +450,14 @@ mod tests {
     fn mount_options_btrfs_hdd() {
         let o = mount_options(FileSystem::Btrfs, true);
         assert!(o.contains("compress=zstd:3"));
-        assert!(o.contains("autodefrag"));
+        assert!(!o.contains("autodefrag"));
     }
 
     #[test]
     fn mount_options_btrfs_ssd() {
         let o = mount_options(FileSystem::Btrfs, false);
-        assert!(o.contains("discard=async"));
+        assert!(o.contains("ssd"));
+        assert!(!o.contains("discard=async"));
     }
 
     #[test]
