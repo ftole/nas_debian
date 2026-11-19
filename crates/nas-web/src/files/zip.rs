@@ -184,11 +184,6 @@ impl FileRoot {
                 candidates.push(PathBuf::from(trimmed));
             }
         }
-        let state_staging = state_dir
-            .map(|p| p.join("staging"))
-            .unwrap_or_else(|| PathBuf::from("/var/lib/nas/staging"));
-        candidates.push(state_staging);
-
         if self.is_protected_path("").is_none() {
             candidates.push(self.root().join(".nas_staging"));
         }
@@ -197,6 +192,12 @@ impl FileRoot {
             if !candidates.contains(&data_staging) {
                 candidates.push(data_staging);
             }
+        }
+        let state_staging = state_dir
+            .map(|p| p.join("staging"))
+            .unwrap_or_else(|| PathBuf::from("/var/lib/nas/staging"));
+        if !candidates.contains(&state_staging) {
+            candidates.push(state_staging);
         }
         candidates.push(std::env::temp_dir());
 
@@ -642,6 +643,26 @@ mod ziptests {
             .collect();
         assert_eq!(names, vec!["valido.txt".to_string()]);
         drop(temp_zip);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn staging_prefiere_volumen_de_datos_sobre_estado_del_so() {
+        let root = root("staging-order");
+        let base = root.root();
+        let target = base.join("carpeta");
+        let state_staging = base.join("_os_state/staging");
+        let data_staging = base.join(".nas_staging");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("archivo.txt"), b"contenido").unwrap();
+
+        let (selected, _) = super::select_staging_dir_from_candidates(
+            &[data_staging.clone(), state_staging.clone()],
+            1024,
+            true,
+        )
+        .expect("staging seleccionable");
+        assert_eq!(selected, data_staging);
         let _ = std::fs::remove_dir_all(base);
     }
 }
