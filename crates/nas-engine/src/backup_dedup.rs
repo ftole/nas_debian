@@ -17,7 +17,9 @@ use nas_exec::{CommandSpec, Runner};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::backup_spec::{BackupSpec, Proto};
 use crate::lock::TaskLock;
+use crate::tasks::{BackupTask, SourceKind};
 
 /// Nombre del archivo marcador de migración completada (una sola vez).
 pub const DEDUP_MIGRATION_MARKER: &str = "migrations/backup_dedup_v2.done";
@@ -337,6 +339,121 @@ pub fn patch_runner_content(content: &str) -> String {
     result
 }
 
+fn resolve_managed_dest_unit(dest_root: &str) -> Option<String> {
+    if dest_root == "/srv/nas/BACKUPS_HISTORICOS" {
+        return Some("principal".to_string());
+    }
+    let unit = dest_root
+        .strip_prefix("/srv/nas/unidades/")?
+        .strip_suffix("/BACKUPS_HISTORICOS")?;
+    if unit.is_empty()
+        || unit == "principal"
+        || unit.len() > 32
+        || !unit
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    Some(unit.to_string())
+}
+
+fn valid_managed_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 32
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Si `original` corresponde a un runner completo generado por NAS con rutas estándar,
+/// lo regenera con la plantilla actual de `BackupSpec::render_runner` preservando sus parámetros.
+fn try_upgrade_managed_runner(id: &str, original: &str) -> Option<String> {
+    if !valid_managed_id(id)
+        || !original.contains("TASK=")
+        || !original.contains("SOURCE_TYPE=")
+        || !original.contains("DEST_ROOT=")
+        || !original.contains("update_progress()")
+        || !original.contains("rsync ")
+    {
+        return None;
+    }
+
+    let task = BackupTask::parse(id, original).ok()?;
+    if task.id != id || task.log_dir != "/srv/nas/LOGS_BACKUP" {
+        return None;
+    }
+    if !(1..=365).contains(&task.retention) {
+        return None;
+    }
+    let dest_unit = resolve_managed_dest_unit(&task.destination_root)?;
+
+    let (proto_str, proto, expected_cred) = match task.kind {
+        SourceKind::Cifs => {
+            if task.source_ip.as_deref().unwrap_or("").is_empty()
+                || task.share.as_deref().unwrap_or("").is_empty()
+            {
+                return None;
+            }
+            (
+                "cifs",
+                Proto::Cifs,
+                Some(format!("/etc/backup-credentials/{id}.cred")),
+            )
+        }
+        SourceKind::Ssh => {
+            if task.source_ip.as_deref().unwrap_or("").is_empty()
+                || task.path.as_deref().unwrap_or("").is_empty()
+                || task.user.as_deref().unwrap_or("").is_empty()
+            {
+                return None;
+            }
+            (
+                "ssh",
+                Proto::Ssh,
+                Some(format!("/etc/backup-credentials/{id}.cred")),
+            )
+        }
+        SourceKind::Local => {
+            if task.path.as_deref().unwrap_or("").is_empty() {
+                return None;
+            }
+            ("local", Proto::Local, None)
+        }
+    };
+
+    if task.credentials_file != expected_cred {
+        return None;
+    }
+
+    let spec = BackupSpec {
+        id: task.id,
+        proto: proto_str.to_string(),
+        ip: task.source_ip.unwrap_or_default(),
+        share: task.share.unwrap_or_default(),
+        path: task.path.unwrap_or_default(),
+        user: task.user.unwrap_or_default(),
+        password: String::new(),
+        cron: "0 23 * * *".to_string(),
+        retention: task.retention,
+        dest_unit,
+        port: task.port,
+        ssh_key: task.key_file,
+        auto_permanent: task.auto_permanent,
+        preserve_existing_auth: true,
+    };
+
+    Some(spec.render_runner(proto))
+}
+
+/// Actualiza un runner de respaldo gestionado regenerándolo o aplicando parches de compatibilidad.
+pub fn repair_runner_content(id: &str, original: &str) -> String {
+    if let Some(upgraded) = try_upgrade_managed_runner(id, original) {
+        return upgraded;
+    }
+    patch_runner_content(original)
+}
+
 /// Actualiza todos los scripts `backup_*.sh` en `bin_dir` validando sintaxis con `bash -n`.
 pub fn repair_runners(runner: &Runner, bin_dir: &Path) -> NasResult<RunnerRepairReport> {
     let mut report = RunnerRepairReport::default();
@@ -369,15 +486,19 @@ pub fn repair_runners(runner: &Runner, bin_dir: &Path) -> NasResult<RunnerRepair
             }
         };
 
-        let patched = patch_runner_content(&original);
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let id = name
+            .strip_prefix("backup_")
+            .and_then(|s| s.strip_suffix(".sh"))
+            .unwrap_or("");
+        let patched = repair_runner_content(id, &original);
         if patched == original {
             report.already_ok += 1;
             continue;
         }
 
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
         let tmp = bin_dir.join(format!(".{name}.repair.{}", std::process::id()));
         if let Err(e) = fs::write(&tmp, patched.as_bytes()) {
             report.errors.push(format!(
@@ -2356,6 +2477,53 @@ Filesystem type is: 9123683e
         let patched2 = patch_runner_content(legacy_no_mode);
         assert!(patched2.contains(",nobrl,file_mode=0777,dir_mode=0777\""));
         assert_eq!(patch_runner_content(&patched2), patched2);
+    }
+
+    #[test]
+    fn repair_runners_actualiza_runner_legado_completo_con_watchdog_y_pool() {
+        let dir = temp_root("upgrade-managed-runner");
+        let legacy = "\
+#!/bin/bash
+set -euo pipefail
+TASK='didi'
+SOURCE_TYPE='cifs'
+SRC_IP='didi.local'
+SRC_SHARE='DIDI'
+SRC_PATH=''
+SRC_USER=''
+SRC_PORT=22
+RETENTION=30
+AUTO_PERMANENT=true
+DEST_ROOT='/srv/nas/BACKUPS_HISTORICOS'
+LOG_DIR='/srv/nas/LOGS_BACKUP'
+CRED_FILE='/etc/backup-credentials/didi.cred'
+KEY_FILE=''
+BKP_DIR=\"${BKP_DIR:-$DEST_ROOT/$TASK}\"
+update_progress() { :; }
+rsync -aAXH -- \"$SRC\" \"$STAGE\"
+";
+        let path = dir.join("backup_didi.sh");
+        fs::write(&path, legacy).unwrap();
+
+        let runner = Runner::new();
+        let rep1 = repair_runners(&runner, &dir).unwrap();
+        assert_eq!(rep1.updated.len(), 1);
+        assert!(rep1.errors.is_empty(), "errores: {:?}", rep1.errors);
+
+        let upgraded = fs::read_to_string(&path).unwrap();
+        assert!(upgraded.contains("TASK='didi'"));
+        assert!(upgraded.contains("SRC_USER=''"));
+        assert!(upgraded.contains("CRED_FILE='/etc/backup-credentials/didi.cred'"));
+        assert!(upgraded.contains("nas-pool-"));
+        assert!(upgraded.contains("check_volume_space"));
+        assert!(upgraded.contains("SPACE_WATCHDOG_PID"));
+        assert!(upgraded.contains("file_mode=0777,dir_mode=0777"));
+
+        let rep2 = repair_runners(&runner, &dir).unwrap();
+        assert_eq!(rep2.updated.len(), 0);
+        assert_eq!(rep2.already_ok, 1);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
