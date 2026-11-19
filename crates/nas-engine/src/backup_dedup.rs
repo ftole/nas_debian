@@ -21,6 +21,102 @@ use crate::backup_spec::{BackupSpec, Proto};
 use crate::lock::TaskLock;
 use crate::tasks::{BackupTask, SourceKind};
 
+/// Construye los argumentos de `systemd-run` con límites cgroup estrictos
+/// para `nas-backup-dedup-migration` según la RAM del servidor.
+pub fn migration_systemd_run_args(nas_bin: &str) -> Vec<String> {
+    let (mem_high_mb, mem_max_mb, io_weight) =
+        ResourceBudget::detect().dedup_migration_systemd_limits();
+    vec![
+        "systemd-run".to_string(),
+        "--quiet".to_string(),
+        "--no-block".to_string(),
+        "--collect".to_string(),
+        "--unit=nas-backup-dedup-migration".to_string(),
+        "-p".to_string(),
+        "Nice=19".to_string(),
+        "-p".to_string(),
+        "IOSchedulingClass=idle".to_string(),
+        "-p".to_string(),
+        format!("IOWeight={io_weight}"),
+        "-p".to_string(),
+        format!("MemoryHigh={mem_high_mb}M"),
+        "-p".to_string(),
+        format!("MemoryMax={mem_max_mb}M"),
+        "-p".to_string(),
+        "TasksMax=64".to_string(),
+        nas_bin.to_string(),
+        "backup".to_string(),
+        "deduplicate".to_string(),
+        "--migration".to_string(),
+    ]
+}
+
+fn parse_lsattr_has_immutable(stdout: &str) -> bool {
+    stdout.lines().any(|line| {
+        line.split_whitespace()
+            .next()
+            .is_some_and(|flags| flags.contains('i'))
+    })
+}
+
+fn container_has_inner_immutable_attr(runner: &Runner, container: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(container) else {
+        return false;
+    };
+    let mut samples: Vec<PathBuf> = Vec::new();
+    let mut first_dir: Option<PathBuf> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name == ".freeze_meta.json" || name.starts_with(".nas_dedup_") {
+            continue;
+        }
+        if meta.is_file() {
+            samples.push(path);
+            break;
+        }
+        if meta.is_dir() && first_dir.is_none() {
+            first_dir = Some(path);
+        }
+    }
+    if let Some(dir) = first_dir {
+        if samples.is_empty() {
+            if let Ok(sub_entries) = fs::read_dir(&dir) {
+                for sub in sub_entries.flatten() {
+                    let sp = sub.path();
+                    if fs::symlink_metadata(&sp)
+                        .map(|m| !m.file_type().is_symlink())
+                        .unwrap_or(false)
+                    {
+                        samples.push(sp);
+                        break;
+                    }
+                }
+            }
+        }
+        samples.push(dir);
+    }
+
+    for sample in samples {
+        if let Ok(out) = runner.run(
+            &CommandSpec::new("lsattr")
+                .args(["-d", &sample.to_string_lossy()])
+                .timeout(Duration::from_secs(10)),
+        ) {
+            if out.is_success() && parse_lsattr_has_immutable(&out.stdout) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Nombre del archivo marcador de migración completada (una sola vez).
 pub const DEDUP_MIGRATION_MARKER: &str = "migrations/backup_dedup_v2.done";
 
@@ -1349,33 +1445,59 @@ where
                 }
             }
 
-            // Nota: `chattr -R -i` devuelve código 1 si encuentra enlaces simbólicos dentro del snapshot,
-            // por lo que únicamente un fallo de ejecución o timeout es error real.
-            if let Err(e) = runner.run(
-                &CommandSpec::new("chattr")
-                    .args(["-R", "-i", &container.to_string_lossy()])
-                    .timeout(Duration::from_secs(3600)),
-            ) {
-                container_writable[idx] = false;
-                summary.errors.push(format!(
-                    "{}: chattr -R -i falló o excedió el tiempo: {e}",
-                    container.display()
-                ));
-                continue;
-            }
             let _ = runner.run(
                 &CommandSpec::new("chattr")
                     .args(["-i", &container.to_string_lossy()])
                     .timeout(Duration::from_secs(30)),
             );
+
+            // Solo ejecutar `chattr -R -i` si la muestra O(1) con `lsattr -d` confirma
+            // contenedores antiguos marcados recursivamente con `chattr -R +i`.
+            if container_has_inner_immutable_attr(runner, container) {
+                if let Err(e) = runner.run(
+                    &CommandSpec::new("chattr")
+                        .args(["-R", "-i", &container.to_string_lossy()])
+                        .timeout(Duration::from_secs(3600)),
+                ) {
+                    container_writable[idx] = false;
+                    summary.errors.push(format!(
+                        "{}: chattr -R -i falló o excedió el tiempo: {e}",
+                        container.display()
+                    ));
+                    continue;
+                }
+            }
         }
-        summary.permissions_repaired += repair_container_permissions(
+        let prev_err_len = summary.errors.len();
+        let mut repaired = repair_container_permissions(
             container,
             is_cifs,
             options.dry_run,
             &mut summary.errors,
             throttle,
         );
+        if !options.dry_run
+            && summary.errors[prev_err_len..]
+                .iter()
+                .any(|e| e.contains("Operation not permitted") || e.contains("chmod"))
+            && runner
+                .run(
+                    &CommandSpec::new("chattr")
+                        .args(["-R", "-i", &container.to_string_lossy()])
+                        .timeout(Duration::from_secs(3600)),
+                )
+                .is_ok()
+        {
+            summary.errors.truncate(prev_err_len);
+            repaired += repair_container_permissions(
+                container,
+                is_cifs,
+                options.dry_run,
+                &mut summary.errors,
+                throttle,
+            );
+        }
+        summary.permissions_repaired += repaired;
     }
 
     let container_fs: Vec<Option<ContainerFsInfo>> = containers
@@ -1764,6 +1886,24 @@ pub fn run_dedup_migration_if_needed(
     } else {
         None
     };
+
+    if !options.dedup.dry_run {
+        let probe_path = options
+            .dedup
+            .roots
+            .first()
+            .map(|r| r.hist_root.as_path())
+            .unwrap_or_else(|| Path::new("/srv/nas"));
+        if probe_path.exists() {
+            let health = crate::storage::check_path_storage_health(runner, probe_path);
+            if !health.healthy {
+                return Err(NasError::Denied(format!(
+                    "migración de deduplicación abortada por salud de almacenamiento: {}",
+                    health.detail
+                )));
+            }
+        }
+    }
 
     // Re-comprobar tras adquirir el bloqueo por si otra instancia acaba de completarla.
     if !options.force && marker.is_file() {
@@ -2729,5 +2869,21 @@ rsync -aAXH -- \"$SRC\" \"$STAGE\"
 
             let _ = fs::remove_dir_all(&root);
         }
+    }
+
+    #[test]
+    fn detecta_inmutabilidad_lsattr_y_genera_limites_systemd_migracion() {
+        assert!(parse_lsattr_has_immutable(
+            "----i---------e------- /srv/nas/BACKUPS_HISTORICOS/t1/snapshot_1/a.bin\n"
+        ));
+        assert!(!parse_lsattr_has_immutable(
+            "--------------e------- /srv/nas/BACKUPS_HISTORICOS/t1/snapshot_1/a.bin\n"
+        ));
+
+        let args = migration_systemd_run_args("/usr/local/bin/nas");
+        assert!(args.iter().any(|a| a.starts_with("MemoryHigh=")));
+        assert!(args.iter().any(|a| a.starts_with("MemoryMax=")));
+        assert!(args.iter().any(|a| a == "IOWeight=10"));
+        assert!(args.iter().any(|a| a == "TasksMax=64"));
     }
 }
