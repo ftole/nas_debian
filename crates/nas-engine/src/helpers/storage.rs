@@ -127,17 +127,7 @@ fn partition_for(device: &str) -> String {
 
 pub(super) fn mount_options_for(runner: &Runner, fstype: &str, device: &str) -> String {
     let is_hdd = crate::storage::detect_device_rotational(runner, device).unwrap_or(true);
-    if fstype == "btrfs" {
-        if is_hdd {
-            return "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag".to_string();
-        }
-        return "rw,noatime,compress=zstd:3,space_cache=v2,ssd,discard=async".to_string();
-    }
-    if is_hdd {
-        "rw,noatime,commit=2,errors=remount-ro".to_string()
-    } else {
-        "rw,noatime,commit=5,errors=remount-ro".to_string()
-    }
+    crate::deploy::storage::mount_options_str(fstype, is_hdd)
 }
 
 pub(super) fn update_fstab(
@@ -169,6 +159,10 @@ pub(super) fn format_partition(
         ));
     }
     os_disk_guard(runner, device)?;
+    let health = crate::storage::check_block_health(runner, device);
+    if !health.healthy {
+        return Err(NasError::Denied(health.detail));
+    }
 
     let mut target = device.to_string();
     let is_disk = runner
@@ -277,6 +271,10 @@ pub fn setup_lvm(
     }
     let fstype = fstype.unwrap_or("ext4");
     os_disk_guard(runner, disk)?;
+    let health = crate::storage::check_block_health(runner, disk);
+    if !health.healthy {
+        return Err(NasError::Denied(health.detail));
+    }
 
     if unmount {
         unmount_device(runner, disk);
@@ -356,6 +354,10 @@ pub fn extend_pool(runner: &Runner, confirm: &str, device: &str) -> NasResult<St
         return Err(NasError::Invalid("dispositivo inválido".into()));
     }
     os_disk_guard(runner, device)?;
+    let health = crate::storage::check_block_health(runner, device);
+    if !health.healthy {
+        return Err(NasError::Denied(health.detail));
+    }
 
     let source = runner
         .run(&CommandSpec::new("findmnt").args(["-no", "SOURCE", "/srv/nas"]))
@@ -420,10 +422,10 @@ mod tests {
         let runner = Runner::new();
         assert_eq!(
             mount_options_for(&runner, "btrfs", "/dev/sdb1"),
-            "rw,noatime,compress=zstd:3,space_cache=v2,autodefrag"
+            "rw,noatime,compress=zstd:3,space_cache=v2"
         );
         let ext4_opts = mount_options_for(&runner, "ext4", "/dev/sdb1");
-        assert!(ext4_opts.starts_with("rw,noatime,commit="));
+        assert!(ext4_opts.starts_with("rw,noatime,commit=5"));
         assert!(ext4_opts.ends_with(",errors=remount-ro"));
     }
 }
