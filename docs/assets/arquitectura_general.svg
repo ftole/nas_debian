@@ -1,130 +1,170 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="100%" height="100%" style="background:#0b1120; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <defs>
-    <linearGradient id="accent-blue" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#60a5fa"/>
-    </linearGradient>
-    <linearGradient id="accent-purple" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#8b5cf6"/>
-      <stop offset="100%" stop-color="#a78bfa"/>
-    </linearGradient>
-    <linearGradient id="accent-green" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#34d399"/>
-    </linearGradient>
-    <linearGradient id="accent-amber" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#fbbf24"/>
-    </linearGradient>
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
-    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9 z" fill="#10b981"/>
+    </marker>
   </defs>
 
-  <!-- Header -->
-  <rect x="30" y="20" width="900" height="62" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
-  <circle cx="65" cy="51" r="14" fill="#3b82f6"/>
-  <path d="M59 51 L63 55 L71 47" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Arquitectura General del Sistema • NAS &amp; Central de Respaldos</text>
-  <text x="92" y="65" fill="#94a3b8" font-size="12">Debian 13 Trixie x86_64 • Workspace Rust (11 crates) + Panel Web Axum/Slate UI + 7 Helpers Root</text>
+  <!-- Encabezado -->
+  <rect x="24" y="20" width="912" height="58" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+  <g transform="translate(42, 37)" fill="none" stroke="#38bdf8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="2" width="20" height="8" rx="2"/>
+    <rect x="2" y="14" width="20" height="8" rx="2"/>
+    <line x1="6" y1="6" x2="6.01" y2="6"/>
+    <line x1="6" y1="18" x2="6.01" y2="18"/>
+  </g>
+  <text x="80" y="45" fill="#f8fafc" font-size="16" font-weight="700">Arquitectura General del Sistema</text>
+  <text x="80" y="63" fill="#94a3b8" font-size="11.5">Debian 13 Trixie (x86_64) • Workspace Rust (11 crates) • Panel Web 100% Offline • Mínimo Privilegio</text>
+  <rect x="838" y="36" width="80" height="24" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text x="878" y="52" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">v0.1.12</text>
 
-  <!-- Capa 1: Clientes y Acceso de Red -->
-  <g transform="translate(30, 100)">
-    <rect width="900" height="86" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-blue)"/>
-    <text x="22" y="26" fill="#60a5fa" font-size="11" font-weight="700" letter-spacing="1">CAPA 1: CLIENTES Y ACCESO DE RED</text>
+  <!-- CAPA 1: CLIENTES Y ORÍGENES -->
+  <g transform="translate(24, 96)">
+    <rect width="912" height="92" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="18" y="23" fill="#38bdf8" font-size="10.5" font-weight="700" letter-spacing="1">CAPA 1 • CLIENTES, ORÍGENES Y ACCESO EXTERNO</text>
 
-    <rect x="20" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="54" fill="#f8fafc" font-size="12" font-weight="600">Equipos Windows (SMB2_10..SMB3_11)</text>
-    <text x="32" y="68" fill="#94a3b8" font-size="10">CIFS/SMB con firma obligatoria y cifrado</text>
+    <!-- Windows -->
+    <rect x="18" y="34" width="280" height="46" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(30, 46)" fill="none" stroke="#38bdf8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="3" width="18" height="12" rx="2"/>
+      <line x1="8" y1="19" x2="14" y2="19"/>
+      <line x1="11" y1="15" x2="11" y2="19"/>
+    </g>
+    <text x="60" y="53" fill="#f8fafc" font-size="12" font-weight="600">Equipos Windows y Red LAN</text>
+    <text x="60" y="69" fill="#94a3b8" font-size="10.5">SMB 2.10–3.11 firmado • WSDD2 • AD</text>
 
-    <rect x="314" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Orígenes Remotos (SMB / SSH / Local)</text>
-    <text x="326" y="68" fill="#94a3b8" font-size="10">CIFS 3.1.1, SSH Ed25519/sshpass y local</text>
+    <!-- Orígenes -->
+    <rect x="316" y="34" width="280" height="46" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(328, 46)" fill="none" stroke="#10b981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9l-2-3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>
+    </g>
+    <text x="358" y="53" fill="#f8fafc" font-size="12" font-weight="600">Orígenes de Respaldo</text>
+    <text x="358" y="69" fill="#94a3b8" font-size="10.5">Windows (CIFS ro) • Linux (SSH) • Local</text>
 
-    <rect x="608" y="36" width="272" height="38" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="620" y="54" fill="#f8fafc" font-size="12" font-weight="600">Navegador Web / Terminal SSH</text>
-    <text x="620" y="68" fill="#94a3b8" font-size="10">HTTPS Nginx proxy_pass + CLI/TUI/nasctl</text>
+    <!-- Admin -->
+    <rect x="614" y="34" width="280" height="46" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(626, 46)" fill="none" stroke="#38bdf8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/>
+      <path d="M3 11h16M11 3a12 12 0 0 1 0 16M11 3a12 12 0 0 0 0 16"/>
+    </g>
+    <text x="656" y="53" fill="#f8fafc" font-size="12" font-weight="600">Administración Remota</text>
+    <text x="656" y="69" fill="#94a3b8" font-size="10.5">Navegador HTTPS (:443) • Consola SSH</text>
   </g>
 
-  <!-- Capa 2: Interfaces de Administración y Control -->
-  <g transform="translate(30, 204)">
-    <rect width="900" height="106" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-purple)"/>
-    <text x="22" y="26" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="1">CAPA 2: INTERFACES DE ADMINISTRACIÓN Y PRESENTACIÓN</text>
+  <!-- Conectores Capa 1 -> Capa 2 -->
+  <line x1="182" y1="188" x2="182" y2="218" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="192" y="207" fill="#94a3b8" font-size="9.5">SMB3</text>
+  <line x1="480" y1="188" x2="480" y2="218" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <text x="490" y="207" fill="#94a3b8" font-size="9.5">CIFS / SSH</text>
+  <line x1="778" y1="188" x2="778" y2="218" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="788" y="207" fill="#94a3b8" font-size="9.5">HTTPS TLS</text>
 
-    <rect x="20" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="54" fill="#f8fafc" font-size="12" font-weight="600">CLI 'nas', 'nas-tui' y 'nasctl'</text>
-    <text x="32" y="69" fill="#94a3b8" font-size="10">nas (--json) • nas-tui (12 secciones ratatui)</text>
-    <text x="32" y="83" fill="#a78bfa" font-size="10">nasctl + nas-ssh para inventarios YAML</text>
+  <!-- CAPA 2: INTERFACES SIN PRIVILEGIOS -->
+  <g transform="translate(24, 222)">
+    <rect width="912" height="106" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="18" y="23" fill="#38bdf8" font-size="10.5" font-weight="700" letter-spacing="1">CAPA 2 • INTERFACES DE CONTROL Y PRESENTACIÓN (SIN PRIVILEGIOS ROOT EN WEB)</text>
 
-    <rect x="314" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="326" y="54" fill="#f8fafc" font-size="12" font-weight="600">Backend Web (nas-web + Nginx TLS)</text>
-    <text x="326" y="69" fill="#94a3b8" font-size="10">Axum 0.8 (127.0.0.1:8080) • Routers</text>
-    <text x="326" y="83" fill="#38bdf8" font-size="10">SQLite WAL (sesiones, auditoría, rate limit)</text>
+    <!-- Panel Web -->
+    <rect x="18" y="34" width="430" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(30, 48)" fill="none" stroke="#38bdf8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <line x1="3" y1="9" x2="21" y2="9"/>
+      <line x1="9" y1="21" x2="9" y2="9"/>
+    </g>
+    <text x="60" y="53" fill="#f8fafc" font-size="12" font-weight="600">Nginx TLS ➔ nas-web (Axum 0.8 + Slate UI)</text>
+    <text x="60" y="69" fill="#94a3b8" font-size="10.5">Activos embebidos 100% offline • PBKDF2 + CSRF • ResourceBudget</text>
+    <text x="60" y="83" fill="#38bdf8" font-size="10">Usuario de servicio aislado: nas-web (127.0.0.1:8080)</text>
 
-    <rect x="608" y="36" width="272" height="56" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="620" y="54" fill="#f8fafc" font-size="12" font-weight="600">Slate UI 100% Offline Embebida</text>
-    <text x="620" y="69" fill="#94a3b8" font-size="10">14 vistas nav • 28 JS modulares + 3 vendor</text>
-    <text x="620" y="83" fill="#10b981" font-size="10">52 iconos SVG • Visores Office • PTY tmux</text>
+    <!-- CLI / TUI / nasctl -->
+    <rect x="464" y="34" width="430" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(476, 48)" fill="none" stroke="#10b981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </g>
+    <text x="506" y="53" fill="#f8fafc" font-size="12" font-weight="600">CLI nas • Asistente nas-tui • Orquestador nasctl</text>
+    <text x="506" y="69" fill="#94a3b8" font-size="10.5">Comandos unificados (--json) • Interfaz terminal Ratatui</text>
+    <text x="506" y="83" fill="#10b981" font-size="10">Ejecución multi-servidor por inventario YAML sobre OpenSSH</text>
   </g>
 
-  <!-- Capa 3: Motor Rust y Servicios -->
-  <g transform="translate(30, 328)">
-    <rect width="900" height="126" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-green)"/>
-    <text x="22" y="26" fill="#34d399" font-size="11" font-weight="700" letter-spacing="1">CAPA 3: MOTOR DE SISTEMA (nas-engine), HELPERS Y AUDITORÍA</text>
+  <!-- FRONTERA DE PRIVILEGIOS -->
+  <line x1="24" y1="350" x2="936" y2="350" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="6,4"/>
+  <rect x="275" y="339" width="410" height="22" rx="11" fill="#111827" stroke="#f59e0b" stroke-width="1"/>
+  <text x="480" y="354" text-anchor="middle" fill="#fbbf24" font-size="10" font-weight="700" letter-spacing="0.5">FRONTERA DE PRIVILEGIOS • nas-exec (sin shell) + sudo -n acotado</text>
 
-    <rect x="20" y="36" width="205" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="30" y="54" fill="#f8fafc" font-size="12" font-weight="600">Samba 4 + VFS</text>
-    <text x="30" y="70" fill="#94a3b8" font-size="10">acl_xattr, streams_xattr, recycle</text>
-    <text x="30" y="85" fill="#94a3b8" font-size="10">smb.conf + ACLs POSIX (2770)</text>
-    <text x="30" y="100" fill="#10b981" font-size="9.5">WSDD2 + realmd / sssd / adcli</text>
+  <line x1="250" y1="328" x2="250" y2="372" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <line x1="710" y1="328" x2="710" y2="372" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
 
-    <rect x="238" y="36" width="205" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="248" y="54" fill="#f8fafc" font-size="12" font-weight="600">Motor de Backups</text>
-    <text x="248" y="70" fill="#94a3b8" font-size="10">rsync -aAXH --link-dest</text>
-    <text x="248" y="85" fill="#94a3b8" font-size="10">Staging .inprogress_* + flock</text>
-    <text x="248" y="100" fill="#38bdf8" font-size="9.5">Golden Snapshot (auto_permanent)</text>
+  <!-- CAPA 3: MOTOR, HELPERS Y AUDITORÍA -->
+  <g transform="translate(24, 376)">
+    <rect width="912" height="106" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="18" y="23" fill="#10b981" font-size="10.5" font-weight="700" letter-spacing="1">CAPA 3 • MOTOR DEL SISTEMA (nas-engine), ASISTENTES ROOT Y AUDITORÍA</text>
 
-    <rect x="456" y="36" width="212" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="466" y="54" fill="#f8fafc" font-size="12" font-weight="600">7 Helpers Root Acotados</text>
-    <text x="466" y="70" fill="#94a3b8" font-size="10">samba-apply, share-dir, share-acl</text>
-    <text x="466" y="85" fill="#94a3b8" font-size="10">accounts, backup-manage (stdin)</text>
-    <text x="466" y="100" fill="#fbbf24" font-size="9.5">nas-terminal, nas-storage-apply</text>
+    <!-- Motor -->
+    <rect x="18" y="34" width="280" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(30, 48)" fill="none" stroke="#10b981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.78 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </g>
+    <text x="60" y="53" fill="#f8fafc" font-size="12" font-weight="600">nas-engine &amp; Samba 4</text>
+    <text x="60" y="69" fill="#94a3b8" font-size="10.5">Almacenamiento, usuarios, ACLs, AD</text>
+    <text x="60" y="83" fill="#10b981" font-size="10">Motor rsync + deduplicación + updates A/B</text>
 
-    <rect x="681" y="36" width="199" height="76" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="691" y="54" fill="#f8fafc" font-size="12" font-weight="600">nas-exec &amp; nas-audit</text>
-    <text x="691" y="70" fill="#94a3b8" font-size="9.5">Argv sin shell, timeout, env_clear</text>
-    <text x="691" y="85" fill="#94a3b8" font-size="10">Cadena SHA-256 append-only</text>
-    <text x="691" y="100" fill="#a78bfa" font-size="9.5">Ed25519 en updates A/B</text>
+    <!-- 7 Helpers -->
+    <rect x="316" y="34" width="280" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(328, 48)" fill="none" stroke="#f59e0b" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </g>
+    <text x="358" y="53" fill="#f8fafc" font-size="12" font-weight="600">7 Helpers Root (/usr/local/sbin/)</text>
+    <text x="358" y="69" fill="#94a3b8" font-size="10.5">samba, share-dir/acl, accounts, terminal</text>
+    <text x="358" y="83" fill="#fbbf24" font-size="10">backup-manage (stdin) + storage-apply</text>
+
+    <!-- Auditoría y Firma -->
+    <rect x="614" y="34" width="280" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(626, 48)" fill="none" stroke="#38bdf8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </g>
+    <text x="656" y="53" fill="#f8fafc" font-size="12" font-weight="600">nas-exec &amp; nas-audit</text>
+    <text x="656" y="69" fill="#94a3b8" font-size="10.5">Argv tipado, env_clear, redacción secretos</text>
+    <text x="656" y="83" fill="#38bdf8" font-size="10">Bitácora SHA-256 + firma Ed25519 + auditd</text>
   </g>
 
-  <!-- Capa 4: Almacenamiento, 3 Roles y Kernel -->
-  <g transform="translate(30, 472)">
-    <rect width="900" height="162" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="900" height="4" rx="2" fill="url(#accent-amber)"/>
-    <text x="22" y="26" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">CAPA 4: ROLES DE SERVIDOR, ALMACENAMIENTO Y KERNEL LINUX</text>
+  <!-- Conectores Capa 3 -> Capa 4 -->
+  <line x1="250" y1="482" x2="250" y2="510" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="710" y1="482" x2="710" y2="510" stroke="#10b981" stroke-width="1.5" marker-end="url(#arrow-green)"/>
 
-    <rect x="20" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="32" y="58" fill="#60a5fa" font-size="12" font-weight="700">Rol ARCHIVOS (NAS)</text>
-    <text x="32" y="76" fill="#cbd5e1" font-size="10.5">• Carpetas departamentales visibles</text>
-    <text x="32" y="93" fill="#94a3b8" font-size="10">• ext4 por defecto (commit=2 HDD / 5 SSD)</text>
-    <text x="32" y="110" fill="#94a3b8" font-size="10">• tune2fs -m 1 • fstrim.timer en SSD</text>
-    <text x="32" y="127" fill="#10b981" font-size="10">• ACLs mixtas (RW/RO/Publico)</text>
+  <!-- CAPA 4: PERSISTENCIA SEPARADA (SO vs DATOS) -->
+  <g transform="translate(24, 514)">
+    <rect width="912" height="106" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+    <text x="18" y="23" fill="#fbbf24" font-size="10.5" font-weight="700" letter-spacing="1">CAPA 4 • PERSISTENCIA AISLADA: DISCO DEL SISTEMA (/) VS VOLUMEN DE DATOS (/srv/nas)</text>
 
-    <rect x="314" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="326" y="58" fill="#34d399" font-size="12" font-weight="700">Rol BACKUP (Central)</text>
-    <text x="326" y="76" fill="#cbd5e1" font-size="10.5">• BACKUPS_HISTORICOS / LOGS (2770)</text>
-    <text x="326" y="93" fill="#94a3b8" font-size="10">• Btrfs (compress=zstd:3, space_cache=v2)</text>
-    <text x="326" y="110" fill="#94a3b8" font-size="10">• btrfs scrub mensual (día 1, 02:00)</text>
-    <text x="326" y="127" fill="#38bdf8" font-size="10">• Deduplicación &gt;85% con hardlinks</text>
+    <!-- Disco SO -->
+    <rect x="18" y="34" width="380" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(30, 48)" fill="none" stroke="#fbbf24" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+    </g>
+    <text x="60" y="53" fill="#f8fafc" font-size="12" font-weight="600">Disco del SO (/) — Protegido por is_os_disk()</text>
+    <text x="60" y="69" fill="#94a3b8" font-size="10.5">SQLite WAL (/var/lib/nas/nas.sqlite) • /etc/nas/ • /etc/samba/</text>
+    <text x="60" y="83" fill="#fbbf24" font-size="10">Cuota journald acotada (256M) • Sin staging ZIP masivo en /</text>
 
-    <rect x="608" y="38" width="272" height="106" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="620" y="58" fill="#fbbf24" font-size="12" font-weight="700">Rol ARCHIVOS_BACKUP &amp; Kernel</text>
-    <text x="620" y="76" fill="#cbd5e1" font-size="10.5">• Unifica NAS + Central (Btrfs defecto)</text>
-    <text x="620" y="93" fill="#94a3b8" font-size="10">• Guardián is_os_disk() + --keep-data</text>
-    <text x="620" y="110" fill="#94a3b8" font-size="10">• sysctl 99-nas-tuning + readahead udev</text>
-    <text x="620" y="127" fill="#f59e0b" font-size="10">• auditd (/etc/audit/rules.d/nas.rules)</text>
+    <!-- Disco Datos -->
+    <rect x="414" y="34" width="480" height="58" rx="7" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <g transform="translate(426, 48)" fill="none" stroke="#10b981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="22" y1="12" x2="2" y2="12"/>
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+      <line x1="6" y1="16" x2="6.01" y2="16"/>
+      <line x1="10" y1="16" x2="10.01" y2="16"/>
+    </g>
+    <text x="456" y="53" fill="#f8fafc" font-size="12" font-weight="600">Volumen de Datos (/srv/nas) — 3 Roles (ext4 / Btrfs)</text>
+    <text x="456" y="69" fill="#94a3b8" font-size="10.5">ARCHIVOS • BACKUP • ARCHIVOS_BACKUP • Pool = Volumen único</text>
+    <text x="456" y="83" fill="#10b981" font-size="10">Montaje tolerante a fallos (nofail) • Reutilizable con --keep-data</text>
   </g>
 </svg>
