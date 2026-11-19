@@ -496,10 +496,9 @@ pub fn detect_device_rotational(runner: &Runner, device: &str) -> Option<bool> {
     None
 }
 
-fn mount_source_from_proc_mounts(target: &Path) -> Option<String> {
-    let raw = std::fs::read_to_string("/proc/mounts").ok()?;
+fn mount_entry_in_proc_mounts(raw: &str, target: &Path) -> Option<(String, String)> {
     let target_str = target.to_string_lossy();
-    let mut best: Option<(usize, String)> = None;
+    let mut best: Option<(usize, String, String)> = None;
     for line in raw.lines() {
         let mut parts = line.split_whitespace();
         let Some(src) = parts.next() else {
@@ -508,6 +507,8 @@ fn mount_source_from_proc_mounts(target: &Path) -> Option<String> {
         let Some(mp) = parts.next() else {
             continue;
         };
+        let _fstype = parts.next();
+        let opts = parts.next().unwrap_or("");
         if !src.starts_with("/dev/") {
             continue;
         }
@@ -516,11 +517,131 @@ fn mount_source_from_proc_mounts(target: &Path) -> Option<String> {
             || target_str
                 .strip_prefix(mp)
                 .is_some_and(|rest| rest.starts_with('/'));
-        if matches && best.as_ref().map_or(true, |(len, _)| mp.len() > *len) {
-            best = Some((mp.len(), src.to_string()));
+        if matches && best.as_ref().map_or(true, |(len, _, _)| mp.len() > *len) {
+            best = Some((mp.len(), src.to_string(), opts.to_string()));
         }
     }
-    best.map(|(_, src)| src)
+    best.map(|(_, src, opts)| (src, opts))
+}
+
+fn mount_source_from_proc_mounts(target: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string("/proc/mounts").ok()?;
+    mount_entry_in_proc_mounts(&raw, target).map(|(src, _)| src)
+}
+
+/// Indica si el sistema de archivos que aloja `path` está montado actualmente en solo lectura (`ro`).
+pub fn path_is_mounted_readonly(path: &Path) -> bool {
+    let Ok(raw) = std::fs::read_to_string("/proc/mounts") else {
+        return false;
+    };
+    mount_entry_in_proc_mounts(&raw, path)
+        .is_some_and(|(_, opts)| opts.split(',').any(|flag| flag == "ro"))
+}
+
+/// Resultado de comprobación preventiva S.M.A.R.T. y de montaje.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskHealthCheck {
+    /// `false` únicamente cuando se detecta un fallo explícito (`ro` o SMART FAILED).
+    pub healthy: bool,
+    /// `true` cuando `smartctl` devolvió un estado evaluable del dispositivo.
+    pub smart_available: bool,
+    /// Detalle legible del diagnóstico.
+    pub detail: String,
+}
+
+/// Interpreta la salida de `smartctl -H` (`Some(true)` = sano, `Some(false)` = fallo explícito).
+pub fn parse_smartctl_health(output: &str) -> Option<bool> {
+    for line in output.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.contains("overall-health self-assessment test result:")
+            || lower.contains("smart health status:")
+        {
+            if lower.contains("failed") || lower.contains("error") {
+                return Some(false);
+            }
+            if lower.contains("passed") || lower.ends_with(": ok") || lower.contains(": ok ") {
+                return Some(true);
+            }
+        }
+    }
+    None
+}
+
+/// Evalúa la salud S.M.A.R.T. de un dispositivo de bloque (degrada sin error si `smartctl` no existe).
+pub fn check_block_health(runner: &Runner, device: &str) -> DiskHealthCheck {
+    let target_dev = resolve_target_device(device).unwrap_or_else(|| device.to_string());
+    let probe = if target_dev.starts_with("/dev/mapper/") || target_dev.starts_with("/dev/dm-") {
+        target_dev.clone()
+    } else if let Some(parent) = parent_disk(&target_dev) {
+        format!("/dev/{parent}")
+    } else {
+        target_dev.clone()
+    };
+
+    if !is_valid_device(&probe) {
+        return DiskHealthCheck {
+            healthy: true,
+            smart_available: false,
+            detail: format!("dispositivo no evaluable por SMART ({device})"),
+        };
+    }
+
+    let spec = CommandSpec::new("smartctl")
+        .args(["-H", &probe])
+        .timeout(std::time::Duration::from_secs(10));
+    match runner.run(&spec) {
+        Ok(out) => {
+            let combined = format!("{}\n{}", out.stdout, out.stderr);
+            match parse_smartctl_health(&combined) {
+                Some(true) => DiskHealthCheck {
+                    healthy: true,
+                    smart_available: true,
+                    detail: format!("{probe}: SMART PASSED"),
+                },
+                Some(false) => DiskHealthCheck {
+                    healthy: false,
+                    smart_available: true,
+                    detail: format!("{probe}: S.M.A.R.T. reporta fallo de hardware (FAILED)"),
+                },
+                None => DiskHealthCheck {
+                    healthy: true,
+                    smart_available: false,
+                    detail: format!("{probe}: SMART no soportado o sin veredicto"),
+                },
+            }
+        }
+        Err(_) => DiskHealthCheck {
+            healthy: true,
+            smart_available: false,
+            detail: "smartctl no disponible en el sistema".to_string(),
+        },
+    }
+}
+
+/// Comprueba estado `ro` y salud S.M.A.R.T. del volumen que aloja `path`.
+pub fn check_path_storage_health(runner: &Runner, path: &Path) -> DiskHealthCheck {
+    if path_is_mounted_readonly(path) {
+        return DiskHealthCheck {
+            healthy: false,
+            smart_available: false,
+            detail: format!(
+                "{}: sistema de archivos montado en solo lectura (ro)",
+                path.display()
+            ),
+        };
+    }
+    let Some(source) = findmnt_value(runner, &path.to_string_lossy(), "SOURCE")
+        .filter(|s| s.starts_with("/dev/"))
+        .or_else(|| mount_source_from_proc_mounts(path))
+    else {
+        return DiskHealthCheck {
+            healthy: true,
+            smart_available: false,
+            detail: format!("{}: sin dispositivo de bloque asociado", path.display()),
+        };
+    };
+    check_block_health(runner, &source)
 }
 
 /// Detecta si el volumen que aloja `path` reside sobre almacenamiento rotacional.
@@ -703,5 +824,34 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&sys);
+    }
+
+    #[test]
+    fn interpreta_estado_smartctl_y_montaje_ro() {
+        assert_eq!(
+            super::parse_smartctl_health(
+                "SMART overall-health self-assessment test result: PASSED\n"
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            super::parse_smartctl_health(
+                "SMART overall-health self-assessment test result: FAILED!\n"
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            super::parse_smartctl_health("SMART Health Status: OK\n"),
+            Some(true)
+        );
+        assert_eq!(super::parse_smartctl_health("Device lacks SMART"), None);
+
+        let mounts = "/dev/nvme0n1p2 / ext4 ro,relatime 0 0\n\
+                      /dev/sda1 /srv/nas btrfs rw,noatime,compress=zstd:3 0 0\n";
+        let root_entry = super::mount_entry_in_proc_mounts(mounts, std::path::Path::new("/etc"));
+        assert!(root_entry.is_some_and(|(_, opts)| opts.split(',').any(|f| f == "ro")));
+        let data_entry =
+            super::mount_entry_in_proc_mounts(mounts, std::path::Path::new("/srv/nas/SISTEMAS"));
+        assert!(data_entry.is_some_and(|(_, opts)| opts.split(',').any(|f| f == "rw")));
     }
 }
