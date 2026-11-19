@@ -619,6 +619,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn runner_cifs_usa_no_owner_no_group_y_update_progress_estima_progreso_real() {
+        let cifs_runner = cifs().render_runner(Proto::Cifs);
+        assert!(cifs_runner.contains("rsync -aAXH --no-o --no-g"));
+        assert!(cifs_runner.contains("stdbuf -oL"));
+        assert!(cifs_runner.contains("find \"$BKP_DIR\" -maxdepth 1 -type d -name '.inprogress_*'"));
+
+        let local = BackupSpec {
+            proto: "local".into(),
+            path: "/datos".into(),
+            ..cifs()
+        };
+        let local_runner = local.render_runner(Proto::Local);
+        assert!(!local_runner.contains("--no-o --no-g"));
+
+        let root = std::env::temp_dir().join(format!("nas-prog-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let prog_file = root.join("test.progress");
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(20);
+
+        let fn_start = cifs_runner.find("write_prog()").expect("write_prog");
+        let fn_end = cifs_runner[fn_start..]
+            .find("\nmkdir -p \"$BKP_DIR\"")
+            .expect("fin update_progress")
+            + fn_start;
+        let snippet = format!(
+            "TASK=t\nPROG_FILE={}\nSTART_TIME={}\n{}\nprintf '64,512 0%% 0.00kB/s 0:00:10 (xfr#1, to-chk=50/100)\\n' | update_progress\n",
+            shell_single_quote(&prog_file.to_string_lossy()),
+            start,
+            &cifs_runner[fn_start..fn_end],
+        );
+        let out = std::process::Command::new("bash")
+            .args(["-euo", "pipefail", "-c", &snippet])
+            .output()
+            .expect("bash");
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&prog_file).unwrap()).unwrap();
+        assert_eq!(json["percent"].as_u64(), Some(50));
+        assert!(json["speed"]
+            .as_str()
+            .unwrap()
+            .contains("Enlazando (50/100 archivos)"));
+        let rem = json["remaining"].as_str().unwrap();
+        assert_ne!(rem, "--:--:--");
+        assert_ne!(rem, "0:00:10");
+        assert_eq!(json["started_at"].as_u64(), Some(start));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn shell_single_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
