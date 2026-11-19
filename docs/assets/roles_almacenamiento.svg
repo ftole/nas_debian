@@ -40,8 +40,8 @@
 
     <rect x="14" y="60" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="24" y="80" fill="#38bdf8" font-size="11" font-weight="700">Filesystem por defecto: ext4</text>
-    <text x="24" y="97" fill="#94a3b8" font-size="10">• HDD: rw,noatime,commit=2 (anti-apagón)</text>
-    <text x="24" y="113" fill="#94a3b8" font-size="10">• SSD: rw,noatime,commit=5 + fstrim</text>
+    <text x="24" y="97" fill="#94a3b8" font-size="10">• HDD: rw,noatime,commit=5,errors=remount-ro</text>
+    <text x="24" y="113" fill="#94a3b8" font-size="10">• SSD: + fstrim.timer y nofail en fstab</text>
     <text x="24" y="129" fill="#10b981" font-size="10">• tune2fs -m 1 (recupera 4% útil)</text>
 
     <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
@@ -67,7 +67,7 @@
     <rect x="14" y="60" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="24" y="80" fill="#34d399" font-size="11" font-weight="700">Filesystem por defecto: Btrfs</text>
     <text x="24" y="97" fill="#94a3b8" font-size="10">• compress=zstd:3,space_cache=v2</text>
-    <text x="24" y="113" fill="#94a3b8" font-size="10">• HDD: autodefrag | SSD: ssd,discard=async</text>
+    <text x="24" y="113" fill="#94a3b8" font-size="10">• HDD: space_cache=v2 | SSD: ssd + fstrim</text>
     <text x="24" y="129" fill="#10b981" font-size="10">• Ahorro de espacio ~20% a 40%</text>
 
     <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
