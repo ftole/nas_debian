@@ -373,6 +373,8 @@ SRC_PORT=22
         assert!(mount.iter().any(|arg| arg.contains("credentials=")));
         assert!(mount.iter().any(|arg| arg.contains("vers=3.1.1")));
         assert!(plan[3].iter().any(|arg| arg == "-aAXH"));
+        assert!(plan[3].iter().any(|arg| arg == "--no-o"));
+        assert!(plan[3].iter().any(|arg| arg == "--no-g"));
         assert!(plan[5]
             .iter()
             .any(|arg| arg.ends_with("snapshot_2026-10-23_160000")));
