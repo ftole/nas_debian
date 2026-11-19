@@ -34,6 +34,8 @@ const AUDIT_RULES: &str = include_str!("../../../../packaging/nas.rules");
 
 const AIDE_NAS_RULES: &str = include_str!("../../../../packaging/75_aide_nas");
 
+const JOURNALD_LIMITS: &str = include_str!("../../../../packaging/99-nas-journald.conf");
+
 /// Renderiza `99-nas-tuning.conf` ajustando `vm.dirty_background_bytes` y `vm.dirty_bytes`
 /// de forma proporcional a la RAM total (`total_mem_mb`).
 pub fn render_sysctl_tuning(total_mem_mb: u64) -> String {
@@ -103,6 +105,11 @@ impl DeployParams {
                 path: "/etc/aide/aide.conf.d/75_aide_nas".into(),
                 mode: 0o644,
                 content: AIDE_NAS_RULES.to_string(),
+            },
+            Artifact {
+                path: "/etc/systemd/journald.conf.d/99-nas-limits.conf".into(),
+                mode: 0o644,
+                content: JOURNALD_LIMITS.to_string(),
             },
             Artifact {
                 path: "/etc/cron.daily/nas-recycle-purge".into(),
@@ -182,14 +189,54 @@ pub fn apply_hardening(runner: &nas_exec::Runner, sudo: bool) -> NasResult<()> {
             .timeout(std::time::Duration::from_secs(30)),
     ));
 
-    // auditd
+    // auditd y journald
     let _ = runner.run(&configure(
         nas_exec::CommandSpec::new("systemctl")
             .args(["restart", "auditd"])
             .timeout(std::time::Duration::from_secs(30)),
     ));
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("systemctl")
+            .args(["restart", "systemd-journald"])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
+    let _ = runner.run(&configure(
+        nas_exec::CommandSpec::new("systemctl")
+            .args([
+                "mask",
+                "sleep.target",
+                "suspend.target",
+                "hibernate.target",
+                "hybrid-sleep.target",
+            ])
+            .timeout(std::time::Duration::from_secs(30)),
+    ));
 
     Ok(())
+}
+
+/// Agrega `nofail` y timeout acotado a puntos de montaje secundarios en `/etc/fstab`
+/// para evitar bloqueos de arranque sin SSH tras fallos de almacenamiento o apagones.
+pub fn fstab_options_for_target(target: &str, options: &str) -> String {
+    if target.trim() == "/" {
+        return options.to_string();
+    }
+    let mut parts: Vec<String> = options
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    if !parts.iter().any(|p| p == "nofail") {
+        parts.push("nofail".to_string());
+    }
+    if !parts
+        .iter()
+        .any(|p| p.starts_with("x-systemd.device-timeout="))
+    {
+        parts.push("x-systemd.device-timeout=15s".to_string());
+    }
+    parts.join(",")
 }
 
 /// Persiste una entrada de montaje en `/etc/fstab` usando el UUID si está disponible.
@@ -230,7 +277,8 @@ pub fn update_fstab(
         .map(ToString::to_string)
         .collect();
 
-    new_lines.push(format!("{fstab_src} {target} auto {options} 0 0"));
+    let fstab_options = fstab_options_for_target(target, options);
+    new_lines.push(format!("{fstab_src} {target} auto {fstab_options} 0 0"));
     let final_content = format!("{}\n", new_lines.join("\n"));
     if std::fs::write(fstab_path, &final_content).is_err() {
         let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
@@ -303,6 +351,7 @@ mod artifact_tests {
         assert!(paths.contains(&"/etc/logrotate.d/nas-backups"));
         assert!(paths.contains(&"/etc/audit/rules.d/nas.rules"));
         assert!(paths.contains(&"/etc/aide/aide.conf.d/75_aide_nas"));
+        assert!(paths.contains(&"/etc/systemd/journald.conf.d/99-nas-limits.conf"));
         assert!(paths.contains(&"/etc/cron.daily/nas-recycle-purge"));
 
         let role = artifacts
@@ -334,7 +383,7 @@ mod artifact_tests {
             .find(|a| a.path == "/etc/audit/rules.d/nas.rules")
             .expect("audit");
         assert_eq!(audit.mode, 0o640);
-        assert_eq!(artifacts.len(), 8);
+        assert_eq!(artifacts.len(), 9);
         assert!(audit.content.contains("-D"));
         assert!(audit.content.contains("-b 8192"));
         assert!(audit.content.contains("-f 1"));
@@ -438,5 +487,16 @@ mod artifact_tests {
             .find(|a| a.path == "/etc/logrotate.d/nas-backups")
             .expect("logrotate");
         assert!(logrotate.content.contains("su root grp_samba"));
+    }
+
+    #[test]
+    fn fstab_agrega_nofail_a_montajes_secundarios() {
+        let sec = super::fstab_options_for_target("/srv/nas", "rw,noatime,commit=5");
+        assert!(sec.contains("nofail"));
+        assert!(sec.contains("x-systemd.device-timeout=15s"));
+        assert_eq!(
+            super::fstab_options_for_target("/", "rw,relatime"),
+            "rw,relatime"
+        );
     }
 }
