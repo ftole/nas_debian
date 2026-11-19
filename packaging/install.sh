@@ -219,6 +219,16 @@ if [ -f "$SCRIPT_DIR/75_aide_nas" ] && [ -d /etc/aide/aide.conf.d ]; then
     install -m 0644 "$SCRIPT_DIR/75_aide_nas" /etc/aide/aide.conf.d/75_aide_nas
 fi
 
+if [ -f "$SCRIPT_DIR/99-nas-journald.conf" ]; then
+    install -d -m 0755 /etc/systemd/journald.conf.d
+    install -m 0644 "$SCRIPT_DIR/99-nas-journald.conf" /etc/systemd/journald.conf.d/99-nas-limits.conf
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+fi
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+fi
+
 echo "    Instalando tarea diaria de auto-purga de papelera Samba..."
 install -d -m 0755 /etc/cron.daily
 cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'
@@ -316,8 +326,18 @@ if [ -x "$PREFIX/nas" ]; then
     "$PREFIX/nas" backup repair-runners >/dev/null 2>&1 || true
     if [ ! -f "$STATE_DIR/migrations/backup_dedup_v2.done" ] && { [ -d "$DATA_ROOT/BACKUPS_HISTORICOS" ] || [ -d "$DATA_ROOT/BACKUPS_PERMANENTES" ] || [ -d "$DATA_ROOT/unidades" ]; }; then
         if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+            TOTAL_MEM_MB="$(awk '/MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)"
+            [ -n "$TOTAL_MEM_MB" ] || TOTAL_MEM_MB=2048
+            DEDUP_MEM_HIGH=$(( TOTAL_MEM_MB / 4 ))
+            [ "$DEDUP_MEM_HIGH" -lt 256 ] && DEDUP_MEM_HIGH=256
+            [ "$DEDUP_MEM_HIGH" -gt 2048 ] && DEDUP_MEM_HIGH=2048
+            DEDUP_MEM_MAX=$(( TOTAL_MEM_MB * 40 / 100 ))
+            [ "$DEDUP_MEM_MAX" -lt 384 ] && DEDUP_MEM_MAX=384
+            [ "$DEDUP_MEM_MAX" -gt 4096 ] && DEDUP_MEM_MAX=4096
             systemd-run --quiet --no-block --collect --unit=nas-backup-dedup-migration \
-                -p Nice=19 -p IOSchedulingClass=idle \
+                -p Nice=19 -p IOSchedulingClass=idle -p IOWeight=10 \
+                -p "MemoryHigh=${DEDUP_MEM_HIGH}M" -p "MemoryMax=${DEDUP_MEM_MAX}M" \
+                -p TasksMax=64 \
                 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
         else
             nice -n 19 ionice -c 3 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
