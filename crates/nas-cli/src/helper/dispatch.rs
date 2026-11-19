@@ -461,22 +461,11 @@ fn run_backup_dedup_migration_helper(runner: &Runner) -> NasResult<String> {
     }
 
     if Path::new("/run/systemd/system").exists() && Path::new("/run/systemd/private").exists() {
+        let args = nas_engine::backup_dedup::migration_systemd_run_args("/usr/local/bin/nas");
+        let cmd = args[0].clone();
         let out = runner.run(
-            &nas_exec::CommandSpec::new("systemd-run")
-                .args([
-                    "--quiet",
-                    "--no-block",
-                    "--collect",
-                    "--unit=nas-backup-dedup-migration",
-                    "-p",
-                    "Nice=19",
-                    "-p",
-                    "IOSchedulingClass=idle",
-                    "/usr/local/bin/nas",
-                    "backup",
-                    "deduplicate",
-                    "--migration",
-                ])
+            &nas_exec::CommandSpec::new(&cmd)
+                .args(&args[1..])
                 .timeout(std::time::Duration::from_secs(30)),
         );
         return match out {
