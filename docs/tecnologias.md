@@ -7,7 +7,7 @@
 
 ## 1. Núcleo de Plataforma y Lenguaje Rust
 
-La plataforma actual (`0.1.10`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
+La plataforma actual (`0.1.12`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
 
 | Tecnología / Crate | Qué Significa | Qué Problema Resuelve y Beneficio Práctico |
 | :--- | :--- | :--- |
@@ -43,8 +43,8 @@ Cada servidor se optimiza según el **rol** asignado (`ARCHIVOS`, `BACKUP`, `ARC
 
 | Tecnología | Qué Significa y Qué Hace | Beneficio Práctico |
 | :--- | :--- | :--- |
-| **`ext4` optimizado** | *Fourth Extended Filesystem* (Sistema de Archivos Extendido 4) | Usado por defecto en el rol **`ARCHIVOS`**. Configura `noatime` (evita escrituras al leer), `commit=2` en HDD (`commit=5` en SSD) para vaciar transacciones cada 2 segundos ante apagones, y `tune2fs -m 1` para recuperar el 4% de espacio reservado al superusuario. |
-| **`Btrfs` + `zstd:3`** | *B-tree File System* (Sistema de Archivos Árbol-B) + compresión *Zstandard* | Usado por defecto en **`BACKUP`** y **`ARCHIVOS_BACKUP`**. Activa `compress=zstd:3` y `space_cache=v2` (ahorro físico típico del 20% al 40%), `autodefrag` en HDD o `ssd,discard=async` en SSD, y sumas de comprobación bloque a bloque. |
+| **`ext4` optimizado** | *Fourth Extended Filesystem* (Sistema de Archivos Extendido 4) | Usado por defecto en el rol **`ARCHIVOS`**. Configura `noatime` (evita escrituras al leer), `commit=5,errors=remount-ro` (equilibrio entre durabilidad ante apagones y desgaste en flash consumidor), y `tune2fs -m 1` para recuperar el 4% de espacio reservado al superusuario. |
+| **`Btrfs` + `zstd:3`** | *B-tree File System* (Sistema de Archivos Árbol-B) + compresión *Zstandard* | Usado por defecto en **`BACKUP`** y **`ARCHIVOS_BACKUP`**. Activa `compress=zstd:3` y `space_cache=v2` (ahorro físico típico del 20% al 40%), `ssd` sin `discard=async` continuo (TRIM periódico vía `fstrim.timer`), sin `autodefrag` para evitar amplificación CoW sobre snapshots/hardlinks, y sumas de comprobación bloque a bloque. |
 | **`btrfs scrub` mensual** | Verificación de integridad física en Btrfs | Tarea programada en `/etc/cron.d/nas-btrfs-scrub` (día 1 de cada mes a las 02:00) para detectar y corregir corrupción silenciosa (*Bit Rot* — degradación silenciosa de bits en disco). |
 | **LVM (*Logical Volume Manager*)** | Administrador de Volúmenes Lógicos (`pvcreate`, `vgcreate`, `lvcreate`) | Permite crear y ampliar volúmenes lógicos y subvolúmenes Btrfs directamente desde la vista de Almacenamiento del panel web. |
 | **`fstrim.timer`** | Descarte periódico de bloques libres (*TRIM*) | Mantiene la velocidad sostenida de escritura y prolonga la vida útil en SSD y NVMe (*Non-Volatile Memory Express*). |
@@ -73,7 +73,7 @@ Cada servidor se optimiza según el **rol** asignado (`ARCHIVOS`, `BACKUP`, `ARC
 - **Conector Linux (`OpenSSH` + `sshpass`):** usa clave privada Ed25519 por tarea o contraseña en archivo `0600` (`sshpass -e`), registrando huellas en `/root/.ssh/known_hosts_backup` bajo política **TOFU** (*Trust On First Use* — Confianza en el Primer Uso, `StrictHostKeyChecking=accept-new`).
 - **Control `flock` por tarea/volumen, Staging `.inprogress_*` y watchdog:** exclusión mutua por tarea en `/var/lock/backup_<id>.lock`, concurrencia acotada por disco/pool (`nas-pool-*`), verificación híbrida de espacio (`2%` acotado `2 GiB–32 GiB`, corte `95%–98%` y monitoreo periódico durante `rsync`), directorio temporal oculto con limpieza automática ante corte (`trap cleanup EXIT TERM INT`) y soporte de *Golden Snapshots* (`auto_permanent`).
 - **Tuning de Kernel (`sysctl` + `udev`):**
-  - `99-nas-tuning.conf`: `fs.inotify.max_user_watches=524288`, `tcp_keepalive` (limpia sesiones SMB muertas), `vm.dirty_background_bytes` / `vm.dirty_bytes` escalados proporcionalmente a la RAM del servidor (`32–512 MiB`), `rp_filter=1`, `tcp_syncookies=1`, `kptr_restrict=2`, `dmesg_restrict=1`, `yama.ptrace_scope=2` y desactivación de IPv6 (`disable_ipv6=1`).
+  - `99-nas-tuning.conf`: `fs.inotify.max_user_watches=524288`, `tcp_keepalive` (limpia sesiones SMB muertas), `vm.vfs_cache_pressure=100`, `vm.dirty_background_bytes` / `vm.dirty_bytes` escalados proporcionalmente a la RAM del servidor (`32–512 MiB`), `rp_filter=2`, `tcp_syncookies=1`, `kptr_restrict=2`, `dmesg_restrict=1`, `yama.ptrace_scope=2` y desactivación de IPv6 (`disable_ipv6=1`); complementado con `99-nas-journald.conf` (`SystemMaxUse=256M`), `nofail,x-systemd.device-timeout=15s` en `/etc/fstab` y pre-chequeo S.M.A.R.T. / `ro` antes de formatear o deduplicar.
   - `60-nas-readahead.rules`: precarga persistente de bloques (`1024 KB` SSD / `4096 KB` HDD).
 - **Trazabilidad doble (`nas-audit` + `auditd`):** bitácora propia en Rust con encadenamiento SHA-256 (*tamper-evident*) complementada por `auditd` (*Linux Audit Daemon* — Demonio de Auditoría del Kernel) vigilando `/etc/sudoers*`, `/etc/samba/smb.conf`, `/etc/backup-credentials/` y `/usr/local/sbin/nas-terminal`.
 
