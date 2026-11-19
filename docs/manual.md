@@ -1,7 +1,7 @@
 # Manual Operativo, Administración y Diagnóstico
 
 > [!NOTE]
-> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento manual de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.10`.
+> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento manual de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.12`.
 
 ---
 
@@ -164,7 +164,7 @@ sudo sshd -t && sudo systemctl reload ssh
 sudo systemctl enable --now fail2ban
 sudo dpkg-reconfigure -plow unattended-upgrades
 
-# 4. Evitar suspensión accidental en hardware físico
+# 4. Verificar que la suspensión accidental esté enmascarada (ya automatizado en install.sh / nas deploy)
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 
 # 5. Inicializar base criptográfica de integridad offline (AIDE) al cerrar cambios
@@ -196,7 +196,7 @@ sudo mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
 | :--- | :--- | :--- | :--- | :--- |
 | **Copia de Seguridad (`rsync`)** | Apagón o caída de red a mitad del snapshot | Directorio incompleto si se promoviera prematuramente | Staging aislado `.inprogress_*` + `trap cleanup EXIT TERM INT`; promoción `mv` solo con código `0` | Ejecutar de nuevo la tarea desde panel/CLI; el histórico previo permanece intacto. |
 | **Disco de Respaldos (`Btrfs`)** | Llenado del 100% del volumen | Riesgo de bloqueo de metadatos Btrfs y fallo de snapshots | Umbral híbrido (`2%` entre `2 GiB–32 GiB`, corte `95%–98%`) verificado al inicio y cada 15s durante `rsync` | Ajustar retención, purgar snapshots no permanentes y verificar con `btrfs filesystem df /srv/nas`. |
-| **Disco de Datos (`ext4`/`Btrfs`)** | Degradación silenciosa de sectores (*Bit Rot*) | Corrupción inadvertida de archivos antiguos | Sumas de comprobación Btrfs + `btrfs scrub` mensual; `commit=2` en `ext4` HDD anti-apagón | Revisar `btrfs scrub status /srv/nas`; restaurar archivo afectado desde snapshot o Golden Snapshot. |
+| **Disco de Datos (`ext4`/`Btrfs`)** | Degradación silenciosa de sectores (*Bit Rot*) o corte eléctrico en disco consumidor | Corrupción inadvertida o bloqueo `ro` del controlador | Sumas de comprobación Btrfs + `btrfs scrub` mensual; `commit=5,errors=remount-ro` + `nofail,x-systemd.device-timeout=15s` en `fstab`; pre-chequeo S.M.A.R.T. y **UPS/No-Break obligatorio en producción** | Ejecutar `sudo btrfs device scan` y probar montaje en **solo lectura** primero (`mount -o ro` o `ro,rescue=usebackuproot`); revisar `smartctl -H` y `btrfs scrub status /srv/nas` sin ejecutar `--repair` ni formatear. |
 | **Actualización del Sistema** | Paquete corrupto, firma falsa o fallo tras reinicio | Servicio web caído o binario incompatible | Validación `SHA-256` + firma `Ed25519` previa + despliegue en slots A/B `/opt/nas_debian/releases/` + *healthcheck* `/login` | Si se indicó `--previous <ver>`, `nas update apply` revierte el slot automáticamente; en recuperación manual, reenlazar `/opt/nas_debian/current` al slot previo, reinstalar `/opt/nas_debian/current/bin/*` en `/usr/local/bin/` y reiniciar `nas-web` + `nginx`. |
 | **Operación de Almacenamiento** | Selección errónea del disco del sistema operativo | Destrucción del SO Debian y pérdida de arranque | Guardián `is_os_disk()` bloquea formateo/repartición en `/` y `/boot`; confirmación textual `SI-FORMATEAR` | No aplica pérdida si actúa el bloqueo; ante fallo físico de disco SO, reinstalar Debian y usar `--keep-data` sobre el disco de datos. |
 | **Sesión / Autenticación Web** | Ataque de fuerza bruta o intento XSS en archivos | Compromiso de sesión administrativa | `api_rate_limits` (HTTP 429), `PBKDF2-HMAC-SHA512`, `HMAC-SHA256` CSRF, `/api/files/raw` en `sandbox`, sanitizador DOM `.xlsx` | Inspeccionar `/audit` y `nas audit verify`; rotar contraseñas y revocar sesiones en `/var/lib/nas/nas.sqlite`. |
