@@ -55,6 +55,63 @@ fn detect_previous_version(root: &str, target_version: &str) -> Option<String> {
     }
 }
 
+fn is_valid_ed25519_pubkey_hex(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.len() == 64 && trimmed.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn post_update_sync_steps(root: &str, nas_bin: &Path, dst_release_pub: &Path) -> Vec<Vec<String>> {
+    let mut steps = Vec::new();
+    if nas_bin.is_file() {
+        let nas_bin_str = nas_bin.to_string_lossy().to_string();
+        steps.push(vec![
+            nas_bin_str.clone(),
+            "backup".to_string(),
+            "repair-runners".to_string(),
+        ]);
+        steps.push(vec![
+            nas_bin_str,
+            "deploy".to_string(),
+            "resources".to_string(),
+        ]);
+        steps.push(vec![
+            "systemctl".to_string(),
+            "restart".to_string(),
+            "nas-web".to_string(),
+        ]);
+    }
+
+    let src_pub = Path::new(root.trim_end_matches('/'))
+        .join("current")
+        .join("packaging")
+        .join("release.pub");
+    if src_pub.is_file() {
+        if let Ok(src_txt) = std::fs::read_to_string(&src_pub) {
+            let src_clean = src_txt.trim();
+            if is_valid_ed25519_pubkey_hex(src_clean) {
+                let needs_sync = std::fs::read_to_string(dst_release_pub)
+                    .ok()
+                    .map(|cur| !cur.trim().eq_ignore_ascii_case(src_clean))
+                    .unwrap_or(true);
+                if needs_sync {
+                    steps.push(vec![
+                        "install".to_string(),
+                        "-m".to_string(),
+                        "0644".to_string(),
+                        "-o".to_string(),
+                        "root".to_string(),
+                        "-g".to_string(),
+                        "root".to_string(),
+                        src_pub.to_string_lossy().to_string(),
+                        dst_release_pub.to_string_lossy().to_string(),
+                    ]);
+                }
+            }
+        }
+    }
+    steps
+}
+
 pub fn update_status(json: bool) -> NasResult<ExitCode> {
     let pkg_version = env!("CARGO_PKG_VERSION");
     let deployed_version = read_deployed_version(
@@ -580,17 +637,20 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
         return Err(error);
     }
 
-    // Reparar runners obsoletos con el binario recién instalado y programar (una sola vez)
-    // la recuperación de deduplicación.
-    if Path::new("/usr/local/bin/nas").is_file() {
-        let repair_step = vec![
-            "/usr/local/bin/nas".to_string(),
-            "backup".to_string(),
-            "repair-runners".to_string(),
-        ];
-        let _ = run_step(&runner, &repair_step, sudo, 60);
+    // Reparar runners obsoletos, ajustar recursos al hardware, sincronizar `/etc/nas/release.pub`
+    // y programar (una sola vez) la recuperación de deduplicación.
+    let nas_bin = Path::new("/usr/local/bin/nas");
+    let dst_release_pub = Path::new("/etc/nas/release.pub");
+    let post_steps = post_update_sync_steps(root, nas_bin, dst_release_pub);
+    if nas_bin.is_file() {
+        for step in &post_steps {
+            let _ = run_step(&runner, step, sudo, 60);
+        }
     } else {
         let _ = nas_engine::backup_dedup::repair_runners(&runner, Path::new("/usr/local/bin"));
+        for step in &post_steps {
+            let _ = run_step(&runner, step, sudo, 60);
+        }
     }
     let dedup_marker =
         Path::new("/var/lib/nas").join(nas_engine::backup_dedup::DEDUP_MIGRATION_MARKER);
@@ -664,7 +724,7 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_previous_version, read_deployed_version};
+    use super::{detect_previous_version, post_update_sync_steps, read_deployed_version};
     use std::os::unix::fs::symlink;
 
     #[test]
@@ -722,6 +782,60 @@ mod tests {
             Some("1.2.2".to_string())
         );
         assert_eq!(detect_previous_version(&root_str, "1.2.2"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn post_update_sync_steps_incluye_recursos_y_sincroniza_release_pub() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_cli_post_sync_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let src_pkg = dir.join("current/packaging");
+        std::fs::create_dir_all(&src_pkg).expect("mkdir pkg");
+        let fake_bin = dir.join("nas");
+        std::fs::write(&fake_bin, b"bin").expect("write fake nas");
+        let dst_pub = dir.join("etc_release.pub");
+        let valid_pub = "a".repeat(64);
+        let old_pub = "b".repeat(64);
+        std::fs::write(src_pkg.join("release.pub"), format!("{valid_pub}\n")).expect("write src");
+        std::fs::write(&dst_pub, format!("{old_pub}\n")).expect("write dst");
+
+        let root_str = dir.to_string_lossy();
+        let steps = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
+        assert!(steps
+            .iter()
+            .any(|s| s.ends_with(&["backup".to_string(), "repair-runners".to_string()])));
+        assert!(steps
+            .iter()
+            .any(|s| s.ends_with(&["deploy".to_string(), "resources".to_string()])));
+        assert!(steps
+            .iter()
+            .any(|s| s == &vec!["systemctl", "restart", "nas-web"]));
+        assert!(steps
+            .iter()
+            .any(|s| s.first().is_some_and(|a| a == "install")
+                && s.last().is_some_and(|p| p == &dst_pub.to_string_lossy())));
+
+        // Si ya coincide `/etc/nas/release.pub`, no añade `install` innecesario.
+        std::fs::write(&dst_pub, format!("{valid_pub}\n")).expect("sync dst");
+        let steps_same = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
+        assert!(!steps_same
+            .iter()
+            .any(|s| s.first().is_some_and(|a| a == "install")));
+
+        // Si `release.pub` origen es inválido, no toca el destino.
+        std::fs::write(src_pkg.join("release.pub"), "ssh-ed25519 INVALIDA\n").expect("bad src");
+        std::fs::write(&dst_pub, format!("{old_pub}\n")).expect("restore dst");
+        let steps_bad = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
+        assert!(!steps_bad
+            .iter()
+            .any(|s| s.first().is_some_and(|a| a == "install")));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
