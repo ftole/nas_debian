@@ -1,111 +1,89 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%" style="background:#0f172a; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-  <defs>
-    <linearGradient id="role-nas" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#60a5fa"/>
-    </linearGradient>
-    <linearGradient id="role-bkp" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#34d399"/>
-    </linearGradient>
-    <linearGradient id="role-mix" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#fbbf24"/>
-    </linearGradient>
-    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
-      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
-    </filter>
-  </defs>
-
-  <!-- Header -->
-  <rect x="30" y="20" width="900" height="60" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" filter="url(#shadow)"/>
-  <circle cx="65" cy="50" r="14" fill="#f59e0b"/>
-  <path d="M59 50 L65 44 L71 50 M65 44 L65 56" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
-  <text x="92" y="45" fill="#f8fafc" font-size="18" font-weight="700">Matriz de 3 Roles y Selección de Almacenamiento</text>
-  <text x="92" y="64" fill="#94a3b8" font-size="12">Comportamiento de /srv/nas, filesystem por defecto (ext4 / Btrfs) y protección del disco del sistema</text>
-
-  <!-- Barra de Protección y Reutilización -->
-  <g transform="translate(30, 94)">
-    <rect width="900" height="48" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="4,4"/>
-    <text x="20" y="21" fill="#38bdf8" font-size="11" font-weight="700">PROTECCIÓN Y FLEXIBILIDAD EN EL DESPLIEGUE (nas deploy apply):</text>
-    <text x="20" y="38" fill="#cbd5e1" font-size="10.5">• Guardián is_os_disk() impide formatear el disco raíz • --keep-data monta /srv/nas sin borrar • --ext4 / --btrfs sobrescriben el perfil por defecto</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 448" width="100%" height="100%" style="background:#0b1120; font-family:system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <!-- Encabezado -->
+  <rect x="24" y="18" width="912" height="54" rx="10" fill="#111827" stroke="#263244" stroke-width="1"/>
+  <g transform="translate(42, 33)" fill="none" stroke="#10b981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="22" y1="12" x2="2" y2="12"/>
+    <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+    <line x1="6" y1="16" x2="6.01" y2="16"/>
+    <line x1="10" y1="16" x2="10.01" y2="16"/>
   </g>
+  <text x="78" y="42" fill="#f8fafc" font-size="16" font-weight="700">Matriz de Roles y Arquitectura de Almacenamiento</text>
+  <text x="78" y="59" fill="#94a3b8" font-size="11.5">Adaptación automática según rol (/etc/nas/role) • Modelo Pool = Volumen único • Protección is_os_disk()</text>
 
-  <!-- Columna 1: ARCHIVOS -->
-  <g transform="translate(30, 156)">
-    <rect width="286" height="358" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="286" height="5" rx="2" fill="url(#role-nas)"/>
-    <text x="18" y="30" fill="#60a5fa" font-size="14" font-weight="700">1. ARCHIVOS</text>
-    <text x="18" y="47" fill="#94a3b8" font-size="10.5">NAS Departamental • NetBIOS SRV-NAS</text>
+  <!-- Tabla comparativa SVG -->
+  <rect x="24" y="86" width="912" height="292" rx="10" fill="#0f172a" stroke="#263244" stroke-width="1"/>
 
-    <rect x="14" y="60" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="80" fill="#38bdf8" font-size="11" font-weight="700">Filesystem por defecto: ext4</text>
-    <text x="24" y="97" fill="#94a3b8" font-size="10">• HDD: rw,noatime,commit=5,errors=remount-ro</text>
-    <text x="24" y="113" fill="#94a3b8" font-size="10">• SSD: + fstrim.timer y nofail en fstab</text>
-    <text x="24" y="129" fill="#10b981" font-size="10">• tune2fs -m 1 (recupera 4% útil)</text>
+  <!-- Cabecera de columnas -->
+  <rect x="24" y="86" width="912" height="44" rx="10" fill="#111827"/>
+  <rect x="24" y="114" width="912" height="16" fill="#111827"/>
+  <line x1="24" y1="130" x2="936" y2="130" stroke="#263244" stroke-width="1"/>
+  <line x1="205" y1="86" x2="205" y2="378" stroke="#1e293b" stroke-width="1"/>
+  <line x1="448" y1="86" x2="448" y2="378" stroke="#1e293b" stroke-width="1"/>
+  <line x1="692" y1="86" x2="692" y2="378" stroke="#1e293b" stroke-width="1"/>
 
-    <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Recursos y Acceso SMB</text>
-    <text x="24" y="193" fill="#94a3b8" font-size="10">• Carpetas visibles en red Windows</text>
-    <text x="24" y="209" fill="#94a3b8" font-size="10">• VFS: acl_xattr, streams_xattr, recycle</text>
-    <text x="24" y="225" fill="#94a3b8" font-size="10">• Protocolo SMB2_10..SMB3_11</text>
+  <text x="42" y="113" fill="#94a3b8" font-size="10.5" font-weight="700" letter-spacing="0.8">CRITERIO</text>
+  <text x="223" y="106" fill="#38bdf8" font-size="12" font-weight="700">1. ARCHIVOS</text>
+  <text x="223" y="121" fill="#94a3b8" font-size="10">NAS Departamental (SRV-NAS)</text>
+  <text x="466" y="106" fill="#10b981" font-size="12" font-weight="700">2. BACKUP</text>
+  <text x="466" y="121" fill="#94a3b8" font-size="10">Central de Respaldos (SRV-BKP)</text>
+  <text x="710" y="106" fill="#fbbf24" font-size="12" font-weight="700">3. ARCHIVOS_BACKUP</text>
+  <text x="710" y="121" fill="#94a3b8" font-size="10">Nodo Híbrido Unificado</text>
 
-    <rect x="14" y="258" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="278" fill="#f8fafc" font-size="11" font-weight="700">Ajustes de Bloque y Cron</text>
-    <text x="24" y="295" fill="#94a3b8" font-size="10">• udev readahead: 4096 KB HDD / 1024 SSD</text>
-    <text x="24" y="311" fill="#94a3b8" font-size="10">• Sin btrfs scrub programado</text>
-    <text x="24" y="327" fill="#38bdf8" font-size="10">• Purga diaria de .recycle (&gt;15 días)</text>
+  <!-- Fila 1: Filesystem -->
+  <rect x="25" y="131" width="910" height="46" fill="#0f172a"/>
+  <text x="42" y="159" fill="#cbd5e1" font-size="11.5" font-weight="600">Sistema de archivos</text>
+  <text x="223" y="152" fill="#f8fafc" font-size="12" font-weight="700">ext4 (defecto)</text>
+  <text x="223" y="168" fill="#94a3b8" font-size="10.5">Cambiable con --btrfs</text>
+  <text x="466" y="152" fill="#f8fafc" font-size="12" font-weight="700">Btrfs + zstd (defecto)</text>
+  <text x="466" y="168" fill="#94a3b8" font-size="10.5">Cambiable con --ext4</text>
+  <text x="710" y="152" fill="#f8fafc" font-size="12" font-weight="700">Btrfs + zstd (defecto)</text>
+  <text x="710" y="168" fill="#94a3b8" font-size="10.5">Soporta LVM y subvolúmenes</text>
+  <line x1="24" y1="177" x2="936" y2="177" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Fila 2: Estructura -->
+  <rect x="25" y="178" width="910" height="50" fill="#111827"/>
+  <text x="42" y="207" fill="#cbd5e1" font-size="11.5" font-weight="600">Estructura en /srv/nas</text>
+  <text x="223" y="200" fill="#f8fafc" font-size="11">Carpetas visibles en red</text>
+  <text x="223" y="216" fill="#94a3b8" font-size="10">ACLs POSIX (2770) • Papelera .recycle</text>
+  <text x="466" y="200" fill="#f8fafc" font-size="11">BACKUPS_HISTORICOS / LOGS</text>
+  <text x="466" y="216" fill="#94a3b8" font-size="10">BACKUPS_PERMANENTES • Recursos $</text>
+  <text x="710" y="200" fill="#f8fafc" font-size="11">Recursos visibles + repositorios</text>
+  <text x="710" y="216" fill="#94a3b8" font-size="10">Módulos /shares y /backups activos</text>
+  <line x1="24" y1="228" x2="936" y2="228" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Fila 3: Integridad -->
+  <rect x="25" y="229" width="910" height="50" fill="#0f172a"/>
+  <text x="42" y="258" fill="#cbd5e1" font-size="11.5" font-weight="600">Integridad y ahorro</text>
+  <text x="223" y="251" fill="#f8fafc" font-size="11">Journal transaccional ext4</text>
+  <text x="223" y="267" fill="#38bdf8" font-size="10">Bloqueo SMB optimizado (+100 PCs)</text>
+  <text x="466" y="251" fill="#f8fafc" font-size="11">Sumas criptográficas + scrub</text>
+  <text x="466" y="267" fill="#10b981" font-size="10">Compresión + hardlinks (&gt;85% ahorro)</text>
+  <text x="710" y="251" fill="#f8fafc" font-size="11">Sumas criptográficas + scrub</text>
+  <text x="710" y="267" fill="#fbbf24" font-size="10">Todas las vistas web habilitadas</text>
+  <line x1="24" y1="279" x2="936" y2="279" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Fila 4: Resiliencia hardware -->
+  <rect x="25" y="280" width="910" height="50" fill="#111827"/>
+  <text x="42" y="309" fill="#cbd5e1" font-size="11.5" font-weight="600">Cuidado de disco</text>
+  <text x="223" y="302" fill="#f8fafc" font-size="11">Montaje estable (sin desgaste)</text>
+  <text x="223" y="318" fill="#94a3b8" font-size="10">errors=remount-ro • TRIM periódico</text>
+  <text x="466" y="302" fill="#f8fafc" font-size="11">Sin autodefrag ni discard continuo</text>
+  <text x="466" y="318" fill="#94a3b8" font-size="10">Evita amplificación CoW en flash</text>
+  <text x="710" y="302" fill="#f8fafc" font-size="11">Sin autodefrag ni discard continuo</text>
+  <text x="710" y="318" fill="#94a3b8" font-size="10">Pre-chequeo S.M.A.R.T. y estado ro</text>
+  <line x1="24" y1="330" x2="936" y2="330" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Fila 5: Arranque -->
+  <rect x="25" y="331" width="910" height="46" rx="8" fill="#0f172a"/>
+  <text x="42" y="358" fill="#cbd5e1" font-size="11.5" font-weight="600">Tolerancia de arranque</text>
+  <text x="223" y="358" fill="#10b981" font-size="11">fstab con nofail + timeout 15s</text>
+  <text x="466" y="358" fill="#10b981" font-size="11">fstab con nofail + timeout 15s</text>
+  <text x="710" y="358" fill="#10b981" font-size="11">fstab con nofail + timeout 15s</text>
+
+  <!-- Barra inferior: Guardrails -->
+  <rect x="24" y="392" width="912" height="38" rx="8" fill="#111827" stroke="#263244" stroke-width="1"/>
+  <g transform="translate(38, 401)" fill="none" stroke="#fbbf24" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
   </g>
-
-  <!-- Columna 2: BACKUP -->
-  <g transform="translate(337, 156)">
-    <rect width="286" height="358" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="286" height="5" rx="2" fill="url(#role-bkp)"/>
-    <text x="18" y="30" fill="#34d399" font-size="14" font-weight="700">2. BACKUP</text>
-    <text x="18" y="47" fill="#94a3b8" font-size="10.5">Central de Respaldos • NetBIOS SRV-BKP</text>
-
-    <rect x="14" y="60" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="80" fill="#34d399" font-size="11" font-weight="700">Filesystem por defecto: Btrfs</text>
-    <text x="24" y="97" fill="#94a3b8" font-size="10">• compress=zstd:3,space_cache=v2</text>
-    <text x="24" y="113" fill="#94a3b8" font-size="10">• HDD: space_cache=v2 | SSD: ssd + fstrim</text>
-    <text x="24" y="129" fill="#10b981" font-size="10">• Ahorro de espacio ~20% a 40%</text>
-
-    <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Directorios de Respaldo (2770)</text>
-    <text x="24" y="193" fill="#94a3b8" font-size="10">• /srv/nas/BACKUPS_HISTORICOS</text>
-    <text x="24" y="209" fill="#94a3b8" font-size="10">• /srv/nas/BACKUPS_PERMANENTES</text>
-    <text x="24" y="225" fill="#94a3b8" font-size="10">• LOGS_BACKUP + recursos $ Samba</text>
-
-    <rect x="14" y="258" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="278" fill="#f8fafc" font-size="11" font-weight="700">Integridad y Snapshots</text>
-    <text x="24" y="295" fill="#94a3b8" font-size="10">• btrfs scrub día 1 de mes a las 02:00</text>
-    <text x="24" y="311" fill="#94a3b8" font-size="10">• rsync --link-dest (deduplicación &gt;85%)</text>
-    <text x="24" y="327" fill="#34d399" font-size="10">• Checksums nativos anti Bit Rot</text>
-  </g>
-
-  <!-- Columna 3: ARCHIVOS_BACKUP -->
-  <g transform="translate(644, 156)">
-    <rect width="286" height="358" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1.2" filter="url(#shadow)"/>
-    <rect x="0" y="0" width="286" height="5" rx="2" fill="url(#role-mix)"/>
-    <text x="18" y="30" fill="#fbbf24" font-size="14" font-weight="700">3. ARCHIVOS_BACKUP</text>
-    <text x="18" y="47" fill="#94a3b8" font-size="10.5">Rol Mixto Unificado (NAS + Central)</text>
-
-    <rect x="14" y="60" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="80" fill="#fbbf24" font-size="11" font-weight="700">Filesystem por defecto: Btrfs</text>
-    <text x="24" y="97" fill="#94a3b8" font-size="10">• compress=zstd:3,space_cache=v2</text>
-    <text x="24" y="113" fill="#94a3b8" font-size="10">• Admite override --ext4 si se requiere</text>
-    <text x="24" y="129" fill="#f59e0b" font-size="10">• Ideal para sedes con nodo único</text>
-
-    <rect x="14" y="156" width="258" height="90" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="176" fill="#f8fafc" font-size="11" font-weight="700">Recursos Combinados</text>
-    <text x="24" y="193" fill="#94a3b8" font-size="10">• Carpetas departamentales visibles</text>
-    <text x="24" y="209" fill="#94a3b8" font-size="10">• + BACKUPS_HISTORICOS / LOGS</text>
-    <text x="24" y="225" fill="#94a3b8" font-size="10">• + Gestión LVM / subvolúmenes Btrfs</text>
-
-    <rect x="14" y="258" width="258" height="84" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-    <text x="24" y="278" fill="#f8fafc" font-size="11" font-weight="700">Mantenimiento Activo</text>
-    <text x="24" y="295" fill="#94a3b8" font-size="10">• btrfs scrub mensual programado</text>
-    <text x="24" y="311" fill="#94a3b8" font-size="10">• Purga diaria de papelera .recycle</text>
-    <text x="24" y="327" fill="#fbbf24" font-size="10">• Todas las vistas web habilitadas</text>
-  </g>
+  <text x="66" y="415" fill="#cbd5e1" font-size="11"><tspan fill="#fbbf24" font-weight="700">Reglas invariantes:</tspan> is_os_disk() impide formatear / o /boot  •  --keep-data monta datos existentes sin borrar  •  Producción requiere UPS</text>
 </svg>
