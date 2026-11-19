@@ -124,10 +124,12 @@ La plataforma utiliza Rust con `#![forbid(unsafe_code)]`, `CommandSpec` sin int�
 <details>
 <summary>Diagramas vectoriales incluidos en <code>docs/assets/</code></summary>
 
-- [arquitectura_general.svg](./docs/assets/arquitectura_general.svg) — Capas del sistema y almacenamiento.
-- [roles_almacenamiento.svg](./docs/assets/roles_almacenamiento.svg) — Matriz de roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`).
-- [modelo_seguridad.svg](./docs/assets/modelo_seguridad.svg) — Controles automatizados vs endurecimiento manual.
-- [flujo_backups.svg](./docs/assets/flujo_backups.svg) — Pipeline `install-spec`, `flock`, staging y retención.
+- [arquitectura_general.svg](./docs/assets/arquitectura_general.svg) — Capas del sistema, frontera de privilegios y almacenamiento.
+- [workspace_crates.svg](./docs/assets/workspace_crates.svg) — Tabla visual del workspace Rust (11 crates).
+- [frontera_privilegios.svg](./docs/assets/frontera_privilegios.svg) — Flujo `nas-exec`/`sudo -n` y tabla de los 7 helpers root.
+- [roles_almacenamiento.svg](./docs/assets/roles_almacenamiento.svg) — Matriz comparativa de los 3 roles (`ARCHIVOS`, `BACKUP`, `ARCHIVOS_BACKUP`).
+- [modelo_seguridad.svg](./docs/assets/modelo_seguridad.svg) — Controles automáticos vs endurecimiento manual.
+- [flujo_backups.svg](./docs/assets/flujo_backups.svg) — Pipeline `stdin`, `flock`, umbral híbrido, staging y retención.
 - [flujo_autenticacion_y_privilegios.svg](./docs/assets/flujo_autenticacion_y_privilegios.svg) — Flujo HTTPS, `PBKDF2`/`CSRF`, `sudoers` y 7 helpers root.
 - [ciclo_release_y_actualizacion.svg](./docs/assets/ciclo_release_y_actualizacion.svg) — Puertas CI, firma `Ed25519`, slots A/B y rollback.
 - [entorno_lab_worktrees.svg](./docs/assets/entorno_lab_worktrees.svg) — Laboratorio multi-agente con `git worktree`.
