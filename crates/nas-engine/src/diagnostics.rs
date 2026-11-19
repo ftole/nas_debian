@@ -85,6 +85,20 @@ pub fn collect(paths: &NasPaths, runner: &Runner) -> Vec<Check> {
         ip.unwrap_or_else(|| "sin IPv4 global".to_string()),
     ));
 
+    let root_ro = crate::storage::path_is_mounted_readonly(std::path::Path::new("/"));
+    let data_ro = crate::storage::path_is_mounted_readonly(&paths.data_root);
+    checks.push(Check::new(
+        "montaje:rw",
+        !root_ro && !data_ro,
+        if root_ro {
+            "/ montado en solo lectura (ro)"
+        } else if data_ro {
+            "almacenamiento de datos montado en solo lectura (ro)"
+        } else {
+            "/ y datos en lectura/escritura"
+        },
+    ));
+
     let budget = nas_core::ResourceBudget::detect();
     let res = &budget.resources;
     checks.push(Check::new(
