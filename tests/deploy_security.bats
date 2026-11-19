@@ -46,10 +46,10 @@ _extraer_bloque_audit() {
     _extraer_bloque_sysctl > "$tmp"
     [ -s "$tmp" ]
 
-    run grep -q '^net\.ipv4\.conf\.all\.rp_filter = 1$' "$tmp"
+    run grep -q '^net\.ipv4\.conf\.all\.rp_filter = 2$' "$tmp"
     [ "$status" -eq 0 ]
 
-    run grep -q '^net\.ipv4\.conf\.default\.rp_filter = 1$' "$tmp"
+    run grep -q '^net\.ipv4\.conf\.default\.rp_filter = 2$' "$tmp"
     [ "$status" -eq 0 ]
 
     run grep -q '^net\.ipv4\.tcp_syncookies = 1$' "$tmp"
