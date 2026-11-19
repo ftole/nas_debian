@@ -55,12 +55,17 @@ impl BackupSpec {
             Proto::Local => "SRC=\"${SRC_PATH:-/}/\"".to_string(),
         };
 
+        let extra_rsync_flags = match proto {
+            Proto::Cifs => "--no-o --no-g ",
+            Proto::Ssh | Proto::Local => "",
+        };
+
         let rsync = match proto {
             Proto::Ssh => {
-                "mkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nif [ -n \"$KEY_FILE\" ] && [ -f \"$KEY_FILE\" ]; then\n    nice -n 10 ionice -c 2 -n 7 rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i $KEY_FILE -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelif [ -f \"/etc/backup-credentials/$TASK.id_ed25519\" ]; then\n    nice -n 10 ionice -c 2 -n 7 rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelse\n    SSHPASS=\"\"\n    if [ -f \"$CRED\" ]; then\n        IFS= read -r SSHPASS < \"$CRED\" || true\n    fi\n    export SSHPASS\n    nice -n 10 ionice -c 2 -n 7 sshpass -e rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\n    unset SSHPASS\nfi".to_string()
+                "mkdir -p /root/.ssh\nchmod 0700 /root/.ssh\nRSYNC_RC=0\nSTDBUF_CMD=()\nif command -v stdbuf >/dev/null 2>&1; then STDBUF_CMD=(stdbuf -oL); fi\nif [ -n \"$KEY_FILE\" ] && [ -f \"$KEY_FILE\" ]; then\n    nice -n 10 ionice -c 2 -n 7 \"${STDBUF_CMD[@]}\" rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i $KEY_FILE -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | \"${STDBUF_CMD[@]}\" tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelif [ -f \"/etc/backup-credentials/$TASK.id_ed25519\" ]; then\n    nice -n 10 ionice -c 2 -n 7 \"${STDBUF_CMD[@]}\" rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | \"${STDBUF_CMD[@]}\" tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\nelse\n    SSHPASS=\"\"\n    if [ -f \"$CRED\" ]; then\n        IFS= read -r SSHPASS < \"$CRED\" || true\n    fi\n    export SSHPASS\n    nice -n 10 ionice -c 2 -n 7 \"${STDBUF_CMD[@]}\" sshpass -e rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -e \"ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | \"${STDBUF_CMD[@]}\" tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}\n    unset SSHPASS\nfi".to_string()
             }
             _ => {
-                "RSYNC_RC=0\nnice -n 10 ionice -c 2 -n 7 rsync -aAXH --info=progress2 --numeric-ids --safe-links --timeout=300 \"${LINK_ARGS[@]}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | tr '\\r' '\\n' | update_progress || RSYNC_RC=${PIPESTATUS[0]}".to_string()
+                format!("RSYNC_RC=0\nSTDBUF_CMD=()\nif command -v stdbuf >/dev/null 2>&1; then STDBUF_CMD=(stdbuf -oL); fi\nnice -n 10 ionice -c 2 -n 7 \"${{STDBUF_CMD[@]}}\" rsync -aAXH {extra_rsync_flags}--info=progress2 --numeric-ids --safe-links --timeout=300 \"${{LINK_ARGS[@]}}\" -- \"$SRC\" \"$STAGE\" 2>> \"$LOG\" | \"${{STDBUF_CMD[@]}}\" tr '\\r' '\\n' | update_progress || RSYNC_RC=${{PIPESTATUS[0]}}")
             }
         };
 
@@ -87,9 +92,9 @@ BKP_DIR="${{BKP_DIR:-$DEST_ROOT/$TASK}}"
 PERM_DIR="${{PERM_DIR:-${{DEST_ROOT/BACKUPS_HISTORICOS/BACKUPS_PERMANENTES}}/$TASK}}"
 LOG="${{LOG_FILE:-$LOG_DIR/backup_${{TASK}}.log}}"
 MOUNT="${{MOUNT_ROOT:-/mnt/backup_sources}}/$TASK"
-PROG_FILE="/run/nas-backup-$TASK.progress"
+PROG_FILE="${{PROG_FILE:-/run/nas-backup-$TASK.progress}}"
 DATE_STR=$(date +%Y-%m-%d_%H%M%S)
-START_TIME=$(date +%s)
+START_TIME="${{START_TIME:-$(date +%s)}}"
 STAGE="$BKP_DIR/.inprogress_$DATE_STR"
 FINAL="$BKP_DIR/snapshot_$DATE_STR"
 SPACE_ABORT_FLAG="$BKP_DIR/.space_abort_$DATE_STR"
@@ -121,20 +126,69 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
+write_prog() {{
+    local pct="$1" spd="$2" elap="$3" rem="$4" bytes="$5" tmp_file
+    tmp_file="${{PROG_FILE}}.tmp.$$"
+    printf '{{"percent":%d,"speed":"%s","elapsed":"%s","remaining":"%s","bytes":"%s","started_at":%d}}\n' \
+        "$pct" "$spd" "$elap" "$rem" "$bytes" "$START_TIME" > "$tmp_file" 2>/dev/null || true
+    chmod 0644 "$tmp_file" 2>/dev/null || true
+    mv -f "$tmp_file" "$PROG_FILE" 2>/dev/null || true
+}}
+
 update_progress() {{
-    local b pct spd rem rest num_pct diff elap tmp_file
-    while read -r b pct spd rem rest; do
+    local b pct spd rsync_elap rest num_pct eff_pct file_pct diff elap rem rem_secs chk_pair chk_rem chk_tot now_sec last_sec=-1 last_pct=-1
+    while read -r b pct spd rsync_elap rest; do
         [ -z "$pct" ] && continue
         num_pct="${{pct%%%}}"
         num_pct="${{num_pct//[^0-9]/}}"
         [ -z "$num_pct" ] && continue
-        diff=$(($(date +%s) - START_TIME))
+
+        file_pct=0
+        chk_pair=""
+        if [[ "$rest" =~ (to-chk|ir-chk)=([0-9]+)/([0-9]+) ]]; then
+            chk_rem="${{BASH_REMATCH[2]}}"
+            chk_tot="${{BASH_REMATCH[3]}}"
+            if [ "$chk_tot" -gt 0 ] 2>/dev/null; then
+                if [ "$chk_rem" -eq 0 ]; then
+                    file_pct=100
+                else
+                    file_pct=$(( (chk_tot - chk_rem) * 100 / chk_tot ))
+                    [ "$file_pct" -gt 99 ] && file_pct=99
+                fi
+                chk_pair="$((chk_tot - chk_rem))/$chk_tot"
+            fi
+        fi
+
+        eff_pct="$num_pct"
+        if [ "$eff_pct" -eq 0 ] && [ "$file_pct" -gt 0 ]; then
+            eff_pct="$file_pct"
+        fi
+        if [ "$eff_pct" -gt 100 ]; then eff_pct=100; fi
+
+        now_sec=$(date +%s)
+        if [ "$now_sec" = "$last_sec" ] && [ "$eff_pct" = "$last_pct" ]; then
+            continue
+        fi
+        last_sec="$now_sec"
+        last_pct="$eff_pct"
+
+        diff=$((now_sec - START_TIME))
+        [ "$diff" -lt 0 ] && diff=0
         elap=$(printf '%02d:%02d:%02d' $((diff/3600)) $(((diff%3600)/60)) $((diff%60)))
-        tmp_file="${{PROG_FILE}}.tmp.$$"
-        printf '{{"percent":%d,"speed":"%s","elapsed":"%s","remaining":"%s","bytes":"%s"}}\n' \
-            "$num_pct" "${{spd:-0.00kB/s}}" "$elap" "${{rem:---:--:--}}" "${{b//,/}}" > "$tmp_file" 2>/dev/null || true
-        chmod 0644 "$tmp_file" 2>/dev/null || true
-        mv -f "$tmp_file" "$PROG_FILE" 2>/dev/null || true
+
+        if [ "$eff_pct" -ge 100 ]; then
+            rem="00:00:00"
+        elif [ "$eff_pct" -ge 1 ] && [ "$diff" -ge 2 ]; then
+            rem_secs=$(( diff * (100 - eff_pct) / eff_pct ))
+            rem=$(printf '%02d:%02d:%02d' $((rem_secs/3600)) $(((rem_secs%3600)/60)) $((rem_secs%60)))
+        else
+            rem="--:--:--"
+        fi
+
+        if [ "$num_pct" -eq 0 ] && [ "$spd" = "0.00kB/s" ] && [ -n "$chk_pair" ]; then
+            spd="Enlazando ($chk_pair archivos)"
+        fi
+        write_prog "$eff_pct" "${{spd:-0.00kB/s}}" "$elap" "$rem" "${{b//,/}}"
     done
 }}
 
@@ -143,6 +197,7 @@ chown root:grp_samba "$PERM_DIR" 2>/dev/null || true
 chmod 2770 "$PERM_DIR" 2>/dev/null || true
 exec 9>"${{LOCK_DIR:-/var/lock}}/backup_$TASK.lock"
 flock -n 9 || {{ log "=== BACKUP OMITIDO: ya hay una ejecucion en curso ($DATE_STR) ==="; exit 0; }}
+find "$BKP_DIR" -maxdepth 1 -type d -name '.inprogress_*' -exec rm -rf -- {{}} + 2>/dev/null || true
 
 POOL_SRC=$(df -Pk "$BKP_DIR" 2>/dev/null | awk 'NR==2 {{print $1}}' || true)
 POOL_DEV="${{POOL_SRC%%\[*}}"
@@ -170,6 +225,7 @@ if [ "$POOL_LOCKED" != "true" ]; then
     HASH_NUM=$(printf '%s' "$TASK" | cksum | awk '{{print $1}}')
     WAIT_SLOT=$(( (HASH_NUM % POOL_SLOTS) + 1 ))
     exec 8>"${{LOCK_DIR:-/var/lock}}/nas-pool-${{POOL_KEY}}_slot_${{WAIT_SLOT}}.lock"
+    write_prog 0 "En cola de volumen" "00:00:00" "--:--:--" "0"
     log "esperando turno de escritura en el volumen $POOL_KEY (maximo $POOL_SLOTS simultaneos)"
     if ! flock -w 21600 8; then
         log "=== ABORTADO: tiempo de espera agotado en cola de volumen $POOL_KEY ==="
@@ -223,11 +279,11 @@ elif [ -d "$PERM_DIR" ]; then
 fi
 
 mkdir -p "$STAGE"
+write_prog 0 "Montando origen..." "00:00:00" "--:--:--" "0"
 {source_setup}
 
 log "inicio ($MODE): $SRC"
-printf '{{"percent":0,"speed":"0.00kB/s","elapsed":"00:00:00","remaining":"--:--:--","bytes":"0"}}\n' > "$PROG_FILE" 2>/dev/null || true
-chmod 0644 "$PROG_FILE" 2>/dev/null || true
+write_prog 0 "Escaneando origen..." "00:00:00" "--:--:--" "0"
 rm -f "$SPACE_ABORT_FLAG" 2>/dev/null || true
 SPACE_CHECK_INTERVAL="${{NAS_BACKUP_SPACE_CHECK_SECS:-15}}"
 if [ "$SPACE_CHECK_INTERVAL" -lt 1 ] 2>/dev/null; then SPACE_CHECK_INTERVAL=15; fi
