@@ -70,9 +70,14 @@ fn post_update_sync_steps(root: &str, nas_bin: &Path, dst_release_pub: &Path) ->
             "repair-runners".to_string(),
         ]);
         steps.push(vec![
-            nas_bin_str,
+            nas_bin_str.clone(),
             "deploy".to_string(),
             "resources".to_string(),
+        ]);
+        steps.push(vec![
+            nas_bin_str,
+            "deploy".to_string(),
+            "ensure-deps".to_string(),
         ]);
         steps.push(vec![
             "systemctl".to_string(),
@@ -800,6 +805,9 @@ mod tests {
         assert!(steps
             .iter()
             .any(|s| s.ends_with(&["deploy".to_string(), "resources".to_string()])));
+        assert!(steps
+            .iter()
+            .any(|s| s.ends_with(&["deploy".to_string(), "ensure-deps".to_string()])));
         assert!(steps
             .iter()
             .any(|s| s == &vec!["systemctl", "restart", "nas-web"]));
