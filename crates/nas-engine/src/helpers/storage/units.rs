@@ -204,7 +204,7 @@ pub fn scrub_unit_start(runner: &Runner, unit: &str) -> NasResult<String> {
     let mount_dir = resolve_unit_mount_dir(unit)?;
     let out = runner.run(
         &CommandSpec::new("btrfs")
-            .args(["scrub", "start", &mount_dir])
+            .args(["scrub", "start", "-c", "3", &mount_dir])
             .timeout(Duration::from_secs(30)),
     )?;
     if out.is_success() {
