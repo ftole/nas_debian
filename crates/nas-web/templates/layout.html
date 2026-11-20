@@ -569,6 +569,9 @@
             <button class="btn btn-secondary" id="btn-format-disk" onclick="openStorageManage()">
               <svg class="icon"><use href="#icon-hard-drive"></use></svg> Gestión avanzada
             </button>
+            <button class="btn btn-secondary" id="btn-power-guide" onclick="openModal('modal-power-guide')">
+              <svg class="icon"><use href="#icon-shield"></use></svg> Resiliencia Eléctrica
+            </button>
           </div>
         </div>
 
@@ -628,6 +631,14 @@
               </div>
               <button type="button" class="btn btn-secondary btn-sm" id="btn-sanitize-fstab" onclick="sanitizeStorageFstab()">Sanear /etc/fstab</button>
             </div>
+
+            <div id="stg-io-errors-alert" style="display:none; margin-top:12px; justify-content:space-between; align-items:center; gap:10px;" class="alert-box alert-box-danger">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-alert-triangle"></use></svg>
+                <span id="stg-io-errors-alert-text"></span>
+              </div>
+              <button type="button" class="btn btn-danger btn-sm" onclick="runStorageScrub()">Ejecutar Scrub BTRFS</button>
+            </div>
           </div>
         </div>
 
@@ -640,6 +651,23 @@
           <div class="panel-card-body">
             <div id="storage-pools-grid" class="card-grid-2">
               <div style="text-align:center; color:var(--text-muted); padding:12px;">Cargando pools y volúmenes...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Protección Eléctrica / UPS (Opcional) -->
+        <div class="panel-card" style="margin-bottom:20px;" id="stg-ups-card">
+          <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Resiliencia Eléctrica y UPS (opcional)</h3>
+            <span id="stg-ups-badge" class="badge badge-gray">Sin UPS configurado</span>
+          </div>
+          <div class="panel-card-body" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div style="font-size:13px; color:var(--text-secondary);" id="stg-ups-detail">
+              La plataforma opera sobre hardware común sin requerir UPS físico; si conectas un UPS USB, puedes activar apagado limpio automático mediante NUT.
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-ups-configure" onclick="openModal('modal-ups-config')">Detectar y configurar UPS USB</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btn-ups-disable" style="display:none;" onclick="openModal('modal-ups-disable')">Desactivar UPS</button>
             </div>
           </div>
         </div>
@@ -2372,6 +2400,13 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div id="stg-inspect-box" style="display:none; margin:10px 0; padding:10px; border-radius:6px; font-size:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-color);">
             <div style="font-weight:600; margin-bottom:4px;" id="stg-inspect-title">Inspección del dispositivo:</div>
             <div id="stg-inspect-details" style="color:var(--text-muted);"></div>
+            <div id="stg-write-cache-box" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border-color);">
+              <div id="stg-write-cache-status" style="margin-bottom:6px;"></div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-wc-off" onclick="toggleDiskWriteCache(false)">Desactivar caché volátil (Máxima protección)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-wc-on" onclick="toggleDiskWriteCache(true)">Activar caché volátil (Rendimiento)</button>
+              </div>
+            </div>
           </div>
           <div class="form-group" id="stg-unit-wrap" style="display:none;">
             <label for="stg-unit-id">Identificador de la unidad (ej. disco2, extra, multimedia):</label>
@@ -3317,6 +3352,77 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-storage-pool-confirm')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-pool-action" onclick="executePoolActionConfirm()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Configurar UPS USB (NUT bajo demanda) -->
+  <div class="modal-backdrop modal-static" id="modal-ups-config">
+    <div class="modal-dialog" style="max-width:540px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Configurar UPS USB (NUT)</h3>
+        <button class="modal-close" onclick="closeModal('modal-ups-config')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-info" style="margin-bottom:12px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-info"></use></svg>
+          <span>Si falta el paquete <code>nut</code>, el sistema lo instalará automáticamente y detectará el UPS conectado por USB.</span>
+        </div>
+        <div class="form-group">
+          <label for="ups-min-battery">Umbral de batería para apagado automático (%):</label>
+          <input type="number" id="ups-min-battery" value="35" min="15" max="80">
+          <small style="display:block; color:var(--text-muted); margin-top:4px;">Recomendado: 30%–40% para dar tiempo suficiente al desmontaje seguro de pools.</small>
+        </div>
+        <div class="form-group">
+          <label for="ups-confirm-input">Confirmación (escribe <code>SI-CONFIGURAR</code>):</label>
+          <input type="text" id="ups-confirm-input" placeholder="SI-CONFIGURAR" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-ups-config')">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-ups-config" onclick="configureUsbUps()">Detectar y activar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Desactivar UPS USB -->
+  <div class="modal-backdrop modal-static" id="modal-ups-disable">
+    <div class="modal-dialog" style="max-width:480px;">
+      <div class="modal-header">
+        <h3 style="color:var(--accent-danger);"><svg class="icon" style="color:var(--accent-danger);"><use href="#icon-alert-triangle"></use></svg> Desactivar monitoreo UPS</h3>
+        <button class="modal-close" onclick="closeModal('modal-ups-disable')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px; color:var(--text-secondary);">Se detendrán los servicios <code>nut-monitor</code> y <code>nut-server</code>. El servidor dejará de apagarse automáticamente ante corte eléctrico.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-ups-disable')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-ups-disable" onclick="disableUsbUps()">Desactivar UPS</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Guía de Resiliencia Eléctrica y Discos de Consumo -->
+  <div class="modal-backdrop modal-static" id="modal-power-guide">
+    <div class="modal-dialog" style="max-width:620px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Guía de Protección ante Cortes Eléctricos</h3>
+        <button class="modal-close" onclick="closeModal('modal-power-guide')">&times;</button>
+      </div>
+      <div class="modal-body" style="font-size:13px; color:var(--text-secondary); line-height:1.55;">
+        <div class="alert-box alert-box-info" style="margin-bottom:12px;">
+          <svg class="icon icon-sm" style="flex-shrink:0;"><use href="#icon-info"></use></svg>
+          <span>Esta plataforma funciona sobre hardware común sin requerir SSD con PLP; aun así, las protecciones físicas son requisito recomendado en producción.</span>
+        </div>
+        <ul style="margin:0 0 12px 18px;">
+          <li><strong>Auto-arranque en BIOS/UEFI:</strong> activa <code>Restore on AC Power Loss = Power On</code> para que el NAS regrese en línea tras cualquier apagón prolongado.</li>
+          <li><strong>Caché volátil del disco (hdparm -W0):</strong> en <em>Gestión avanzada</em> puedes desactivar la caché DRAM interna de discos HDD/SATA sin PLP (prioriza integridad ante cortes sobre velocidad en archivos pequeños).</li>
+          <li><strong>Capacidad sumada vs Espejo RAID1:</strong> Btrfs <code>single</code> suma discos y protege metadatos en <code>RAID1</code>, pero solo <code>Btrfs RAID1</code> tolera fallo físico de un disco tras un pico eléctrico.</li>
+          <li><strong>Hardware recomendado en producción:</strong> UPS/No-Break USB (compatible con el módulo NUT de esta vista), supresor de picos/regulador y SSD con PLP para el sistema raíz (<code>/</code>).</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-power-guide')">Entendido</button>
       </div>
     </div>
   </div>
