@@ -34,10 +34,17 @@ async function onStorageDeviceChange() {
     if (info.size) html += ` · Capacidad: <strong>${escapeHtml(info.size)}</strong>`;
     html += '</div>';
 
+    if (info.smart_available) {
+      const smartColor = info.smart_healthy ? 'var(--accent-success-text)' : 'var(--accent-danger)';
+      html += `<div style="color:${smartColor}; margin-top:4px;">S.M.A.R.T.: ${escapeHtml(info.smart_detail || (info.smart_healthy ? 'PASSED' : 'FAILED'))}</div>`;
+    } else if (info.smart_detail) {
+      html += `<div style="color:var(--text-muted); margin-top:2px;">S.M.A.R.T.: ${escapeHtml(info.smart_detail)}</div>`;
+    }
+
     if (info.has_data) {
       html += `<div style="color:var(--accent-warning); margin-top:4px; font-weight:600;">⚠️ ATENCIÓN: El dispositivo contiene particiones o firmas preexistentes.</div>`;
       if (info.signatures && info.signatures.length > 0) {
-        html += `<div style="margin-top:2px;">Firmas detectadas: <code>${info.signatures.map(s => escapeHtml(s.type || s.label || s.uuid || '')).filter(Boolean).join(', ')}</code></div>`;
+        html += `<div style="margin-top:2px;">Firmas detectadas: <code>${info.signatures.map(s => escapeHtml(typeof s === 'string' ? s : (s?.type || s?.label || s?.uuid || ''))).filter(Boolean).join(', ')}</code></div>`;
       }
       if (info.partitions && info.partitions.length > 0) {
         html += `<div style="margin-top:2px;">Particiones: ${info.partitions.map(p => `<code>${escapeHtml(p.name)} (${escapeHtml(p.size || '')})</code>`).join(', ')}</div>`;
@@ -74,6 +81,8 @@ function storageWizardNext(step) {
 async function openStorageManage(preselectedDevice = null) {
   openModal('modal-storage-manage');
   storageWizardNext(1);
+  const confirmEl = document.getElementById('stg-confirm');
+  if (confirmEl) confirmEl.value = '';
   const sel = document.getElementById('stg-device');
   if (sel) {
     sel.innerHTML = '<option value="">Cargando discos disponibles...</option>';
@@ -101,7 +110,66 @@ async function openStorageManage(preselectedDevice = null) {
 let _createPoolSelected = [];
 let _createPoolDisks = [];
 
+function toggleCreatePoolAction() {
+  const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
+  const wrap = document.getElementById('cp-extend-target-wrap');
+  if (wrap) wrap.style.display = action === 'extend' ? '' : 'none';
+}
+
+function toggleCreatePoolTarget() {
+  const scope = document.getElementById('cp-target-scope')?.value || 'unit';
+  const wrap = document.getElementById('cp-unit-id-wrap');
+  if (wrap) wrap.style.display = scope === 'unit' ? '' : 'none';
+}
+
+function updateCreatePoolModeHint() {
+  const mode = document.getElementById('cp-pool-mode')?.value || 'btrfs_single';
+  const hint = document.getElementById('cp-mode-hint');
+  const fsSel = document.getElementById('cp-fstype');
+  if (fsSel) {
+    fsSel.value = (mode === 'ext4' || mode === 'lvm_ext4') ? 'ext4' : 'btrfs';
+  }
+  if (!hint) return;
+  const count = (_createPoolSelected || []).length;
+  const msgs = {
+    btrfs_single: count >= 2
+      ? 'Suma la capacidad de todos los discos (Data: single) con metadatos replicados en RAID1 entre discos.'
+      : 'Crea un volumen Btrfs con compresión zstd:3; podrás sumar más discos en línea después.',
+    btrfs_raid1: 'Espejo RAID1 completo (Data + Metadata en RAID1). Requiere al menos 2 discos; la capacidad útil será ~50% del par.',
+    ext4: 'Sistema de archivos ext4 clásico sobre 1 solo disco físico.',
+    lvm_btrfs: 'Agrupa los discos en un Volume Group LVM con volumen lógico Btrfs.',
+    lvm_ext4: 'Agrupa los discos en un Volume Group LVM con volumen lógico ext4.',
+  };
+  hint.textContent = msgs[mode] || '';
+}
+
 function createPoolNext(step) {
+  const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
+  if (step === 3 && (_createPoolSelected || []).length === 0) {
+    showToast('Selecciona al menos un disco disponible.', 'warning');
+    return;
+  }
+  if (step === 4 && action === 'create') {
+    const mode = document.getElementById('cp-pool-mode')?.value || 'btrfs_single';
+    const count = (_createPoolSelected || []).length;
+    if (mode === 'ext4' && count !== 1) {
+      showToast('ext4 directo solo admite 1 disco. Elige Btrfs o LVM para combinar varios discos.', 'warning');
+      return;
+    }
+    if (mode === 'btrfs_raid1' && count < 2) {
+      showToast('Btrfs RAID1 requiere al menos 2 discos.', 'warning');
+      return;
+    }
+    const scope = document.getElementById('cp-target-scope')?.value || 'unit';
+    if (scope === 'unit') {
+      const unitId = (document.getElementById('cp-unit-id')?.value || '').trim();
+      if (!unitId || !/^[a-zA-Z0-9_-]{1,32}$/.test(unitId)) {
+        showToast('Ingresa un identificador válido para el nuevo pool/unidad (1-32 caracteres alfanuméricos, guion o _).', 'warning');
+        return;
+      }
+    }
+  }
+
   const steps = document.querySelectorAll('.cp-step');
   steps.forEach((el, idx) => { el.style.display = (idx + 1 === step) ? '' : 'none'; });
   const inds = document.querySelectorAll('[id^="cp-step-ind-"]');
@@ -113,11 +181,22 @@ function createPoolNext(step) {
     loadCreatePoolDisks();
   }
   if (step === 3) {
-    const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
     const ext = document.getElementById('cp-options-extend');
     const cre = document.getElementById('cp-options-create');
     if (ext) ext.style.display = action === 'extend' ? '' : 'none';
     if (cre) cre.style.display = action === 'create' ? '' : 'none';
+    if (action === 'extend') {
+      const targetId = document.getElementById('cp-extend-target')?.value || 'principal';
+      const targetUnit = (typeof _storageUnitsData !== 'undefined' && Array.isArray(_storageUnitsData))
+        ? _storageUnitsData.find(u => u.id === targetId)
+        : null;
+      const raidWrap = document.getElementById('cp-raid1-meta-wrap');
+      const isBtrfs = targetUnit ? Boolean(targetUnit.is_btrfs || String(targetUnit.filesystem || '').toLowerCase() === 'btrfs') : true;
+      if (raidWrap) raidWrap.style.display = isBtrfs ? '' : 'none';
+    } else {
+      toggleCreatePoolTarget();
+      updateCreatePoolModeHint();
+    }
   }
   if (step === 4) {
     renderCreatePoolSummary();
@@ -127,6 +206,7 @@ function createPoolNext(step) {
 async function loadCreatePoolDisks() {
   const container = document.getElementById('cp-disks-list');
   if (!container) return;
+  const prevSelected = new Set(_createPoolSelected || []);
   container.innerHTML = 'Cargando discos...';
   try {
     const res = await apiFetch('/api/storage/disks', { silentToast: true });
@@ -136,29 +216,71 @@ async function loadCreatePoolDisks() {
       const dev = d.device || ('/dev/' + d.name);
       const size = d.size || '';
       const disabled = d.in_use ? 'disabled' : '';
-      const label = d.in_use ? ' (en uso)' : '';
-      return `<label style="display:block; padding:6px; border-bottom:1px solid var(--border-color);">
-        <input type="checkbox" class="cp-disk-check" value="${escapeHtml(dev)}" data-size="${escapeHtml(size)}" ${disabled} onchange="updateCreatePoolCapacity()">
-        <strong>${escapeHtml(dev)}</strong> — ${escapeHtml(size)} ${escapeHtml(d.model || '')}${label}
+      const checked = !d.in_use && prevSelected.has(dev) ? 'checked' : '';
+      const hasPreexisting = Boolean((d.children_count && d.children_count > 0) || d.fstype);
+      let badge = '<span class="badge badge-ok">Disponible</span>';
+      if (d.in_use && d.is_pool_member) {
+        badge = `<span class="badge badge-info">En pool (${escapeHtml(d.mount || 'activo')})</span>`;
+      } else if (d.in_use) {
+        badge = `<span class="badge badge-warn">Montado (${escapeHtml(d.mount || 'en uso')})</span>`;
+      } else if (hasPreexisting) {
+        badge = `<span class="badge badge-warn">Firmas: ${escapeHtml(d.fstype || 'particiones')}</span>`;
+      }
+      const media = d.rotational === false ? 'SSD' : (d.rotational === true ? 'HDD' : '');
+      return `<label style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; border-bottom:1px solid var(--border-color); cursor:${d.in_use ? 'not-allowed' : 'pointer'}; opacity:${d.in_use ? '0.65' : '1'};">
+        <span>
+          <input type="checkbox" class="cp-disk-check" value="${escapeHtml(dev)}" data-size="${escapeHtml(size)}" data-has-data="${hasPreexisting ? '1' : '0'}" ${disabled} ${checked} onchange="updateCreatePoolCapacity()">
+          <strong>${escapeHtml(dev)}</strong> — ${escapeHtml(size)} ${escapeHtml(d.model || '')} ${media ? `<small class="text-muted">(${media})</small>` : ''}
+        </span>
+        ${badge}
       </label>`;
-    }).join('') || '<div style="color:var(--text-muted);">No hay discos disponibles.</div>';
+    }).join('') || '<div style="color:var(--text-muted);">No hay discos no protegidos detectados.</div>';
     updateCreatePoolCapacity();
   } catch (e) {
     container.innerHTML = `<div style="color:var(--accent-danger);">${escapeHtml(e.message)}</div>`;
   }
 }
 
+function parseDiskSizeGb(sizeStr) {
+  const raw = String(sizeStr || '').trim().toUpperCase();
+  const num = parseFloat(raw);
+  if (isNaN(num)) return 0;
+  if (raw.endsWith('T')) return num * 1024;
+  if (raw.endsWith('M')) return num / 1024;
+  return num;
+}
+
 function updateCreatePoolCapacity() {
   const checks = document.querySelectorAll('.cp-disk-check:checked');
-  let total = 0;
+  let totalGb = 0;
+  let hasDataCount = 0;
   checks.forEach(c => {
-    const sizeStr = c.getAttribute('data-size') || '';
-    const num = parseFloat(sizeStr);
-    if (!isNaN(num)) total += num;
+    totalGb += parseDiskSizeGb(c.getAttribute('data-size'));
+    if (c.getAttribute('data-has-data') === '1') hasDataCount++;
   });
   const el = document.getElementById('cp-selected-capacity');
-  if (el) el.textContent = total ? total.toFixed(1) + ' GB (aprox.)' : '0 GB';
+  if (el) {
+    if (totalGb >= 1024) {
+      el.textContent = `${(totalGb / 1024).toFixed(2)} TB (${totalGb.toFixed(1)} GB aprox.)`;
+    } else {
+      el.textContent = totalGb ? `${totalGb.toFixed(1)} GB (aprox.)` : '0 GB';
+    }
+  }
+  const warn = document.getElementById('cp-disks-warning');
+  if (warn) {
+    if (hasDataCount > 0) {
+      warn.style.display = 'block';
+      warn.textContent = `⚠️ ${hasDataCount} disco(s) seleccionado(s) contienen particiones o firmas previas. Se requerirá escribir SI-DESTRUIR-DATOS en el último paso.`;
+    } else {
+      warn.style.display = 'none';
+    }
+  }
   _createPoolSelected = Array.from(checks).map(c => c.value);
+}
+
+function createPoolNeedsDestroyConfirm() {
+  const checks = document.querySelectorAll('.cp-disk-check:checked');
+  return Array.from(checks).some(c => c.getAttribute('data-has-data') === '1');
 }
 
 function renderCreatePoolSummary() {
@@ -166,18 +288,42 @@ function renderCreatePoolSummary() {
   if (!summary) return;
   const action = document.querySelector('input[name="cp-action"]:checked')?.value || 'extend';
   const selected = _createPoolSelected || [];
+  const needsDestroy = createPoolNeedsDestroyConfirm();
+  const requiredToken = needsDestroy ? 'SI-DESTRUIR-DATOS' : 'SI-FORMATEAR';
+
+  const confirmLabel = document.getElementById('cp-confirm-label');
+  const confirmInput = document.getElementById('cp-confirm');
+  const confirmHint = document.getElementById('cp-confirm-hint');
+  if (confirmLabel) confirmLabel.innerHTML = `Confirmación (escribe <code>${requiredToken}</code>):`;
+  if (confirmInput) confirmInput.placeholder = requiredToken;
+  if (confirmHint) {
+    confirmHint.textContent = needsDestroy
+      ? 'Uno o más discos tienen particiones o firmas previas. Escribe SI-DESTRUIR-DATOS para confirmar su formateo irreversible.'
+      : 'Escribe SI-FORMATEAR para aplicar la operación.';
+  }
+
   if (action === 'extend') {
-    summary.innerHTML = `<strong>Ampliar espacio principal</strong><br>Se añadirán ${selected.length} disco(s) al pool /srv/nas: ${selected.map(escapeHtml).join(', ')}.`;
+    const targetId = document.getElementById('cp-extend-target')?.value || 'principal';
+    const targetLabel = targetId === 'principal' ? '/srv/nas (Principal)' : `/srv/nas/unidades/${targetId}`;
+    const raidMeta = document.getElementById('cp-raid1-meta')?.checked;
+    summary.innerHTML = `<strong>Ampliar pool existente</strong><br>Destino: <code>${escapeHtml(targetLabel)}</code><br>Discos a sumar (${selected.length}): ${selected.map(d => `<code>${escapeHtml(d)}</code>`).join(', ')}${raidMeta ? '<br>Metadatos Btrfs: se asegurará perfil RAID1.' : ''}`;
   } else {
-    const id = document.getElementById('cp-unit-id')?.value || 'disco2';
-    const fs = document.getElementById('cp-fstype')?.value || 'ext4';
-    summary.innerHTML = `<strong>Crear espacio nuevo</strong><br>Se creará la unidad "${escapeHtml(id)}" (${escapeHtml(fs)}) con ${selected.length} disco(s): ${selected.map(escapeHtml).join(', ')}.`;
+    const scope = document.getElementById('cp-target-scope')?.value || 'unit';
+    const unitId = (document.getElementById('cp-unit-id')?.value || '').trim();
+    const targetLabel = scope === 'principal' ? '/srv/nas (Principal)' : `/srv/nas/unidades/${unitId}`;
+    const mode = document.getElementById('cp-pool-mode')?.value || 'btrfs_single';
+    summary.innerHTML = `<strong>Crear pool / unidad nueva</strong><br>Destino: <code>${escapeHtml(targetLabel)}</code><br>Modo: <strong>${escapeHtml(mode)}</strong><br>Discos (${selected.length}): ${selected.map(d => `<code>${escapeHtml(d)}</code>`).join(', ')}`;
   }
 }
 
 async function submitCreatePool() {
-  const confirmVal = document.getElementById('cp-confirm')?.value || '';
-  if (confirmVal !== 'SI-FORMATEAR') {
+  const confirmVal = (document.getElementById('cp-confirm')?.value || '').trim();
+  const needsDestroy = createPoolNeedsDestroyConfirm();
+  if (needsDestroy && confirmVal !== 'SI-DESTRUIR-DATOS') {
+    showToast('Hay discos con datos o particiones previas. Escribe SI-DESTRUIR-DATOS para confirmar.', 'error');
+    return;
+  }
+  if (!needsDestroy && confirmVal !== 'SI-FORMATEAR' && confirmVal !== 'SI-DESTRUIR-DATOS') {
     showToast('Escribe SI-FORMATEAR para confirmar.', 'error');
     return;
   }
@@ -191,30 +337,47 @@ async function submitCreatePool() {
   if (btn) { btn.disabled = true; btn.textContent = 'Aplicando...'; }
   try {
     if (action === 'extend') {
+      const targetId = document.getElementById('cp-extend-target')?.value || 'principal';
+      const raidMeta = Boolean(document.getElementById('cp-raid1-meta')?.checked);
       const res = await apiFetch('/api/storage/extend-pool-multi', {
         method: 'POST',
-        body: JSON.stringify({ devices: selected, confirm: confirmVal }),
+        body: JSON.stringify({
+          target: targetId,
+          devices: selected,
+          confirm: confirmVal,
+          metadata_raid1: raidMeta,
+        }),
       });
       const data = res.data || res;
       if (data.failed) {
-        showToast('Ampliación parcial. Revisa resultados.', 'warning');
+        const firstErr = Array.isArray(data.results) ? data.results.find(r => !r.success)?.message : '';
+        showToast(firstErr || 'Ampliación parcial o rechazada. Revisa resultados.', 'warning');
       } else {
-        showToast('Pool ampliado correctamente.', 'success');
+        showToast(res.message || 'Pool ampliado correctamente.', 'success');
       }
     } else {
-      const id = document.getElementById('cp-unit-id')?.value || 'disco2';
-      const fs = document.getElementById('cp-fstype')?.value || 'ext4';
-      for (const dev of selected) {
-        await apiFetch('/api/storage/add-unit', {
-          method: 'POST',
-          body: JSON.stringify({ device: dev, unit_id: id, fstype: fs, confirm: confirmVal }),
-        });
-      }
-      showToast('Espacio(s) creado(s) correctamente.', 'success');
+      const scope = document.getElementById('cp-target-scope')?.value || 'unit';
+      const target = scope === 'principal'
+        ? 'principal'
+        : (document.getElementById('cp-unit-id')?.value || '').trim();
+      const mode = document.getElementById('cp-pool-mode')?.value || 'btrfs_single';
+      const unmount = Boolean(document.getElementById('cp-unmount')?.checked);
+      const res = await apiFetch('/api/storage/create-pool', {
+        method: 'POST',
+        body: JSON.stringify({
+          target,
+          mode,
+          devices: selected,
+          confirm: confirmVal,
+          unmount,
+        }),
+      });
+      showToast(res.message || 'Pool creado y montado correctamente.', 'success');
     }
+    const confirmInput = document.getElementById('cp-confirm');
+    if (confirmInput) confirmInput.value = '';
     closeModal('modal-create-pool');
     loadStorage();
-    loadStorageUnits();
   } catch (e) {
     showToast(e.message || 'Error al aplicar cambios.', 'error');
   } finally {
@@ -222,12 +385,31 @@ async function submitCreatePool() {
   }
 }
 
-function openCreatePoolWizard() {
+function openCreatePoolWizard(actionMode = null, targetPool = null) {
   openModal('modal-create-pool');
+  _createPoolSelected = [];
+  const confirmEl = document.getElementById('cp-confirm');
+  if (confirmEl) confirmEl.value = '';
+  const unitIdEl = document.getElementById('cp-unit-id');
+  if (unitIdEl) unitIdEl.value = '';
+  const unmountEl = document.getElementById('cp-unmount');
+  if (unmountEl) unmountEl.checked = false;
+  const radioVal = actionMode === 'create' ? 'create' : 'extend';
+  const radio = document.querySelector(`input[name="cp-action"][value="${radioVal}"]`);
+  if (radio) radio.checked = true;
+  if (targetPool) {
+    const extSel = document.getElementById('cp-extend-target');
+    if (extSel) extSel.value = targetPool;
+  }
+  toggleCreatePoolAction();
   createPoolNext(1);
   const checks = document.querySelectorAll('.cp-disk-check');
   checks.forEach(c => c.checked = false);
   updateCreatePoolCapacity();
+}
+
+function openExtendPoolWizard(targetPool = 'principal') {
+  openCreatePoolWizard('extend', targetPool);
 }
 
 function openFormatDisk(dev) {
@@ -240,7 +422,7 @@ function toggleStorageOp() {
   document.getElementById('stg-subvol-wrap').style.display = op === 'subvolume' ? 'block' : 'none';
   const unitWrap = document.getElementById('stg-unit-wrap');
   if (unitWrap) unitWrap.style.display = op === 'add_unit' ? 'block' : 'none';
-  document.getElementById('stg-fs-wrap').style.display = (op === 'subvolume' || op === 'extend') ? 'none' : 'block';
+  document.getElementById('stg-fs-wrap').style.display = (op === 'subvolume' || op === 'extend' || op === 'wipe') ? 'none' : 'block';
 }
 
 async function submitStorageManage(event) {
@@ -256,7 +438,12 @@ async function submitStorageManage(event) {
   }
 
   const hasData = Boolean(_currentDeviceInspection?.has_data);
-  if (hasData) {
+  if (op === 'wipe') {
+    if (confirmText !== 'SI-DESTRUIR-DATOS') {
+      showToast('Para limpiar firmas y particiones (wipefs), debes escribir estrictamente SI-DESTRUIR-DATOS.', 'warning');
+      return;
+    }
+  } else if (hasData) {
     if (confirmText !== 'SI-DESTRUIR-DATOS') {
       showToast('Este disco contiene datos preexistentes. Debes escribir estrictamente SI-DESTRUIR-DATOS para confirmar la eliminación.', 'warning');
       return;
@@ -271,7 +458,10 @@ async function submitStorageManage(event) {
   let url = '/api/storage/format';
   let payload = { device, fstype, confirm: confirmText };
 
-  if (op === 'extend') {
+  if (op === 'wipe') {
+    url = '/api/storage/wipe';
+    payload = { device, confirm: confirmText };
+  } else if (op === 'extend') {
     url = '/api/storage/extend-pool';
     payload = { device, confirm: confirmText };
   } else if (op === 'add_unit') {
@@ -304,7 +494,9 @@ async function submitStorageManage(event) {
       await apiFetch(url, { method: 'POST', body: JSON.stringify(payload), silentToast: true });
     } catch (err) {
       const msg = String(err.message || '');
-      if (/montad|desmont/i.test(msg)) {
+      const supportsUnmount = op === 'format' || op === 'lvm' || op === 'wipe';
+      const isProtectedBlock = /overmount|pool btrfs activo|pertenece al pool/i.test(msg);
+      if (supportsUnmount && !isProtectedBlock && /montad|desmont/i.test(msg)) {
         _pendingStorageUrl = url;
         _pendingStoragePayload = payload;
         openModal('modal-storage-unmount-confirm');
@@ -317,7 +509,6 @@ async function submitStorageManage(event) {
     closeModal('modal-storage-manage');
     document.getElementById('stg-confirm').value = '';
     loadStorage();
-    loadStorageUnits();
   } catch (e) {
     showToast(e.message || 'No se pudo completar la operación.', 'error');
   } finally {
@@ -345,7 +536,6 @@ async function executeStorageUnmountAndProceed() {
     const confirmInput = document.getElementById('stg-confirm');
     if (confirmInput) confirmInput.value = '';
     loadStorage();
-    loadStorageUnits();
   } catch (e) {
     showToast(e.message || 'No se pudo completar la operación con desmontaje forzado.', 'error');
   } finally {
