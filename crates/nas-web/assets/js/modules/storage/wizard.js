@@ -60,9 +60,46 @@ async function onStorageDeviceChange() {
       if (confirmHint) confirmHint.textContent = 'Escribe SI-FORMATEAR para proceder.';
     }
     if (inspectDetails) inspectDetails.innerHTML = html;
+
+    const wcBox = document.getElementById('stg-write-cache-box');
+    const wcStatus = document.getElementById('stg-write-cache-status');
+    const wcOff = document.getElementById('btn-wc-off');
+    const wcOn = document.getElementById('btn-wc-on');
+    if (wcBox && wcStatus) {
+      if (info.write_cache_detail) {
+        wcBox.style.display = 'block';
+        wcStatus.textContent = info.write_cache_detail;
+        const canControl = Boolean(info.write_cache_supported);
+        if (wcOff) wcOff.style.display = canControl && info.write_cache_enabled !== false ? '' : 'none';
+        if (wcOn) wcOn.style.display = canControl && info.write_cache_enabled === false ? '' : 'none';
+      } else {
+        wcBox.style.display = 'none';
+      }
+    }
   } catch (err) {
     if (inspectBox) inspectBox.style.display = 'block';
+    const wcBox = document.getElementById('stg-write-cache-box');
+    if (wcBox) wcBox.style.display = 'none';
     if (inspectDetails) inspectDetails.innerHTML = `<span style="color:var(--accent-warning);">No se pudo inspeccionar el dispositivo (${escapeHtml(err.message || 'error')}). Se aplicará verificación estricta.</span>`;
+  }
+}
+
+async function toggleDiskWriteCache(enabled) {
+  const dev = document.getElementById('stg-device')?.value || '';
+  if (!dev) return;
+  const btn = document.getElementById(enabled ? 'btn-wc-on' : 'btn-wc-off');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/storage/write-cache', {
+      method: 'POST',
+      body: JSON.stringify({ device: dev, enabled: Boolean(enabled), confirm: 'SI-APLICAR' }),
+    });
+    showToast(res.message || 'Política de caché actualizada.', 'success');
+    await onStorageDeviceChange();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
   }
 }
 
