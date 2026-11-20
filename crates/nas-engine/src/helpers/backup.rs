@@ -132,11 +132,8 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let perm_root = dest_root.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
     let perm_task_dir = PathBuf::from(&perm_root).join(id);
     let _ = std::fs::create_dir_all(&perm_task_dir);
-    let _ = runner.run(&CommandSpec::new("chown").args([
-        "-R",
-        "root:grp_samba",
-        &perm_task_dir.to_string_lossy(),
-    ]));
+    let _ = runner
+        .run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
 
     let runner_content = std::fs::read_to_string(&runner_dst).unwrap_or_default();
@@ -357,7 +354,7 @@ fn install_backup_spec_with_dirs(
         let perm_task_dir = PathBuf::from(&perm_root).join(id);
         let _ = std::fs::create_dir_all(&perm_task_dir);
         let perm_str = perm_task_dir.to_string_lossy().to_string();
-        let _ = runner.run(&CommandSpec::new("chown").args(["-R", "root:grp_samba", &perm_str]));
+        let _ = runner.run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_str]));
         let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_str]));
 
         if spec.auto_permanent {
