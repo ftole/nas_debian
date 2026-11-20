@@ -80,6 +80,37 @@ pub struct RemovePoolDeviceBody {
     pub confirm: String,
 }
 
+/// Cuerpo para activar/desactivar caché volátil de escritura de un disco físico (`hdparm -W0`/`-W1`).
+#[derive(Debug, Deserialize)]
+pub struct WriteCacheBody {
+    #[serde(default)]
+    pub device: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub confirm: String,
+}
+
+fn default_min_battery_pct() -> u8 {
+    35
+}
+
+/// Cuerpo para auto-instalar NUT y configurar UPS USB.
+#[derive(Debug, Deserialize)]
+pub struct UpsConfigureBody {
+    #[serde(default = "default_min_battery_pct")]
+    pub min_battery_pct: u8,
+    #[serde(default)]
+    pub confirm: String,
+}
+
+/// Cuerpo para deshabilitar el monitoreo UPS local.
+#[derive(Debug, Deserialize)]
+pub struct UpsDisableBody {
+    #[serde(default)]
+    pub confirm: String,
+}
+
 async fn audit_storage(
     state: &AppState,
     headers: &HeaderMap,
@@ -496,6 +527,79 @@ pub async fn storage_remove_device(
                 &body.confirm,
             )
         },
+    )
+    .await
+}
+
+/// Activa o desactiva la caché volátil de escritura de un disco físico y persiste regla udev.
+pub async fn storage_write_cache(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<WriteCacheBody>,
+) -> Response {
+    let target = format!(
+        "{} ({})",
+        body.device,
+        if body.enabled { "on" } else { "off" }
+    );
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_write_cache",
+        target,
+        move || {
+            nas_engine::storage_ops::set_write_cache(
+                &Runner::new(),
+                &body.device,
+                body.enabled,
+                &body.confirm,
+            )
+        },
+    )
+    .await
+}
+
+/// Auto-instala NUT bajo demanda, detecta el UPS USB y habilita apagado automático.
+pub async fn storage_ups_configure(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<UpsConfigureBody>,
+) -> Response {
+    let target = format!("nut-usb (umbral {}%)", body.min_battery_pct);
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_ups_configure",
+        target,
+        move || {
+            nas_engine::storage_ops::ups_configure(
+                &Runner::new(),
+                body.min_battery_pct,
+                &body.confirm,
+            )
+        },
+    )
+    .await
+}
+
+/// Deshabilita el monitoreo UPS local (nut).
+pub async fn storage_ups_disable(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<UpsDisableBody>,
+) -> Response {
+    storage_operation(
+        state,
+        admin,
+        headers,
+        "storage_ups_disable",
+        "nut".to_string(),
+        move || nas_engine::storage_ops::ups_disable(&Runner::new(), &body.confirm),
     )
     .await
 }
