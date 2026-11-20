@@ -64,7 +64,10 @@
 /api/storage/trim
 /api/storage/umount-unit
 /api/storage/units
+/api/storage/ups/configure
+/api/storage/ups/disable
 /api/storage/wipe
+/api/storage/write-cache
 /api/system/applications
 /api/system/audit/verify
 /api/system/reboot
