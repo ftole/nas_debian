@@ -473,6 +473,8 @@ pub fn deploy_resources(
     if apply_systemd {
         nas_engine::deploy::web::apply_resources_dropin(&runner, env_file, sudo)?;
         applied.push(nas_engine::deploy::web::SYSTEMD_RESOURCES_DROPIN_PATH.to_string());
+        nas_engine::deploy::apply_journald_and_sleep_mask(&runner, sudo)?;
+        applied.push("/etc/systemd/journald.conf.d/99-nas-limits.conf".to_string());
     }
 
     if json {
