@@ -47,6 +47,8 @@ pub mod terminal;
 /// Verificación y planificación de actualizaciones firmadas.
 pub mod uninstall;
 pub mod update;
+/// Gestión opcional Plug & Play de UPS/No-Break mediante NUT.
+pub mod ups;
 /// Inventario de usuarios y grupos locales.
 pub mod users;
 
