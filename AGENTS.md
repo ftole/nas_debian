@@ -6,9 +6,10 @@
 
 ---
 
-## 1. Identidad del Entorno
+## 1. Identidad del Entorno y Premisa Cero-Supuestos
 
-* **Sistema Operativo Base:** Debian 13 (Trixie) GNU/Linux `x86_64`.
+* **Sistema Operativo Base:** Debian 13 (Trixie) GNU/Linux `x86_64` (instalación mínima por consola o con escritorio).
+* **Premisa de Entorno Mínimo y Auto-Aprovisionamiento (OBLIGATORIA):** Toda nueva funcionalidad, servicio, script o módulo debe asumir que el usuario **únicamente** actualizó Debian (`apt update && apt upgrade`) e instaló `curl` y `wget`. **Prohibido** asumir paquetes preinstalados (`smartmontools`, `hdparm`, `btrfs-progs`, `lvm2`, `parted`, `acl`, `samba`, `nginx`, `auditd`, `aide`, `nut`, `sudo`, etc.). Cualquier dependencia requerida debe **auto-instalarse de forma idempotente y desatendida** (`DEBIAN_FRONTEND=noninteractive apt-get install -y`) en [install.sh](./install.sh) (tanto binario precompilado como `--build-from-source`) y en el flujo de actualización (`nas update`), manteniendo degradación segura en tiempo de ejecución si aún falta en nodos previos.
 * **Organización / Grupo de Trabajo:** `TEAM-JOFRATO`.
 * **Identificadores NetBIOS por Defecto:** `SRV-NAS` (`ARCHIVOS`), `SRV-BKP` (`BACKUP`).
 * **Placeholders de Laboratorio:** IP `<host>` (Subred `<red>`), usuario `<usuario>` / `root`, contraseña `<contraseña>` (nunca persistir credenciales reales).
@@ -55,7 +56,7 @@
 3. **Límites cgroup estrictos en tareas de mantenimiento:** toda unidad transitoria o pesada (`nas-backup-dedup-migration` vía `systemd-run`, scrubs, reindexados) debe declarar `Nice=19`, `IOSchedulingClass=idle`, `IOWeight=10`, `MemoryHigh`, `MemoryMax` y `TasksMax` acotados. No fijar `vm.vfs_cache_pressure` agresivamente bajo (`< 50–100`; valor vigente `100`).
 4. **Arranque y red tolerantes a fallos:** toda entrada secundaria en `/etc/fstab` (`/srv/nas`) debe incluir `nofail,x-systemd.device-timeout=15s`; el despliegue debe enmascarar `sleep.target`, `suspend.target`, `hibernate.target` y `hybrid-sleep.target` y fijar `net.ipv4.conf.*.rp_filter = 2`.
 5. **Pre-chequeo S.M.A.R.T. y disciplina de carga:** antes de formatear, extender volúmenes o ejecutar migraciones masivas, comprobar que el volumen no esté en solo lectura (`ro`) y consultar `smartctl -H` (si está disponible) abortando ante `FAILED`. **Prohibido** compilar `--release` o estresar discos en paralelo a backups/migraciones sin `nice -n 10 ionice -c 2 -n 7`.
-6. **Requisito mínimo de infraestructura:** todo servidor en producción con discos de consumo **debe operar con UPS/No-Break** (`nut`/`apcupsd` cuando aplique); para `/`, recomendar RAID-1 o SSD con PLP (*Power Loss Protection*).
+6. **Infraestructura low-cost y requisito documentado (sin suposiciones físicas):** la plataforma está diseñada para operar sobre hardware común/económico sin asumir SSD con PLP ni UPS presentes; no obstante, para producción con discos de consumo **se documenta como requisito indispensable** operar con UPS/No-Break (`nut`/`apcupsd` cuando aplique), supresor de picos/regulador y recomendar RAID-1 o SSD con PLP (*Power Loss Protection*) para `/`.
 
 ---
 
