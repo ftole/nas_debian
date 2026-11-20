@@ -17,8 +17,8 @@
 
 ### Conteo de Hallazgos Activos
 - **Críticos:** `5` activos (`DT-C04` resuelto; `DT-C05` parcialmente resuelto)
-- **Altos:** `20` activos (`DT-A08` resuelto; `DT-A09` y `DT-A13` parcialmente resueltos)
-- **Medios:** `14` activos (`DT-M12` resuelto)
+- **Altos:** `19` activos (`DT-A08` y `DT-A12` resueltos; `DT-A09`, `DT-A10` y `DT-A13` parcialmente resueltos)
+- **Medios:** `13` activos (`DT-M02` y `DT-M12` resueltos)
 - **Bajos / Deuda Estructural:** `8` (`DT-B01` a `DT-B08`)
 
 ---
@@ -51,9 +51,9 @@
 ### 3.2 Almacenamiento, Resiliencia ante Apagones y Migración Deduplicada
 - **`DT-A08` [RESUELTO] — `deploy/storage.rs::update_fstab` y `helpers/storage/units.rs` ahora delegan en `deploy/artifacts.rs::update_fstab`:** ambos aplican `fstab_options_for_target` (`nofail,x-systemd.device-timeout=15s`, retirando `autodefrag`/`discard=async`) con temporales `O_EXCL` (`write_unique_temp_file`) y respaldo `.bak.<epoch>`, además de saneamiento bajo demanda vía `sanitize_fstab` (`/api/storage/fstab-sanitize`).
 - **`DT-A09` [PARCIAL] — S.M.A.R.T. bajo `nas-web` sin `sudo`:** `crates/nas-engine/src/storage.rs::check_block_health` ya limpia `[/@subvol]` mediante `clean_block_source(device)` antes de validar el dispositivo, pero sigue invocando `smartctl -H` sin `SudoMode::Passwordless` cuando se ejecuta desde el servicio sin privilegios `nas-web`.
-- **`DT-A10` — `backup_dedup.rs` pierde `ro=true` / `+i` tras corte eléctrico u OOM y no protege picos de RAM en `partial_cache`:** `crates/nas-engine/src/backup_dedup.rs:1413-1470,1574,1771-1785` carece de restauración incremental o `Drop` guard al abortar por `MemoryMax`; `partial_cache` (hasta 500k entradas de 8 KiB) + `filefrag` doble por candidato pueden disparar el OOM killer en hosts de 2–4 GiB. Además, en `collect_files_in_container_partitioned` (`969-990`), si un cubo `(size, MetaKey)` excede `max_records_in_ram` (`divisor >= 4096`), los registros sobrantes se descartan con `continue`.
+- **`DT-A10` [PARCIAL] — `backup_dedup.rs` ya protege `ro=true` / `+i` con guarda RAII y recuperación tras apagón:** `ContainerProtectionGuard` y `.nas_dedup_guard.json` (`recover_interrupted_dedup_guard`) restauran `ro=true` y `chattr +i` ante fallo, `Drop` o corte eléctrico previo; queda pendiente la cota de cubos cuando `divisor >= 4096` en `collect_files_in_container_partitioned` (`969-990`).
 - **`DT-A11` — `chown -R` y `chattr -R -i` remanentes sobre árboles históricos de backups:** `crates/nas-engine/src/helpers/backup.rs:135-139,360` y `helpers/backup/permanent.rs:183-187,426-444` siguen lanzando `chown -R` / `chattr -R -i` completos; `permanent.rs:30-66` ejecuta `dir_stats` síncrono con `HashSet` ilimitado; `backup_spec/render.rs:331-368` deja `FULL_*` huérfano bloqueando futuras congelaciones si falla `cp -al`/`--reflink`.
-- **`DT-A12` — `nas-audit` con carrera TOCTOU en lockfile y ocultamiento de línea final truncada:** `crates/nas-audit/src/lib.rs:138-146,189-190,233-262` enmascara `PermissionDenied` como `"bitácora bloqueada"`, borra `.lock` de forma no atómica en `attempt == 200` y descarta en silencio una última línea truncada por apagón rompiendo el encadenamiento en `verify()`.
+- **`DT-A12` [RESUELTO] — `nas-audit` endurecido frente a apagones y permisos:** `crates/nas-audit/src/lib.rs` ejecuta `sync_data()` en cada `append()`, recorta de forma segura solo una última línea truncada antes de sellar (`trim_truncated_tail_unlocked` / `recover_truncated_tail`), reporta explícitamente el truncamiento eléctrico en `verify()` y falla de inmediato ante `PermissionDenied` en `AuditLockGuard`.
 
 ### 3.3 Bugs Funcionales en Panel Web, CLI y Orquestación
 - **`DT-A13` [PARCIAL] — Papelera pendiente para unidades adicionales (`unidades/<id>`):** `crates/nas-web/src/routes/files.rs::file_root_for` ya admite `unidades/<id>` (retirando el prefijo `unidades/` y validando `valid_name`), `files.js` muestra el origen en la barra de estado y `files/actions.js::submitMoveFile` ya envía `root`; queda pendiente que `assets/js/modules/files/trash.js` envíe `root` al listar o restaurar la papelera (`/api/files/trash` y `/api/files/trash/restore-all`).
@@ -74,7 +74,7 @@
   - `valid_device` / `is_valid_device` (4 variantes), cálculo `parent_disk` / `partition_path` (5 variantes), `is_os_disk` (4 variantes), `update_fstab` (3 variantes), listas `RESERVED` de usuarios (3 variantes, `samba.rs` omite `"nas"`), validadores de share/ID/usuario (algunos compilan `Regex::new` en cada llamada), parsers de `df -Pk` e IP primaria.
   - `nas-cli` reimplementa `services`, `diag` (omitiendo `sqlite`, `red` y `montaje:rw` de `nas-engine`) y `storage` (usando `lsblk` propio en vez de `nas_engine::storage::disks`).
   - Dos motores de ejecución de backups divergentes (`tasks/runner.rs` vs `backup_spec/render.rs`) y 3 parsers distintos de `backup_<id>.sh`.
-- **`DT-M02` — `tasks/runner.rs` omite limpieza `.inprogress_*`, `chattr +i`, `nice/ionice`, control de espacio si no existe el directorio y limpia mal `[/@subvol]`:** `crates/nas-engine/src/tasks/runner.rs:88-143,219,275,302-322,393-422`.
+- **`DT-M02` [RESUELTO] — `tasks/runner.rs` limpia `.inprogress_*` y resuelve pool sin `[subvol]`:** `crates/nas-engine/src/tasks/runner.rs` purga `.inprogress_*` tanto al inicio (`clean_orphan_inprogress_dirs`) como al fallar (`remove_dir_all(task.staging_path(now))`), añade `umount -f`/`-l` ante caída CIFS y recorta `[subvol]` en `destination_pool_key`.
 - **`DT-M03` — `nas-exec::command.rs` descarta `stdin_data` bajo `SudoMode::WithPassword` y puede bloquearse con nietos abiertos:** `crates/nas-exec/src/command.rs:311-315,350-376`; además `Redactor` (`redact.rs:31-48`) no ordena secretos por longitud descendente ni redacta `CommandSpec::describe()`.
 - **`DT-M04` — SQLite en `db.rs` corre `ALTER TABLE web_audit` antes de `CREATE TABLE web_audit` y serializa toda la concurrencia bajo un `Mutex` único:** `crates/nas-web/src/db.rs:37,111-124,140`.
 - **`DT-M05` — Endpoint `/api/terminal/history` usa `AuthenticatedUser` en vez de `SuperAdminUser`:** `crates/nas-web/src/routes/terminal.rs:295`.
