@@ -18,7 +18,8 @@ use crate::{
 pub use ops::{
     storage_add_unit, storage_create_pool, storage_extend_pool, storage_extend_pool_multi,
     storage_format, storage_fstab_sanitize, storage_lvm, storage_remove_device, storage_subvolume,
-    storage_umount_unit, storage_wipe,
+    storage_umount_unit, storage_ups_configure, storage_ups_disable, storage_wipe,
+    storage_write_cache,
 };
 
 /// Parámetro opcional `?unit=` para scrub o TRIM sobre unidades adicionales.
@@ -78,11 +79,14 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
             pool_devices: Vec::new(),
             data_profile: None,
             metadata_profile: None,
+            io_errors_total: 0,
+            io_errors_detail: Vec::new(),
         }
     });
     let lsblk_devs = nas_engine::storage::lsblk_devices_with_uuid(&runner).unwrap_or_default();
     let btrfs_pools = nas_engine::storage::btrfs_pools_from_lsblk(&lsblk_devs);
     let fstab_audit = nas_engine::storage::audit_system_fstab(&runner);
+    let ups = nas_engine::ups::status(&runner);
     let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
     let disks: Vec<serde_json::Value> = disks
         .iter()
@@ -103,6 +107,7 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
         "disks": disks,
         "btrfs_pools": btrfs_pools,
         "fstab_audit": fstab_audit,
+        "ups": ups,
     }))
 }
 
@@ -447,6 +452,21 @@ pub async fn storage_trim(
     }
 }
 
+/// Estado del monitoreo UPS/NUT opcional.
+pub async fn storage_ups_status(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+) -> Response {
+    match state
+        .run_system_blocking(|| Ok::<_, NasError>(nas_engine::ups::status(&Runner::new())))
+        .await
+    {
+        Ok(Ok(status)) => axum::Json(ApiResponse::ok(status, "Estado UPS/NUT")).into_response(),
+        Ok(Err(error)) => server_error(&error.to_string()),
+        Err(_) => server_error("consulta UPS interrumpida"),
+    }
+}
+
 /// Router del dominio de almacenamiento.
 pub fn router() -> Router<crate::AppState> {
     use axum::routing::{get, post};
@@ -463,6 +483,10 @@ pub fn router() -> Router<crate::AppState> {
         .route("/api/storage/remove-device", post(storage_remove_device))
         .route("/api/storage/wipe", post(storage_wipe))
         .route("/api/storage/fstab-sanitize", post(storage_fstab_sanitize))
+        .route("/api/storage/write-cache", post(storage_write_cache))
+        .route("/api/storage/ups", get(storage_ups_status))
+        .route("/api/storage/ups/configure", post(storage_ups_configure))
+        .route("/api/storage/ups/disable", post(storage_ups_disable))
         .route("/api/storage/extend-pool", post(storage_extend_pool))
         .route(
             "/api/storage/extend-pool-multi",
