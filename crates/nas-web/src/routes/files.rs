@@ -107,10 +107,11 @@ pub fn file_root_for(state: &AppState, root: Option<&str>) -> Result<FileRoot, B
         }
         state.paths.data_root.join("BACKUPS_HISTORICOS")
     } else {
-        if !nas_engine::storage_ops::valid_name(requested) {
+        let unit_id = requested.strip_prefix("unidades/").unwrap_or(requested);
+        if !nas_engine::storage_ops::valid_name(unit_id) {
             return Err(Box::new(bad_request("unidad de almacenamiento inválida")));
         }
-        let unit = state.paths.data_root.join("unidades").join(requested);
+        let unit = state.paths.data_root.join("unidades").join(unit_id);
         if !unit.is_dir() {
             return Err(Box::new(not_found_response(
                 "la unidad solicitada no existe",
