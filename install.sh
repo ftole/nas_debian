@@ -97,6 +97,28 @@ if [ -z "${NAS_WEB_PASSWORD:-}" ] && { [ ! -f /etc/nas-web.env ] || [ ! -f /var/
     fi
 fi
 
+install_runtime_deps() {
+    local mode="${1:-runtime}"
+    local pkgs=(
+        sudo curl wget ca-certificates tar gzip acl openssl
+        btrfs-progs lvm2 parted e2fsprogs util-linux psmisc
+        smartmontools hdparm logrotate auditd aide cron
+        samba samba-vfs-modules cifs-utils rsync nginx-light
+        tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss
+    )
+    if [ "$mode" = "build" ]; then
+        pkgs+=(git build-essential pkg-config)
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    if command -v ionice >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive nice -n 10 ionice -c 2 -n 7 \
+            apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null 2>&1
+    else
+        DEBIAN_FRONTEND=noninteractive nice -n 10 \
+            apt-get install -y -qq --no-install-recommends "${pkgs[@]}" >/dev/null 2>&1
+    fi
+}
+
 clear 2>/dev/null || true
 echo -e "${C_CYAN}"
 echo "  ╭──────────────────────────────────────────────────────────────────────────╮"
@@ -108,10 +130,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
     echo -e "${C_YELLOW}[!] Modo de compilación desde código fuente activado.${C_RESET}"
 
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando herramientas base y de compilación..."
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo git curl ca-certificates \
-        build-essential pkg-config acl openssl btrfs-progs lvm2 samba samba-vfs-modules cifs-utils rsync \
-        nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
+    install_runtime_deps build
 
     if ! cargo --version >/dev/null 2>&1; then
         if [ -n "${SUDO_USER:-}" ] && [ -d "/home/$SUDO_USER/.rustup" ]; then
@@ -211,10 +230,7 @@ else
     # INSTALACIÓN ULTRARRÁPIDA DESDE RELEASE OFICIAL PRECOMPILADO (PREDETERMINADO)
     # ==========================================================================
     echo -e " ${C_BOLD}[1/5]${C_RESET} Instalando dependencias del sistema operativo..."
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl ca-certificates tar gzip \
-        acl openssl btrfs-progs lvm2 samba samba-vfs-modules cifs-utils rsync \
-        nginx-light parted auditd tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss >/dev/null 2>&1
+    install_runtime_deps runtime
 
     echo -e " ${C_BOLD}[2/5]${C_RESET} Consultando release oficial de GitHub..."
     TARGET_TAG="$SPECIFIED_VERSION"
