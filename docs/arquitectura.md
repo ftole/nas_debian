@@ -62,7 +62,7 @@ Separar dónde se guardan las configuraciones, el estado web y los datos de usua
 
 ## 4. Arquitectura de Almacenamiento y Los 3 Roles
 
-El diseño sigue el principio **Pool = Volumen único**: en esta fase la plataforma no implementa **RAID** (*Redundant Array of Independent Disks* — Arreglo Redundante de Discos) por software ni reconstrucción automática; cada punto de montaje administra un volumen dedicado bajo reglas estrictas de seguridad.
+El diseño sigue el principio **Pool = Volumen lógico por punto de montaje**: no se implementa RAID por controlador/`mdadm` con *hot-spare* ni reconstrucción automática ante fallo físico, pero cada punto de montaje (`/srv/nas` principal o unidades adicionales `/srv/nas/unidades/<id>`) puede respaldarse con 1 o N discos mediante **Btrfs** nativo (`single` con metadatos RAID1 o espejo `raid1`), **LVM** (`lvm_ext4` / `lvm_btrfs`) o `ext4` de disco único, administrado bajo reglas estrictas de seguridad (bloqueo de sobre-montaje, orden LIFO al desmontar y retiro seguro `btrfs device remove`).
 
 ![Matriz de Roles y Arquitectura de Almacenamiento](./assets/roles_almacenamiento.svg)
 
@@ -103,7 +103,7 @@ Al iniciar `nas-web` o una migración pesada, `nas-core/src/resources.rs` inspec
 | **Binarios nativos Rust + SQLite WAL** | Stack PHP-FPM + Python + MySQL/Redis | Cero consumo en reposo, seguridad de memoria sin *garbage collector* y una sola base embebida sin demonios extra. | Toda actualización exige recompilar o distribuir binarios por arquitectura (`x86_64`). |
 | **Frontend embebido en el binario** | Archivos estáticos sueltos en `/var/www/` y CDNs | Garantiza operación 100% *offline* y despliegues atómicos en un solo archivo binario. | Cambiar HTML/CSS/JS requiere recompilar y reiniciar `nas-web` (`scripts/deploy_local.sh`). |
 | **`nas-web` sin `root` + 7 *helpers* + `nas-exec`** | Ejecutar el panel web directamente como `root` o invocar `/bin/sh -c` | Limita la superficie de ataque ante cualquier fallo web y elimina inyección de comandos de *shell*. | Mantiene dos capas de validación (panel y *helper*) que deben permanecer sincronizadas. |
-| **Pool = Volumen único en `/srv/nas`** | Orquestar **RAID** software / ZFS desde la web | Evita falsas promesas de redundancia automática o reconstrucciones riesgosas sin hardware empresarial ni **UPS** (*Uninterruptible Power Supply* — Sistema de Alimentación Ininterrumpida). | La tolerancia física recae en el controlador/infraestructura externa y en respaldos frecuentes. |
+| **Pool = Volumen por punto de montaje (`/srv/nas` y `unidades/<id>`)** | Orquestar arreglos `mdadm`/ZFS con *hot-spare* desde la web | Evita falsas promesas de reconstrucción automática sin hardware empresarial ni **UPS** (*Uninterruptible Power Supply* — Sistema de Alimentación Ininterrumpida), permitiendo combinar discos vía Btrfs o LVM de forma explícita. | La tolerancia física recae en espejo Btrfs (`btrfs_raid1` opcional), controlador externo, UPS y respaldos frecuentes. |
 | **Enlaces duros (`--link-dest`) + Btrfs** | Formatos propietarios cifrados de backup | Cada *snapshot* es un árbol estándar navegable directamente desde Samba/explorador en emergencias, con ahorro típico >85%. | Exige cuidar permisos POSIX y evitar escaneos recursivos masivos que sobrecarguen los inodos. |
 
 ---
@@ -115,4 +115,5 @@ Al iniciar `nas-web` o una migración pesada, `nas-core/src/resources.rs` inspec
 - [Stack Tecnológico y Glosario de Siglas](./tecnologias.md)
 - [Seguridad y Endurecimiento](./seguridad.md)
 - [Laboratorio, CI y Releases](./lab_y_desarrollo.md)
+- [Diseño Operativo de Discos y Pools Btrfs](./diseno_gestion_discos_y_pools.md)
 - [Deuda Técnica Activa (`v0.1.12+`)](./deuda_tecnica.md)
