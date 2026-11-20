@@ -153,6 +153,70 @@ impl AuditLog {
         }
     }
 
+    fn trim_truncated_tail_unlocked(&self) -> NasResult<bool> {
+        if !self.path.exists() {
+            return Ok(false);
+        }
+        let raw = std::fs::read(&self.path).map_err(|e| NasError::io(&self.path, e))?;
+        if raw.is_empty() {
+            return Ok(false);
+        }
+        let text = String::from_utf8_lossy(&raw);
+        let Some(last_nl) = raw.iter().rposition(|&b| b == b'\n') else {
+            if serde_json::from_str::<AuditEntry>(text.trim()).is_ok() {
+                return Ok(false);
+            }
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&self.path)
+                .map_err(|e| NasError::io(&self.path, e))?;
+            file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
+            return Ok(true);
+        };
+
+        let tail = std::str::from_utf8(&raw[last_nl + 1..]);
+        let tail_invalid_no_nl = match tail {
+            Ok(t) => !t.trim().is_empty() && serde_json::from_str::<AuditEntry>(t.trim()).is_err(),
+            Err(_) => true,
+        };
+        if tail_invalid_no_nl {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&self.path)
+                .map_err(|e| NasError::io(&self.path, e))?;
+            file.set_len((last_nl + 1) as u64)
+                .map_err(|e| NasError::io(&self.path, e))?;
+            file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
+            return Ok(true);
+        }
+
+        // También si la última línea sí terminó en `\n` pero quedó parcialmente escrita/corrupta al final.
+        let non_empty: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        if let Some(last_line) = non_empty.last() {
+            if serde_json::from_str::<AuditEntry>(last_line.trim()).is_err() {
+                if let Some(prev_end) = text.trim_end_matches(['\r', '\n']).rfind('\n') {
+                    let file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&self.path)
+                        .map_err(|e| NasError::io(&self.path, e))?;
+                    file.set_len((prev_end + 1) as u64)
+                        .map_err(|e| NasError::io(&self.path, e))?;
+                    file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Recupera la bitácora recortando únicamente una última línea truncada por corte eléctrico.
+    pub fn recover_truncated_tail(&self) -> NasResult<bool> {
+        let _guard = AuditLockGuard::acquire(&self.path)?;
+        self.trim_truncated_tail_unlocked()
+    }
+
     /// Añade una entrada sellada y devuelve la versión persistida.
     pub fn append(&self, entry: AuditEntry) -> NasResult<AuditEntry> {
         if let Some(parent) = self.path.parent() {
@@ -160,6 +224,7 @@ impl AuditLog {
         }
 
         let _guard = AuditLockGuard::acquire(&self.path)?;
+        let _ = self.trim_truncated_tail_unlocked()?;
 
         let previous = self.last_hash()?;
         let sealed = entry.seal(&previous);
@@ -180,6 +245,7 @@ impl AuditLog {
 
         writeln!(file, "{line}").map_err(|e| NasError::io(&self.path, e))?;
         file.flush().map_err(|e| NasError::io(&self.path, e))?;
+        file.sync_data().map_err(|e| NasError::io(&self.path, e))?;
 
         Ok(sealed)
     }
@@ -189,14 +255,30 @@ impl AuditLog {
         let content =
             std::fs::read_to_string(&self.path).map_err(|e| NasError::io(&self.path, e))?;
 
+        let non_empty: Vec<(usize, &str)> = content
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| !line.trim().is_empty())
+            .collect();
+        let total = non_empty.len();
+
         let mut expected_prev = String::from("0");
         let mut count = 0;
 
-        for (index, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let entry: AuditEntry = serde_json::from_str(line)?;
+        for (pos, (index, line)) in non_empty.iter().enumerate() {
+            let entry: AuditEntry = match serde_json::from_str(line) {
+                Ok(entry) => entry,
+                Err(err) => {
+                    if pos + 1 == total {
+                        return Err(NasError::Invalid(format!(
+                            "última entrada truncada en la línea {} (posible corte eléctrico; {} entradas previas íntegras): {err}",
+                            index + 1,
+                            count
+                        )));
+                    }
+                    return Err(err.into());
+                }
+            };
             if entry.prev_hash != expected_prev {
                 return Err(NasError::Invalid(format!(
                     "cadena de auditoría rota en la línea {}",
@@ -237,10 +319,7 @@ impl AuditLockGuard {
                 .open(&lock_path)
             {
                 Ok(_) => return Ok(Self { lock_path }),
-                Err(err)
-                    if err.kind() == std::io::ErrorKind::AlreadyExists
-                        || err.kind() == std::io::ErrorKind::PermissionDenied =>
-                {
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                     if attempt == 200 {
                         if let Ok(meta) = std::fs::metadata(&lock_path) {
                             if let Ok(modified) = meta.modified() {
@@ -436,6 +515,48 @@ mod tests {
         );
 
         assert_eq!(log.last_hash().expect("last hash"), last_expected);
+        let _ = std::fs::remove_file(log.path());
+    }
+
+    #[test]
+    fn soporta_cola_truncada_por_apagon_y_recupera_encadenamiento() {
+        let log = temp_log("truncated_tail");
+        let e1 = log
+            .append(AuditEntry::new(
+                "admin", "panel", "login", "web", "SUCCESS", "ok",
+            ))
+            .expect("append 1");
+        let e2 = log
+            .append(AuditEntry::new(
+                "admin", "panel", "share", "data", "SUCCESS", "ok2",
+            ))
+            .expect("append 2");
+
+        // Simular corte eléctrico a mitad de escritura de la 3ra línea (sin `\n`).
+        use std::io::Write;
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(log.path())
+                .expect("open append");
+            write!(f, "{{\"ts\":123,\"user\":\"admin\",\"truncated").expect("partial write");
+        }
+
+        let err = log
+            .verify()
+            .expect_err("debe detectar línea final truncada");
+        assert!(err.to_string().contains("última entrada truncada"));
+
+        // Una nueva escritura sana limpia únicamente la cola truncada y preserva e1->e2->e3.
+        let e3 = log
+            .append(AuditEntry::new(
+                "admin", "panel", "backup", "t1", "SUCCESS", "ok3",
+            ))
+            .expect("append 3");
+        assert_eq!(e2.prev_hash, e1.hash);
+        assert_eq!(e3.prev_hash, e2.hash);
+        assert_eq!(log.verify().expect("cadena recuperada"), 3);
+
         let _ = std::fs::remove_file(log.path());
     }
 }
