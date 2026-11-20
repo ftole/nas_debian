@@ -195,22 +195,44 @@ pub fn apply_hardening(runner: &nas_exec::Runner, sudo: bool) -> NasResult<()> {
             .args(["restart", "auditd"])
             .timeout(std::time::Duration::from_secs(30)),
     ));
-    let _ = runner.run(&configure(
-        nas_exec::CommandSpec::new("systemctl")
+    apply_journald_and_sleep_mask(runner, sudo)
+}
+
+/// Aplica cuotas de `systemd-journald` (`99-nas-limits.conf`) y enmascara objetivos de suspensión ACPI.
+pub fn apply_journald_and_sleep_mask(runner: &nas_exec::Runner, sudo: bool) -> NasResult<()> {
+    let journald_path = std::path::Path::new("/etc/systemd/journald.conf.d/99-nas-limits.conf");
+    let changed = std::fs::read_to_string(journald_path)
+        .map(|cur| cur != JOURNALD_LIMITS)
+        .unwrap_or(true);
+    if changed {
+        let artifact = Artifact {
+            path: "/etc/systemd/journald.conf.d/99-nas-limits.conf".into(),
+            mode: 0o644,
+            content: JOURNALD_LIMITS.to_string(),
+        };
+        super::web::write_artifact(runner, &artifact, sudo)?;
+        let mut restart = nas_exec::CommandSpec::new("systemctl")
             .args(["restart", "systemd-journald"])
-            .timeout(std::time::Duration::from_secs(30)),
-    ));
-    let _ = runner.run(&configure(
-        nas_exec::CommandSpec::new("systemctl")
-            .args([
-                "mask",
-                "sleep.target",
-                "suspend.target",
-                "hibernate.target",
-                "hybrid-sleep.target",
-            ])
-            .timeout(std::time::Duration::from_secs(30)),
-    ));
+            .timeout(std::time::Duration::from_secs(30));
+        if sudo {
+            restart = restart.sudo(nas_exec::SudoMode::Passwordless);
+        }
+        let _ = runner.run(&restart);
+    }
+
+    let mut mask = nas_exec::CommandSpec::new("systemctl")
+        .args([
+            "mask",
+            "sleep.target",
+            "suspend.target",
+            "hibernate.target",
+            "hybrid-sleep.target",
+        ])
+        .timeout(std::time::Duration::from_secs(30));
+    if sudo {
+        mask = mask.sudo(nas_exec::SudoMode::Passwordless);
+    }
+    let _ = runner.run(&mask);
 
     Ok(())
 }
