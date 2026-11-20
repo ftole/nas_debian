@@ -487,3 +487,19 @@ pub fn deploy_resources(
     }
     Ok(ExitCode::SUCCESS)
 }
+
+pub fn deploy_ensure_deps(sudo: bool, json: bool) -> NasResult<ExitCode> {
+    let runner = Runner::new();
+    let installed = nas_engine::deploy::deps::ensure_base_runtime_deps(&runner, sudo)?;
+    if json {
+        print_json(&ApiResponse::ok(
+            serde_json::json!({ "installed": installed }),
+            "Dependencias base verificadas",
+        ))?;
+    } else if installed.is_empty() {
+        println!("Todas las dependencias base de Debian 13 ya están instaladas.");
+    } else {
+        println!("Paquetes instalados: {}", installed.join(", "));
+    }
+    Ok(ExitCode::SUCCESS)
+}
