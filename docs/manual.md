@@ -87,6 +87,7 @@ sudo nas deploy apply \
 | `nas services` | Estado de `smbd`, `nmbd`, `wsdd2`, `nginx` y `nas-web`. |
 | `nas diag` | Diagnóstico integral con código de salida significativo para scripts. |
 | `nas storage <subcomando>` | Inventario de discos (mostrando `protected: true` en el disco del SO), particiones y uso de `/srv/nas`. |
+| `nas helper storage-apply <acción>` | Acciones privilegiadas de almacenamiento: `create-pool` (1 o N discos: `btrfs_single`, `btrfs_raid1`, `ext4`, `lvm_ext4`, `lvm_btrfs`), `extend-pool-target`, `remove-pool-device`, `umount-unit`, `wipe-disk`, `sanitize-fstab`, `scrub-unit-status`, `scrub-unit-start` y `trim-unit`. |
 | `nas users <subcomando>` | Listado e inventario de usuarios/grupos del sistema y Samba. |
 | `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución, bitácoras, Golden Snapshots, `repair-runners` y `deduplicate`. |
 | `nas audit <subcomando>` | Consulta y verificación criptográfica SHA-256 de la bitácora `nas-audit`. |
@@ -107,7 +108,7 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 3. **Bitácoras (`logs`):** consulta de logs de Samba, sistema y tareas de respaldo.
 4. **Carpetas Compartidas (`shares`):** alta/edición de recursos SMB, visibilidad (`$` oculto) y esquemas de ACL POSIX `2770` + herencia por defecto.
 5. **Respaldos (`backups`):** gestión de tareas CIFS/SSH/Locales, credenciales vía `stdin`, ejecución bajo demanda y Golden Snapshots.
-6. **Almacenamiento (`storage`):** discos físicos (bloqueo estricto en disco del SO), formateo con confirmación `SI-FORMATEAR`, montaje en `/srv/nas`, LVM (PV/VG/LV) y subvolúmenes Btrfs.
+6. **Almacenamiento (`storage`):** discos físicos (bloqueo estricto en disco del SO y miembros de pools Btrfs activos), asistente de creación de pools uni/multi-disco (`btrfs_single`, `btrfs_raid1`, `ext4`, `lvm_ext4`, `lvm_btrfs`) en `/srv/nas` o `/srv/nas/unidades/<id>`, ampliación en línea (LVM y Btrfs con conversión opcional de metadatos a RAID1), retiro seguro de miembros Btrfs (`btrfs device remove`), desmontaje LIFO de unidades, borrado de firmas (`SI-DESTRUIR-DATOS`), auditoría y saneamiento de `/etc/fstab` (`nofail`), subvolúmenes Btrfs y `scrub`/`fstrim` por unidad.
 7. **Terminal (`terminal`):** PTY interactiva real respaldada por sesiones `tmux` aisladas por usuario (`nas-terminal`).
 8. **Usuarios y Grupos (`users`):** gestión de cuentas web, usuarios Samba/Linux y membresía de grupos.
 9. **Servicios (`services`):** control (`start`, `stop`, `restart`, `reload`) de `smbd`, `nmbd`, `wsdd2`, `nginx`, `cron` y `nas-web`.
@@ -126,7 +127,7 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 | **Diaria** | Purga de papelera SMB | `/etc/cron.daily/nas-recycle-purge` | Elimina archivos en `.recycle` con antigüedad mayor a 15 días. |
 | **Semanal** | TRIM en unidades flash | `systemctl status fstrim.timer` | Libera bloques no referenciados en SSD/NVMe sin degradar velocidad de escritura. |
 | **Semanal / Mensual** | Rotación de bitácoras | `/etc/logrotate.d/nas-backups` | Comprime logs de respaldo (`copytruncate`). |
-| **Mensual (día 1, 02:00)** | Verificación Btrfs | `/etc/cron.d/nas-btrfs-scrub` | Ejecuta `btrfs scrub start -B /srv/nas` contra *Bit Rot* en roles `BACKUP` / `ARCHIVOS_BACKUP`. |
+| **Mensual (día 1, 02:00 / 03:00)** | Verificación Btrfs | `/etc/cron.d/nas-btrfs-scrub` y `/etc/cron.d/nas-btrfs-scrub-unit-<id>` | Ejecuta `btrfs scrub start -B` sobre `/srv/nas` y cada unidad Btrfs adicional en `/srv/nas/unidades/<id>` contra *Bit Rot* (también ejecutable bajo demanda desde `/dashboard#storage`). |
 | **Semanal (Manual)** | Respaldo de estado del panel | Copia segura de `/var/lib/nas/nas.sqlite`, `/etc/nas/`, `/etc/samba/smb.conf` y `/etc/cron.d/backup_*` | Permite restaurar configuración, usuarios web y tareas cron ante fallo de disco raíz. |
 | **Mensual (Manual)** | Verificación de auditoría y actualización | `nas audit verify` y `sudo nas update apply` | Comprueba integridad SHA-256 de la bitácora y aplica parches firmados `Ed25519`. |
 
