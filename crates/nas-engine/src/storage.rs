@@ -105,6 +105,12 @@ pub struct StorageOverview {
     /// Perfil Btrfs de metadatos (`RAID1`, `DUP`, etc.), si aplica.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata_profile: Option<String>,
+    /// Total de errores de E/S o corrupción acumulados en `btrfs device stats`.
+    #[serde(default)]
+    pub io_errors_total: u64,
+    /// Detalle legible por dispositivo/contador con errores > 0.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub io_errors_detail: Vec<String>,
 }
 
 /// Disco físico con protección del disco del sistema.
@@ -514,6 +520,128 @@ pub fn audit_system_fstab(runner: &Runner) -> FstabAudit {
     })
 }
 
+/// Parsea `btrfs device stats <ruta>` devolviendo `(suma_errores, líneas_con_errores)`.
+pub fn parse_btrfs_device_stats(raw: &str) -> (u64, Vec<String>) {
+    let mut total = 0u64;
+    let mut details = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let Some(metric) = parts.next() else {
+            continue;
+        };
+        let Some(count) = parts.next().and_then(|v| v.parse::<u64>().ok()) else {
+            continue;
+        };
+        if count > 0 {
+            total = total.saturating_add(count);
+            details.push(format!("{metric}: {count}"));
+        }
+    }
+    (total, details)
+}
+
+/// Consulta `btrfs device stats` en lectura sin bloquear ni despertar discos inactivos.
+pub fn collect_btrfs_device_errors(runner: &Runner, path: &str) -> (u64, Vec<String>) {
+    let Ok(out) = runner.run(
+        &CommandSpec::new("btrfs")
+            .args(["device", "stats", path])
+            .timeout(std::time::Duration::from_secs(5)),
+    ) else {
+        return (0, Vec::new());
+    };
+    if !out.is_success() {
+        return (0, Vec::new());
+    }
+    parse_btrfs_device_stats(&out.stdout)
+}
+
+/// Parsea `hdparm -W <dev>` devolviendo `Some(true)` si está activa, `Some(false)` si está desactivada.
+pub fn parse_hdparm_write_cache(raw: &str) -> Option<bool> {
+    for line in raw.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("write-caching") {
+            continue;
+        }
+        if lower.contains("not supported") {
+            return None;
+        }
+        if lower.contains("(on)") || lower.contains("=  1") || lower.contains("= 1") {
+            return Some(true);
+        }
+        if lower.contains("(off)") || lower.contains("=  0") || lower.contains("= 0") {
+            return Some(false);
+        }
+    }
+    None
+}
+
+/// Inspecciona el estado de la caché volátil de escritura de un disco físico vía `hdparm -W`.
+pub fn inspect_write_cache(runner: &Runner, device: &str) -> (bool, Option<bool>, String) {
+    let disk_path = resolve_target_device(clean_block_source(device))
+        .unwrap_or_else(|| device.trim().to_string());
+    let Ok(out) = runner.run(
+        &CommandSpec::new("hdparm")
+            .args(["-W", &disk_path])
+            .timeout(std::time::Duration::from_secs(5)),
+    ) else {
+        return (
+            false,
+            None,
+            "hdparm no disponible; ejecuta 'nas deploy ensure-deps' para instalarlo".to_string(),
+        );
+    };
+    if !out.is_success() {
+        let err = out.stderr.trim();
+        let msg = if err.is_empty() {
+            "Caché volátil no consultable en este controlador".to_string()
+        } else {
+            format!("Sin acceso a caché vía hdparm ({err})")
+        };
+        return (false, None, msg);
+    }
+    match parse_hdparm_write_cache(&out.stdout) {
+        Some(true) => (
+            true,
+            Some(true),
+            "Caché volátil ACTIVA (rendimiento estándar; riesgo en corte seco sin PLP)".to_string(),
+        ),
+        Some(false) => (
+            true,
+            Some(false),
+            "Caché volátil DESACTIVADA (máxima protección ante cortes eléctricos)".to_string(),
+        ),
+        None => (
+            false,
+            None,
+            "El controlador/disco no reporta control write-cache por hdparm".to_string(),
+        ),
+    }
+}
+
+/// Genera la regla udev persistente para aplicar `hdparm -W0` o `-W1` al conectar/arrancar el disco.
+pub fn render_write_cache_udev_rule(
+    dev_id_link: Option<&str>,
+    kernel_name: &str,
+    enabled: bool,
+) -> String {
+    let flag = if enabled { "-W1" } else { "-W0" };
+    let clean_kernel = kernel_name.trim().trim_start_matches("/dev/");
+    let matcher = match dev_id_link.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) => {
+            format!(r#"SUBSYSTEM=="block", ENV{{DEVTYPE}}=="disk", ENV{{DEVLINKS}}=="*{id}*""#)
+        }
+        None => format!(r#"SUBSYSTEM=="block", ENV{{DEVTYPE}}=="disk", KERNEL=="{clean_kernel}""#),
+    };
+    format!(
+        "# Regla generada por nas_debian para persistir protección write-cache\n\
+         ACTION==\"add|change\", {matcher}, RUN+=\"/usr/sbin/hdparm {flag} /dev/%k\"\n"
+    )
+}
+
 /// Resumen del volumen indicado.
 pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
     let df = runner.run(&CommandSpec::new("df").args(["-Pk", path]))?;
@@ -587,6 +715,11 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
 
     let is_readonly = path_is_mounted_readonly(Path::new(path));
     let data_root_on_os_disk = is_path_on_os_disk(runner, Path::new(path));
+    let (io_errors_total, io_errors_detail) = if is_btrfs {
+        collect_btrfs_device_errors(runner, path)
+    } else {
+        (0, Vec::new())
+    };
 
     Ok(StorageOverview {
         path: path.to_string(),
@@ -604,6 +737,8 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
         pool_devices,
         data_profile,
         metadata_profile,
+        io_errors_total,
+        io_errors_detail,
     })
 }
 
@@ -738,6 +873,8 @@ pub fn inspect(runner: &Runner, device: &str) -> NasResult<serde_json::Value> {
 
     let has_data = !root.children.is_empty() || root.fstype.is_some() || !signatures.is_empty();
     let health = check_block_health(runner, device);
+    let (write_cache_supported, write_cache_enabled, write_cache_detail) =
+        inspect_write_cache(runner, device);
 
     Ok(serde_json::json!({
         "device": device,
@@ -753,6 +890,9 @@ pub fn inspect(runner: &Runner, device: &str) -> NasResult<serde_json::Value> {
         "smart_healthy": health.healthy,
         "smart_available": health.smart_available,
         "smart_detail": health.detail,
+        "write_cache_supported": write_cache_supported,
+        "write_cache_enabled": write_cache_enabled,
+        "write_cache_detail": write_cache_detail,
         "partitions": root.children.iter().map(|child| serde_json::json!({
             "name": child.name,
             "size": child.size,
@@ -1545,5 +1685,37 @@ UUID=btrfs-789 /srv/nas/unidades/sano btrfs rw,noatime,compress=zstd:3,nofail,x-
         assert_eq!(audit.issues.len(), 1);
         assert_eq!(audit.issues[0].code, "missing_uuid");
         assert_eq!(audit.fixable_count, 0);
+    }
+
+    #[test]
+    fn parsea_btrfs_device_stats_y_hdparm_write_cache() {
+        let stats = "\
+[/dev/sdc1].write_io_errs    0
+[/dev/sdc1].read_io_errs     2
+[/dev/sdc1].flush_io_errs    0
+[/dev/sdc1].corruption_errs  1
+[/dev/sdc1].generation_errs  0
+";
+        let (total, detail) = super::parse_btrfs_device_stats(stats);
+        assert_eq!(total, 3);
+        assert_eq!(detail.len(), 2);
+        assert!(detail[0].contains("read_io_errs: 2"));
+
+        assert_eq!(
+            super::parse_hdparm_write_cache("/dev/sdb:\n write-caching =  1 (on)\n"),
+            Some(true)
+        );
+        assert_eq!(
+            super::parse_hdparm_write_cache("/dev/sdb:\n write-caching =  0 (off)\n"),
+            Some(false)
+        );
+        assert_eq!(
+            super::parse_hdparm_write_cache("/dev/sdb:\n write-caching = not supported\n"),
+            None
+        );
+
+        let rule = super::render_write_cache_udev_rule(Some("ata-ST2000_ABC"), "sdb", false);
+        assert!(rule.contains("ata-ST2000_ABC"));
+        assert!(rule.contains("/usr/sbin/hdparm -W0 /dev/%k"));
     }
 }
