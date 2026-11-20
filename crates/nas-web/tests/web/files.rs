@@ -417,3 +417,43 @@ async fn files_upload_usa_staging_de_unidad_cuando_root_viene_en_multipart() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn files_acepta_prefijo_unidades_slash_id() {
+    let dir = temp_dir("files-unidades-prefix");
+    let paths = paths_for(&dir);
+    let unit_dir = paths.data_root.join("unidades").join("pool2");
+    std::fs::create_dir_all(&unit_dir).expect("unit dir");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let state = AppState::new(auth, paths, ServerRole::Arquivos);
+    let app = router(state);
+    let cookie = cookie_for(&app).await;
+
+    let res_mkdir = app
+        .clone()
+        .oneshot(post_json(
+            "/api/files/mkdir",
+            &cookie,
+            r#"{"root":"unidades/pool2","path":"docs"}"#,
+        ))
+        .await
+        .expect("mkdir unidad");
+    assert_eq!(res_mkdir.status(), StatusCode::OK);
+    assert!(unit_dir.join("docs").is_dir());
+
+    let res_list = app
+        .clone()
+        .oneshot(get("/api/files/list?root=unidades%2Fpool2&path=", &cookie))
+        .await
+        .expect("list unidad");
+    assert_eq!(res_list.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(res_list).await).expect("json");
+    let items = payload["data"]["items"].as_array().expect("items");
+    assert!(items.iter().any(|i| i["name"] == "docs"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
