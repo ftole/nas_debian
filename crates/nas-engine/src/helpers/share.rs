@@ -164,41 +164,63 @@ pub fn apply_share_acl(
     }
 }
 
+fn recycle_find_args<'a>(root: &'a str, target_type: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec![
+        root,
+        "(",
+        "-name",
+        "BACKUPS_HISTORICOS",
+        "-o",
+        "-name",
+        "BACKUPS_PERMANENTES",
+        "-o",
+        "-name",
+        "LOGS_BACKUP",
+        "-o",
+        "-name",
+        ".nas_staging",
+        ")",
+        "-prune",
+        "-o",
+        "-type",
+        target_type,
+        "-path",
+        "*/.recycle/*",
+    ];
+    args.extend_from_slice(extra);
+    args
+}
+
 /// Purga archivos en las papeleras de reciclaje Samba (`.recycle`) dentro de `data_root`
-/// con más de `days` días.
+/// con más de `days` días, podando árboles históricos/logs de backups para evitar
+/// escaneos masivos innecesarios ni alterar snapshots.
 pub fn purge_recycle_in(runner: &Runner, data_root: &Path, days: u32) -> NasResult<String> {
     let days = days.max(1);
     let mtime_arg = format!("+{days}");
     let root_str = data_root.to_string_lossy();
 
-    // 1. Eliminar archivos mayores a `days` días en cualquier directorio .recycle dentro de `data_root`
+    // 1. Eliminar archivos mayores a `days` días en .recycle podando BACKUPS_* / LOGS_BACKUP / .nas_staging.
+    //    No usar `-delete` junto a `-prune` porque GNU find activa `-depth` e invalida `-prune`.
+    let file_args = recycle_find_args(
+        root_str.as_ref(),
+        "f",
+        &["-mtime", &mtime_arg, "-exec", "rm", "-f", "{}", "+"],
+    );
     let purge_files = runner.run(
         &CommandSpec::new("find")
-            .args([
-                root_str.as_ref(),
-                "-type",
-                "f",
-                "-path",
-                "*/.recycle/*",
-                "-mtime",
-                &mtime_arg,
-                "-delete",
-            ])
+            .args(file_args)
             .timeout(Duration::from_secs(120)),
     );
 
     // 2. Eliminar directorios vacíos remanentes en .recycle (best-effort)
+    let dir_args = recycle_find_args(
+        root_str.as_ref(),
+        "d",
+        &["-empty", "-exec", "rmdir", "{}", "+"],
+    );
     let _ = runner.run(
         &CommandSpec::new("find")
-            .args([
-                root_str.as_ref(),
-                "-type",
-                "d",
-                "-path",
-                "*/.recycle/*",
-                "-empty",
-                "-delete",
-            ])
+            .args(dir_args)
             .timeout(Duration::from_secs(60)),
     );
 
@@ -261,5 +283,54 @@ mod tests {
         assert!(
             err.to_string().contains("principal inválido") || err.to_string().contains("no existe")
         );
+    }
+
+    #[test]
+    fn purge_recycle_poda_respaldos_y_conserva_snapshots_historicos() {
+        let base = std::env::temp_dir().join(format!(
+            "nas_purge_recycle_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let share_recycle = base.join("SISTEMAS/.recycle");
+        let unit_share_recycle = base.join("unidades/u1/CONTABILIDAD/.recycle");
+        let backup_recycle = base.join("BACKUPS_HISTORICOS/t1/snapshot_1/.recycle");
+        let unit_backup_recycle = base.join("unidades/u1/BACKUPS_PERMANENTES/t1/FULL_1/.recycle");
+
+        for dir in [
+            &share_recycle,
+            &unit_share_recycle,
+            &backup_recycle,
+            &unit_backup_recycle,
+        ] {
+            std::fs::create_dir_all(dir).expect("mkdir recycle");
+            std::fs::write(dir.join("archivo.tmp"), b"x").expect("write");
+        }
+
+        let runner = Runner::new();
+        for dir in [
+            &share_recycle,
+            &unit_share_recycle,
+            &backup_recycle,
+            &unit_backup_recycle,
+        ] {
+            let file = dir.join("archivo.tmp");
+            let _ = runner.run(&CommandSpec::new("touch").args([
+                "-d",
+                "30 days ago",
+                &file.to_string_lossy(),
+            ]));
+        }
+
+        purge_recycle_in(&runner, &base, 15).expect("purge_recycle_in");
+        assert!(!share_recycle.join("archivo.tmp").exists());
+        assert!(!unit_share_recycle.join("archivo.tmp").exists());
+        assert!(backup_recycle.join("archivo.tmp").exists());
+        assert!(unit_backup_recycle.join("archivo.tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
