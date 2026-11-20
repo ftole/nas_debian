@@ -259,6 +259,15 @@ async fn almacenamiento_valida_confirmacion_y_dispositivo() {
             r#"{"device":"/dev/sdx","confirm":"SI-FORMATEAR"}"#,
         ),
         ("/api/storage/fstab-sanitize", r#"{"confirm":""}"#),
+        (
+            "/api/storage/write-cache",
+            r#"{"device":"../bad","enabled":false,"confirm":"SI-APLICAR"}"#,
+        ),
+        (
+            "/api/storage/ups/configure",
+            r#"{"min_battery_pct":95,"confirm":"SI-CONFIGURAR"}"#,
+        ),
+        ("/api/storage/ups/disable", r#"{"confirm":""}"#),
     ] {
         let response = app
             .clone()
