@@ -347,6 +347,20 @@ fn helper_purge_recycle_valida_o_ejecuta() {
 }
 
 #[test]
+fn helper_storage_apply_smart_y_write_cache_validan_dispositivo() {
+    for sub in ["smart-health", "write-cache-status"] {
+        let bad = nas()
+            .args(["--json", "helper", "storage-apply", sub, "/etc/passwd"])
+            .output()
+            .expect("ejecuta");
+        assert!(
+            !bad.status.success(),
+            "{sub} debe rechazar rutas ajenas a /dev"
+        );
+    }
+}
+
+#[test]
 fn helper_backup_manage_freeze_rechaza_id_invalido() {
     let output = nas()
         .args(["--json", "helper", "backup-manage", "freeze", "id invalido"])
