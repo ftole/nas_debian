@@ -62,6 +62,19 @@ function renderStorageOverview(overview) {
     }
   }
 
+  const ioAlert = document.getElementById('stg-io-errors-alert');
+  const ioAlertText = document.getElementById('stg-io-errors-alert-text');
+  if (ioAlert && ioAlertText) {
+    const errTotal = Number(overview.io_errors_total || 0);
+    if (errTotal > 0) {
+      const detailList = Array.isArray(overview.io_errors_detail) ? overview.io_errors_detail.slice(0, 4).join(', ') : '';
+      ioAlert.style.display = 'flex';
+      ioAlertText.textContent = `Se detectaron ${errTotal} error(es) de E/S o corrupción en Btrfs (${detailList || 'btrfs device stats'}). Recomendado ejecutar Scrub BTRFS y revisar S.M.A.R.T.`;
+    } else {
+      ioAlert.style.display = 'none';
+    }
+  }
+
   const statPercent = document.getElementById('stg-stat-percent');
   if (statPercent) statPercent.textContent = `${overview.usage_percent ?? 0}%`;
 
@@ -223,6 +236,83 @@ async function confirmSanitizeFstab() {
   }
 }
 
+function renderUpsStatus(ups) {
+  const badge = document.getElementById('stg-ups-badge');
+  const detail = document.getElementById('stg-ups-detail');
+  const disableBtn = document.getElementById('btn-ups-disable');
+  if (!badge || !detail) return;
+  if (!ups || !ups.configured) {
+    badge.className = 'badge badge-gray';
+    badge.textContent = ups && ups.installed ? 'NUT instalado (inactivo)' : 'Sin UPS configurado';
+    detail.textContent = ups?.detail || 'La plataforma opera sobre hardware común sin requerir UPS físico; si conectas un UPS USB, puedes activar apagado limpio automático mediante NUT.';
+    if (disableBtn) disableBtn.style.display = 'none';
+    return;
+  }
+  if (disableBtn) disableBtn.style.display = '';
+  if (ups.on_battery) {
+    badge.className = ups.low_battery ? 'badge badge-err' : 'badge badge-warn';
+    badge.textContent = `En batería (${ups.battery_charge ?? '--'}%)`;
+  } else if (ups.online) {
+    badge.className = 'badge badge-ok';
+    badge.textContent = `En línea (${ups.battery_charge ?? '--'}%)`;
+  } else {
+    badge.className = 'badge badge-warn';
+    badge.textContent = 'Sin telemetría';
+  }
+  const extra = [];
+  if (ups.model) extra.push(`Modelo: ${ups.model}`);
+  if (ups.load_percent !== undefined && ups.load_percent !== null) extra.push(`Carga: ${ups.load_percent}%`);
+  if (ups.runtime_seconds !== undefined && ups.runtime_seconds !== null) {
+    extra.push(`Autonomía: ${Math.max(1, Math.round(ups.runtime_seconds / 60))} min`);
+  }
+  extra.push(`Umbral apagado: ${ups.min_battery_pct ?? 35}%`);
+  detail.textContent = `${ups.detail || ''}${extra.length ? ' · ' + extra.join(' · ') : ''}`;
+}
+
+async function configureUsbUps() {
+  const minPct = Number(document.getElementById('ups-min-battery')?.value || 35);
+  const confirmVal = (document.getElementById('ups-confirm-input')?.value || '').trim();
+  if (confirmVal !== 'SI-CONFIGURAR') {
+    showToast('Debes escribir exactamente SI-CONFIGURAR para detectar y habilitar el UPS.', 'warning');
+    return;
+  }
+  const btn = document.getElementById('btn-confirm-ups-config');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/storage/ups/configure', {
+      method: 'POST',
+      body: JSON.stringify({ min_battery_pct: minPct, confirm: confirmVal }),
+    });
+    showToast(res.message || 'UPS USB configurado correctamente.', 'success');
+    const input = document.getElementById('ups-confirm-input');
+    if (input) input.value = '';
+    closeModal('modal-ups-config');
+    loadStorage();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
+}
+
+async function disableUsbUps() {
+  const btn = document.getElementById('btn-confirm-ups-disable');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/storage/ups/disable', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: 'SI-CONFIGURAR' }),
+    });
+    showToast(res.message || 'Monitoreo UPS deshabilitado.', 'success');
+    closeModal('modal-ups-disable');
+    loadStorage();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+  }
+}
+
 async function loadStorage() {
   const tbody = document.getElementById('storage-disks-body');
   if (!tbody) return;
@@ -233,10 +323,12 @@ async function loadStorage() {
     const disks = payload.disks ?? [];
     const overview = payload.overview ?? {};
     const fstabAudit = payload.fstab_audit ?? null;
+    const ups = payload.ups ?? null;
 
     // Actualizar tarjeta principal de capacidad y estado
     renderStorageOverview(overview);
     renderFstabAudit(fstabAudit);
+    renderUpsStatus(ups);
 
     // Actualizar tarjetas de inteligencia BTRFS y TRIM
     updateStorageIntelligence(overview);
