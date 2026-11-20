@@ -135,8 +135,8 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 
 * **Opciones de montaje aplicadas por rol y hardware:**
   * **`ext4` (`ARCHIVOS`):** `rw,noatime,commit=5,errors=remount-ro` + `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` en HDD y `1024 KB` en SSD (`fstrim.timer`).
-  * **`Btrfs` (`BACKUP` / `ARCHIVOS_BACKUP`):** `rw,noatime,compress=zstd:3,space_cache=v2` (`ssd` en flash, sin `autodefrag` ni `discard=async` continuo); *scrub* mensual y deduplicación `rsync --link-dest` (`--no-o --no-g` en CIFS, `stdbuf -oL` y progreso `to-chk`/`ir-chk`).
-  * **Resiliencia en `/etc/fstab` y disco del SO:** entradas secundarias con `nofail,x-systemd.device-timeout=15s`; cuota `journald` en `/etc/systemd/journald.conf.d/99-nas-limits.conf` (`SystemMaxUse=256M`); cálculo de ocupación de backups con `du -sc -B1`.
+  * **`Btrfs` (`BACKUP` / `ARCHIVOS_BACKUP`):** `rw,noatime,compress=zstd:3,space_cache=v2` (`ssd` en flash, sin `autodefrag` ni `discard=async` continuo); *scrub* mensual con `ionice` idle (`-c 3`), monitoreo de errores en `btrfs device stats` y deduplicación `rsync --link-dest` (`--no-o --no-g` en CIFS, `stdbuf -oL` y progreso `to-chk`/`ir-chk`).
+  * **Resiliencia eléctrica en hardware low-cost:** SQLite en `WAL` + `synchronous=FULL` (`wal_autocheckpoint=200`); entradas secundarias de `/etc/fstab` con `nofail,x-systemd.device-timeout=15s`; toggle opcional por disco para desactivar caché DRAM volátil (`hdparm -W0` + regla `udev` persistente); módulo Plug & Play opcional para UPS USB (`nut`); límites dinámicos `ResourceBudget` en backups (`systemd-run`), `journald` (`SystemMaxUse=256M`) y auto-aprovisionamiento `nas deploy ensure-deps` desde Debian limpio.
 
 ```bash
 # 1. Salud general del servidor, servicios y diagnósticos
