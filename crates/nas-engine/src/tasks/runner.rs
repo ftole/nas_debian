@@ -315,8 +315,26 @@ pub fn run(
             .iter()
             .filter(|step| step.first().is_some_and(|arg| arg == "umount"))
         {
-            let _ = run_step(runner, step, options.sudo, 120);
+            if run_step(runner, step, options.sudo, 120).is_err() {
+                if let Some(mount_point) = step.get(1) {
+                    let _ = run_step(
+                        runner,
+                        &["umount".into(), "-f".into(), mount_point.clone()],
+                        options.sudo,
+                        30,
+                    )
+                    .or_else(|_| {
+                        run_step(
+                            runner,
+                            &["umount".into(), "-l".into(), mount_point.clone()],
+                            options.sudo,
+                            30,
+                        )
+                    });
+                }
+            }
         }
+        let _ = std::fs::remove_dir_all(task.staging_path(now));
         append_log(&log_path, "ERROR", &error.to_string());
         return Err(error);
     }
@@ -414,7 +432,8 @@ fn destination_pool_key(runner: &Runner, target: &Path) -> String {
                 .nth(1)
                 .and_then(|l| l.split_whitespace().next())
             {
-                return src.to_string();
+                let clean = src.split('[').next().unwrap_or(src);
+                return clean.to_string();
             }
         }
     }
