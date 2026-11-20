@@ -1046,6 +1046,87 @@ pub fn sanitize_fstab(runner: &Runner, confirm: &str) -> NasResult<String> {
     ))
 }
 
+fn find_by_id_basename_for_disk(disk_path: &str) -> Option<String> {
+    let target_canon = std::fs::canonicalize(disk_path).ok()?;
+    let entries = std::fs::read_dir("/dev/disk/by-id").ok()?;
+    let mut best: Option<String> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.contains("-part") {
+            continue;
+        }
+        if let Ok(resolved) = std::fs::canonicalize(entry.path()) {
+            if resolved == target_canon {
+                if name.starts_with("wwn-") || name.starts_with("nvme-eui.") {
+                    return Some(name);
+                }
+                if best.is_none() {
+                    best = Some(name);
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Activa o desactiva la caché volátil de escritura de un disco (`hdparm -W0`/`-W1`)
+/// y persiste una regla udev para mantener la configuración tras cada reinicio.
+pub fn set_write_cache(
+    runner: &Runner,
+    confirm: &str,
+    device: &str,
+    enabled: bool,
+) -> NasResult<String> {
+    if !confirm_ok(confirm) && confirm != "SI-APLICAR" {
+        return Err(NasError::Denied(
+            "confirmación requerida (SI-APLICAR o SI-FORMATEAR)".into(),
+        ));
+    }
+    if !valid_device(device) {
+        return Err(NasError::Invalid("dispositivo inválido".into()));
+    }
+    let disk_path = crate::storage_ops::parent_disk(runner, device)
+        .unwrap_or_else(|| device.trim().to_string());
+    if !valid_device(&disk_path) {
+        return Err(NasError::Invalid("disco físico inválido".into()));
+    }
+    let disk_name = disk_path.trim_start_matches("/dev/");
+    if disk_name.is_empty() || disk_name.contains('/') {
+        return Err(NasError::Invalid(
+            "solo los discos físicos directos admiten control hdparm write-cache".into(),
+        ));
+    }
+
+    crate::deploy::deps::ensure_packages(runner, &["hdparm"], false)?;
+
+    let flag = if enabled { "-W1" } else { "-W0" };
+    runner
+        .run(
+            &CommandSpec::new("hdparm")
+                .args([flag, &disk_path])
+                .timeout(Duration::from_secs(10)),
+        )?
+        .ensure_success()?;
+
+    let by_id = find_by_id_basename_for_disk(&disk_path);
+    let rule_content =
+        crate::storage::render_write_cache_udev_rule(by_id.as_deref(), disk_name, enabled);
+    let rule_path = format!("/etc/udev/rules.d/65-nas-writecache-{disk_name}.rules");
+    std::fs::create_dir_all("/etc/udev/rules.d")
+        .map_err(|e| NasError::io(Path::new("/etc/udev/rules.d"), e))?;
+    std::fs::write(&rule_path, rule_content).map_err(|e| NasError::io(Path::new(&rule_path), e))?;
+    let _ = runner.run(&CommandSpec::new("udevadm").args(["control", "--reload-rules"]));
+
+    let mode_text = if enabled {
+        "ACTIVADA (rendimiento estándar)"
+    } else {
+        "DESACTIVADA (protección máxima ante cortes)"
+    };
+    Ok(format!(
+        "caché volátil de {disk_path} {mode_text}; regla persistente en {rule_path}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
