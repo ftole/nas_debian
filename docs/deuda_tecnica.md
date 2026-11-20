@@ -17,8 +17,8 @@
 
 ### Conteo de Hallazgos Activos
 - **Críticos:** `7` (`DT-C01` a `DT-C07`)
-- **Altos:** `21` (`DT-A01` a `DT-A21`)
-- **Medios:** `15` (`DT-M01` a `DT-M15`)
+- **Altos:** `20` activos (`DT-A08` resuelto; `DT-A09` y `DT-A13` parcialmente resueltos)
+- **Medios:** `14` activos (`DT-M12` resuelto)
 - **Bajos / Deuda Estructural:** `8` (`DT-B01` a `DT-B08`)
 
 ---
@@ -49,14 +49,14 @@
 - **`DT-A07` — `nas-cli helper` con lectura ilimitada en `stdin`, fallbacks silenciosos y contraseñas en `argv`:** `crates/nas-cli/src/helper/dispatch.rs:12-34,71-95,144-187,476-479` lee `stdin` sin cota máxima (OOM), trunca en 8 KiB con `read_stdin_single_line`, convierte códigos >255 a `u8`, oculta errores de `systemd-run` de deduplicación y mantiene contraseñas en `argv` para `CreateUser`/`UpdateUser`.
 
 ### 3.2 Almacenamiento, Resiliencia ante Apagones y Migración Deduplicada
-- **`DT-A08` — `deploy/storage.rs::update_fstab` duplica a `artifacts.rs` pero omite `nofail`:** `crates/nas-engine/src/deploy/storage.rs:341` (y `helpers/storage/units.rs:100-133`) escriben `/etc/fstab` sin llamar a `fstab_options_for_target`, dejando montajes sin `nofail,x-systemd.device-timeout=15s`.
-- **`DT-A09` — S.M.A.R.T. falla silenciosamente en subvolúmenes Btrfs (`[/@subvol]`) y bajo `nas-web` sin `sudo`:** `crates/nas-engine/src/storage.rs:572-619,634-644` no limpia `[/@subvol]` antes de `is_valid_device` ni ejecuta `smartctl -H` con `SudoMode::Passwordless`.
+- **`DT-A08` [RESUELTO] — `deploy/storage.rs::update_fstab` y `helpers/storage/units.rs` ahora delegan en `deploy/artifacts.rs::update_fstab`:** ambos aplican `fstab_options_for_target` (`nofail,x-systemd.device-timeout=15s`, retirando `autodefrag`/`discard=async`) con temporales `O_EXCL` (`write_unique_temp_file`) y respaldo `.bak.<epoch>`, además de saneamiento bajo demanda vía `sanitize_fstab` (`/api/storage/fstab-sanitize`).
+- **`DT-A09` [PARCIAL] — S.M.A.R.T. bajo `nas-web` sin `sudo`:** `crates/nas-engine/src/storage.rs::check_block_health` ya limpia `[/@subvol]` mediante `clean_block_source(device)` antes de validar el dispositivo, pero sigue invocando `smartctl -H` sin `SudoMode::Passwordless` cuando se ejecuta desde el servicio sin privilegios `nas-web`.
 - **`DT-A10` — `backup_dedup.rs` pierde `ro=true` / `+i` tras corte eléctrico u OOM y no protege picos de RAM en `partial_cache`:** `crates/nas-engine/src/backup_dedup.rs:1413-1470,1574,1771-1785` carece de restauración incremental o `Drop` guard al abortar por `MemoryMax`; `partial_cache` (hasta 500k entradas de 8 KiB) + `filefrag` doble por candidato pueden disparar el OOM killer en hosts de 2–4 GiB. Además, en `collect_files_in_container_partitioned` (`969-990`), si un cubo `(size, MetaKey)` excede `max_records_in_ram` (`divisor >= 4096`), los registros sobrantes se descartan con `continue`.
 - **`DT-A11` — `chown -R` y `chattr -R -i` remanentes sobre árboles históricos de backups:** `crates/nas-engine/src/helpers/backup.rs:135-139,360` y `helpers/backup/permanent.rs:183-187,426-444` siguen lanzando `chown -R` / `chattr -R -i` completos; `permanent.rs:30-66` ejecuta `dir_stats` síncrono con `HashSet` ilimitado; `backup_spec/render.rs:331-368` deja `FULL_*` huérfano bloqueando futuras congelaciones si falla `cp -al`/`--reflink`.
 - **`DT-A12` — `nas-audit` con carrera TOCTOU en lockfile y ocultamiento de línea final truncada:** `crates/nas-audit/src/lib.rs:138-146,189-190,233-262` enmascara `PermissionDenied` como `"bitácora bloqueada"`, borra `.lock` de forma no atómica en `attempt == 200` y descarta en silencio una última línea truncada por apagón rompiendo el encadenamiento en `verify()`.
 
 ### 3.3 Bugs Funcionales en Panel Web, CLI y Orquestación
-- **`DT-A13` — Explorador de archivos y papelera rotos para unidades adicionales (`unidades/<id>`):** `crates/nas-web/assets/js/modules/storage/pools.js:132-133` envía `root=unidades/<id>`, pero `crates/nas-web/src/routes/files.rs:110-112` usa `valid_name` (que prohíbe `/`) rechazando con HTTP 400; `submitMoveFile` (`actions.js:429-435`) y `trash.js` omiten `root`.
+- **`DT-A13` [PARCIAL] — Papelera pendiente para unidades adicionales (`unidades/<id>`):** `crates/nas-web/src/routes/files.rs::file_root_for` ya admite `unidades/<id>` (retirando el prefijo `unidades/` y validando `valid_name`), `files.js` muestra el origen en la barra de estado y `files/actions.js::submitMoveFile` ya envía `root`; queda pendiente que `assets/js/modules/files/trash.js` envíe `root` al listar o restaurar la papelera (`/api/files/trash` y `/api/files/trash/restore-all`).
 - **`DT-A14` — `layout.html` con tarjetas de rol `superadmin` rotas (`onclick=""`) y ~30 tokens PHP sin poblar:** `crates/nas-web/templates/layout.html:259,768-891,2539,2661,3357` frente a `views.rs:138-152`. No se puede seleccionar el rol `superadmin` desde los modales de usuario/edición.
 - **`DT-A15` — Subida multipart (`files_upload`) sensible al orden de campos, con fuga de staging y TOCTOU:** `crates/nas-web/src/routes/files/mutations.rs:250-296,345-359,443-459,480-485` depende de que `root` llegue antes que `file`, no usa guardas `TempFile` con `Drop`, hace `try_exists` + `rename` no atómico y corre `df -Pk` cada 16 MiB.
 - **`DT-A16` — Papelera (`trash`) con truncamiento `parseInt`, XSS en `data-id`, race TOCTOU y recorrido síncrono:** `crates/nas-web/assets/js/modules/files/trash.js:156,242` y `files/trash.rs:99-101,124,330-368`.
@@ -84,7 +84,7 @@
 - **`DT-M09` — `helpers/terminal.rs` oculta fallos de `tmux` en `capture_terminal` y abre socket como `root` en `start_terminal`:** `helpers/terminal.rs:21-33,78-85,253-294`.
 - **`DT-M10` — `nas-tui` con rutas hardcodeadas (`/srv/nas`, `/dev/null`), sin scroll en `Paragraph` y sin guard `Drop` para restaurar TTY en panic:** `crates/nas-tui/src/{app.rs:263,307,334,357, ui.rs:47-55,284, main.rs:37-55}`.
 - **`DT-M11` — Inconsistencias `--json` y códigos de salida en `nas-cli` / `nasctl` / `nas-dev`:** errores siempre imprimen JSON en `stderr` sin `--json`; `audit verify`, `diag`, `update verify` y `nasctl check` emiten `"success": true` al fallar; `nasctl` omite hosts si un hilo entra en pánico; `nas-dev sync` deja temporales `nas-dev-<pid>` sin limpiar.
-- **`DT-M12` — `btrfs scrub` mensual omite volúmenes adicionales en `/srv/nas/unidades/*`:** `deploy/artifacts.rs:135` y `deploy/storage.rs:397` solo programan `/srv/nas`.
+- **`DT-M12` [RESUELTO] — `btrfs scrub` y `fstrim` para volúmenes adicionales en `/srv/nas/unidades/*`:** `helpers/storage.rs::create_pool` y `helpers/storage/units.rs::mount_unit` registran `/etc/cron.d/nas-btrfs-scrub-unit-<id>` mediante `register_btrfs_scrub_for_target` (y `umount_unit` lo retira); además `/api/storage/scrub?unit=<id>` y `/api/storage/trim?unit=<id>` (`nas helper storage-apply scrub-unit-status|scrub-unit-start|trim-unit`) operan por unidad.
 - **`DT-M13` — `update.rs` healthcheck `curl` sin `-f`:** `crates/nas-engine/src/update.rs:253-262` no falla ante HTTP `500`/`502`.
 - **`DT-M14` — Brechas en CI y tests BATS:** `.github/workflows/ci.yml:58` deshabilita `tests/deploy_shim.bats`; `failure_runners.bats` y `rotation.bats` prueban Bash inline con `chattr -R +i` / `chmod -R u+w` en lugar de runners Rust reales; `scripts/parity_extract.py` depende de fixtures PHP (`layout.php` de 3,154 ln); `scripts/qa_live_runner.py:157` apunta a `/api/users/update` en vez de `/api/users/delete`.
 - **`DT-M15` — Subprocesos innecesarios y lectura completa en RAM en runners/logs:** `backup_spec/render.rs:168` llama `$(date +%s)` en cada línea de progreso `rsync`; `AUTO_PERMANENT` hace doble recorrido (`du -sb` + `find`); `helpers/backup.rs:643` lee todo el `.log` con `read_to_string`; `helpers/share.rs:54-60` corre `chown -R` en shares existentes.
@@ -135,10 +135,10 @@
    - `DT-C01` (bloquear rutas protegidas en `FileRoot::resolve_dir`).
    - `DT-C02` (verificación SHA-256 obligatoria y validación Ed25519 real o no mentir en `ed25519_verified` en `install.sh`).
    - `DT-C04`, `DT-C05`, `DT-C06` (`umount -f/-l`, `nohup` sin `timeout` bloqueante, `-prune` de `BACKUPS_*` en `purge_recycle_in`).
-   - `DT-A01`, `DT-A02`, `DT-A03`, `DT-A04`, `DT-A08`, `DT-A09` (claves SSH, `KEY_FILE`, temporales `O_EXCL`, `restore.rs`, `deploy/storage.rs` con `nofail`, `smartctl` con `sudo` y limpieza `[/@subvol]`).
+   - `DT-A01`, `DT-A02`, `DT-A03`, `DT-A04`, `DT-A09` (claves SSH, `KEY_FILE`, temporales `O_EXCL`, `restore.rs`, `smartctl` con `sudo`; `DT-A08` resuelto).
 2. **Ola 2 — Bugs Funcionales Web / Deduplicación (Alta prioridad):**
    - `DT-C03` (ZIP64 + descarga directa sin `res.blob()` en RAM).
-   - `DT-A13`, `DT-A14`, `DT-A15`, `DT-A16`, `DT-A17`, `DT-A18` (`unidades/<id>`, tokens de `layout.html`, `files_upload` con `TempFile`, `trash` IDs, SVG, `user_update`).
+   - `DT-A13` (papelera en `trash.js` para `unidades/<id>`; explorador y mover ya resueltos), `DT-A14`, `DT-A15`, `DT-A16`, `DT-A17`, `DT-A18` (tokens de `layout.html`, `files_upload` con `TempFile`, `trash` IDs, SVG, `user_update`).
    - `DT-A10`, `DT-A11` (`backup_dedup.rs` guardado de estado `ro`/`+i`, cota real de RAM para `partial_cache` y cubos, eliminación de `chown -R` innecesarios).
 3. **Ola 3 — Consolidación Arquitectónica y Desacople:**
    - Unificar `deploy::storage` / `helpers::storage` / `storage_ops` / `storage` y `tasks/runner.rs` vs `backup_spec/render.rs`.
