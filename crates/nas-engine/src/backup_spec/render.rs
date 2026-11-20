@@ -110,6 +110,9 @@ cleanup() {{
         SPACE_WATCHDOG_PID=""
     fi
     rm -f "$PROG_FILE" "${{PROG_FILE}}.tmp."* "$SPACE_ABORT_FLAG" 2>/dev/null || true
+    if [ -n "${{PERM_DIR:-}}" ] && [ -d "$PERM_DIR" ]; then
+        rm -rf -- "$PERM_DIR"/.freezing_* 2>/dev/null || true
+    fi
     if mountpoint -q "$MOUNT" 2>/dev/null; then
         umount "$MOUNT" 2>/dev/null || umount -f "$MOUNT" 2>/dev/null || umount -l "$MOUNT" 2>/dev/null || true
     fi
@@ -335,36 +338,40 @@ if [ -d "$STAGE" ]; then
 fi
 if btrfs subvolume show "$FINAL" >/dev/null 2>&1; then btrfs property set "$FINAL" ro true 2>/dev/null || true; fi
 
+freeze_auto_permanent() {{
+    local tag="$1" label="$2" perm_dest="$3" perm_stage="$4" perm_size perm_files
+    rm -rf -- "$perm_stage" 2>/dev/null || true
+    if cp -al "$FINAL" "$perm_stage" 2>/dev/null || cp -a --reflink=always "$FINAL" "$perm_stage" 2>/dev/null; then
+        perm_size=$(du -sb "$perm_stage" 2>/dev/null | awk 'NR==1{{print $1}}' || true)
+        perm_files=$(find "$perm_stage" -type f 2>/dev/null | wc -l || true)
+        printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"%s","size_bytes":%s,"files_count":%s}}\n' \
+            "$TASK" "$(basename "$perm_dest")" "$perm_dest" "$DATE_STR" "$tag" "${{perm_size:-0}}" "${{perm_files:-0}}" > "$perm_stage/.freeze_meta.json" 2>/dev/null || true
+        if mv "$perm_stage" "$perm_dest"; then
+            chattr +i "$perm_dest" 2>/dev/null || true
+            log "congelación $label automática: $(basename "$perm_dest")"
+        else
+            rm -rf -- "$perm_stage" 2>/dev/null || true
+        fi
+    else
+        rm -rf -- "$perm_stage" 2>/dev/null || true
+    fi
+}}
+
 if [ "$AUTO_PERMANENT" = "true" ]; then
+    [ -d "$PERM_DIR" ] && rm -rf -- "$PERM_DIR"/.freezing_* 2>/dev/null || true
     HAS_PERM=false
     if [ -d "$PERM_DIR" ] && find "$PERM_DIR" -mindepth 1 -maxdepth 1 -type d -name "FULL_*" 2>/dev/null | grep -q .; then
         HAS_PERM=true
     fi
 
     if [ "$HAS_PERM" != "true" ]; then
-        PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_INICIAL"
-        if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
-            PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}' || true)
-            PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l || true)
-            printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"INICIAL","size_bytes":%s,"files_count":%s}}\n' \
-                "$TASK" "FULL_${{DATE_STR}}_INICIAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
-            chattr +i "$PERM_DEST" 2>/dev/null || true
-            log "congelación inicial automática: FULL_${{DATE_STR}}_INICIAL"
-        fi
+        freeze_auto_permanent "INICIAL" "inicial" "$PERM_DIR/FULL_${{DATE_STR}}_INICIAL" "$PERM_DIR/.freezing_${{DATE_STR}}_INICIAL"
     else
         DAY_OF_MONTH=$(date +%d)
         if [ "$DAY_OF_MONTH" = "01" ]; then
             MONTH_TAG=$(date +%Y-%m)
             if ! find "$PERM_DIR" -maxdepth 1 -type d -name "FULL_${{MONTH_TAG}}*" 2>/dev/null | grep -q .; then
-                PERM_DEST="$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL"
-                if cp -al "$FINAL" "$PERM_DEST" 2>/dev/null || cp -a --reflink=always "$FINAL" "$PERM_DEST" 2>/dev/null; then
-                    PERM_SIZE=$(du -sb "$PERM_DEST" 2>/dev/null | awk 'NR==1{{print $1}}' || true)
-                    PERM_FILES=$(find "$PERM_DEST" -type f 2>/dev/null | wc -l || true)
-                    printf '{{"task":"%s","name":"%s","path":"%s","date":"%s","tag":"MENSUAL","size_bytes":%s,"files_count":%s}}\n' \
-                        "$TASK" "FULL_${{DATE_STR}}_MENSUAL" "$PERM_DEST" "$DATE_STR" "${{PERM_SIZE:-0}}" "${{PERM_FILES:-0}}" > "$PERM_DEST/.freeze_meta.json" 2>/dev/null || true
-                    chattr +i "$PERM_DEST" 2>/dev/null || true
-                    log "congelación mensual automática: FULL_${{DATE_STR}}_MENSUAL"
-                fi
+                freeze_auto_permanent "MENSUAL" "mensual" "$PERM_DIR/FULL_${{DATE_STR}}_MENSUAL" "$PERM_DIR/.freezing_${{DATE_STR}}_MENSUAL"
             fi
         fi
     fi
@@ -379,9 +386,13 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
     TO_REMOVE=$((TOTAL_SNAPS - RETENTION))
     for ((i = 0; i < TO_REMOVE; i++)); do
         OLD="${{ALL_SNAPS[$i]}}"
-        chattr -R -i "$OLD" 2>/dev/null || true
-        find "$OLD" -type d -exec chmod u+w {{}} + 2>/dev/null || true
-        if rm -rf -- "$OLD"; then
+        chattr -i "$OLD" 2>/dev/null || true
+        if ! rm -rf -- "$OLD" 2>/dev/null; then
+            chattr -R -i "$OLD" 2>/dev/null || true
+            find "$OLD" -type d -exec chmod u+w {{}} + 2>/dev/null || true
+            rm -rf -- "$OLD" 2>/dev/null || true
+        fi
+        if [ ! -e "$OLD" ]; then
             log "retención: eliminado $(basename "$OLD")"
         fi
     done
