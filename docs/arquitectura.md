@@ -17,7 +17,7 @@ Cuatro restricciones reales del entorno determinan todas las decisiones estructu
 1. **Operación 100% *offline* (sin dependencia de internet):** toda la interfaz web, iconos y visores ofimáticos se compilan dentro del binario para operar en redes corporativas cerradas sin **CDNs** (*Content Delivery Networks* — Redes de Distribución de Contenidos).
 2. **Mínimo privilegio y cero intérprete *shell*:** el servicio web corre con un usuario sin privilegios (`nas-web`) y nunca invoca `/bin/sh -c`; cada acción privilegiada atraviesa argumentos tipados y una lista blanca de asistentes `root`.
 3. **Bajo consumo en reposo:** sin intérpretes PHP/Python ni bases de datos externas; binarios nativos Rust y **SQLite** en modo **WAL** (*Write-Ahead Logging* — Registro de Escritura Anticipada).
-4. **Resiliencia en hardware de grado consumidor:** aislamiento estricto entre el disco del sistema operativo (`/`) y el volumen de datos (`/srv/nas`), escrituras atómicas en respaldos y límites de memoria/E/S mediante **cgroups** (*Control Groups* — Grupos de Control del kernel Linux).
+4. **Resiliencia en hardware de grado consumidor y cero supuestos:** partiendo de un Debian 13 mínimo con solo `curl` y `wget`, `install.sh` y `nas deploy ensure-deps` auto-aprovisionan herramientas base; el sistema aísla `/srv/nas` respecto a `/`, activa `SQLite WAL + synchronous=FULL`, admite control `hdparm -W0` por disco + `nut` opcional bajo demanda, y acota memoria/CPU/E/S mediante **cgroups** (*Control Groups*) y `ResourceBudget`.
 
 ---
 
