@@ -312,6 +312,9 @@ mod tests {
         assert!(runner.contains("--info=progress2"));
         assert!(runner.contains("update_progress"));
         assert!(runner.contains("FULL_${DATE_STR}_INICIAL"));
+        assert!(runner.contains(".freezing_${DATE_STR}_INICIAL"));
+        assert!(runner.contains("freeze_auto_permanent"));
+        assert!(runner.contains("chattr -i \"$OLD\""));
         assert!(runner.contains("AUTO_PERMANENT=true"));
         assert!(runner.contains("codigo 23"));
         assert!(runner.contains("codigo 24"));
