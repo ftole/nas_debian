@@ -305,80 +305,10 @@ pub fn unmount(runner: &Runner, target: &str) -> NasResult<()> {
     )
 }
 
-/// Persiste una entrada de montaje en `/etc/fstab` usando el UUID si está disponible.
+/// Persiste una entrada de montaje en `/etc/fstab` usando el UUID si está disponible
+/// y aplicando siempre `nofail,x-systemd.device-timeout=15s` en montajes secundarios.
 pub fn update_fstab(runner: &Runner, source: &str, target: &str, options: &str) -> NasResult<()> {
-    let fstab_path = std::path::Path::new("/etc/fstab");
-    if !fstab_path.exists() {
-        return Ok(());
-    }
-
-    let uuid_res = runner.run(
-        &CommandSpec::new("blkid")
-            .args(["-s", "UUID", "-o", "value", source])
-            .timeout(Duration::from_secs(10)),
-    );
-    let fstab_src = match uuid_res {
-        Ok(out) if out.is_success() && !out.stdout.trim().is_empty() => {
-            format!("UUID={}", out.stdout.trim())
-        }
-        _ => source.to_string(),
-    };
-
-    let content = std::fs::read_to_string(fstab_path).unwrap_or_default();
-    let mut new_lines: Vec<String> = content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('#') {
-                return true;
-            }
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            !(parts.len() >= 2 && parts[1] == target)
-        })
-        .map(ToString::to_string)
-        .collect();
-
-    new_lines.push(format!("{fstab_src} {target} auto {options} 0 0"));
-    let final_content = format!("{}\n", new_lines.join("\n"));
-    if std::fs::write(fstab_path, &final_content).is_err() {
-        let staged = std::env::temp_dir().join(format!("nas-fstab-{}", std::process::id()));
-        std::fs::write(&staged, &final_content).map_err(|e| {
-            NasError::Denied(format!(
-                "no se pudo preparar archivo temporal de fstab: {e}"
-            ))
-        })?;
-        let res = runner.run(
-            &CommandSpec::new("install")
-                .args([
-                    "-m",
-                    "0644",
-                    "-o",
-                    "root",
-                    "-g",
-                    "root",
-                    &staged.to_string_lossy(),
-                    "/etc/fstab",
-                ])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(Duration::from_secs(30)),
-        );
-        let _ = std::fs::remove_file(&staged);
-        match res {
-            Ok(out) if !out.is_success() => {
-                return Err(NasError::Denied(format!(
-                    "no se pudo actualizar /etc/fstab: {}",
-                    out.stderr
-                )));
-            }
-            Err(e) => {
-                return Err(NasError::Denied(format!(
-                    "no se pudo actualizar /etc/fstab: {e}"
-                )));
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+    super::artifacts::update_fstab(runner, source, target, options)
 }
 
 /// Activa `fstrim.timer` (SSD).
