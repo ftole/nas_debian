@@ -20,7 +20,12 @@ pub fn confirm_ok(confirm: &str) -> bool {
 /// Valida un dispositivo de bloque (`/dev/sdb`, `/dev/nvme0n1p1`, `/dev/mapper/vg-lv`).
 pub fn valid_device(device: &str) -> bool {
     let device = device.trim();
-    if !device.starts_with("/dev/") || device.len() > 64 || device.contains("..") {
+    if !device.starts_with("/dev/")
+        || device.len() <= 5
+        || device.len() > 64
+        || device.ends_with('/')
+        || device.contains("..")
+    {
         return false;
     }
     device
@@ -110,29 +115,43 @@ pub fn os_disks(runner: &Runner) -> Vec<String> {
     disks
 }
 
+fn disk_from_partition_name(name: &str) -> &str {
+    if let Some((disk, part)) = name.rsplit_once('p') {
+        if !part.is_empty()
+            && part.chars().all(|c| c.is_ascii_digit())
+            && disk.ends_with(|c: char| c.is_ascii_digit())
+        {
+            return disk;
+        }
+    }
+    if name.starts_with("nvme")
+        || name.starts_with("mmcblk")
+        || name.starts_with("loop")
+        || name.starts_with("nbd")
+        || name.starts_with("md")
+        || name.starts_with("ram")
+        || name.starts_with("pmem")
+    {
+        return name;
+    }
+    let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    if trimmed.is_empty() {
+        name
+    } else {
+        trimmed
+    }
+}
+
 /// Disco padre de un dispositivo (`/dev/sda1` → `/dev/sda`).
 pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
+    let device = device.trim().trim_end_matches('/');
+    if device.is_empty() {
+        return None;
+    }
     if let Ok(output) = run_capture(runner, "lsblk", &["-ndo", "PKNAME", device]) {
         let name = output.lines().next().unwrap_or_default().trim();
         if !name.is_empty() {
-            let disk_name = if name.starts_with("nvme") || name.starts_with("mmcblk") {
-                if let Some((disk, part)) = name.rsplit_once('p') {
-                    if !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()) {
-                        disk
-                    } else {
-                        name
-                    }
-                } else {
-                    name
-                }
-            } else {
-                let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
-                if trimmed.is_empty() {
-                    name
-                } else {
-                    trimmed
-                }
-            };
+            let disk_name = disk_from_partition_name(name);
             return Some(format!("/dev/{disk_name}"));
         }
     }
@@ -140,20 +159,21 @@ pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
     if base.is_empty() || device.starts_with("/dev/mapper/") {
         return None;
     }
-    if base.starts_with("nvme") || base.starts_with("mmcblk") {
-        if let Some((disk, part)) = base.rsplit_once('p') {
-            if !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()) {
-                return Some(format!("/dev/{disk}"));
-            }
-        }
-        return Some(format!("/dev/{base}"));
+    let disk_name = disk_from_partition_name(base);
+    Some(format!("/dev/{disk_name}"))
+}
+
+/// Comprueba si `device` coincide con un miembro de pool, su disco padre o viceversa,
+/// evitando falsos positivos por prefijo (p. ej. `/dev/sda` vs `/dev/sdaa1`).
+pub(crate) fn device_matches_pool_member(runner: &Runner, member: &str, device: &str) -> bool {
+    let member = member.trim().trim_end_matches('/');
+    let device = device.trim().trim_end_matches('/');
+    if member.is_empty() || device.is_empty() {
+        return false;
     }
-    let trimmed = base.trim_end_matches(|c: char| c.is_ascii_digit());
-    if trimmed.is_empty() {
-        Some(format!("/dev/{base}"))
-    } else {
-        Some(format!("/dev/{trimmed}"))
-    }
+    member == device
+        || parent_disk(runner, member).as_deref() == Some(device)
+        || parent_disk(runner, device).as_deref() == Some(member)
 }
 
 /// Puntos de montaje del dispositivo o de sus particiones.
@@ -212,6 +232,22 @@ fn ensure_safe(runner: &Runner, device: &str, confirm: &str) -> Result<(), Strin
         return Err(fail(
             "operación prohibida: el disco contiene LVM o RAID activo",
         ));
+    }
+    if let Ok(devs) = crate::storage::lsblk_devices_with_uuid(runner) {
+        for pool in crate::storage::btrfs_pools_from_lsblk(&devs) {
+            let Some(mp) = pool.mountpoint else {
+                continue;
+            };
+            let matches = pool
+                .devices
+                .iter()
+                .any(|member| device_matches_pool_member(runner, member, device));
+            if matches {
+                return Err(fail(format!(
+                    "operación prohibida: {device} pertenece al pool Btrfs montado en {mp}"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -367,24 +403,210 @@ pub fn add_unit(
     if !ALLOWED_FILESYSTEMS.contains(&fstype.as_str()) {
         return Err(fail("filesystem no soportado"));
     }
+    let mount_dir = format!("/srv/nas/unidades/{unit_id}");
+    if crate::storage::is_mountpoint(std::path::Path::new(&mount_dir)) {
+        return Err(fail(format!(
+            "ya existe un volumen montado en {mount_dir} (bloqueo anti-overmount)"
+        )));
+    }
     ensure_safe(runner, device, confirm)?;
+    check_mounted(runner, device, false)?;
     helper(runner, &["add-unit", confirm, device, unit_id, &fstype])?;
     Ok(format!(
         "unidad {unit_id} creada en /srv/nas/unidades/{unit_id}"
     ))
 }
 
-/// Extiende el VG que contiene `/srv/nas` con un disco adicional.
+/// Extiende el pool (LVM o Btrfs) que contiene `/srv/nas` con un disco adicional.
 pub fn extend_pool(runner: &Runner, device: &str, confirm: &str) -> Result<String, String> {
+    extend_pool_target(runner, "principal", device, confirm, false)
+}
+
+/// Extiende un pool existente (`principal` o `<unit_id>`), soportando LVM y Btrfs (`btrfs device add`).
+pub fn extend_pool_target(
+    runner: &Runner,
+    target: &str,
+    device: &str,
+    confirm: &str,
+    metadata_raid1: bool,
+) -> Result<String, String> {
     if !confirm_ok(confirm) {
         return Err(fail("confirmación requerida"));
+    }
+    let target = target.trim();
+    let target_arg = if target.is_empty() {
+        "principal"
+    } else if target != "principal" && !valid_name(target) {
+        return Err(fail("identificador de pool inválido"));
+    } else {
+        target
+    };
+    if !valid_device(device) {
+        return Err(fail("dispositivo inválido"));
+    }
+    ensure_safe(runner, device, confirm)?;
+    check_mounted(runner, device, false)?;
+    let raid_flag = if metadata_raid1 { "1" } else { "0" };
+    helper(
+        runner,
+        &["extend-pool-target", confirm, target_arg, device, raid_flag],
+    )
+}
+
+/// Crea un nuevo pool (1 o N discos) en `principal` (`/srv/nas`) o en `/srv/nas/unidades/<id>`.
+pub fn create_pool(
+    runner: &Runner,
+    target: &str,
+    mode: &str,
+    devices: &[String],
+    confirm: &str,
+    unmount: bool,
+) -> Result<String, String> {
+    if !confirm_ok(confirm) {
+        return Err(fail(
+            "confirmación requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)",
+        ));
+    }
+    let target = target.trim();
+    let target_arg = if target.is_empty() || target == "principal" {
+        "principal"
+    } else if valid_name(target) {
+        target
+    } else {
+        return Err(fail("identificador de pool o unidad inválido"));
+    };
+    let mode = mode.trim().to_ascii_lowercase();
+    if !crate::helpers::storage::ALLOWED_POOL_MODES.contains(&mode.as_str()) {
+        return Err(fail(format!("modo de pool no soportado: {mode}")));
+    }
+    if devices.is_empty() {
+        return Err(fail("selecciona al menos un disco"));
+    }
+    if mode == "ext4" && devices.len() != 1 {
+        return Err(fail(
+            "ext4 directo solo admite 1 disco; selecciona Btrfs o LVM para varios discos",
+        ));
+    }
+    if mode == "btrfs_raid1" && devices.len() < 2 {
+        return Err(fail("Btrfs RAID1 (espejo) requiere al menos 2 discos"));
+    }
+    let mut clean_devs = Vec::with_capacity(devices.len());
+    for raw in devices {
+        let dev = raw.trim().to_string();
+        if !valid_device(&dev) {
+            return Err(fail(format!("dispositivo inválido: {dev}")));
+        }
+        if clean_devs.contains(&dev) {
+            return Err(fail(format!("dispositivo duplicado: {dev}")));
+        }
+        ensure_safe(runner, &dev, confirm)?;
+        check_mounted(runner, &dev, unmount)?;
+        clean_devs.push(dev);
+    }
+    if target_arg != "principal" {
+        let mount_dir = format!("/srv/nas/unidades/{target_arg}");
+        if crate::storage::is_mountpoint(std::path::Path::new(&mount_dir)) {
+            return Err(fail(format!(
+                "ya existe un volumen montado en {mount_dir} (bloqueo anti-overmount)"
+            )));
+        }
+    }
+    let joined = clean_devs.join(",");
+    let flag = if unmount { "1" } else { "0" };
+    helper(
+        runner,
+        &["create-pool", confirm, target_arg, &mode, &joined, flag],
+    )
+}
+
+/// Desmonta una unidad adicional `/srv/nas/unidades/<id>` y la retira de `/etc/fstab`.
+pub fn umount_unit(runner: &Runner, unit_id: &str, confirm: &str) -> Result<String, String> {
+    if !confirm_ok(confirm) {
+        return Err(fail("confirmación requerida"));
+    }
+    if !valid_name(unit_id) {
+        return Err(fail("identificador de unidad inválido"));
+    }
+    helper(runner, &["umount-unit", confirm, unit_id])
+}
+
+/// Retira de forma segura un disco miembro de un pool Btrfs (`btrfs device remove`).
+pub fn remove_pool_device(
+    runner: &Runner,
+    target: &str,
+    device: &str,
+    confirm: &str,
+) -> Result<String, String> {
+    if !confirm_ok(confirm) {
+        return Err(fail(
+            "confirmación requerida (SI-FORMATEAR o SI-DESTRUIR-DATOS)",
+        ));
+    }
+    let target = target.trim();
+    let target_arg = if target.is_empty() || target == "principal" {
+        "principal"
+    } else if valid_name(target) {
+        target
+    } else {
+        return Err(fail("identificador de pool inválido"));
+    };
+    let device = device.trim();
+    if !valid_device(device) {
+        return Err(fail("dispositivo inválido"));
+    }
+    helper(runner, &["remove-pool-device", confirm, target_arg, device])
+}
+
+/// Borra firmas y tabla de particiones de un disco no protegido.
+pub fn wipe_disk(
+    runner: &Runner,
+    device: &str,
+    confirm: &str,
+    unmount: bool,
+) -> Result<String, String> {
+    if confirm != "SI-DESTRUIR-DATOS" {
+        return Err(fail(
+            "se requiere escribir exactamente SI-DESTRUIR-DATOS para limpiar firmas de disco",
+        ));
     }
     if !valid_device(device) {
         return Err(fail("dispositivo inválido"));
     }
     ensure_safe(runner, device, confirm)?;
-    helper(runner, &["extend-pool", confirm, device])?;
-    Ok(format!("pool extendido con {device}"))
+    check_mounted(runner, device, unmount)?;
+    helper(runner, &["wipe-disk", confirm, device])
+}
+
+/// Sanea `/etc/fstab` retirando entradas huérfanas y normalizando `nofail`.
+pub fn sanitize_fstab(runner: &Runner, confirm: &str) -> Result<String, String> {
+    if !confirm_ok(confirm) && confirm != "SI-SANEAR" {
+        return Err(fail("confirmación requerida"));
+    }
+    helper(runner, &["sanitize-fstab", confirm])
+}
+
+/// Consulta `btrfs scrub status` de una unidad `/srv/nas/unidades/<id>`.
+pub fn unit_scrub_status(runner: &Runner, unit_id: &str) -> Result<String, String> {
+    if !valid_name(unit_id) {
+        return Err(fail("identificador de unidad inválido"));
+    }
+    helper(runner, &["scrub-unit-status", unit_id])
+}
+
+/// Inicia `btrfs scrub start` de una unidad `/srv/nas/unidades/<id>`.
+pub fn unit_scrub_start(runner: &Runner, unit_id: &str) -> Result<String, String> {
+    if !valid_name(unit_id) {
+        return Err(fail("identificador de unidad inválido"));
+    }
+    helper(runner, &["scrub-unit-start", unit_id])
+}
+
+/// Ejecuta `fstrim -v` en una unidad `/srv/nas/unidades/<id>`.
+pub fn unit_trim(runner: &Runner, unit_id: &str) -> Result<String, String> {
+    if !valid_name(unit_id) {
+        return Err(fail("identificador de unidad inválido"));
+    }
+    helper(runner, &["trim-unit", unit_id])
 }
 
 #[cfg(test)]
@@ -405,6 +627,8 @@ mod tests {
         assert!(valid_device("/dev/nvme0n1p1"));
         assert!(valid_device("/dev/mapper/vg-data"));
         assert!(!valid_device("/dev/../etc/passwd"));
+        assert!(!valid_device("/dev/"));
+        assert!(!valid_device("/dev/sda/"));
         assert!(!valid_device("rm -rf /"));
         assert!(!valid_device("sdb"));
 
@@ -457,5 +681,103 @@ mod tests {
         let runner = nas_exec::Runner::new();
         // Dispositivos que no sean del sistema operativo
         assert!(super::ensure_safe(&runner, "/dev/sdz", "SI-DESTRUIR-DATOS").is_ok());
+    }
+
+    #[test]
+    fn create_pool_y_wipe_validan_reglas_antes_de_helper() {
+        let runner = nas_exec::Runner::new();
+        assert!(super::create_pool(
+            &runner,
+            "principal",
+            "btrfs_single",
+            &[],
+            "SI-FORMATEAR",
+            false
+        )
+        .is_err());
+        assert!(super::create_pool(
+            &runner,
+            "pool2",
+            "ext4",
+            &["/dev/sdx".into(), "/dev/sdy".into()],
+            "SI-FORMATEAR",
+            false
+        )
+        .is_err());
+        assert!(super::create_pool(
+            &runner,
+            "pool2",
+            "btrfs_raid1",
+            &["/dev/sdx".into()],
+            "SI-FORMATEAR",
+            false
+        )
+        .is_err());
+        assert!(super::wipe_disk(&runner, "/dev/sdx", "SI-FORMATEAR", false).is_err());
+        assert!(super::umount_unit(&runner, "../bad", "SI-FORMATEAR").is_err());
+        assert!(
+            super::extend_pool_target(&runner, "../bad", "/dev/sdx", "SI-FORMATEAR", false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn device_matches_pool_member_sin_colisiones_de_prefijo() {
+        let runner = nas_exec::Runner::new();
+        assert!(!super::device_matches_pool_member(
+            &runner,
+            "/dev/sdaa1",
+            "/dev/sda"
+        ));
+        assert!(!super::device_matches_pool_member(
+            &runner,
+            "/dev/nvme0n10p1",
+            "/dev/nvme0n1"
+        ));
+        assert!(!super::device_matches_pool_member(
+            &runner,
+            "/dev/loop10p1",
+            "/dev/loop1"
+        ));
+        assert!(!super::device_matches_pool_member(
+            &runner,
+            "/dev/loop10",
+            "/dev/loop1"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/sda1",
+            "/dev/sda"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/sda",
+            "/dev/sda1"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/nvme0n1p1",
+            "/dev/nvme0n1"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/loop1p1",
+            "/dev/loop1"
+        ));
+        assert!(!super::device_matches_pool_member(
+            &runner,
+            "/dev/mmcblk10p1",
+            "/dev/mmcblk1"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/mmcblk0p1",
+            "/dev/mmcblk0"
+        ));
+        assert!(super::device_matches_pool_member(
+            &runner,
+            "/dev/sda1",
+            "/dev/sda/"
+        ));
     }
 }
