@@ -27,6 +27,9 @@ pub struct PermanentBackupInfo {
     pub files_count: u64,
 }
 
+/// Tope estricto de inodos distintos en memoria al calcular estadísticas de un respaldo permanente.
+const DIR_STATS_MAX_INODES: usize = 250_000;
+
 fn dir_stats(path: &Path) -> (u64, u64) {
     let mut files = 0u64;
     let mut bytes = 0u64;
@@ -49,7 +52,12 @@ fn dir_stats(path: &Path) -> (u64, u64) {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::MetadataExt;
-                    if seen.insert((meta.dev(), meta.ino())) {
+                    let count_file = if seen.len() < DIR_STATS_MAX_INODES {
+                        seen.insert((meta.dev(), meta.ino()))
+                    } else {
+                        true
+                    };
+                    if count_file {
                         bytes += meta.len();
                     }
                 }
@@ -63,6 +71,23 @@ fn dir_stats(path: &Path) -> (u64, u64) {
         }
     }
     (files, bytes)
+}
+
+fn clean_stale_freezing_dirs(perm_task_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(perm_task_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir()
+            && path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(".freezing_"))
+        {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -180,13 +205,11 @@ pub fn freeze_backup_task(
         .replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES");
     let perm_task_dir = PathBuf::from(&perm_root).join(id);
     std::fs::create_dir_all(&perm_task_dir).map_err(|e| NasError::Denied(e.to_string()))?;
-    let _ = runner.run(&CommandSpec::new("chown").args([
-        "-R",
-        "root:grp_samba",
-        &perm_task_dir.to_string_lossy(),
-    ]));
+    let _ = runner
+        .run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &perm_task_dir.to_string_lossy()]));
+    clean_stale_freezing_dirs(&perm_task_dir);
 
     let now = chrono::Local::now();
     let date_str = now.format("%Y-%m-%d_%H%M%S").to_string();
@@ -205,31 +228,34 @@ pub fn freeze_backup_task(
         None => format!("FULL_{date_str}"),
     };
 
+    let stage_path = perm_task_dir.join(format!(".freezing_{folder_name}"));
     let target_path = perm_task_dir.join(&folder_name);
 
     // Levantar temporalmente inmutabilidad en el snapshot origen para permitir crear enlaces duros
     let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &latest.to_string_lossy()]));
 
-    // Clonación instantánea mediante Hardlinks (costo 0 bytes extras), o reflink Btrfs si cruza subvolúmenes.
+    // Clonación en directorio temporal `.freezing_*` para evitar `FULL_*` huérfanos ante un corte eléctrico.
     let latest_s = latest.to_string_lossy().to_string();
+    let stage_s = stage_path.to_string_lossy().to_string();
     let target_s = target_path.to_string_lossy().to_string();
     let cp_res = runner.run(
         &CommandSpec::new("cp")
-            .args(["-al", &latest_s, &target_s])
+            .args(["-al", &latest_s, &stage_s])
             .timeout(Duration::from_secs(120)),
     )?;
     let cp_ok = if cp_res.is_success() {
         Ok(())
     } else {
-        let _ = std::fs::remove_dir_all(&target_path);
+        let _ = std::fs::remove_dir_all(&stage_path);
         let reflink_res = runner.run(
             &CommandSpec::new("cp")
-                .args(["-a", "--reflink=always", &latest_s, &target_s])
+                .args(["-a", "--reflink=always", &latest_s, &stage_s])
                 .timeout(Duration::from_secs(120)),
         )?;
         if reflink_res.is_success() {
             Ok(())
         } else {
+            let _ = std::fs::remove_dir_all(&stage_path);
             Err(if cp_res.stderr.is_empty() {
                 reflink_res.stderr
             } else {
@@ -247,7 +273,7 @@ pub fn freeze_backup_task(
         )));
     }
 
-    let (files_count, size_bytes) = dir_stats(&target_path);
+    let (files_count, size_bytes) = dir_stats(&stage_path);
 
     let info = PermanentBackupInfo {
         task: id.to_string(),
@@ -259,10 +285,17 @@ pub fn freeze_backup_task(
         files_count,
     };
 
-    // Guardar metadatos en el snapshot antes de bloquear el contenedor con chattr +i
-    let meta_file = target_path.join(".freeze_meta.json");
+    // Guardar metadatos y propiedad del contenedor antes de publicar y fijar `+i`
+    let meta_file = stage_path.join(".freeze_meta.json");
     if let Ok(meta_json) = serde_json::to_string_pretty(&info) {
         let _ = std::fs::write(&meta_file, meta_json);
+    }
+    let _ = runner.run(&CommandSpec::new("chown").args(["root:grp_samba", &stage_s]));
+    if let Err(e) = std::fs::rename(&stage_path, &target_path) {
+        let _ = std::fs::remove_dir_all(&stage_path);
+        return Err(NasError::Denied(format!(
+            "no se pudo publicar respaldo permanente {target_s}: {e}"
+        )));
     }
 
     // Inmutabilidad solo en el directorio contenedor (sin -R ni chmod -R a-w para preservar hardlinks en snapshot origen)
@@ -423,33 +456,36 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
         )));
     };
 
-    let _ = runner.run(
-        &CommandSpec::new("chattr")
-            .args(["-R", "-i", &path.to_string_lossy()])
-            .timeout(Duration::from_secs(600)),
-    );
-    let _ = runner.run(
-        &CommandSpec::new("find")
-            .args([
-                &path.to_string_lossy(),
-                "-type",
-                "d",
-                "-exec",
-                "chmod",
-                "u+w",
-                "{}",
-                "+",
-            ])
-            .timeout(Duration::from_secs(600)),
-    );
-    let mut rm_success = false;
-    if let Ok(res) = runner.run(&CommandSpec::new("rm").args(["-rf", &path.to_string_lossy()])) {
-        if res.is_success() {
-            rm_success = true;
-        }
+    let path_s = path.to_string_lossy().to_string();
+    // Levantar primero +i solo en el contenedor raíz para evitar tormentas recursivas de metadatos;
+    // únicamente si rm -rf falla (respaldo legado con +i/permisos anidados), ejecutar saneamiento recursivo.
+    let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &path_s]));
+    let mut rm_success = runner
+        .run(&CommandSpec::new("rm").args(["-rf", &path_s]))
+        .map(|r| r.is_success())
+        .unwrap_or(false);
+    if !rm_success && std::fs::remove_dir_all(&path).is_ok() {
+        rm_success = true;
     }
-    if !rm_success {
-        let _ = std::fs::remove_dir_all(&path);
+    if !rm_success && path.exists() {
+        let _ = runner.run(
+            &CommandSpec::new("chattr")
+                .args(["-R", "-i", &path_s])
+                .timeout(Duration::from_secs(600)),
+        );
+        let _ = runner.run(
+            &CommandSpec::new("find")
+                .args([&path_s, "-type", "d", "-exec", "chmod", "u+w", "{}", "+"])
+                .timeout(Duration::from_secs(600)),
+        );
+        if let Ok(res) = runner.run(&CommandSpec::new("rm").args(["-rf", &path_s])) {
+            if res.is_success() {
+                rm_success = true;
+            }
+        }
+        if !rm_success {
+            let _ = std::fs::remove_dir_all(&path);
+        }
     }
 
     if let Some(perm_parent) = path.parent() {
@@ -527,5 +563,32 @@ mod tests {
         };
         assert_eq!(d3, "2026-10-30_120000");
         assert_eq!(t3, None);
+    }
+
+    #[test]
+    fn limpia_directorios_freezing_interrumpidos_sin_tocar_full() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_perm_clean_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let freezing = dir.join(".freezing_FULL_2026-11-20_100000_INICIAL");
+        let full = dir.join("FULL_2026-11-19_100000_INICIAL");
+        std::fs::create_dir_all(&freezing).expect("freezing");
+        std::fs::create_dir_all(&full).expect("full");
+        std::fs::write(freezing.join("a"), b"123").expect("write");
+
+        clean_stale_freezing_dirs(&dir);
+        assert!(!freezing.exists());
+        assert!(full.is_dir());
+
+        let (files, bytes) = dir_stats(&dir);
+        assert_eq!(files, 0);
+        assert_eq!(bytes, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
