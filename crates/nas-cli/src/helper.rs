@@ -298,6 +298,28 @@ pub enum StorageApplyAction {
     /// Extiende un grupo de volúmenes LVM existente.
     #[command(alias = "extend_pool")]
     ExtendPool { confirm: String, device: String },
+    /// Extiende un pool existente (/srv/nas o /srv/nas/unidades/<id>) en LVM o Btrfs.
+    #[command(alias = "extend_pool_target")]
+    ExtendPoolTarget {
+        confirm: String,
+        target: String,
+        device: String,
+        #[arg(default_value = "0")]
+        metadata_raid1: String,
+    },
+    /// Crea un nuevo pool (1 o N discos) con Btrfs (single/raid1), ext4 o LVM.
+    #[command(alias = "create_pool")]
+    CreatePool {
+        confirm: String,
+        target: String,
+        mode: String,
+        devices: String,
+        #[arg(default_value = "0")]
+        unmount: String,
+    },
+    /// Sanea /etc/fstab retirando entradas huérfanas y normalizando nofail.
+    #[command(alias = "sanitize_fstab")]
+    SanitizeFstab { confirm: String },
     /// Crea un subvolumen Btrfs en /srv/nas.
     #[command(alias = "subvolume", alias = "create_subvolume")]
     CreateSubvolume { confirm: String, name: String },
@@ -316,6 +338,22 @@ pub enum StorageApplyAction {
     /// Desmonta una unidad y la retira de /etc/fstab.
     #[command(alias = "umount_unit")]
     UmountUnit { confirm: String, unit: String },
+    /// Retira un miembro de un pool Btrfs multi-dispositivo en línea.
+    #[command(alias = "remove_pool_device")]
+    RemovePoolDevice {
+        confirm: String,
+        target: String,
+        device: String,
+    },
+    /// Consulta el estado de scrub Btrfs de una unidad o /srv/nas.
+    #[command(alias = "scrub_unit_status")]
+    ScrubUnitStatus { unit: String },
+    /// Inicia scrub Btrfs en una unidad o /srv/nas.
+    #[command(alias = "scrub_unit_start")]
+    ScrubUnitStart { unit: String },
+    /// Ejecuta fstrim en una unidad o /srv/nas.
+    #[command(alias = "trim_unit")]
+    TrimUnit { unit: String },
 }
 
 /// Subcomandos de terminal (`nas helper terminal`).
