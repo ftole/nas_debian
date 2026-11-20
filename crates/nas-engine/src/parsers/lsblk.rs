@@ -25,6 +25,8 @@ struct RawDevice {
     #[serde(default)]
     rota: Option<RotaValue>,
     #[serde(default)]
+    uuid: Option<String>,
+    #[serde(default)]
     children: Vec<RawDevice>,
 }
 
@@ -103,6 +105,9 @@ pub struct BlockDevice {
     pub fstype: Option<String>,
     /// Indica si el dispositivo es mecánico (`Some(true)`) o flash (`Some(false)`).
     pub rotational: Option<bool>,
+    /// UUID del sistema de archivos o partición, si aplica.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
     /// Dispositivos hijos (particiones, volúmenes).
     pub children: Vec<BlockDevice>,
 }
@@ -144,6 +149,10 @@ fn convert(raw: RawDevice) -> BlockDevice {
             .filter(|m| !m.is_empty()),
         fstype: raw.fstype.filter(|f| !f.is_empty()),
         rotational: raw.rota.and_then(|r| r.as_bool()),
+        uuid: raw
+            .uuid
+            .map(|u| u.trim().to_string())
+            .filter(|u| !u.is_empty()),
         children: raw.children.into_iter().map(convert).collect(),
     }
 }
@@ -220,5 +229,29 @@ mod tests {
     #[test]
     fn json_invalido_es_error() {
         assert!(parse("no-json").is_err());
+    }
+
+    #[test]
+    fn parsea_uuid_opcional_para_agrupacion_btrfs() {
+        let json = r#"{
+          "blockdevices": [
+            {"name":"sda","size":"2T","type":"disk","uuid":null,"children":[
+              {"name":"sda1","size":"2T","type":"part","fstype":"btrfs","mountpoint":"/srv/nas","uuid":"07168427-c131-4b01-822d-8ebdcf220d4e","children":[]}
+            ]},
+            {"name":"sdb","size":"2T","type":"disk","uuid":null,"children":[
+              {"name":"sdb1","size":"2T","type":"part","fstype":"btrfs","mountpoint":null,"uuid":"07168427-c131-4b01-822d-8ebdcf220d4e","children":[]}
+            ]}
+          ]
+        }"#;
+        let devices = parse(json).expect("json con uuid");
+        assert_eq!(devices[0].uuid, None);
+        assert_eq!(
+            devices[0].children[0].uuid.as_deref(),
+            Some("07168427-c131-4b01-822d-8ebdcf220d4e")
+        );
+        assert_eq!(
+            devices[1].children[0].uuid.as_deref(),
+            Some("07168427-c131-4b01-822d-8ebdcf220d4e")
+        );
     }
 }
