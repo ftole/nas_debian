@@ -5,6 +5,7 @@
 //! montaje, y genera el plan y artefactos para el despliegue nativo.
 
 mod artifacts;
+pub mod deps;
 pub mod env;
 pub mod helpers;
 pub mod samba;
