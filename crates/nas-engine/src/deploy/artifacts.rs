@@ -119,8 +119,8 @@ impl DeployParams {
 if [ -x /usr/local/bin/nas ]; then\n\
     /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true\n\
 else\n\
-    find /srv/nas -type f -path '*/.recycle/*' -mtime +15 -delete 2>/dev/null || true\n\
-    find /srv/nas -type d -path '*/.recycle/*' -empty -delete 2>/dev/null || true\n\
+    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type f -path '*/.recycle/*' -mtime +15 -exec rm -f {} + 2>/dev/null || true\n\
+    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type d -path '*/.recycle/*' -empty -exec rmdir {} + 2>/dev/null || true\n\
 fi\n"
                     .to_string(),
             },
