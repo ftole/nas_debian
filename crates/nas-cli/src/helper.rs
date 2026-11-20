@@ -361,6 +361,12 @@ pub enum StorageApplyAction {
         device: String,
         mode: String,
     },
+    /// Consulta el estado S.M.A.R.T. de un dispositivo físico (solo lectura, para uso acotado desde nas-web).
+    #[command(alias = "smart_health")]
+    SmartHealth { device: String },
+    /// Consulta el estado write-cache (`hdparm -W`) de un disco físico (solo lectura).
+    #[command(alias = "write_cache_status")]
+    WriteCacheStatus { device: String },
     /// Auto-instala NUT, detecta el UPS USB y configura apagado automático.
     #[command(alias = "ups_configure")]
     UpsConfigure {
