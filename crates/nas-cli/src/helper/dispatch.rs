@@ -437,6 +437,22 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 };
                 storage::set_write_cache(&runner, &confirm, &device, enabled)?
             }
+            StorageApplyAction::SmartHealth { device } => {
+                if !nas_engine::storage::is_valid_device(&device) {
+                    return Err(NasError::Invalid("dispositivo inválido para SMART".into()));
+                }
+                let health = nas_engine::storage::check_block_health_direct(&runner, &device);
+                serde_json::to_string(&health).map_err(|e| NasError::Invalid(e.to_string()))?
+            }
+            StorageApplyAction::WriteCacheStatus { device } => {
+                if !nas_engine::storage::is_valid_device(&device) {
+                    return Err(NasError::Invalid(
+                        "dispositivo inválido para write-cache".into(),
+                    ));
+                }
+                let probe = nas_engine::storage::inspect_write_cache_direct(&runner, &device);
+                serde_json::to_string(&probe).map_err(|e| NasError::Invalid(e.to_string()))?
+            }
             StorageApplyAction::UpsConfigure {
                 confirm,
                 min_battery_pct,
