@@ -83,6 +83,8 @@ btn-confirm-sanitize-fstab
 btn-confirm-stop-backup
 btn-confirm-trim-ssd
 btn-confirm-unmount-storage
+btn-confirm-ups-config
+btn-confirm-ups-disable
 btn-confirm-zip-download
 btn-cp-apply
 btn-discover-domain
@@ -125,9 +127,12 @@ btn-test-backup
 btn-test-edit-backup
 btn-trim-storage
 btn-upload-files
+btn-ups-disable
 btn-user-action-confirm-submit
 btn-view-grid
 btn-view-list
+btn-wc-off
+btn-wc-on
 chip-count-admin
 chip-count-all
 chip-count-blocked
@@ -361,6 +366,8 @@ stg-fstab-alert-text
 stg-fstype
 stg-inspect-box
 stg-inspect-details
+stg-io-errors-alert
+stg-io-errors-alert-text
 stg-lv
 stg-lvm-wrap
 stg-main-path
@@ -394,7 +401,11 @@ stg-trim-badge
 stg-trim-info
 stg-unit-id
 stg-unit-wrap
+stg-ups-badge
+stg-ups-detail
 stg-vg
+stg-write-cache-box
+stg-write-cache-status
 storage-disks-body
 storage-pools-grid
 storage-subvols-body
@@ -425,6 +436,8 @@ upload-file-label
 upload-percent-label
 upload-progress-bar
 upload-progress-fill
+ups-confirm-input
+ups-min-battery
 user-action-confirm-alert
 user-action-confirm-alert-text
 user-action-confirm-desc
