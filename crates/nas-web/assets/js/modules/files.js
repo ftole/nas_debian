@@ -349,7 +349,12 @@ function updateFilesStatusBar() {
   }
 
   if (storageEl) {
-    const rootName = AppState.files.root === 'backups' ? 'Backups (/srv/nas/BACKUPS_HISTORICOS)' : 'Almacenamiento (/srv/nas)';
+    let rootName = 'Almacenamiento (/srv/nas)';
+    if (AppState.files.root === 'backups') {
+      rootName = 'Backups (/srv/nas/BACKUPS_HISTORICOS)';
+    } else if (String(AppState.files.root || '').startsWith('unidades/')) {
+      rootName = `Unidad (/srv/nas/${AppState.files.root})`;
+    }
     const freeStr = AppState.storage?.overview?.free_formatted ? ` • Libre: ${AppState.storage.overview.free_formatted}` : '';
     storageEl.textContent = `${rootName}${freeStr}`;
   }
