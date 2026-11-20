@@ -429,6 +429,7 @@ async function submitMoveFile(e) {
     const res = await apiFetch('/api/files/move', {
       method: 'POST',
       body: JSON.stringify({
+        root: AppState.files.root || 'nas',
         path: source,
         target_dir: target,
       }),
