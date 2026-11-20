@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use nas_core::{NasError, NasPaths, NasResult};
-use nas_exec::{CommandSpec, Runner};
-use serde::Serialize;
+use nas_exec::{CommandSpec, Runner, SudoMode};
+use serde::{Deserialize, Serialize};
 
 use crate::parsers::lsblk;
 
@@ -579,20 +579,61 @@ pub fn parse_hdparm_write_cache(raw: &str) -> Option<bool> {
     None
 }
 
-/// Inspecciona el estado de la caché volátil de escritura de un disco físico vía `hdparm -W`.
-pub fn inspect_write_cache(runner: &Runner, device: &str) -> (bool, Option<bool>, String) {
+/// Resultado estructurado de consulta de caché volátil de escritura (`hdparm -W`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteCacheProbe {
+    /// `true` si el disco/controlador soporta consulta de write-cache.
+    pub supported: bool,
+    /// `Some(true)` activa, `Some(false)` desactivada, `None` desconocida.
+    pub enabled: Option<bool>,
+    /// Detalle legible del estado.
+    pub detail: String,
+}
+
+#[cfg(unix)]
+fn is_euid_root() -> bool {
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
+        return false;
+    };
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Uid:") {
+            let mut parts = rest.split_whitespace();
+            let _real = parts.next();
+            if let Some(euid) = parts.next() {
+                return euid == "0";
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(unix))]
+fn is_euid_root() -> bool {
+    false
+}
+
+/// Inspecciona directamente el estado de caché volátil vía `hdparm -W` (sin elevación `sudo`).
+pub fn inspect_write_cache_direct(runner: &Runner, device: &str) -> WriteCacheProbe {
     let disk_path = resolve_target_device(clean_block_source(device))
         .unwrap_or_else(|| device.trim().to_string());
+    if !is_valid_device(&disk_path) {
+        return WriteCacheProbe {
+            supported: false,
+            enabled: None,
+            detail: format!("dispositivo inválido para hdparm ({device})"),
+        };
+    }
     let Ok(out) = runner.run(
         &CommandSpec::new("hdparm")
             .args(["-W", &disk_path])
             .timeout(std::time::Duration::from_secs(5)),
     ) else {
-        return (
-            false,
-            None,
-            "hdparm no disponible; ejecuta 'nas deploy ensure-deps' para instalarlo".to_string(),
-        );
+        return WriteCacheProbe {
+            supported: false,
+            enabled: None,
+            detail: "hdparm no disponible; ejecuta 'nas deploy ensure-deps' para instalarlo"
+                .to_string(),
+        };
     };
     if !out.is_success() {
         let err = out.stderr.trim();
@@ -601,25 +642,58 @@ pub fn inspect_write_cache(runner: &Runner, device: &str) -> (bool, Option<bool>
         } else {
             format!("Sin acceso a caché vía hdparm ({err})")
         };
-        return (false, None, msg);
+        return WriteCacheProbe {
+            supported: false,
+            enabled: None,
+            detail: msg,
+        };
     }
     match parse_hdparm_write_cache(&out.stdout) {
-        Some(true) => (
-            true,
-            Some(true),
-            "Caché volátil ACTIVA (rendimiento estándar; riesgo en corte seco sin PLP)".to_string(),
-        ),
-        Some(false) => (
-            true,
-            Some(false),
-            "Caché volátil DESACTIVADA (máxima protección ante cortes eléctricos)".to_string(),
-        ),
-        None => (
-            false,
-            None,
-            "El controlador/disco no reporta control write-cache por hdparm".to_string(),
-        ),
+        Some(true) => WriteCacheProbe {
+            supported: true,
+            enabled: Some(true),
+            detail: "Caché volátil ACTIVA (rendimiento estándar; riesgo en corte seco sin PLP)"
+                .to_string(),
+        },
+        Some(false) => WriteCacheProbe {
+            supported: true,
+            enabled: Some(false),
+            detail: "Caché volátil DESACTIVADA (máxima protección ante cortes eléctricos)"
+                .to_string(),
+        },
+        None => WriteCacheProbe {
+            supported: false,
+            enabled: None,
+            detail: "El controlador/disco no reporta control write-cache por hdparm".to_string(),
+        },
     }
+}
+
+/// Inspecciona el estado de la caché volátil de escritura de un disco físico vía `hdparm -W`
+/// (con respaldo `sudo` acotado vía `nas helper storage-apply write-cache-status` cuando corre sin root).
+pub fn inspect_write_cache(runner: &Runner, device: &str) -> (bool, Option<bool>, String) {
+    let direct = inspect_write_cache_direct(runner, device);
+    if direct.supported || direct.enabled.is_some() || is_euid_root() {
+        return (direct.supported, direct.enabled, direct.detail);
+    }
+
+    let disk_path = resolve_target_device(clean_block_source(device))
+        .unwrap_or_else(|| device.trim().to_string());
+    if is_valid_device(&disk_path) {
+        let spec = CommandSpec::new("/usr/local/bin/nas")
+            .args(["helper", "storage-apply", "write-cache-status", &disk_path])
+            .sudo(SudoMode::Passwordless)
+            .timeout(std::time::Duration::from_secs(8));
+        if let Ok(out) = runner.run(&spec) {
+            if out.is_success() {
+                if let Ok(parsed) = serde_json::from_str::<WriteCacheProbe>(out.stdout.trim()) {
+                    return (parsed.supported, parsed.enabled, parsed.detail);
+                }
+            }
+        }
+    }
+
+    (direct.supported, direct.enabled, direct.detail)
 }
 
 /// Genera la regla udev persistente para aplicar `hdparm -W0` o `-W1` al conectar/arrancar el disco.
@@ -1181,7 +1255,7 @@ pub fn path_is_mounted_readonly(path: &Path) -> bool {
 }
 
 /// Resultado de comprobación preventiva S.M.A.R.T. y de montaje.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskHealthCheck {
     /// `false` únicamente cuando se detecta un fallo explícito (`ro` o SMART FAILED).
     pub healthy: bool,
@@ -1210,18 +1284,21 @@ pub fn parse_smartctl_health(output: &str) -> Option<bool> {
     None
 }
 
-/// Evalúa la salud S.M.A.R.T. de un dispositivo de bloque (degrada sin error si `smartctl` no existe).
-pub fn check_block_health(runner: &Runner, device: &str) -> DiskHealthCheck {
+fn resolve_smart_probe_device(device: &str) -> String {
     let cleaned = clean_block_source(device);
     let target_dev = resolve_target_device(cleaned).unwrap_or_else(|| cleaned.to_string());
-    let probe = if target_dev.starts_with("/dev/mapper/") || target_dev.starts_with("/dev/dm-") {
-        target_dev.clone()
+    if target_dev.starts_with("/dev/mapper/") || target_dev.starts_with("/dev/dm-") {
+        target_dev
     } else if let Some(parent) = parent_disk(&target_dev) {
         format!("/dev/{parent}")
     } else {
-        target_dev.clone()
-    };
+        target_dev
+    }
+}
 
+/// Evalúa directamente la salud S.M.A.R.T. vía `smartctl -H` (sin elevación `sudo`).
+pub fn check_block_health_direct(runner: &Runner, device: &str) -> DiskHealthCheck {
+    let probe = resolve_smart_probe_device(device);
     if !is_valid_device(&probe) {
         return DiskHealthCheck {
             healthy: true,
@@ -1260,6 +1337,32 @@ pub fn check_block_health(runner: &Runner, device: &str) -> DiskHealthCheck {
             detail: "smartctl no disponible en el sistema".to_string(),
         },
     }
+}
+
+/// Evalúa la salud S.M.A.R.T. de un dispositivo de bloque (degrada sin error si `smartctl` no existe;
+/// bajo proceso sin privilegios como `nas-web` usa respaldo `sudo` acotado vía `nas helper storage-apply`).
+pub fn check_block_health(runner: &Runner, device: &str) -> DiskHealthCheck {
+    let direct = check_block_health_direct(runner, device);
+    if direct.smart_available || !direct.healthy || is_euid_root() {
+        return direct;
+    }
+
+    let probe = resolve_smart_probe_device(device);
+    if is_valid_device(&probe) {
+        let spec = CommandSpec::new("/usr/local/bin/nas")
+            .args(["helper", "storage-apply", "smart-health", &probe])
+            .sudo(SudoMode::Passwordless)
+            .timeout(std::time::Duration::from_secs(12));
+        if let Ok(out) = runner.run(&spec) {
+            if out.is_success() {
+                if let Ok(parsed) = serde_json::from_str::<DiskHealthCheck>(out.stdout.trim()) {
+                    return parsed;
+                }
+            }
+        }
+    }
+
+    direct
 }
 
 /// Comprueba estado `ro` y salud S.M.A.R.T. del volumen que aloja `path`.
@@ -1488,6 +1591,26 @@ mod tests {
             Some(true)
         );
         assert_eq!(super::parse_smartctl_health("Device lacks SMART"), None);
+
+        let hc = super::DiskHealthCheck {
+            healthy: true,
+            smart_available: true,
+            detail: "/dev/sda: SMART PASSED".to_string(),
+        };
+        let hc_json = serde_json::to_string(&hc).expect("serialize DiskHealthCheck");
+        let hc_back: super::DiskHealthCheck =
+            serde_json::from_str(&hc_json).expect("deserialize DiskHealthCheck");
+        assert_eq!(hc, hc_back);
+
+        let wc = super::WriteCacheProbe {
+            supported: true,
+            enabled: Some(false),
+            detail: "desactivada".to_string(),
+        };
+        let wc_json = serde_json::to_string(&wc).expect("serialize WriteCacheProbe");
+        let wc_back: super::WriteCacheProbe =
+            serde_json::from_str(&wc_json).expect("deserialize WriteCacheProbe");
+        assert_eq!(wc, wc_back);
 
         let mounts = "/dev/nvme0n1p2 / ext4 ro,relatime 0 0\n\
                       /dev/sda1 /srv/nas btrfs rw,noatime,compress=zstd:3 0 0\n";
