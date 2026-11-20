@@ -463,6 +463,29 @@ impl ResourceBudget {
         (mem_high_mb, mem_max_mb, 10)
     }
 
+    /// Cuotas recomendadas de `systemd` para tareas pesadas en segundo plano
+    /// (`nas-backup-*`, `scrub`, aprovisionamiento): `(MemoryHigh MiB, MemoryMax MiB, CPUQuota %, TasksMax)`.
+    pub fn background_task_systemd_limits(&self) -> (u64, u64, usize, usize) {
+        let total_mem_mb = self.resources.total_mem_mb.max(256);
+        let mem_high_mb = (total_mem_mb / 3)
+            .clamp(256, 2048)
+            .min((total_mem_mb / 2).max(192));
+        let mem_max_cap = (total_mem_mb * 75 / 100).max(256).min(total_mem_mb);
+        let mem_max_mb = (total_mem_mb / 2)
+            .clamp(384, 4096)
+            .min(mem_max_cap)
+            .max(mem_high_mb.saturating_add(64).min(total_mem_mb));
+
+        let cpus = self.resources.effective_cpus.max(1);
+        let cpu_quota_pct = if cpus <= 1 {
+            65
+        } else {
+            cpus.saturating_mul(65).clamp(120, 600)
+        };
+        let tasks_max = cpus.saturating_mul(32).clamp(96, 256);
+        (mem_high_mb, mem_max_mb, cpu_quota_pct, tasks_max)
+    }
+
     /// Límites proporcionales de caché sucia del kernel:
     /// `(vm.dirty_background_bytes, vm.dirty_bytes)`.
     pub fn sysctl_dirty_bytes(&self) -> (u64, u64) {
@@ -824,6 +847,10 @@ MemAvailable:    8192000 kB
         assert_eq!(budget.systemd_resource_limits(), (4096, 8192, 800, 1024));
         assert_eq!(budget.dedup_migration_systemd_limits(), (2048, 4096, 10));
         assert_eq!(
+            budget.background_task_systemd_limits(),
+            (2048, 4096, 600, 256)
+        );
+        assert_eq!(
             budget.sysctl_dirty_bytes(),
             (128 * 1024 * 1024, 512 * 1024 * 1024)
         );
@@ -858,6 +885,10 @@ MemAvailable:    8192000 kB
         assert_eq!(
             small_budget.dedup_migration_systemd_limits(),
             (256, 409, 10)
+        );
+        assert_eq!(
+            small_budget.background_task_systemd_limits(),
+            (341, 512, 65, 96)
         );
         assert_eq!(
             small_budget.sysctl_dirty_bytes(),
