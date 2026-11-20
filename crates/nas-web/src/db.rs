@@ -82,7 +82,9 @@ impl Db {
             .map_err(db_error)?;
         conn.pragma_update(None, "busy_timeout", 5000)
             .map_err(db_error)?;
-        conn.pragma_update(None, "synchronous", "NORMAL")
+        conn.pragma_update(None, "synchronous", "FULL")
+            .map_err(db_error)?;
+        conn.pragma_update(None, "wal_autocheckpoint", 200)
             .map_err(db_error)?;
 
         let has_window_start: bool = conn
@@ -526,6 +528,11 @@ mod tests {
         let synchronous: i64 = conn
             .query_row("PRAGMA synchronous", [], |r| r.get(0))
             .expect("synchronous");
-        assert_eq!(synchronous, 1);
+        assert_eq!(synchronous, 2);
+
+        let autocheckpoint: i64 = conn
+            .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))
+            .expect("wal_autocheckpoint");
+        assert_eq!(autocheckpoint, 200);
     }
 }
