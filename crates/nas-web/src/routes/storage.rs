@@ -1,7 +1,7 @@
 mod ops;
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     response::{IntoResponse, Response},
     Router,
 };
@@ -16,9 +16,17 @@ use crate::{
 };
 
 pub use ops::{
-    storage_add_unit, storage_extend_pool, storage_extend_pool_multi, storage_format, storage_lvm,
-    storage_subvolume,
+    storage_add_unit, storage_create_pool, storage_extend_pool, storage_extend_pool_multi,
+    storage_format, storage_fstab_sanitize, storage_lvm, storage_remove_device, storage_subvolume,
+    storage_umount_unit, storage_wipe,
 };
+
+/// Parámetro opcional `?unit=` para scrub o TRIM sobre unidades adicionales.
+#[derive(Debug, Deserialize, Default)]
+pub struct UnitQuery {
+    #[serde(default)]
+    pub unit: Option<String>,
+}
 
 /// Cuerpo para inspeccionar un dispositivo.
 #[derive(Debug, Deserialize)]
@@ -65,8 +73,16 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
             is_btrfs: false,
             supports_trim: false,
             device_type: "Desconocido".to_string(),
+            data_root_on_os_disk: true,
+            is_readonly: false,
+            pool_devices: Vec::new(),
+            data_profile: None,
+            metadata_profile: None,
         }
     });
+    let lsblk_devs = nas_engine::storage::lsblk_devices_with_uuid(&runner).unwrap_or_default();
+    let btrfs_pools = nas_engine::storage::btrfs_pools_from_lsblk(&lsblk_devs);
+    let fstab_audit = nas_engine::storage::audit_system_fstab(&runner);
     let disks = nas_engine::storage::disks(&runner).unwrap_or_default();
     let disks: Vec<serde_json::Value> = disks
         .iter()
@@ -85,6 +101,8 @@ fn collect_storage_payload(paths: &nas_core::NasPaths) -> Result<serde_json::Val
     Ok(serde_json::json!({
         "overview": overview,
         "disks": disks,
+        "btrfs_pools": btrfs_pools,
+        "fstab_audit": fstab_audit,
     }))
 }
 
@@ -141,17 +159,27 @@ pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUs
         .run_system_blocking(move || {
             let runner = Runner::new();
             let mut units = Vec::new();
+            let mut main_on_os = false;
             if let Ok(overview) = nas_engine::storage::overview_for(&paths, &runner) {
+                main_on_os = overview.data_root_on_os_disk;
                 units.push(serde_json::json!({
                     "id": "principal",
                     "name": format!("Unidad Principal ({})", overview.path),
                     "path": overview.path,
                     "is_main": true,
+                    "device": overview.device,
                     "filesystem": overview.filesystem,
                     "total_gb": overview.total_gb,
                     "used_gb": overview.used_gb,
                     "free_gb": overview.free_gb,
                     "usage_percent": overview.usage_percent,
+                    "is_btrfs": overview.is_btrfs,
+                    "supports_trim": overview.supports_trim,
+                    "is_readonly": overview.is_readonly,
+                    "data_root_on_os_disk": overview.data_root_on_os_disk,
+                    "pool_devices": overview.pool_devices,
+                    "data_profile": overview.data_profile,
+                    "metadata_profile": overview.metadata_profile,
                 }));
             }
 
@@ -164,6 +192,9 @@ pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUs
                     .collect();
                 dirs.sort();
                 for unit_path in dirs {
+                    if !nas_engine::storage::is_mountpoint(&unit_path) {
+                        continue;
+                    }
                     let Some(id) = unit_path
                         .file_name()
                         .and_then(|name| name.to_str())
@@ -179,21 +210,32 @@ pub async fn storage_units(State(state): State<AppState>, _user: AuthenticatedUs
                             "name": format!("Unidad {id} ({})", overview.path),
                             "path": overview.path,
                             "is_main": false,
+                            "device": overview.device,
                             "filesystem": overview.filesystem,
                             "total_gb": overview.total_gb,
                             "used_gb": overview.used_gb,
                             "free_gb": overview.free_gb,
                             "usage_percent": overview.usage_percent,
+                            "is_btrfs": overview.is_btrfs,
+                            "supports_trim": overview.supports_trim,
+                            "is_readonly": overview.is_readonly,
+                            "data_root_on_os_disk": overview.data_root_on_os_disk,
+                            "pool_devices": overview.pool_devices,
+                            "data_profile": overview.data_profile,
+                            "metadata_profile": overview.metadata_profile,
                         }));
                     }
                 }
             }
-            units
+            (units, main_on_os)
         })
         .await
     {
-        Ok(units) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "units": units }),
+        Ok((units, main_on_os)) => axum::Json(ApiResponse::ok(
+            serde_json::json!({
+                "units": units,
+                "data_root_on_os_disk": main_on_os,
+            }),
             "Unidades de almacenamiento",
         ))
         .into_response(),
@@ -253,13 +295,36 @@ pub async fn storage_subvolumes(
     }
 }
 
-/// Estado del scrub Btrfs (responde `200` degradado si `/srv/nas` no es Btrfs).
-pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUser) -> Response {
+fn normalized_unit_id(raw: Option<&str>) -> Option<String> {
+    let trimmed = raw.unwrap_or("").trim();
+    if trimmed.is_empty() || trimmed == "principal" {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Estado del scrub Btrfs (responde `200` degradado si el volumen no es Btrfs).
+pub async fn storage_scrub(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Query(query): Query<UnitQuery>,
+) -> Response {
     let paths = state.paths.clone();
+    let unit = normalized_unit_id(query.unit.as_deref());
+    if let Some(ref u) = unit {
+        if !nas_engine::storage_ops::valid_name(u) {
+            return error_response(NasError::Invalid("identificador de unidad inválido".into()));
+        }
+    }
     match state
         .run_system_blocking(move || {
             let runner = Runner::new();
-            let is_btrfs = nas_engine::storage::overview_for(&paths, &runner)
+            let mut unit_paths = (*paths).clone();
+            if let Some(ref u) = unit {
+                unit_paths.data_root = paths.data_root.join("unidades").join(u);
+            }
+            let is_btrfs = nas_engine::storage::overview_for(&unit_paths, &runner)
                 .map(|o| o.is_btrfs)
                 .unwrap_or(false);
             if !is_btrfs {
@@ -268,16 +333,21 @@ pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUs
                     "status": "no disponible",
                     "errors": 0,
                     "success": true,
-                    "output": "El volumen principal no utiliza Btrfs.",
+                    "output": "El volumen seleccionado no utiliza Btrfs.",
                 });
             }
-            let target = paths.data_root.to_string_lossy().to_string();
-            match run_json(
-                nas_exec::CommandSpec::new("btrfs")
-                    .args(["scrub", "status", &target])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(15)),
-            ) {
+            let res = if let Some(ref u) = unit {
+                nas_engine::storage_ops::unit_scrub_status(&runner, u)
+            } else {
+                let target = paths.data_root.to_string_lossy().to_string();
+                run_json(
+                    nas_exec::CommandSpec::new("btrfs")
+                        .args(["scrub", "status", &target])
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(15)),
+                )
+            };
+            match res {
                 Ok(text) => {
                     let status = nas_engine::parsers::scrub::parse_scrub_status(&text);
                     let mut payload = serde_json::to_value(&status).unwrap_or_default();
@@ -301,17 +371,31 @@ pub async fn storage_scrub(State(state): State<AppState>, _user: AuthenticatedUs
     }
 }
 
-/// Inicia el scrub Btrfs.
-pub async fn storage_scrub_start(State(state): State<AppState>, _admin: AdminUser) -> Response {
+/// Inicia el scrub Btrfs en `/srv/nas` o una unidad `/srv/nas/unidades/<id>`.
+pub async fn storage_scrub_start(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<UnitQuery>,
+) -> Response {
+    let unit = normalized_unit_id(query.unit.as_deref());
+    if let Some(ref u) = unit {
+        if !nas_engine::storage_ops::valid_name(u) {
+            return error_response(NasError::Invalid("identificador de unidad inválido".into()));
+        }
+    }
     let target = state.paths.data_root.to_string_lossy().to_string();
     match state
         .run_heavy_blocking(move || {
-            run_json(
-                nas_exec::CommandSpec::new("btrfs")
-                    .args(["scrub", "start", &target])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(30)),
-            )
+            if let Some(ref u) = unit {
+                nas_engine::storage_ops::unit_scrub_start(&Runner::new(), u)
+            } else {
+                run_json(
+                    nas_exec::CommandSpec::new("btrfs")
+                        .args(["scrub", "start", &target])
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(30)),
+                )
+            }
         })
         .await
     {
@@ -325,17 +409,31 @@ pub async fn storage_scrub_start(State(state): State<AppState>, _admin: AdminUse
     }
 }
 
-/// Ejecuta fstrim sobre el volumen.
-pub async fn storage_trim(State(state): State<AppState>, _admin: AdminUser) -> Response {
+/// Ejecuta fstrim sobre `/srv/nas` o una unidad `/srv/nas/unidades/<id>`.
+pub async fn storage_trim(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<UnitQuery>,
+) -> Response {
+    let unit = normalized_unit_id(query.unit.as_deref());
+    if let Some(ref u) = unit {
+        if !nas_engine::storage_ops::valid_name(u) {
+            return error_response(NasError::Invalid("identificador de unidad inválido".into()));
+        }
+    }
     let target = state.paths.data_root.to_string_lossy().to_string();
     match state
         .run_heavy_blocking(move || {
-            run_json(
-                nas_exec::CommandSpec::new("fstrim")
-                    .args(["-v", &target])
-                    .sudo(nas_exec::SudoMode::Passwordless)
-                    .timeout(std::time::Duration::from_secs(120)),
-            )
+            if let Some(ref u) = unit {
+                nas_engine::storage_ops::unit_trim(&Runner::new(), u)
+            } else {
+                run_json(
+                    nas_exec::CommandSpec::new("fstrim")
+                        .args(["-v", &target])
+                        .sudo(nas_exec::SudoMode::Passwordless)
+                        .timeout(std::time::Duration::from_secs(120)),
+                )
+            }
         })
         .await
     {
@@ -360,6 +458,11 @@ pub fn router() -> Router<crate::AppState> {
         .route("/api/storage/lvm", post(storage_lvm))
         .route("/api/storage/subvolume", post(storage_subvolume))
         .route("/api/storage/add-unit", post(storage_add_unit))
+        .route("/api/storage/umount-unit", post(storage_umount_unit))
+        .route("/api/storage/create-pool", post(storage_create_pool))
+        .route("/api/storage/remove-device", post(storage_remove_device))
+        .route("/api/storage/wipe", post(storage_wipe))
+        .route("/api/storage/fstab-sanitize", post(storage_fstab_sanitize))
         .route("/api/storage/extend-pool", post(storage_extend_pool))
         .route(
             "/api/storage/extend-pool-multi",
