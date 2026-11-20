@@ -4,6 +4,7 @@
 let _scrubPollTimer = null;
 let _pendingStoragePayload = null;
 let _pendingStorageUrl = null;
+let _lastFstabAudit = null;
 
 function renderStorageOverview(overview) {
   if (!overview) return;
@@ -28,6 +29,37 @@ function renderStorageOverview(overview) {
     const fsName = (overview.filesystem || 'N/A').toUpperCase();
     const devType = overview.device_type || 'HDD';
     statFs.textContent = `${fsName} · ${devType}`;
+  }
+
+  const metaRow = document.getElementById('stg-pool-meta-row');
+  if (metaRow) {
+    const parts = [];
+    if (overview.is_btrfs && (overview.data_profile || overview.metadata_profile)) {
+      parts.push(`Perfil Btrfs: <strong>Data: ${escapeHtml((overview.data_profile || 'single').toUpperCase())}</strong> · <strong>Metadata: ${escapeHtml((overview.metadata_profile || 'DUP').toUpperCase())}</strong>`);
+    }
+    if (Array.isArray(overview.pool_devices) && overview.pool_devices.length > 0) {
+      parts.push(`Miembros (${overview.pool_devices.length}): ${overview.pool_devices.map(d => `<code>${escapeHtml(d)}</code>`).join(', ')}`);
+    } else if (overview.device) {
+      parts.push(`Origen: <code>${escapeHtml(overview.device)}</code>`);
+    }
+    if (overview.is_readonly) {
+      parts.push('<span class="badge badge-err">SOLO LECTURA (ro)</span>');
+    }
+    metaRow.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+  }
+
+  const osAlert = document.getElementById('stg-os-disk-alert');
+  const osAlertText = document.getElementById('stg-os-disk-alert-text');
+  if (osAlert && osAlertText) {
+    if (overview.is_readonly) {
+      osAlert.style.display = 'flex';
+      osAlertText.textContent = `¡ALERTA CRÍTICA! El volumen ${overview.path || '/srv/nas'} está montado en solo lectura (ro). Verifica salud S.M.A.R.T., cables y dmesg antes de continuar escribiendo respaldos.`;
+    } else if (overview.data_root_on_os_disk) {
+      osAlert.style.display = 'flex';
+      osAlertText.textContent = `Atención: ${overview.path || '/srv/nas'} reside sobre el disco del sistema operativo (/). Crea o monta un pool dedicado antes de almacenar respaldos masivos.`;
+    } else {
+      osAlert.style.display = 'none';
+    }
   }
 
   const statPercent = document.getElementById('stg-stat-percent');
@@ -125,17 +157,86 @@ function openCreateSubvolumeModal() {
   }
 }
 
+function renderFstabAudit(fstabAudit) {
+  _lastFstabAudit = fstabAudit || null;
+  const box = document.getElementById('stg-fstab-alert');
+  const text = document.getElementById('stg-fstab-alert-text');
+  const btn = document.getElementById('btn-sanitize-fstab');
+  if (!box || !text) return;
+  if (!fstabAudit || fstabAudit.healthy || !Array.isArray(fstabAudit.issues) || fstabAudit.issues.length === 0) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'flex';
+  const fixableCount = Number(
+    fstabAudit.fixable_count ?? fstabAudit.issues.filter(i => i.code !== 'missing_uuid').length
+  );
+  if (btn) {
+    btn.style.display = fixableCount > 0 ? '' : 'none';
+  }
+  const summary = fstabAudit.issues.slice(0, 3).map(i => i.detail).join(' · ');
+  const extra = fstabAudit.issues.length > 3 ? ` (+${fstabAudit.issues.length - 3} más)` : '';
+  const hint = fixableCount === 0 ? ' (Reconecta el disco o retira la línea en /etc/fstab si fue dado de baja)' : '';
+  text.textContent = `Anomalías en /etc/fstab: ${summary}${extra}${hint}`;
+}
+
+function sanitizeStorageFstab() {
+  const issues = Array.isArray(_lastFstabAudit?.issues) ? _lastFstabAudit.issues : [];
+  const summaryEl = document.getElementById('sanitize-fstab-alert-summary');
+  const listEl = document.getElementById('sanitize-fstab-issues-list');
+  if (summaryEl) {
+    summaryEl.textContent = issues.length > 0
+      ? `Se detectaron ${issues.length} anomalía(s) en /etc/fstab que conviene corregir antes del próximo reinicio:`
+      : 'Se revisará y normalizará /etc/fstab aplicando opciones seguras de almacenamiento.';
+  }
+  if (listEl) {
+    if (issues.length > 0) {
+      listEl.innerHTML = issues.map(issue => {
+        const lineTag = issue.line_number ? `Línea ${escapeHtml(String(issue.line_number))}: ` : '';
+        return `<li>${lineTag}${escapeHtml(issue.detail || '')}</li>`;
+      }).join('');
+    } else {
+      listEl.innerHTML = '<li>Normalización de opciones <code>nofail,x-systemd.device-timeout=15s</code> y retiro de entradas huérfanas.</li>';
+    }
+  }
+  openModal('modal-sanitize-fstab');
+}
+
+async function confirmSanitizeFstab() {
+  closeModal('modal-sanitize-fstab');
+  const btn = document.getElementById('btn-sanitize-fstab');
+  const modalBtn = document.getElementById('btn-confirm-sanitize-fstab');
+  if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+  if (modalBtn) { modalBtn.disabled = true; modalBtn.classList.add('is-loading'); }
+  try {
+    const res = await apiFetch('/api/storage/fstab-sanitize', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: 'SI-SANEAR' }),
+    });
+    showToast(res.message || '/etc/fstab saneado correctamente.', 'success');
+    loadStorage();
+  } catch (e) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); }
+    if (modalBtn) { modalBtn.disabled = false; modalBtn.classList.remove('is-loading'); }
+  }
+}
+
 async function loadStorage() {
   const tbody = document.getElementById('storage-disks-body');
   if (!tbody) return;
 
   try {
     const res = await apiFetch('/api/storage/disks');
-    const disks = res.data?.disks ?? res.disks ?? [];
-    const overview = res.data?.overview ?? res.overview ?? {};
+    const payload = res.data || res;
+    const disks = payload.disks ?? [];
+    const overview = payload.overview ?? {};
+    const fstabAudit = payload.fstab_audit ?? null;
 
     // Actualizar tarjeta principal de capacidad y estado
     renderStorageOverview(overview);
+    renderFstabAudit(fstabAudit);
 
     // Actualizar tarjetas de inteligencia BTRFS y TRIM
     updateStorageIntelligence(overview);
@@ -161,18 +262,29 @@ async function loadStorage() {
 
       let stateBadge = '';
       if (d.mount === '/srv/nas') {
-        stateBadge = ' <span class="badge badge-ok">Pool NAS</span>';
+        stateBadge = d.is_pool_member
+          ? ' <span class="badge badge-ok">Pool NAS (Multi-disco)</span>'
+          : ' <span class="badge badge-ok">Pool NAS</span>';
       } else if (d.protected) {
         stateBadge = ` <span class="badge badge-err">SO · ${escapeHtml(d.mount || 'protegido')}</span>`;
+      } else if (d.is_pool_member && d.mount) {
+        stateBadge = ` <span class="badge badge-info">Miembro Pool (${escapeHtml(d.mount)})</span>`;
       } else if (d.in_use) {
         stateBadge = ' <span class="badge badge-warn">En uso</span>';
       } else {
         stateBadge = ' <span class="badge badge-ok">Disponible</span>';
       }
 
-      const typeBadge = isPart
+      const mediaTag = d.rotational === false
+        ? ' <span class="badge badge-info" title="Estado sólido">SSD</span>'
+        : (d.rotational === true ? ' <span class="badge badge-gray" title="Mecánico">HDD</span>' : '');
+      const typeBadge = (isPart
         ? '<span class="badge badge-gray">Partición</span>'
-        : '<span class="badge badge-gray">Disco</span>';
+        : '<span class="badge badge-gray">Disco</span>') + mediaTag;
+
+      const fsInfo = d.pool_uuid
+        ? `${escapeHtml(d.fstype || 'btrfs')} <small class="text-muted">(${escapeHtml(String(d.pool_uuid).slice(0, 8))}…)</small>`
+        : escapeHtml(d.fstype || 'N/A');
 
       return `
       <tr>
@@ -181,7 +293,7 @@ async function loadStorage() {
         <td>${escapeHtml(d.size)}</td>
         <td>${typeBadge}</td>
         <td><code>${escapeHtml(d.mount || 'Sin montar')}</code></td>
-        <td>${escapeHtml(d.fstype || 'N/A')}</td>
+        <td>${fsInfo}</td>
         <td style="text-align:right;">
           ${!d.protected ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openStorageManage('${escapeHtml(devPath)}')"><svg class="icon icon-sm"><use href="#icon-wrench"></use></svg> Gestionar</button>` : '<span class="text-muted" style="font-size:11px;">Protegido por SO</span>'}
         </td>
@@ -288,9 +400,42 @@ function renderScrubRunning(rate = '', timeLeft = '') {
   }
 }
 
+function getMaintenanceUnitId() {
+  return document.getElementById('stg-maint-unit')?.value || 'principal';
+}
+
+function getSelectedMaintenanceOverview(fallbackOverview = null) {
+  const unitId = getMaintenanceUnitId();
+  if (typeof _storageUnitsData !== 'undefined' && Array.isArray(_storageUnitsData)) {
+    const found = _storageUnitsData.find(u => u.id === unitId);
+    if (found) return found;
+  }
+  return fallbackOverview;
+}
+
+function onMaintenanceUnitChange() {
+  const unitOverview = getSelectedMaintenanceOverview();
+  if (unitOverview) {
+    updateStorageIntelligence(unitOverview);
+  } else {
+    checkBtrfsScrubStatus(false);
+  }
+}
+
+function runUnitScrub(unitId) {
+  const sel = document.getElementById('stg-maint-unit');
+  if (sel) {
+    sel.value = unitId || 'principal';
+    onMaintenanceUnitChange();
+  }
+  runStorageScrub();
+}
+
 async function checkBtrfsScrubStatus(isPolling = false) {
   try {
-    const res = await apiFetch('/api/storage/scrub');
+    const unitId = getMaintenanceUnitId();
+    const qs = unitId && unitId !== 'principal' ? `?unit=${encodeURIComponent(unitId)}` : '';
+    const res = await apiFetch('/api/storage/scrub' + qs);
     const d = res.data || res;
 
     const isRunning = Boolean(d.running || d.status === 'running');
@@ -389,13 +534,17 @@ function pollBtrfsScrubProgress() {
 
 async function runStorageScrub() {
   try {
-    const stg = await apiFetch('/api/storage');
-    const overview = stg.data?.overview || stg.overview || {};
-    const isBtrfs = Boolean(overview.is_btrfs);
-    const fsName = overview.filesystem || 'ext4';
+    const unitId = getMaintenanceUnitId();
+    let targetOverview = getSelectedMaintenanceOverview();
+    if (!targetOverview) {
+      const stg = await apiFetch('/api/storage');
+      targetOverview = stg.data?.overview || stg.overview || {};
+    }
+    const isBtrfs = Boolean(targetOverview.is_btrfs || String(targetOverview.filesystem || '').toLowerCase() === 'btrfs');
+    const fsName = targetOverview.filesystem || 'ext4';
 
     if (!isBtrfs) {
-      showToast('Operación cancelada: el volumen está en ' + fsName.toUpperCase() + '. BTRFS Scrub requiere un filesystem Btrfs.', 'warning');
+      showToast(`Operación cancelada: la unidad "${unitId}" está en ${fsName.toUpperCase()}. BTRFS Scrub requiere Btrfs.`, 'warning');
       return;
     }
 
@@ -414,7 +563,9 @@ async function confirmAuditBtrfs() {
 
   let started = false;
   try {
-    const res = await apiFetch('/api/storage/scrub', { method: 'POST' });
+    const unitId = getMaintenanceUnitId();
+    const qs = unitId && unitId !== 'principal' ? `?unit=${encodeURIComponent(unitId)}` : '';
+    const res = await apiFetch('/api/storage/scrub' + qs, { method: 'POST' });
     started = true;
     showToast(res.message || 'Auditoría BTRFS scrub iniciada.', 'info');
     pollBtrfsScrubProgress();
@@ -433,18 +584,22 @@ async function runStorageTrim() {
   if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
 
   try {
-    const stg = await apiFetch('/api/storage');
-    const overview = stg.data?.overview || stg.overview || {};
-    const supportsTrim = Boolean(overview.supports_trim);
-    const devType = overview.device_type || 'HDD (Mecánico)';
+    const unitId = getMaintenanceUnitId();
+    let targetOverview = getSelectedMaintenanceOverview();
+    if (!targetOverview) {
+      const stg = await apiFetch('/api/storage');
+      targetOverview = stg.data?.overview || stg.overview || {};
+    }
+    const supportsTrim = Boolean(targetOverview.supports_trim);
+    const devType = targetOverview.device_type || 'HDD (Mecánico)';
 
     if (!supportsTrim) {
-      showToast('TRIM no ejecutable: el almacenamiento reside en un ' + devType + '. Solo aplica a unidades SSD / NVMe.', 'warning');
+      showToast(`TRIM no ejecutable en "${unitId}": reside en ${devType}. Solo aplica a SSD / NVMe.`, 'warning');
       return;
     }
 
     const modalPath = document.getElementById('trim-modal-path');
-    if (modalPath) modalPath.textContent = overview.path || '/srv/nas';
+    if (modalPath) modalPath.textContent = targetOverview.path || '/srv/nas';
     openModal('modal-trim-ssd');
   } catch (e) {
     // Ya mostrado por apiFetch
@@ -461,8 +616,10 @@ async function confirmTrimSsd() {
   if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.classList.add('is-loading'); }
 
   try {
-    const res = await apiFetch('/api/storage/trim', { method: 'POST' });
-    const freed = res.data?.bytes_trimmed || res.message || 'bloques descartados';
+    const unitId = getMaintenanceUnitId();
+    const qs = unitId && unitId !== 'principal' ? `?unit=${encodeURIComponent(unitId)}` : '';
+    const res = await apiFetch('/api/storage/trim' + qs, { method: 'POST' });
+    const freed = res.data?.bytes_trimmed || res.data?.output || res.message || 'bloques descartados';
     showToast('TRIM SSD completado: ' + freed, 'success');
 
     const trimInfo = document.getElementById('stg-trim-info');
