@@ -365,6 +365,35 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             StorageApplyAction::ExtendPool { confirm, device } => {
                 storage::extend_pool(&runner, &confirm, &device)?
             }
+            StorageApplyAction::ExtendPoolTarget {
+                confirm,
+                target,
+                device,
+                metadata_raid1,
+            } => storage::extend_pool_target(
+                &runner,
+                &confirm,
+                &target,
+                &device,
+                metadata_raid1 == "1",
+            )?,
+            StorageApplyAction::CreatePool {
+                confirm,
+                target,
+                mode,
+                devices,
+                unmount,
+            } => {
+                let devs: Vec<String> = devices
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                storage::create_pool(&runner, &confirm, &target, &mode, &devs, unmount == "1")?
+            }
+            StorageApplyAction::SanitizeFstab { confirm } => {
+                storage::sanitize_fstab(&runner, &confirm)?
+            }
             StorageApplyAction::CreateSubvolume { confirm, name } => {
                 storage::create_subvolume(&runner, &confirm, &name)?
             }
@@ -380,6 +409,18 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             StorageApplyAction::UmountUnit { confirm, unit } => {
                 storage::umount_unit(&runner, &confirm, &unit)?
             }
+            StorageApplyAction::RemovePoolDevice {
+                confirm,
+                target,
+                device,
+            } => storage::remove_pool_device(&runner, &confirm, &target, &device)?,
+            StorageApplyAction::ScrubUnitStatus { unit } => {
+                storage::scrub_unit_status(&runner, &unit)?
+            }
+            StorageApplyAction::ScrubUnitStart { unit } => {
+                storage::scrub_unit_start(&runner, &unit)?
+            }
+            StorageApplyAction::TrimUnit { unit } => storage::trim_unit(&runner, &unit)?,
         },
         HelperAction::Terminal { user, action } => match action {
             TerminalAction::Start { cols, rows } => {
