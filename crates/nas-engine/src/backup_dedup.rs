@@ -8,13 +8,13 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nas_core::{MemoryPressure, NasError, NasResult, ResourceBudget, SystemResources};
 use nas_exec::{CommandSpec, Runner};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::backup_spec::{BackupSpec, Proto};
@@ -1365,6 +1365,115 @@ fn compute_sha256_parallel(
     (out, saw_critical)
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+struct DedupProtectionState {
+    ro_subvols: Vec<PathBuf>,
+    containers: Vec<PathBuf>,
+}
+
+fn guard_state_path(hist_task_dir: &Path) -> PathBuf {
+    hist_task_dir.join(".nas_dedup_guard.json")
+}
+
+fn restore_container_protection(runner: &Runner, state: &DedupProtectionState) {
+    for ro_sub in &state.ro_subvols {
+        let _ = runner.run(
+            &CommandSpec::new("btrfs")
+                .args(["property", "set", &ro_sub.to_string_lossy(), "ro", "true"])
+                .timeout(Duration::from_secs(30)),
+        );
+    }
+    for container in &state.containers {
+        let _ = runner.run(
+            &CommandSpec::new("chattr")
+                .args(["+i", &container.to_string_lossy()])
+                .timeout(Duration::from_secs(15)),
+        );
+    }
+}
+
+fn recover_interrupted_dedup_guard(runner: &Runner, hist_task_dir: &Path) {
+    let path = guard_state_path(hist_task_dir);
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return;
+    };
+    if let Ok(state) = serde_json::from_str::<DedupProtectionState>(&raw) {
+        restore_container_protection(runner, &state);
+    }
+    let _ = fs::remove_file(&path);
+}
+
+struct ContainerProtectionGuard<'a> {
+    runner: &'a Runner,
+    state_file: PathBuf,
+    enabled: bool,
+    state: DedupProtectionState,
+    restored: bool,
+}
+
+impl<'a> ContainerProtectionGuard<'a> {
+    fn new(runner: &'a Runner, hist_task_dir: &Path, enabled: bool) -> Self {
+        Self {
+            runner,
+            state_file: guard_state_path(hist_task_dir),
+            enabled,
+            state: DedupProtectionState::default(),
+            restored: false,
+        }
+    }
+
+    fn persist(&self) {
+        if !self.enabled {
+            return;
+        }
+        if let Some(parent) = self.state_file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(&self.state) {
+            if let Ok(mut f) = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&self.state_file)
+            {
+                if f.write_all(json.as_bytes()).is_ok() {
+                    let _ = f.sync_all();
+                }
+            }
+        }
+    }
+
+    fn record_ro_subvol(&mut self, path: PathBuf) {
+        if !self.state.ro_subvols.contains(&path) {
+            self.state.ro_subvols.push(path);
+            self.persist();
+        }
+    }
+
+    fn record_container(&mut self, path: PathBuf) {
+        if !self.state.containers.contains(&path) {
+            self.state.containers.push(path);
+            self.persist();
+        }
+    }
+
+    fn restore_now(&mut self) {
+        if self.restored || !self.enabled {
+            self.restored = true;
+            return;
+        }
+        restore_container_protection(self.runner, &self.state);
+        let _ = fs::remove_file(&self.state_file);
+        self.restored = true;
+    }
+}
+
+impl Drop for ContainerProtectionGuard<'_> {
+    fn drop(&mut self) {
+        self.restore_now();
+    }
+}
+
 fn deduplicate_task_inner<F>(
     runner: &Runner,
     pair: &BackupRootPair,
@@ -1397,6 +1506,9 @@ where
 
     let hist_task_dir = pair.hist_root.join(task_id);
     let perm_task_dir = pair.perm_root.join(task_id);
+    if !options.dry_run {
+        recover_interrupted_dedup_guard(runner, &hist_task_dir);
+    }
     let containers = list_completed_containers(&hist_task_dir, &perm_task_dir);
     summary.snapshots_scanned = containers.len();
     if containers.is_empty() {
@@ -1405,11 +1517,13 @@ where
 
     let is_cifs = task_is_cifs(&options.runner_dir, task_id);
 
-    // 1. Levantar temporalmente inmutabilidad (y propiedad Btrfs ro si aplica) y reparar permisos `a-w`.
-    let mut ro_subvols: Vec<PathBuf> = Vec::new();
+    // 1. Levantar temporalmente inmutabilidad (y propiedad Btrfs ro si aplica) bajo guarda RAII + bitácora de recuperación ante apagón.
+    let mut protection_guard =
+        ContainerProtectionGuard::new(runner, &hist_task_dir, !options.dry_run);
     let mut container_writable = vec![true; containers.len()];
     for (idx, container) in containers.iter().enumerate() {
         if !options.dry_run {
+            protection_guard.record_container(container.clone());
             if is_btrfs_ro_subvolume(runner, container) {
                 match runner.run(
                     &CommandSpec::new("btrfs")
@@ -1423,7 +1537,7 @@ where
                         .timeout(Duration::from_secs(30)),
                 ) {
                     Ok(out) if out.is_success() => {
-                        ro_subvols.push(container.clone());
+                        protection_guard.record_ro_subvol(container.clone());
                     }
                     Ok(out) => {
                         container_writable[idx] = false;
@@ -1768,46 +1882,31 @@ where
 
     // 4. Restaurar inmutabilidad únicamente en los contenedores raíz (sin -R ni chmod -R a-w),
     // y restaurar propiedad `ro=true` en subvolúmenes Btrfs que originalmente eran read-only.
-    if !options.dry_run {
-        for ro_sub in &ro_subvols {
-            let _ = runner.run(
-                &CommandSpec::new("btrfs")
-                    .args(["property", "set", &ro_sub.to_string_lossy(), "ro", "true"])
-                    .timeout(Duration::from_secs(30)),
-            );
-        }
-        for container in &containers {
-            let _ = runner.run(
-                &CommandSpec::new("chattr")
-                    .args(["+i", &container.to_string_lossy()])
-                    .timeout(Duration::from_secs(15)),
-            );
-        }
-
-        if summary.hardlinks_created > 0
+    protection_guard.restore_now();
+    if !options.dry_run
+        && (summary.hardlinks_created > 0
             || summary.reflinks_created > 0
-            || summary.permissions_repaired > 0
+            || summary.permissions_repaired > 0)
+    {
+        let log_path = options.log_dir.join(format!("backup_{task_id}.log"));
+        if let Some(parent) = log_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
         {
-            let log_path = options.log_dir.join(format!("backup_{task_id}.log"));
-            if let Some(parent) = log_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            if let Ok(mut f) = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-            {
-                use std::io::Write;
-                let now = chrono::Local::now().format("%F %T");
-                let msg = format!(
-                    "[{now}] [{task_id}] [DEDUP] Recuperación completada: {} permisos reparados, {} hardlinks, {} reflinks, {} bytes recuperados\n",
-                    summary.permissions_repaired,
-                    summary.hardlinks_created,
-                    summary.reflinks_created,
-                    summary.bytes_reclaimed
-                );
-                let _ = f.write_all(msg.as_bytes());
-            }
+            use std::io::Write;
+            let now = chrono::Local::now().format("%F %T");
+            let msg = format!(
+                "[{now}] [{task_id}] [DEDUP] Recuperación completada: {} permisos reparados, {} hardlinks, {} reflinks, {} bytes recuperados\n",
+                summary.permissions_repaired,
+                summary.hardlinks_created,
+                summary.reflinks_created,
+                summary.bytes_reclaimed
+            );
+            let _ = f.write_all(msg.as_bytes());
         }
     }
 
@@ -2885,5 +2984,45 @@ rsync -aAXH -- \"$SRC\" \"$STAGE\"
         assert!(args.iter().any(|a| a.starts_with("MemoryMax=")));
         assert!(args.iter().any(|a| a == "IOWeight=10"));
         assert!(args.iter().any(|a| a == "TasksMax=64"));
+    }
+
+    #[test]
+    fn guarda_de_proteccion_persiste_y_limpia_en_drop() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_dedup_guard_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).expect("mkdir");
+        let snap = dir.join("snapshot_1");
+        fs::create_dir_all(&snap).expect("mkdir snap");
+
+        let runner = Runner::new();
+        {
+            let mut guard = ContainerProtectionGuard::new(&runner, &dir, true);
+            guard.record_container(snap.clone());
+            guard.record_ro_subvol(snap.clone());
+            assert!(guard_state_path(&dir).is_file());
+        }
+        // Al salir de ámbito (`Drop`), el marcador transitorio se limpia tras restaurar protección.
+        assert!(!guard_state_path(&dir).exists());
+
+        // Simular estado dejado por corte eléctrico y recuperarlo en arranque posterior.
+        let orphan = DedupProtectionState {
+            ro_subvols: vec![snap.clone()],
+            containers: vec![snap],
+        };
+        fs::write(
+            guard_state_path(&dir),
+            serde_json::to_string(&orphan).expect("json"),
+        )
+        .expect("write orphan");
+        recover_interrupted_dedup_guard(&Runner::new(), &dir);
+        assert!(!guard_state_path(&dir).exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
