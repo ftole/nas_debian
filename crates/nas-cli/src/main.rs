@@ -231,6 +231,12 @@ enum DeployAction {
         #[arg(long)]
         sudo: bool,
     },
+    /// Verifica e instala de forma idempotente paquetes base requeridos en Debian 13.
+    EnsureDeps {
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+    },
 }
 
 /// Argumentos comunes de despliegue.
@@ -572,6 +578,9 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 sudo,
                 cli.json,
             ),
+            DeployAction::EnsureDeps { sudo } => {
+                commands::deploy::deploy_ensure_deps(sudo, cli.json)
+            }
         },
         Command::Helper { action } => run_helper(action, cli.json),
     }
