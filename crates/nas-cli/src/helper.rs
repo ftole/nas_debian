@@ -354,6 +354,23 @@ pub enum StorageApplyAction {
     /// Ejecuta fstrim en una unidad o /srv/nas.
     #[command(alias = "trim_unit")]
     TrimUnit { unit: String },
+    /// Activa o desactiva la caché volátil de escritura de un disco físico con regla udev.
+    #[command(alias = "set_write_cache")]
+    SetWriteCache {
+        confirm: String,
+        device: String,
+        mode: String,
+    },
+    /// Auto-instala NUT, detecta el UPS USB y configura apagado automático.
+    #[command(alias = "ups_configure")]
+    UpsConfigure {
+        confirm: String,
+        #[arg(default_value = "35")]
+        min_battery_pct: u8,
+    },
+    /// Desactiva el monitoreo UPS local (nut).
+    #[command(alias = "ups_disable")]
+    UpsDisable { confirm: String },
 }
 
 /// Subcomandos de terminal (`nas helper terminal`).
