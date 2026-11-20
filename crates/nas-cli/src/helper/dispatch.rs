@@ -421,6 +421,29 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 storage::scrub_unit_start(&runner, &unit)?
             }
             StorageApplyAction::TrimUnit { unit } => storage::trim_unit(&runner, &unit)?,
+            StorageApplyAction::SetWriteCache {
+                confirm,
+                device,
+                mode,
+            } => {
+                let enabled = match mode.trim().to_ascii_lowercase().as_str() {
+                    "on" | "1" | "true" => true,
+                    "off" | "0" | "false" => false,
+                    _ => {
+                        return Err(NasError::Invalid(
+                            "modo write-cache inválido (usa 'on' o 'off')".into(),
+                        ))
+                    }
+                };
+                storage::set_write_cache(&runner, &confirm, &device, enabled)?
+            }
+            StorageApplyAction::UpsConfigure {
+                confirm,
+                min_battery_pct,
+            } => nas_engine::ups::configure_usb(&runner, &confirm, min_battery_pct)?,
+            StorageApplyAction::UpsDisable { confirm } => {
+                nas_engine::ups::disable(&runner, &confirm)?
+            }
         },
         HelperAction::Terminal { user, action } => match action {
             TerminalAction::Start { cols, rows } => {
