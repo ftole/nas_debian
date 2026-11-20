@@ -203,6 +203,7 @@ async fn almacenamiento_valida_confirmacion_y_dispositivo() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     let response = app
+        .clone()
         .oneshot(post_json(
             "/api/storage/inspect",
             &cookie,
@@ -211,6 +212,97 @@ async fn almacenamiento_valida_confirmacion_y_dispositivo() {
         .await
         .expect("respuesta");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    for (endpoint, body) in [
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"pool2","mode":"btrfs_single","devices":[],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"pool2","mode":"xfs","devices":["/dev/sdz"],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"pool2","mode":"ext4","devices":["/dev/sdx","/dev/sdy"],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"pool2","mode":"btrfs_raid1","devices":["/dev/sdx"],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"../escape","mode":"btrfs_single","devices":["/dev/sdx"],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/create-pool",
+            r#"{"target":"pool2","mode":"btrfs_single","devices":["/dev/sdx","/dev/sdx"],"confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/umount-unit",
+            r#"{"unit_id":"../escape","confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/remove-device",
+            r#"{"target":"principal","device":"/dev/sdx","confirm":""}"#,
+        ),
+        (
+            "/api/storage/remove-device",
+            r#"{"target":"../escape","device":"/dev/sdx","confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/remove-device",
+            r#"{"target":"principal","device":"../bad","confirm":"SI-FORMATEAR"}"#,
+        ),
+        (
+            "/api/storage/wipe",
+            r#"{"device":"/dev/sdx","confirm":"SI-FORMATEAR"}"#,
+        ),
+        ("/api/storage/fstab-sanitize", r#"{"confirm":""}"#),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(post_json(endpoint, &cookie, body))
+            .await
+            .expect("respuesta");
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "se esperaba 400 para {endpoint} con {body}"
+        );
+    }
+
+    let response = app
+        .clone()
+        .oneshot(post_json(
+            "/api/storage/extend-pool-multi",
+            &cookie,
+            r#"{"target":"../bad","devices":["/dev/sdx"],"confirm":"SI-FORMATEAR"}"#,
+        ))
+        .await
+        .expect("respuesta");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("json");
+    assert_eq!(payload["data"]["failed"], true);
+
+    // Un directorio huérfano sin punto de montaje en unidades/ no debe listarse como unidad montada.
+    let ghost_unit = _dir.join("data").join("unidades").join("fantasma");
+    std::fs::create_dir_all(&ghost_unit).expect("ghost unit dir");
+    let response = app
+        .oneshot(get("/api/storage/units", &cookie))
+        .await
+        .expect("units");
+    assert_eq!(response.status(), StatusCode::OK);
+    let units_payload: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("units json");
+    let units = units_payload["data"]["units"]
+        .as_array()
+        .expect("units array");
+    assert!(
+        !units.iter().any(|u| u["id"] == "fantasma"),
+        "unidad no montada no debe aparecer en /api/storage/units: {units:?}"
+    );
 }
 
 #[tokio::test]
