@@ -520,24 +520,50 @@ pub fn run_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     if has_bus {
         let stamp = chrono::Local::now().timestamp();
         let unit = format!("nas-backup-{id}-{stamp}");
-        let _ = runner.run(
-            &CommandSpec::new("systemd-run")
-                .args([
-                    "--quiet",
-                    "--no-block",
-                    "--collect",
-                    &format!("--unit={unit}"),
-                    "--setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                    &runner_path,
-                ])
-                .timeout(Duration::from_secs(30)),
-        );
+        let (mem_high_mb, mem_max_mb, cpu_quota_pct, tasks_max) =
+            nas_core::ResourceBudget::detect().background_task_systemd_limits();
+        let mem_high_arg = format!("MemoryHigh={mem_high_mb}M");
+        let mem_max_arg = format!("MemoryMax={mem_max_mb}M");
+        let cpu_arg = format!("CPUQuota={cpu_quota_pct}%");
+        let tasks_arg = format!("TasksMax={tasks_max}");
+        runner
+            .run(
+                &CommandSpec::new("systemd-run")
+                    .args([
+                        "--quiet",
+                        "--no-block",
+                        "--collect",
+                        &format!("--unit={unit}"),
+                        "-p",
+                        "Nice=10",
+                        "-p",
+                        "IOSchedulingClass=best-effort",
+                        "-p",
+                        "IOSchedulingPriority=6",
+                        "-p",
+                        "IOWeight=20",
+                        "-p",
+                        &cpu_arg,
+                        "-p",
+                        &mem_high_arg,
+                        "-p",
+                        &mem_max_arg,
+                        "-p",
+                        &tasks_arg,
+                        "--setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                        &runner_path,
+                    ])
+                    .timeout(Duration::from_secs(30)),
+            )?
+            .ensure_success()?;
     } else {
-        let _ = runner.run(
-            &CommandSpec::new("nohup")
-                .args([&runner_path])
-                .timeout(Duration::from_secs(10)),
-        );
+        runner
+            .run(
+                &CommandSpec::new("nice")
+                    .args(["-n", "10", "nohup", &runner_path])
+                    .timeout(Duration::from_secs(10)),
+            )?
+            .ensure_success()?;
     }
 
     Ok(format!("tarea {id} iniciada"))
