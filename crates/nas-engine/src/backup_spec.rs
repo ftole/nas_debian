@@ -152,15 +152,23 @@ impl BackupSpec {
                     let key = key.trim();
                     if key.starts_with("-----BEGIN") {
                         nas_ssh::validate_private_key(key)?;
-                    } else if key.starts_with('/') {
-                        if key.contains("..") || key.chars().any(char::is_control) {
+                    } else if let Some(file) = key.strip_prefix("/etc/backup-credentials/") {
+                        if file.is_empty()
+                            || file == "."
+                            || file == ".."
+                            || file.contains('/')
+                            || file.contains("..")
+                            || !file
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+                        {
                             return Err(NasError::Invalid(
                                 "ruta de clave privada SSH inválida".into(),
                             ));
                         }
                     } else {
                         return Err(NasError::Invalid(
-                            "la clave SSH debe ser contenido PEM (-----BEGIN ...) o una ruta absoluta (/...)".into(),
+                            "la clave SSH debe ser contenido PEM (-----BEGIN ...) o una ruta en /etc/backup-credentials/".into(),
                         ));
                     }
                 }
@@ -439,13 +447,26 @@ mod tests {
 
         let runner = ssh_key_spec.render_runner(proto);
         assert!(runner.contains("KEY_FILE='/etc/backup-credentials/srv_ed25519.id_ed25519'"));
-        assert!(runner.contains("ssh -i $KEY_FILE -p $SRC_PORT"));
+        assert!(runner.contains("ssh -i '$KEY_FILE' -p $SRC_PORT"));
         assert!(runner.contains("ssh -i /etc/backup-credentials/$TASK.id_ed25519 -p $SRC_PORT"));
         assert!(runner.contains("sshpass -e rsync"));
 
         let mut bad_key = ssh_key_spec.clone();
         bad_key.ssh_key = Some("clave-invalida-demasiado-corta".into());
         assert!(bad_key.validate().is_err());
+
+        for injection in [
+            "/etc/backup-credentials/a -oProxyCommand=id",
+            "/etc/shadow",
+            "/etc/backup-credentials/../root/.ssh/id_ed25519",
+        ] {
+            let mut bad_path = ssh_key_spec.clone();
+            bad_path.ssh_key = Some(injection.into());
+            assert!(
+                bad_path.validate().is_err(),
+                "debe rechazar ruta de clave SSH insegura: {injection}"
+            );
+        }
     }
 
     #[test]
