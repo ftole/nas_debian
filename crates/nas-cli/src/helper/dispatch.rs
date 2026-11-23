@@ -9,11 +9,29 @@ use nas_exec::Runner;
 
 use super::{AccountsAction, BackupManageAction, HelperAction, StorageApplyAction, TerminalAction};
 
-fn read_stdin_line() -> String {
+const MAX_HELPER_STDIN_BYTES: usize = 1024 * 1024;
+const MAX_HELPER_PASSWORD_BYTES: usize = 8192;
+
+fn read_stdin_bounded(max_bytes: usize) -> NasResult<String> {
     use std::io::Read;
-    let mut buffer = String::new();
-    let _ = std::io::stdin().read_to_string(&mut buffer);
-    buffer.trim_end_matches(['\r', '\n']).to_string()
+    let mut buffer = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut buffer)
+        .map_err(|e| NasError::io("stdin", e))?;
+    if buffer.len() > max_bytes {
+        return Err(NasError::Invalid(format!(
+            "la entrada por stdin supera el límite máximo permitido ({max_bytes} bytes)"
+        )));
+    }
+    String::from_utf8(buffer)
+        .map_err(|_| NasError::Invalid("entrada por stdin no es UTF-8 válido".into()))
+}
+
+fn read_stdin_line() -> NasResult<String> {
+    let raw = read_stdin_bounded(MAX_HELPER_STDIN_BYTES)?;
+    Ok(raw.trim_end_matches(['\r', '\n']).to_string())
 }
 
 fn trim_stdin_line(raw: &str) -> String {
@@ -23,14 +41,9 @@ fn trim_stdin_line(raw: &str) -> String {
         .to_string()
 }
 
-fn read_stdin_single_line() -> String {
-    use std::io::Read;
-    let mut buffer = String::new();
-    let _ = std::io::stdin()
-        .lock()
-        .take(8192)
-        .read_to_string(&mut buffer);
-    trim_stdin_line(&buffer)
+fn read_stdin_single_line() -> NasResult<String> {
+    let raw = read_stdin_bounded(MAX_HELPER_PASSWORD_BYTES)?;
+    Ok(trim_stdin_line(&raw))
 }
 
 #[cfg(unix)]
@@ -85,11 +98,14 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 .arg(exe);
             cmd.args(std::env::args().skip(1));
             if let Ok(mut child) = cmd.spawn() {
-                if let Ok(status) = child.wait() {
-                    if let Some(code) = status.code() {
-                        return Ok(ExitCode::from(code as u8));
-                    }
-                }
+                let status = child.wait().map_err(|e| NasError::io("systemd-run", e))?;
+                return match status.code() {
+                    Some(0) => Ok(ExitCode::SUCCESS),
+                    Some(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(1).max(1))),
+                    None => Err(NasError::Denied(
+                        "el proceso escapado en systemd-run fue terminado por señal".into(),
+                    )),
+                };
             }
         }
     }
@@ -142,9 +158,17 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 groups,
             } => {
                 let pass = if password == "-" {
-                    read_stdin_single_line()
+                    read_stdin_single_line()?
                 } else {
-                    password
+                    if !accounts::is_valid_user(username.trim()) {
+                        return Err(NasError::Invalid(
+                            "usuario inválido o reservado del sistema".into(),
+                        ));
+                    }
+                    accounts::validate_password(&password)?;
+                    return Err(NasError::Denied(
+                        "por seguridad, envíe la contraseña por stdin usando '-'".into(),
+                    ));
                 };
                 let group_vec: Vec<String> = groups
                     .split(',')
@@ -174,7 +198,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 groups,
             } => {
                 let pass = if password == "-" {
-                    let s = read_stdin_single_line();
+                    let s = read_stdin_single_line()?;
                     if s.is_empty() {
                         None
                     } else {
@@ -183,7 +207,15 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 } else if password == "--keep-password" || password.is_empty() {
                     None
                 } else {
-                    Some(password)
+                    if !accounts::is_valid_user(username.trim()) {
+                        return Err(NasError::Invalid(
+                            "usuario inválido o reservado del sistema".into(),
+                        ));
+                    }
+                    accounts::validate_password(&password)?;
+                    return Err(NasError::Denied(
+                        "por seguridad, envíe la contraseña por stdin usando '-' o '--keep-password'".into(),
+                    ));
                 };
                 let group_vec: Vec<String> = groups
                     .split(',')
@@ -224,7 +256,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
         HelperAction::BackupManage { action } => match action {
             BackupManageAction::Install { id } => backup::install_backup_task(&runner, &id)?,
             BackupManageAction::InstallSpec => {
-                let raw = read_stdin_line();
+                let raw = read_stdin_line()?;
                 let spec: nas_engine::backup_spec::BackupSpec = serde_json::from_str(&raw)
                     .map_err(|e| NasError::Invalid(format!("especificación JSON inválida: {e}")))?;
                 backup::install_backup_spec(&runner, &spec)?
@@ -237,7 +269,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             } => {
                 let (f, c) = if let Some(p) = pos_file {
                     if p.to_string_lossy() == "-" {
-                        let text = read_stdin_line();
+                        let text = read_stdin_line()?;
                         (None, Some(text))
                     } else {
                         (Some(p), None)
@@ -256,7 +288,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
             } => {
                 let (f, c) = if let Some(p) = pos_file {
                     if p.to_string_lossy() == "-" {
-                        let text = read_stdin_line();
+                        let text = read_stdin_line()?;
                         (None, Some(text))
                     } else {
                         (Some(p), None)
@@ -277,7 +309,10 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 user,
                 password,
             } => {
-                let pass = password.unwrap_or_else(read_stdin_line);
+                let pass = match password {
+                    Some(p) if p != "-" => p,
+                    _ => read_stdin_line()?,
+                };
                 backup::test_cifs_conn(&runner, &host, &share, &user, &pass)?
             }
             BackupManageAction::TestSsh {
@@ -286,7 +321,10 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 user,
                 password,
             } => {
-                let pass = password.unwrap_or_else(read_stdin_line);
+                let pass = match password {
+                    Some(p) if p != "-" => p,
+                    _ => read_stdin_line()?,
+                };
                 backup::test_ssh_conn(&runner, &host, port, &user, &pass)?
             }
             BackupManageAction::Test {
@@ -296,7 +334,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
                 port,
                 user,
             } => {
-                let pass = read_stdin_line();
+                let pass = read_stdin_line()?;
                 match proto.as_str() {
                     "cifs" => backup::test_cifs_conn(&runner, &host, &target, &user, &pass)?,
                     "ssh" => backup::test_ssh_conn(&runner, &host, port, &user, &pass)?,
@@ -553,10 +591,26 @@ fn run_backup_dedup_migration_helper(runner: &Runner) -> NasResult<String> {
                 "Runners actualizados ({}); unidad nas-backup-dedup-migration iniciada en segundo plano",
                 runners.updated.len()
             )),
-            Ok(_) | Err(_) => Ok(format!(
-                "Runners actualizados ({}); migración ya en ejecución o diferida",
-                runners.updated.len()
-            )),
+            Ok(res)
+                if res.stderr.contains("already exists")
+                    || res.stdout.contains("already exists") =>
+            {
+                Ok(format!(
+                    "Runners actualizados ({}); migración ya en ejecución",
+                    runners.updated.len()
+                ))
+            }
+            Ok(res) => Err(NasError::Denied(format!(
+                "no se pudo lanzar nas-backup-dedup-migration vía systemd-run: {}",
+                if res.stderr.trim().is_empty() {
+                    res.stdout.trim()
+                } else {
+                    res.stderr.trim()
+                }
+            ))),
+            Err(err) => Err(NasError::Denied(format!(
+                "error al invocar systemd-run para nas-backup-dedup-migration: {err}"
+            ))),
         };
     }
 
