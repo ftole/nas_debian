@@ -140,7 +140,7 @@ fn collect_linux(runner: &Runner, paths: &NasPaths) -> NetworkOverview {
         samba,
         services,
         listening,
-        firewall: collect_firewall(),
+        firewall: collect_firewall(runner),
         smb_sessions: collect_smb_sessions(runner),
         generated_at: now.format("%H:%M:%S").to_string(),
         generated_timestamp: now.timestamp(),
@@ -217,9 +217,9 @@ fn collect_samba(runner: &Runner, paths: &NasPaths) -> smb::SambaConfig {
     config
 }
 
-fn collect_firewall() -> FirewallStatus {
-    let source = "/etc/ufw/ufw.conf";
-    let active = read_optional(source).is_some_and(|text| {
+fn collect_firewall(runner: &Runner) -> FirewallStatus {
+    let ufw_source = "/etc/ufw/ufw.conf";
+    let ufw_active = read_optional(ufw_source).is_some_and(|text| {
         text.lines().any(|line| match line.split_once('=') {
             Some((key, value)) => {
                 key.trim().eq_ignore_ascii_case("ENABLED")
@@ -229,11 +229,31 @@ fn collect_firewall() -> FirewallStatus {
         })
     });
 
+    if ufw_active {
+        return FirewallStatus {
+            active: true,
+            rules_visible: false,
+            source: Some(ufw_source.to_string()),
+        };
+    }
+
+    let nft_active = runner
+        .run(&CommandSpec::new("systemctl").args(["is-active", "nftables"]))
+        .map(|out| out.stdout.trim() == "active")
+        .unwrap_or(false);
+    if nft_active {
+        return FirewallStatus {
+            active: true,
+            rules_visible: false,
+            source: Some("/etc/nftables.conf".to_string()),
+        };
+    }
+
     FirewallStatus {
-        active,
+        active: false,
         rules_visible: false,
-        source: if std::path::Path::new(source).exists() {
-            Some(source.to_string())
+        source: if std::path::Path::new(ufw_source).exists() {
+            Some(ufw_source.to_string())
         } else {
             None
         },
