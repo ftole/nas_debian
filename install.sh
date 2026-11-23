@@ -102,7 +102,7 @@ install_runtime_deps() {
     local pkgs=(
         sudo curl wget ca-certificates tar gzip acl openssl
         btrfs-progs lvm2 parted e2fsprogs util-linux psmisc
-        smartmontools hdparm logrotate auditd aide cron
+        smartmontools hdparm logrotate auditd aide ufw fail2ban unattended-upgrades cron
         samba samba-vfs-modules cifs-utils rsync nginx-light
         tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss
     )
@@ -214,8 +214,8 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
   "date": "$(date -u +"%Y-%m-%d")",
   "channel": "stable",
   "signature_scheme": "Ed25519",
-  "ed25519_verified": true,
-  "notes": "Compilación oficial de la plataforma NAS"
+  "ed25519_verified": false,
+  "notes": "Compilación local desde código fuente (sin manifiesto Ed25519)"
 }
 EOF
     mkdir -p /etc/nas 2>/dev/null || true
@@ -247,9 +247,11 @@ else
             TARGET_TAG=$(echo "$API_RESP" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | cut -d'"' -f4 || true)
         fi
 
-        # 3. Fallback de contingencia a v0.1.4
+        # 3. Sin fallback silencioso a versiones antiguas si falla la resolución
         if [ -z "$TARGET_TAG" ]; then
-            TARGET_TAG="v0.1.4"
+            echo -e "${C_RED}[-] No se pudo determinar la última release oficial en GitHub.${C_RESET}" >&2
+            echo -e "    Indique --version <tag> o compile desde fuentes con --build-from-source." >&2
+            exit 1
         fi
     fi
 
@@ -266,38 +268,99 @@ else
     BASE_URL="https://github.com/ftole/nas_debian/releases/download/${TARGET_TAG}"
     TAR_URL="${BASE_URL}/${PKG_FILE}"
     MANIFEST_URL="${BASE_URL}/${MANIFEST_FILE}"
-    SHA_URL="${BASE_URL}/${PKG_FILE}.sha256"
 
     TMP_DIR=$(mktemp -d /tmp/nas_pkg.XXXXXX 2>/dev/null || mktemp -d)
     trap 'rm -rf "$TMP_DIR"' EXIT
 
-    echo -e "  Descargando paquete de distribución..."
+    echo -e "  Descargando paquete y manifiesto firmado..."
     if ! curl -fsSL --connect-timeout 15 --max-time 300 -o "$TMP_DIR/$PKG_FILE" "$TAR_URL"; then
         echo -e "${C_RED}[-] No se pudo descargar el paquete precompilado desde $TAR_URL${C_RESET}" >&2
         echo -e "    Puede compilar desde fuentes ejecutando: ${C_BOLD}sudo bash $0 --build-from-source${C_RESET}" >&2
         exit 1
     fi
-
-    # Descargar manifiesto o suma SHA-256 para verificación
-    curl -fsSL --connect-timeout 10 --max-time 60 -o "$TMP_DIR/$MANIFEST_FILE" "$MANIFEST_URL" 2>/dev/null || true
-    curl -fsSL --connect-timeout 10 --max-time 60 -o "$TMP_DIR/${PKG_FILE}.sha256" "$SHA_URL" 2>/dev/null || true
-
-    EXPECTED_SHA=""
-    if [ -f "$TMP_DIR/$MANIFEST_FILE" ]; then
-        EXPECTED_SHA=$(grep -o '"sha256": *"[^"]*"' "$TMP_DIR/$MANIFEST_FILE" | head -n 1 | cut -d'"' -f4 || true)
-    fi
-    if [ -z "$EXPECTED_SHA" ] && [ -f "$TMP_DIR/${PKG_FILE}.sha256" ]; then
-        EXPECTED_SHA=$(awk '{print $1}' "$TMP_DIR/${PKG_FILE}.sha256")
+    if ! curl -fsSL --connect-timeout 10 --max-time 60 -o "$TMP_DIR/$MANIFEST_FILE" "$MANIFEST_URL"; then
+        echo -e "${C_RED}[-] No se pudo descargar el manifiesto firmado ($MANIFEST_URL). Instalación abortada.${C_RESET}" >&2
+        exit 1
     fi
 
-    if [ -n "$EXPECTED_SHA" ]; then
-        ACTUAL_SHA=$(sha256sum "$TMP_DIR/$PKG_FILE" | awk '{print $1}')
-        if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
-            echo -e "${C_RED}[-] Verificación SHA-256 fallida (esperado $EXPECTED_SHA, obtenido $ACTUAL_SHA). Abortando.${C_RESET}" >&2
-            exit 1
+    DEFAULT_RELEASE_PUB="220d56af9dad91eb44fb9a6fa175adc96cc9ffb25b405a2db2e867b2a9153335"
+    SCRIPT_DIR_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    if [ -n "${NAS_RELEASE_PUBKEY:-}" ]; then
+        RELEASE_PUBKEY_HEX="$NAS_RELEASE_PUBKEY"
+    elif [ -n "$SCRIPT_DIR_LOCAL" ] && [ -f "$SCRIPT_DIR_LOCAL/packaging/release.pub" ]; then
+        RELEASE_PUBKEY_HEX="$(tr -d '[:space:]' < "$SCRIPT_DIR_LOCAL/packaging/release.pub")"
+    else
+        RELEASE_PUBKEY_HEX="$DEFAULT_RELEASE_PUB"
+    fi
+
+    if ! printf '%s' "$RELEASE_PUBKEY_HEX" | grep -qE '^[0-9a-fA-F]{64}$'; then
+        echo -e "${C_RED}[-] Clave pública Ed25519 inválida.${C_RESET}" >&2
+        exit 1
+    fi
+
+    json_str_field() {
+        local file="$1" key="$2"
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=d.get(sys.argv[2]); print("" if v is None else str(v))' "$file" "$key"
+        else
+            grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" | head -n 1 | sed 's/.*:[[:space:]]*"\([^"]*\)"/\1/'
         fi
-        echo -e "${C_GREEN}  [✔] Integridad SHA-256 verificada:${C_RESET} $ACTUAL_SHA"
+    }
+
+    hex_to_bin() {
+        local hex="$1" out="$2" i=0 len
+        len=${#hex}
+        : > "$out"
+        while [ "$i" -lt "$len" ]; do
+            printf '%b' "\\x${hex:i:2}" >> "$out"
+            i=$((i + 2))
+        done
+    }
+
+    M_VERSION="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "version")"
+    M_COMMIT="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "commit")"
+    M_ARTIFACT="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "artifact")"
+    M_SHA256="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "sha256")"
+    M_PUBLISHED_AT="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "published_at")"
+    M_SIGNATURE="$(json_str_field "$TMP_DIR/$MANIFEST_FILE" "signature")"
+
+    if [ -z "$M_VERSION" ] || [ -z "$M_COMMIT" ] || [ -z "$M_ARTIFACT" ] || [ -z "$M_SHA256" ] || [ -z "$M_PUBLISHED_AT" ] || [ -z "$M_SIGNATURE" ]; then
+        echo -e "${C_RED}[-] Manifiesto incompleto o sin firma Ed25519. Abortando.${C_RESET}" >&2
+        exit 1
     fi
+    if [ "${M_VERSION#v}" != "$TARGET_VER" ]; then
+        echo -e "${C_RED}[-] Versión del manifiesto (${M_VERSION}) no coincide con la solicitada (${TARGET_VER}). Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+    if [ "$M_ARTIFACT" != "$PKG_FILE" ]; then
+        echo -e "${C_RED}[-] Artefacto del manifiesto (${M_ARTIFACT}) no coincide con el paquete (${PKG_FILE}). Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+    if ! printf '%s' "$M_SHA256" | grep -qE '^[0-9a-fA-F]{64}$'; then
+        echo -e "${C_RED}[-] SHA-256 inválido en manifiesto. Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+    if ! printf '%s' "$M_SIGNATURE" | grep -qE '^[0-9a-fA-F]{128}$'; then
+        echo -e "${C_RED}[-] Firma Ed25519 inválida en manifiesto. Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+
+    ACTUAL_SHA=$(sha256sum "$TMP_DIR/$PKG_FILE" | awk '{print $1}')
+    if [ "${ACTUAL_SHA,,}" != "${M_SHA256,,}" ]; then
+        echo -e "${C_RED}[-] Verificación SHA-256 fallida (esperado $M_SHA256, obtenido $ACTUAL_SHA). Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+    echo -e "${C_GREEN}  [✔] Integridad SHA-256 verificada:${C_RESET} $ACTUAL_SHA"
+
+    printf '%s|%s|%s|%s|%s' "$M_VERSION" "$M_COMMIT" "$M_ARTIFACT" "$M_SHA256" "$M_PUBLISHED_AT" > "$TMP_DIR/payload.txt"
+    hex_to_bin "302a300506032b6570032100${RELEASE_PUBKEY_HEX}" "$TMP_DIR/pub.der"
+    hex_to_bin "$M_SIGNATURE" "$TMP_DIR/sig.bin"
+
+    if ! openssl pkeyutl -verify -pubin -keyform DER -inkey "$TMP_DIR/pub.der" -rawin -in "$TMP_DIR/payload.txt" -sigfile "$TMP_DIR/sig.bin" >/dev/null 2>&1; then
+        echo -e "${C_RED}[-] Verificación criptográfica Ed25519 FALLIDA. Posible manipulación del paquete. Abortando.${C_RESET}" >&2
+        exit 1
+    fi
+    echo -e "${C_GREEN}  [✔] Firma criptográfica Ed25519 verificada.${C_RESET}"
 
     echo -e " ${C_BOLD}[3/5]${C_RESET} Desempaquetando archivos en ${C_CYAN}$INSTALL_DIR${C_RESET}..."
     mkdir -p "$INSTALL_DIR"
