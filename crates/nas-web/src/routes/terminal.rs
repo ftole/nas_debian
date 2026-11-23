@@ -8,7 +8,7 @@ use nas_exec::Runner;
 use serde::Deserialize;
 
 use crate::{
-    extractors::{AuthenticatedUser, SuperAdminUser},
+    extractors::SuperAdminUser,
     routes::common::{audit_ip, bad_request, server_error, ApiResponse},
     AppState,
 };
@@ -292,7 +292,7 @@ pub async fn terminal_kill(
 }
 
 /// Historial de comandos del terminal (aún sin persistencia propia).
-pub async fn terminal_history(_user: AuthenticatedUser) -> Response {
+pub async fn terminal_history(_superadmin: SuperAdminUser) -> Response {
     axum::Json(ApiResponse::ok(
         Vec::<String>::new(),
         "Historial de terminal",
