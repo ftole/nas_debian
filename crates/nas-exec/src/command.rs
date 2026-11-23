@@ -260,7 +260,15 @@ impl Runner {
 
     /// Ejecuta el comando describiéndolo sin secretos.
     pub fn run(&self, spec: &CommandSpec) -> NasResult<CommandOutput> {
-        let command_line = spec.describe();
+        let mut output_redactor = self.redactor.clone();
+        if let SudoMode::WithPassword(secret) = &spec.sudo {
+            output_redactor.add_secret(secret.expose());
+        }
+        let mut cmd_redactor = output_redactor.clone();
+        if let Some(secret) = &spec.stdin_data {
+            cmd_redactor.add_secret(secret.expose());
+        }
+        let command_line = cmd_redactor.redact(&spec.describe());
         let started = Instant::now();
 
         let mut command = match &spec.sudo {
@@ -308,11 +316,7 @@ impl Runner {
             .spawn()
             .map_err(|e| NasError::io(&spec.program, e))?;
 
-        let payload = match (&spec.sudo, &spec.stdin_data) {
-            (SudoMode::WithPassword(secret), _) => Some(secret.expose().to_string()),
-            (_, Some(secret)) => Some(secret.expose().to_string()),
-            _ => None,
-        };
+        let payload = combine_stdin_payload(&spec.sudo, &spec.stdin_data);
 
         if let Some(mut stdin) = child.stdin.take() {
             if let Some(value) = payload {
@@ -340,8 +344,14 @@ impl Runner {
             .ok_or_else(|| NasError::Invalid("stderr no disponible".into()))?;
 
         let max_bytes = spec.max_output_bytes.max(1024);
-        let stdout_handle = thread::spawn(move || read_bounded(stdout_pipe, max_bytes));
-        let stderr_handle = thread::spawn(move || read_bounded(stderr_pipe, max_bytes));
+        let (out_tx, out_rx) = std::sync::mpsc::channel();
+        let (err_tx, err_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = out_tx.send(read_bounded(stdout_pipe, max_bytes));
+        });
+        thread::spawn(move || {
+            let _ = err_tx.send(read_bounded(stderr_pipe, max_bytes));
+        });
 
         let mut timed_out = false;
         let code;
@@ -372,10 +382,22 @@ impl Runner {
             poll_ms = (poll_ms.saturating_mul(2)).min(25);
         }
 
-        let (stdout_raw, stdout_truncated) = stdout_handle.join().unwrap_or_default();
-        let (stderr_raw, stderr_truncated) = stderr_handle.join().unwrap_or_default();
-        let mut stdout = self.redactor.redact(&String::from_utf8_lossy(&stdout_raw));
-        let mut stderr = self.redactor.redact(&String::from_utf8_lossy(&stderr_raw));
+        let (stdout_raw, stdout_truncated) = if timed_out {
+            out_rx
+                .recv_timeout(Duration::from_millis(150))
+                .unwrap_or_default()
+        } else {
+            out_rx.recv().unwrap_or_default()
+        };
+        let (stderr_raw, stderr_truncated) = if timed_out {
+            err_rx
+                .recv_timeout(Duration::from_millis(150))
+                .unwrap_or_default()
+        } else {
+            err_rx.recv().unwrap_or_default()
+        };
+        let mut stdout = output_redactor.redact(&String::from_utf8_lossy(&stdout_raw));
+        let mut stderr = output_redactor.redact(&String::from_utf8_lossy(&stderr_raw));
         if stdout_truncated {
             stdout.push_str("\n[salida truncada al superar límite de memoria]");
         }
@@ -397,6 +419,19 @@ impl Runner {
             duration: started.elapsed(),
             command: command_line,
         })
+    }
+}
+
+fn combine_stdin_payload(sudo: &SudoMode, stdin_data: &Option<SecretInput>) -> Option<String> {
+    match (sudo, stdin_data) {
+        (SudoMode::WithPassword(sudo_secret), Some(data)) => Some(format!(
+            "{}\n{}",
+            sudo_secret.expose().trim_end_matches(['\r', '\n']),
+            data.expose()
+        )),
+        (SudoMode::WithPassword(sudo_secret), None) => Some(sudo_secret.expose().to_string()),
+        (_, Some(data)) => Some(data.expose().to_string()),
+        _ => None,
     }
 }
 
@@ -521,5 +556,41 @@ mod tests {
             assert!(out.stderr.contains("fallo ***"), "stderr: {}", out.stderr);
             assert!(!out.stderr.contains(secret));
         }
+    }
+
+    #[test]
+    fn combina_sudo_with_password_y_stdin_data() {
+        let sudo = SudoMode::WithPassword(SecretInput::new("sudo_pass\n"));
+        let stdin = Some(SecretInput::new("payload_linea"));
+        assert_eq!(
+            super::combine_stdin_payload(&sudo, &stdin).as_deref(),
+            Some("sudo_pass\npayload_linea")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn redacta_secretos_en_command_describe_y_no_cuelga_con_nietos_abiertos() {
+        let runner = Runner::new().with_secret("SecretoCmd99");
+        let out = runner
+            .run(&CommandSpec::new("echo").arg("SecretoCmd99"))
+            .expect("echo");
+        assert!(out.is_success());
+        assert!(!out.command.contains("SecretoCmd99"));
+        assert!(out.command.contains("***"));
+
+        let started = std::time::Instant::now();
+        let bg = runner
+            .run(
+                &CommandSpec::new("sh")
+                    .args(["-c", "(sleep 3) & sleep 5"])
+                    .timeout(Duration::from_millis(120)),
+            )
+            .expect("timeout con nieto");
+        assert!(bg.timed_out);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "no debe bloquear esperando nieto con stdout/stderr abiertos"
+        );
     }
 }
