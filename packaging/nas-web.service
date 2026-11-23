@@ -23,8 +23,9 @@ TasksMax=256
 IOWeight=50
 Nice=5
 
-# Endurecimiento. `sudo -n` requiere CAP_SETUID/SETGID y las acciones
-# privilegiadas acotadas (btrfs/fstrim) necesitan CAP_SYS_ADMIN.
+# Endurecimiento. `sudo -n` requiere NoNewPrivileges=no y CapabilityBoundingSet
+# para elevar únicamente hacia la lista blanca de /etc/sudoers.d/nas-web-rust;
+# el proceso web por sí mismo opera sin capacidades ambiente (AmbientCapabilities=).
 NoNewPrivileges=no
 # ProtectHome=no porque useradd -m crea /home/<usuario>.
 # ProtectSystem=yes (no strict) porque el helper validado escribe /etc/samba/smb.conf
@@ -48,7 +49,7 @@ SystemCallErrorNumber=EPERM
 ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin -/etc/cron.d -/etc/backup-credentials -/etc/samba
 UMask=0007
 CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_MKNOD CAP_AUDIT_WRITE CAP_KILL CAP_LINUX_IMMUTABLE
-AmbientCapabilities=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
+AmbientCapabilities=
 
 [Install]
 WantedBy=multi-user.target
