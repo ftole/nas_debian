@@ -51,10 +51,12 @@ pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasR
     std::fs::create_dir_all(dir_path)
         .map_err(|e| NasError::Denied(format!("no se pudo crear el directorio {dir}: {e}")))?;
 
+    let had_entries = std::fs::read_dir(dir_path).is_ok_and(|mut it| it.next().is_some());
+
     runner
         .run(
             &CommandSpec::new("chown")
-                .args(["-R", "root:grp_samba", &dir])
+                .args(["-R", "root:grp_samba", "--", &dir])
                 .timeout(Duration::from_secs(30)),
         )?
         .ensure_success()?;
@@ -62,10 +64,34 @@ pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasR
     runner
         .run(
             &CommandSpec::new("chmod")
-                .args(["2770", &dir])
+                .args(["2770", "--", &dir])
                 .timeout(Duration::from_secs(30)),
         )?
         .ensure_success()?;
+
+    let _ = runner.run(
+        &CommandSpec::new("setfacl")
+            .args([
+                "-m",
+                "u:nas-web:rwx,g:grp_samba:rwx,m::rwx,d:u:nas-web:rwx,d:g:grp_samba:rwx,d:m::rwx",
+                "--",
+                &dir,
+            ])
+            .timeout(Duration::from_secs(30)),
+    );
+    if had_entries {
+        let _ = runner.run(
+            &CommandSpec::new("setfacl")
+                .args([
+                    "-RP",
+                    "-m",
+                    "u:nas-web:rwX,g:grp_samba:rwX,d:u:nas-web:rwx,d:g:grp_samba:rwx",
+                    "--",
+                    &dir,
+                ])
+                .timeout(Duration::from_secs(60)),
+        );
+    }
 
     Ok(dir)
 }
