@@ -53,10 +53,17 @@ check "$INSTALL" "/usr/local/sbin/nas-terminal *" "sudoers: helper de terminal"
 check "$INSTALL" "/usr/local/sbin/nas-storage-apply *" "sudoers: helper de almacenamiento"
 check "$INSTALL" "/usr/local/sbin/nas-backup-manage *" "sudoers: helper de respaldos"
 check "$UNIT" "NoNewPrivileges=no" "unit: NoNewPrivileges documentado"
+if grep -qE '^AmbientCapabilities=.*CAP_' "$UNIT"; then
+    echo "[FALLO] unit: AmbientCapabilities debe estar vacío en $UNIT"
+    FAILED=1
+else
+    echo "[OK]    unit: AmbientCapabilities vacío"
+fi
 
 check "$INSTALL" "nginx -t" "install: valida nginx"
 check "$INSTALL" "systemctl enable --now nas-web.service" "install: habilita servicio"
 check "$INSTALL" "75_aide_nas" "install: exclusiones AIDE NAS"
+check "$INSTALL" "-name BACKUPS_HISTORICOS" "install: nas-recycle-purge poda respaldos"
 check "$SCRIPT_DIR/75_aide_nas" "-/srv/nas$" "aide: excluye /srv/nas"
 
 if [ "$FAILED" -ne 0 ]; then
