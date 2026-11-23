@@ -1,12 +1,67 @@
 //! Pruebas de conectividad CIFS y SSH para tareas de respaldo.
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
 use nas_exec::{CommandSpec, Runner};
 
-use super::write_secure_file;
+const CRED_DIR: &str = "/etc/backup-credentials";
+
+fn create_unique_temp_dir(prefix: &str) -> NasResult<PathBuf> {
+    let base_dir = std::env::temp_dir();
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for attempt in 0..32u32 {
+        let candidate = base_dir.join(format!("{prefix}_{pid}_{nanos}_{attempt}"));
+        #[cfg(unix)]
+        let res = {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut builder = std::fs::DirBuilder::new();
+            builder.mode(0o700);
+            builder.create(&candidate)
+        };
+        #[cfg(not(unix))]
+        let res = std::fs::DirBuilder::new().create(&candidate);
+        match res {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(NasError::Denied(format!(
+                    "no se pudo crear directorio temporal de prueba: {e}"
+                )));
+            }
+        }
+    }
+    Err(NasError::Denied(
+        "no se pudo asignar un directorio temporal único".into(),
+    ))
+}
+
+fn validate_existing_ssh_key_path(raw: &str) -> NasResult<PathBuf> {
+    if raw.contains("..") || raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(NasError::Denied("ruta de clave SSH inválida".into()));
+    }
+    let base = std::fs::canonicalize(CRED_DIR).map_err(|_| {
+        NasError::Denied(
+            "ruta de clave SSH no permitida: debe residir en /etc/backup-credentials/ o enviarse en formato PEM".into(),
+        )
+    })?;
+    let canon = std::fs::canonicalize(raw).map_err(|_| {
+        NasError::Denied(
+            "ruta de clave SSH no permitida: debe residir en /etc/backup-credentials/ o enviarse en formato PEM".into(),
+        )
+    })?;
+    if !canon.starts_with(&base) || !canon.is_file() {
+        return Err(NasError::Denied(
+            "ruta de clave SSH no permitida: debe residir en /etc/backup-credentials/ o enviarse en formato PEM".into(),
+        ));
+    }
+    Ok(canon)
+}
 
 fn is_valid_host(host: &str) -> bool {
     let host = host.trim();
@@ -60,20 +115,13 @@ pub fn test_cifs_conn(
     if !is_valid_cifs_user(user) {
         return Err(NasError::Invalid("usuario CIFS inválido".into()));
     }
-
-    let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-    let temp_dir = std::env::temp_dir().join(format!("cifs_test_{}_{stamp}", std::process::id()));
-    let temp_cred = std::env::temp_dir().join(format!("cifs_cred_{}_{stamp}", std::process::id()));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        builder.mode(0o700);
-        let _ = builder.create(&temp_dir);
+    if password.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
+        return Err(NasError::Invalid(
+            "la contraseña CIFS contiene caracteres no permitidos".into(),
+        ));
     }
-    #[cfg(not(unix))]
-    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let temp_dir = create_unique_temp_dir("cifs_test")?;
 
     let cred_content = if let Some((dom, acc)) = user.split_once('\\') {
         format!("domain={dom}\nusername={acc}\npassword={password}\n")
@@ -82,7 +130,13 @@ pub fn test_cifs_conn(
     } else {
         format!("username={user}\npassword={password}\n")
     };
-    write_secure_file(&temp_cred, &cred_content)?;
+    let temp_cred = match crate::deploy::write_unique_temp_file("cifs_cred", &cred_content) {
+        Ok(path) => path,
+        Err(err) => {
+            let _ = std::fs::remove_dir(&temp_dir);
+            return Err(err);
+        }
+    };
 
     let opts = format!(
         "credentials={},ro,iocharset=utf8,vers=3.1.1,noserverino,cache=none,soft,nobrl",
@@ -90,13 +144,14 @@ pub fn test_cifs_conn(
     );
     let target = format!("//{host}/{share}");
     let temp_dir_str = temp_dir.to_string_lossy().to_string();
-    let mount_res = runner.run(
+    let safe_runner = runner.clone().with_secret(password);
+    let mount_res = safe_runner.run(
         &CommandSpec::new("mount")
             .args(["-t", "cifs", &target, &temp_dir_str, "-o", &opts])
             .timeout(Duration::from_secs(15)),
     );
 
-    let _ = runner.run(&CommandSpec::new("umount").args([&temp_dir_str]));
+    let _ = safe_runner.run(&CommandSpec::new("umount").args([&temp_dir_str]));
     let _ = std::fs::remove_file(&temp_cred);
     let _ = std::fs::remove_dir(&temp_dir);
 
@@ -157,16 +212,19 @@ pub fn test_ssh_conn(
 
     let _ = std::fs::create_dir_all("/root/.ssh");
     let trimmed_auth = auth.trim();
+    let safe_runner = if !trimmed_auth.is_empty() && !trimmed_auth.starts_with('/') {
+        runner.clone().with_secret(auth)
+    } else {
+        runner.clone()
+    };
 
     let (spec, temp_guard) = if trimmed_auth.starts_with("-----BEGIN") {
         nas_ssh::validate_private_key(trimmed_auth)?;
-        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let temp_key = std::env::temp_dir().join(format!("ssh_key_{}_{stamp}", std::process::id()));
         let mut key_content = trimmed_auth.to_string();
         if !key_content.ends_with('\n') {
             key_content.push('\n');
         }
-        write_secure_file(&temp_key, &key_content)?;
+        let temp_key = crate::deploy::write_unique_temp_file("ssh_key", &key_content)?;
 
         let cmd = CommandSpec::new("ssh")
             .args([
@@ -190,11 +248,12 @@ pub fn test_ssh_conn(
             ])
             .timeout(Duration::from_secs(15));
         (cmd, Some(temp_key))
-    } else if !trimmed_auth.is_empty() && Path::new(trimmed_auth).is_file() {
+    } else if trimmed_auth.starts_with('/') {
+        let valid_key = validate_existing_ssh_key_path(trimmed_auth)?;
         let cmd = CommandSpec::new("ssh")
             .args([
                 "-i",
-                trimmed_auth,
+                &valid_key.to_string_lossy(),
                 "-p",
                 &port.to_string(),
                 "-l",
@@ -214,6 +273,11 @@ pub fn test_ssh_conn(
             .timeout(Duration::from_secs(15));
         (cmd, None)
     } else {
+        if auth.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
+            return Err(NasError::Invalid(
+                "la contraseña SSH contiene caracteres no permitidos".into(),
+            ));
+        }
         let mut spec = CommandSpec::new("sshpass")
             .args([
                 "-e",
@@ -237,7 +301,7 @@ pub fn test_ssh_conn(
         (spec, None)
     };
 
-    let res = runner.run(&spec);
+    let res = safe_runner.run(&spec);
     if let Some(path) = temp_guard {
         let _ = std::fs::remove_file(path);
     }
@@ -280,5 +344,18 @@ mod tests {
         let bad_pem =
             "-----BEGIN OPENSSH PRIVATE KEY-----\ncorto\n-----END OPENSSH PRIVATE KEY-----";
         assert!(test_ssh_conn(&runner, "10.10.1.1", 22, "root", bad_pem).is_err());
+
+        // DT-A01: no debe aceptar rutas arbitrarias fuera de /etc/backup-credentials/
+        let etc_passwd =
+            test_ssh_conn(&runner, "10.10.1.1", 22, "root", "/etc/passwd").unwrap_err();
+        assert!(etc_passwd.to_string().contains("/etc/backup-credentials"));
+        assert!(test_ssh_conn(
+            &runner,
+            "10.10.1.1",
+            22,
+            "root",
+            "/etc/backup-credentials/../passwd"
+        )
+        .is_err());
     }
 }
