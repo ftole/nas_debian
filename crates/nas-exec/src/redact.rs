@@ -21,6 +21,8 @@ impl Redactor {
         let secret = secret.into();
         if secret.len() >= 3 && !self.secrets.contains(&secret) {
             self.secrets.push(secret);
+            // Ordenar por longitud descendente para evitar enmascaramiento parcial de subcadenas.
+            self.secrets.sort_by_key(|a| std::cmp::Reverse(a.len()));
         }
     }
 
@@ -82,5 +84,16 @@ mod tests {
         let mut redactor = Redactor::new();
         redactor.add_secret("ab");
         assert!(!redactor.has_secrets());
+    }
+
+    #[test]
+    fn ordena_secretos_por_longitud_descendente() {
+        let mut redactor = Redactor::new();
+        redactor.add_secret("clave");
+        redactor.add_secret("clave-maestra-123");
+        let masked = redactor.redact("usando clave-maestra-123 y clave");
+        assert_eq!(masked, "usando *** y ***");
+        assert!(!masked.contains("maestra"));
+        assert!(!masked.contains("123"));
     }
 }
