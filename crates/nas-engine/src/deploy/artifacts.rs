@@ -36,6 +36,18 @@ const AIDE_NAS_RULES: &str = include_str!("../../../../packaging/75_aide_nas");
 
 const JOURNALD_LIMITS: &str = include_str!("../../../../packaging/99-nas-journald.conf");
 
+/// Script diario de purga de papeleras Samba (`.recycle`) podando respaldos y staging.
+pub const RECYCLE_PURGE_SCRIPT: &str = concat!(
+    "#!/bin/bash\n",
+    "# nas-recycle-purge: Purga automática de archivos en papeleras Samba con más de 15 días\n",
+    "if [ -x /usr/local/bin/nas ]; then\n",
+    "    /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true\n",
+    "else\n",
+    "    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type f -path '*/.recycle/*' -mtime +15 -exec rm -f {} + 2>/dev/null || true\n",
+    "    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type d -path '*/.recycle/*' -empty -exec rmdir {} + 2>/dev/null || true\n",
+    "fi\n",
+);
+
 /// Renderiza `99-nas-tuning.conf` ajustando `vm.dirty_background_bytes` y `vm.dirty_bytes`
 /// de forma proporcional a la RAM total (`total_mem_mb`).
 pub fn render_sysctl_tuning(total_mem_mb: u64) -> String {
@@ -114,15 +126,7 @@ impl DeployParams {
             Artifact {
                 path: "/etc/cron.daily/nas-recycle-purge".into(),
                 mode: 0o755,
-                content: "#!/bin/bash\n\
-# nas-recycle-purge: Purga automática de archivos en papeleras Samba con más de 15 días\n\
-if [ -x /usr/local/bin/nas ]; then\n\
-    /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true\n\
-else\n\
-    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type f -path '*/.recycle/*' -mtime +15 -exec rm -f {} + 2>/dev/null || true\n\
-    find /srv/nas \\( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \\) -prune -o -type d -path '*/.recycle/*' -empty -exec rmdir {} + 2>/dev/null || true\n\
-fi\n"
-                    .to_string(),
+                content: RECYCLE_PURGE_SCRIPT.to_string(),
             },
         ];
 
@@ -269,7 +273,7 @@ pub fn fstab_options_for_target(target: &str, options: &str) -> String {
 }
 
 /// Crea un archivo temporal único con `create_new(true)` (`O_EXCL`) y modo `0600`.
-pub(crate) fn write_unique_temp_file(prefix: &str, content: &str) -> NasResult<std::path::PathBuf> {
+pub fn write_unique_temp_file(prefix: &str, content: &str) -> NasResult<std::path::PathBuf> {
     use std::io::Write;
     let base_dir = std::env::temp_dir();
     let pid = std::process::id();
@@ -687,5 +691,26 @@ UUID=btrfs-uuid /srv/nas/unidades/pool2 btrfs rw,noatime,autodefrag,discard=asyn
         assert!(clean.contains("x-systemd.device-timeout=15s"));
         assert!(!clean.contains("autodefrag"));
         assert!(!clean.contains("discard=async"));
+    }
+
+    #[test]
+    fn recycle_purge_coincide_con_packaging_install_y_poda_respaldos() {
+        let install_sh = include_str!("../../../../packaging/install.sh");
+        let marker = "cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'\n";
+        let start = install_sh
+            .find(marker)
+            .map(|idx| idx + marker.len())
+            .expect("bloque PURGE_EOF en packaging/install.sh");
+        let end = install_sh[start..]
+            .find("\nPURGE_EOF\n")
+            .map(|rel| start + rel + 1)
+            .expect("cierre PURGE_EOF en packaging/install.sh");
+        assert_eq!(super::RECYCLE_PURGE_SCRIPT, &install_sh[start..end]);
+        assert!(super::RECYCLE_PURGE_SCRIPT.contains("-prune"));
+        assert!(super::RECYCLE_PURGE_SCRIPT.contains("BACKUPS_HISTORICOS"));
+        assert!(super::RECYCLE_PURGE_SCRIPT.contains("BACKUPS_PERMANENTES"));
+        assert!(super::RECYCLE_PURGE_SCRIPT.contains("LOGS_BACKUP"));
+        assert!(super::RECYCLE_PURGE_SCRIPT.contains(".nas_staging"));
+        assert!(!super::RECYCLE_PURGE_SCRIPT.contains("-delete"));
     }
 }
