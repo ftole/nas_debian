@@ -43,13 +43,7 @@ pub fn configure_wsdd2(runner: &Runner, netbios: &str, workgroup: &str) -> NasRe
             override_content.as_str(),
         ),
     ] {
-        let staged = std::env::temp_dir().join(format!(
-            "nas-wsdd2-{}-{}",
-            std::process::id(),
-            path.replace('/', "_")
-        ));
-        std::fs::write(&staged, content)
-            .map_err(|e| NasError::Denied(format!("no se pudo preparar override de wsdd2: {e}")))?;
+        let staged = crate::deploy::write_unique_temp_file("nas-wsdd2", content)?;
         let res = runner.run(
             &CommandSpec::new("install")
                 .args([
