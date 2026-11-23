@@ -17,9 +17,10 @@ use nas_core::{NasError, NasResult, ServerRole};
 use serde::Serialize;
 
 pub use artifacts::{
-    apply_hardening, apply_journald_and_sleep_mask, render_sysctl_tuning, update_fstab, Artifact,
+    apply_hardening, apply_journald_and_sleep_mask, render_sysctl_tuning, update_fstab,
+    write_unique_temp_file, Artifact, RECYCLE_PURGE_SCRIPT,
 };
-pub(crate) use artifacts::{install_fstab_content, sanitize_fstab_content, write_unique_temp_file};
+pub(crate) use artifacts::{install_fstab_content, sanitize_fstab_content};
 
 /// Sistema de archivos objetivo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
