@@ -65,6 +65,11 @@ enum Command {
         #[command(subcommand)]
         action: DeployAction,
     },
+    /// Estado y automatización del endurecimiento de seguridad del sistema operativo.
+    Security {
+        #[command(subcommand)]
+        action: SecurityAction,
+    },
     /// Inventario de almacenamiento.
     Storage {
         #[command(subcommand)]
@@ -278,6 +283,39 @@ pub struct DeployArgs {
     /// El disco es HDD mecánico (fuerza opciones de montaje rotacionales).
     #[arg(long)]
     pub hdd: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum SecurityAction {
+    /// Muestra el estado actual del firewall, fail2ban, auditd, AIDE y unidad systemd.
+    Status,
+    /// Aplica o simula (`--dry-run`) el endurecimiento de seguridad del host.
+    Harden {
+        /// Aplica los cambios reales en el servidor.
+        #[arg(long)]
+        apply: bool,
+        /// Simula el plan sin modificar el sistema.
+        #[arg(long)]
+        dry_run: bool,
+        /// Modo seguro (no deshabilita contraseñas SSH ni sobreescribe un firewall activo).
+        #[arg(long)]
+        safe_only: bool,
+        /// Reconfigura el cortafuegos UFW aunque ya esté activo.
+        #[arg(long)]
+        force_fw: bool,
+        /// Subredes LAN CIDR permitidas (separadas por coma; si se omite, autodetecta).
+        #[arg(long)]
+        lan_cidr: Option<String>,
+        /// Endurece SSH (`99-nas-hardening.conf`) si existen llaves públicas en authorized_keys.
+        #[arg(long)]
+        harden_ssh: bool,
+        /// Inicializa la base de integridad AIDE (`/var/lib/aide/aide.db`) si falta.
+        #[arg(long)]
+        init_aide: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -581,6 +619,30 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
             DeployAction::EnsureDeps { sudo } => {
                 commands::deploy::deploy_ensure_deps(sudo, cli.json)
             }
+        },
+        Command::Security { action } => match action {
+            SecurityAction::Status => commands::security::security_status(cli.json),
+            SecurityAction::Harden {
+                apply,
+                dry_run,
+                safe_only,
+                force_fw,
+                lan_cidr,
+                harden_ssh,
+                init_aide,
+                sudo,
+            } => commands::security::security_harden(
+                nas_engine::security::HardenOptions {
+                    apply: apply && !dry_run,
+                    safe_only,
+                    force_firewall: force_fw,
+                    lan_cidr,
+                    harden_ssh,
+                    init_aide,
+                    sudo,
+                },
+                cli.json,
+            ),
         },
         Command::Helper { action } => run_helper(action, cli.json),
     }
