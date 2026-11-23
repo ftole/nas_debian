@@ -15,6 +15,7 @@ impl FileRoot {
             )));
         }
         let path = self.resolve(relative)?;
+        self.check_resolved_not_protected(&path, "escritura")?;
         if path == self.root {
             return Err(NasError::Denied("no se puede sobrescribir la raíz".into()));
         }
