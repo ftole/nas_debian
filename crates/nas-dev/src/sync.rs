@@ -20,6 +20,7 @@ pub(crate) struct RemoteStep {
     pub(crate) argv: Vec<String>,
     pub(crate) ignore_failure: bool,
     pub(crate) healthcheck: bool,
+    pub(crate) sudo: bool,
 }
 
 impl RemoteStep {
@@ -29,6 +30,7 @@ impl RemoteStep {
             argv,
             ignore_failure: false,
             healthcheck: false,
+            sudo: false,
         }
     }
 
@@ -41,6 +43,62 @@ impl RemoteStep {
         self.healthcheck = true;
         self
     }
+
+    pub(crate) fn with_sudo(mut self) -> Self {
+        self.sudo = true;
+        self
+    }
+}
+
+struct TempWorkdirGuard(PathBuf);
+
+impl Drop for TempWorkdirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn create_unique_workdir() -> NasResult<TempWorkdirGuard> {
+    let base = std::env::temp_dir();
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    for attempt in 0..32u32 {
+        let candidate = base.join(format!("nas-dev-{pid}-{nanos}-{attempt}"));
+        #[cfg(unix)]
+        let res = {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut b = std::fs::DirBuilder::new();
+            b.mode(0o700);
+            b.create(&candidate)
+        };
+        #[cfg(not(unix))]
+        let res = std::fs::DirBuilder::new().create(&candidate);
+        match res {
+            Ok(()) => return Ok(TempWorkdirGuard(candidate)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(NasError::io(&candidate, e)),
+        }
+    }
+    Err(NasError::Denied(
+        "no se pudo crear directorio temporal único para nas-dev".into(),
+    ))
+}
+
+fn validate_remote_path(label: &str, path: &str) -> NasResult<()> {
+    let trimmed = path.trim();
+    if trimmed.is_empty()
+        || !trimmed.starts_with('/')
+        || trimmed.contains("..")
+        || trimmed.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(NasError::Invalid(format!(
+            "ruta remota {label} inválida: '{path}'"
+        )));
+    }
+    Ok(())
 }
 
 /// Plan completo de sincronización hacia un entorno de desarrollo.
@@ -74,6 +132,8 @@ pub(crate) fn sync(
     let inventory = load_inventory(inventory_path)?;
     let host = inventory.resolve(alias)?;
     ensure_development(&host)?;
+    validate_remote_path("web", &host.web)?;
+    validate_remote_path("state", &host.state)?;
 
     let target = target_for(
         &host,
@@ -99,8 +159,8 @@ pub(crate) fn sync(
         return Ok(preflight_code);
     }
 
-    let workdir = std::env::temp_dir().join(format!("nas-dev-{}", std::process::id()));
-    std::fs::create_dir_all(&workdir).map_err(|e| NasError::io(&workdir, e))?;
+    let workdir_guard = create_unique_workdir()?;
+    let workdir = &workdir_guard.0;
 
     let bundle = workdir.join("bundle.tar.gz");
     create_archive(source, &bundle)?;
@@ -174,10 +234,22 @@ fn execute(
     archive: &Path,
     sudo: bool,
 ) -> NasResult<()> {
+    // Crear directorios de recepción ANTES de subir el paquete por scp.
+    if let Some(mkdir_step) = plan.steps.first() {
+        let output = executor.run(target, &mkdir_step.argv)?;
+        if !output.is_success() {
+            return Err(NasError::Command {
+                command: format!("{}: {}", mkdir_step.label, output.command),
+                code: output.code,
+                stderr: output.stderr,
+            });
+        }
+    }
+
     executor.upload(target, archive, &plan.incoming)?;
 
-    for step in &plan.steps {
-        let argv = if sudo {
+    for step in plan.steps.iter().skip(1) {
+        let argv = if sudo && step.sudo {
             with_sudo(&step.argv)
         } else {
             step.argv.clone()
@@ -192,7 +264,7 @@ fn execute(
             }
             let _ = executor.run(
                 target,
-                &if sudo {
+                &if sudo && plan.rollback.sudo {
                     with_sudo(&plan.rollback.argv)
                 } else {
                     plan.rollback.argv.clone()
@@ -230,14 +302,20 @@ fn render_dry_run(
             .steps
             .iter()
             .map(|step| {
+                let step_prefix = if sudo && step.sudo { "sudo -n -- " } else { "" };
                 serde_json::json!({
                     "label": step.label,
-                    "command": format!("{prefix}{}", step.argv.join(" ")),
+                    "command": format!("{step_prefix}{}", step.argv.join(" ")),
                     "ignore_failure": step.ignore_failure,
                     "healthcheck": step.healthcheck,
                 })
             })
             .collect();
+        let rb_prefix = if sudo && plan.rollback.sudo {
+            "sudo -n -- "
+        } else {
+            ""
+        };
         println!(
             "{}",
             serde_json::to_string_pretty(&ApiResponse::ok(
@@ -246,7 +324,7 @@ fn render_dry_run(
                     "target": target.destination(),
                     "upload": plan.incoming,
                     "steps": steps,
-                    "rollback": format!("{prefix}{}", plan.rollback.argv.join(" ")),
+                    "rollback": format!("{rb_prefix}{}", plan.rollback.argv.join(" ")),
                 }),
                 "Simulación de sincronización"
             ))?
@@ -261,18 +339,25 @@ fn render_dry_run(
     println!();
     println!("[upload] paquete -> {}", plan.incoming);
     for (index, step) in plan.steps.iter().enumerate() {
+        let step_prefix = if sudo && step.sudo { "sudo -n -- " } else { "" };
         println!(
-            "{:>2}. {:<26} {prefix}{}",
+            "{:>2}. {:<26} {step_prefix}{}",
             index + 1,
             step.label,
             step.argv.join(" ")
         );
     }
+    let rb_prefix = if sudo && plan.rollback.sudo {
+        "sudo -n -- "
+    } else {
+        ""
+    };
     println!(
-        "RB. {:<26} {prefix}{}",
+        "RB. {:<26} {rb_prefix}{}",
         plan.rollback.label,
         plan.rollback.argv.join(" ")
     );
+    let _ = prefix;
 
     Ok(ExitCode::SUCCESS)
 }
@@ -349,11 +434,13 @@ pub(crate) fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> Syn
             "recargar nginx",
             vec!["systemctl".into(), "reload".into(), "nginx".into()],
         )
+        .with_sudo()
         .optional(),
         RemoteStep::new(
             "reiniciar nas-web",
             vec!["systemctl".into(), "restart".into(), "nas-web".into()],
         )
+        .with_sudo()
         .optional(),
         RemoteStep::new(
             "healthcheck",
