@@ -192,6 +192,30 @@ async fn resolve_staging_dir_async(state: &AppState, root_name: Option<&str>) ->
     }
 }
 
+struct StagedCleanupGuard(Vec<PathBuf>);
+
+impl StagedCleanupGuard {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn push(&mut self, path: PathBuf) {
+        self.0.push(path);
+    }
+
+    fn cleanup_sync(&mut self) {
+        for p in self.0.drain(..) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+impl Drop for StagedCleanupGuard {
+    fn drop(&mut self) {
+        self.cleanup_sync();
+    }
+}
+
 /// Sube uno o varios archivos a un directorio, escribiendo por streaming.
 pub async fn files_upload(
     State(state): State<AppState>,
@@ -230,6 +254,7 @@ pub async fn files_upload(
     }
 
     let mut staged_files: Vec<(PathBuf, String)> = Vec::new();
+    let mut staged_guard = StagedCleanupGuard::new();
     let mut saved: Vec<String> = Vec::new();
     let mut total_written_all: u64 = 0;
     let mut last_space_check: u64 = 0;
@@ -306,7 +331,13 @@ pub async fn files_upload(
         };
 
         let temporary = active_staging_dir.join(format!(".upload-{}", random_hex()));
-        let mut file = match tokio::fs::File::create(&temporary).await {
+        staged_guard.push(temporary.clone());
+        let mut file = match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await
+        {
             Ok(file) => file,
             Err(error) => {
                 for (temp, _) in &staged_files {
@@ -406,8 +437,9 @@ pub async fn files_upload(
 
     let target_dir_str = directory.unwrap_or_default();
     let target_dir_arg = target_dir_str.clone();
+    let root_for_dir = root.clone();
     let target_dir = match state
-        .run_system_blocking(move || root.resolve_dir(&target_dir_arg))
+        .run_system_blocking(move || root_for_dir.resolve_dir(&target_dir_arg))
         .await
     {
         Ok(Ok(dir)) => dir,
@@ -427,6 +459,19 @@ pub async fn files_upload(
 
     let mut seen = std::collections::HashSet::new();
     for (_, filename) in &staged_files {
+        let destination = target_dir.join(filename);
+        let dest_rel = destination
+            .strip_prefix(root.root())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| filename.clone());
+        if let Some(desc) = root.is_protected_path(&dest_rel) {
+            for (temp, _) in &staged_files {
+                let _ = tokio::fs::remove_file(temp).await;
+            }
+            return error_response(nas_core::NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura y subidas"
+            )));
+        }
         if !seen.insert(filename) {
             for (temp, _) in &staged_files {
                 let _ = tokio::fs::remove_file(temp).await;
@@ -439,7 +484,6 @@ pub async fn files_upload(
             )
                 .into_response();
         }
-        let destination = target_dir.join(filename);
         if tokio::fs::try_exists(&destination).await.unwrap_or(false) {
             for (temp, _) in &staged_files {
                 let _ = tokio::fs::remove_file(temp).await;
