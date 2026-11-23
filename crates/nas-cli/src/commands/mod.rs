@@ -5,6 +5,7 @@ pub mod deploy;
 pub mod diag;
 pub mod migrate;
 pub mod network;
+pub mod security;
 pub mod services;
 pub mod status;
 pub mod storage;
