@@ -15,11 +15,13 @@ STATE_DIR="/var/lib/nas"
 DATA_ROOT="/srv/nas"
 SERVICE_USER="nas-web"
 CONFIGURE_NGINX=1
+NO_HARDEN=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --prefix) PREFIX="${2:?falta directorio}"; shift 2 ;;
         --no-nginx) CONFIGURE_NGINX=0; shift ;;
+        --no-harden) NO_HARDEN=1; shift ;;
         -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
         *) echo "opción desconocida: $1" >&2; exit 2 ;;
     esac
@@ -72,17 +74,45 @@ chmod 0750 "$STATE_DIR" 2>/dev/null || true
 
 install -d -m 2770 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/audit" 2>/dev/null || true
-install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
-chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
+install -d -m 00700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
+chown -PR "$SERVICE_USER:$SERVICE_USER" -- "$STATE_DIR/staging" 2>/dev/null || true
+chmod 00700 -- "$STATE_DIR/staging" 2>/dev/null || true
 
 if [ -f "$STATE_DIR/nas.sqlite" ]; then
     chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
     chmod 0640 "$STATE_DIR"/nas.sqlite* 2>/dev/null || true
 fi
 
-install -d -m 2770 -o root -g grp_samba "$DATA_ROOT" "$DATA_ROOT/BACKUPS_HISTORICOS" "$DATA_ROOT/BACKUPS_PERMANENTES" "$DATA_ROOT/LOGS_BACKUP" 2>/dev/null || true
-if command -v setfacl >/dev/null 2>&1; then
-    setfacl -m u:"$SERVICE_USER":rwx,g:grp_samba:rwx,d:u:"$SERVICE_USER":rwx,d:g:grp_samba:rwx "$DATA_ROOT" 2>/dev/null || true
+EFFECTIVE_DATA_ROOT="$DATA_ROOT"
+if [ -f "$ENV_FILE" ]; then
+    env_data_root="$(awk -F= '/^NAS_DATA_ROOT=/{print $2; exit}' "$ENV_FILE" | tr -d "\"'[:space:]")"
+    if [ -n "$env_data_root" ] && [[ "$env_data_root" == /* ]] && [[ "$env_data_root" != *".."* ]]; then
+        EFFECTIVE_DATA_ROOT="$env_data_root"
+    fi
+fi
+
+install -d -m 2770 -o root -g grp_samba "$EFFECTIVE_DATA_ROOT" "$EFFECTIVE_DATA_ROOT/BACKUPS_HISTORICOS" "$EFFECTIVE_DATA_ROOT/BACKUPS_PERMANENTES" "$EFFECTIVE_DATA_ROOT/LOGS_BACKUP" 2>/dev/null || true
+if [ -d "$EFFECTIVE_DATA_ROOT" ] && [ ! -L "$EFFECTIVE_DATA_ROOT" ]; then
+    chown root:grp_samba -- "$EFFECTIVE_DATA_ROOT" 2>/dev/null || true
+    chmod 2770 -- "$EFFECTIVE_DATA_ROOT" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:"$SERVICE_USER":rwx,g:grp_samba:rwx,m::rwx,d:u:"$SERVICE_USER":rwx,d:g:grp_samba:rwx,d:m::rwx -- "$EFFECTIVE_DATA_ROOT" 2>/dev/null || true
+    fi
+fi
+if [ -d "$EFFECTIVE_DATA_ROOT/unidades" ] && [ ! -L "$EFFECTIVE_DATA_ROOT/unidades" ]; then
+    chown root:grp_samba -- "$EFFECTIVE_DATA_ROOT/unidades" 2>/dev/null || true
+    chmod 2770 -- "$EFFECTIVE_DATA_ROOT/unidades" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:"$SERVICE_USER":rwx,g:grp_samba:rwx,m::rwx,d:u:"$SERVICE_USER":rwx,d:g:grp_samba:rwx,d:m::rwx -- "$EFFECTIVE_DATA_ROOT/unidades" 2>/dev/null || true
+    fi
+fi
+if [ ! -L "$EFFECTIVE_DATA_ROOT/.nas_staging" ] && { [ ! -e "$EFFECTIVE_DATA_ROOT/.nas_staging" ] || [ -d "$EFFECTIVE_DATA_ROOT/.nas_staging" ]; }; then
+    install -d -m 00700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$EFFECTIVE_DATA_ROOT/.nas_staging" 2>/dev/null || true
+    chown -PR "$SERVICE_USER:$SERVICE_USER" -- "$EFFECTIVE_DATA_ROOT/.nas_staging" 2>/dev/null || true
+    chmod 00700 -- "$EFFECTIVE_DATA_ROOT/.nas_staging" 2>/dev/null || true
+    if command -v setfacl >/dev/null 2>&1; then
+        setfacl -b -- "$EFFECTIVE_DATA_ROOT/.nas_staging" 2>/dev/null || true
+    fi
 fi
 install -d -m 0755 /etc/nas
 if [ -f "$SCRIPT_DIR/release.pub" ]; then
@@ -186,7 +216,7 @@ install -m 0755 -o root -g root "$SCRIPT_DIR/nas-accounts" /usr/local/sbin/nas-a
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-backup-manage" /usr/local/sbin/nas-backup-manage
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-terminal" /usr/local/sbin/nas-terminal
 install -m 0755 -o root -g root "$SCRIPT_DIR/nas-storage-apply" /usr/local/sbin/nas-storage-apply
-install -d -m 2770 -o root -g "$SERVICE_USER" /var/lib/nas/staging 2>/dev/null || true
+install -d -m 00700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR/staging" 2>/dev/null || true
 
 if [ -f "$SCRIPT_DIR/99-nas-tuning.conf" ]; then
     install -d -m 0755 /etc/sysctl.d
@@ -237,8 +267,8 @@ cat > /etc/cron.daily/nas-recycle-purge <<'PURGE_EOF'
 if [ -x /usr/local/bin/nas ]; then
     /usr/local/bin/nas helper purge-recycle --days 15 >/dev/null 2>&1 || true
 else
-    find /srv/nas -type f -path '*/.recycle/*' -mtime +15 -delete 2>/dev/null || true
-    find /srv/nas -type d -path '*/.recycle/*' -empty -delete 2>/dev/null || true
+    find /srv/nas \( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \) -prune -o -type f -path '*/.recycle/*' -mtime +15 -exec rm -f {} + 2>/dev/null || true
+    find /srv/nas \( -name BACKUPS_HISTORICOS -o -name BACKUPS_PERMANENTES -o -name LOGS_BACKUP -o -name .nas_staging \) -prune -o -type d -path '*/.recycle/*' -empty -exec rmdir {} + 2>/dev/null || true
 fi
 PURGE_EOF
 chmod 0755 /etc/cron.daily/nas-recycle-purge
@@ -324,7 +354,13 @@ fi
 
 if [ -x "$PREFIX/nas" ]; then
     "$PREFIX/nas" backup repair-runners >/dev/null 2>&1 || true
-    if [ ! -f "$STATE_DIR/migrations/backup_dedup_v2.done" ] && { [ -d "$DATA_ROOT/BACKUPS_HISTORICOS" ] || [ -d "$DATA_ROOT/BACKUPS_PERMANENTES" ] || [ -d "$DATA_ROOT/unidades" ]; }; then
+    if [ "$NO_HARDEN" -eq 0 ]; then
+        echo "[hardening] Aplicando firewall de red y controles de seguridad del SO..."
+        if ! "$PREFIX/nas" security harden --apply --safe-only; then
+            echo "[!] Advertencia: nas security harden reportó un fallo; revise con 'nas security status'" >&2
+        fi
+    fi
+    if [ ! -f "$STATE_DIR/migrations/backup_dedup_v2.done" ] && { [ -d "$EFFECTIVE_DATA_ROOT/BACKUPS_HISTORICOS" ] || [ -d "$EFFECTIVE_DATA_ROOT/BACKUPS_PERMANENTES" ] || [ -d "$EFFECTIVE_DATA_ROOT/unidades" ]; }; then
         if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             TOTAL_MEM_MB="$(awk '/MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)"
             [ -n "$TOTAL_MEM_MB" ] || TOTAL_MEM_MB=2048
