@@ -159,7 +159,16 @@ systemctl cat nas-web | grep -E "MemoryHigh|MemoryMax|CPUQuota|TasksMax"
 ## 5. Checklist de Endurecimiento Manual en Debian 13
 
 > [!NOTE]
-> **Automatización pendiente:** La ejecución automática de estos controles vía `nas security harden` durante `install.sh` / actualizaciones está registrada como mejora pendiente en [docs/seguridad.md](./seguridad.md#4-plan-pendiente-automatización-del-endurecimiento-en-rust-nas-security). Mientras tanto, aplícalos con este checklist.
+> **Automatización integrada:** La ejecución de los controles seguros (`ufw` con anti-lockout LAN/SSH, `fail2ban`, `unattended-upgrades`, `auditd`, `aide` exclusiones, máscara ACPI y sincronización de `nas-web.service`/`sudoers`) se ejecuta automáticamente mediante `nas security harden --apply --safe-only` en `install.sh`, `nas deploy apply` y `nas update apply`. Para verificar el estado o endurecer SSH/AIDE manualmente:
+
+```bash
+# Ver estado completo de controles de seguridad del host
+sudo nas security status
+
+# Simular o aplicar endurecimiento incluyendo SSH (requiere authorized_keys) e inicialización AIDE
+sudo nas security harden --dry-run
+sudo nas security harden --apply --harden-ssh --init-aide
+```
 
 Ejecuta estos pasos después de completar `install.sh` y `nas deploy apply` en un servidor de producción:
 
