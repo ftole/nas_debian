@@ -69,6 +69,24 @@ impl SshTarget {
         format!("{}@{}", self.user, self.host)
     }
 
+    fn validate_endpoint(&self) -> NasResult<()> {
+        let host = self.host.trim();
+        let user = self.user.trim();
+        if host.is_empty()
+            || host.starts_with('-')
+            || host.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(NasError::Invalid("host SSH inválido".into()));
+        }
+        if user.is_empty()
+            || user.starts_with('-')
+            || user.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(NasError::Invalid("usuario SSH inválido".into()));
+        }
+        Ok(())
+    }
+
     /// Opciones comunes de OpenSSH compartidas por `ssh` y `scp`.
     fn common_options(&self) -> Vec<String> {
         let mut args: Vec<String> = vec![
@@ -160,11 +178,13 @@ impl OpenSsh {
 
 impl RemoteExecutor for OpenSsh {
     fn run(&self, target: &SshTarget, argv: &[String]) -> NasResult<CommandOutput> {
+        target.validate_endpoint()?;
         if argv.is_empty() {
             return Err(NasError::Invalid("comando remoto vacío".into()));
         }
 
         let mut args = target.ssh_args();
+        args.push("--".into());
         args.push(target.destination());
         args.push(quote_all(argv));
 
@@ -176,7 +196,9 @@ impl RemoteExecutor for OpenSsh {
     }
 
     fn upload(&self, target: &SshTarget, local: &Path, remote: &str) -> NasResult<()> {
+        target.validate_endpoint()?;
         let mut args = target.scp_args();
+        args.push("--".into());
         args.push(local.to_string_lossy().to_string());
         args.push(format!("{}:{remote}", target.destination()));
 
@@ -198,6 +220,104 @@ impl RemoteExecutor for OpenSsh {
     }
 }
 
+fn decode_base64_prefix(input: &str, max_bytes: usize) -> Vec<u8> {
+    fn val(b: u8) -> Option<u8> {
+        match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    let mut out = Vec::with_capacity(max_bytes);
+    let mut buf = [0u8; 4];
+    let mut len = 0usize;
+
+    for &b in input.as_bytes() {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        if b == b'=' {
+            buf[len] = 0;
+            len += 1;
+            if len == 4 {
+                out.push((buf[0] << 2) | (buf[1] >> 4));
+                if input.as_bytes().iter().filter(|&&c| c == b'=').count() < 2 {
+                    out.push((buf[1] << 4) | (buf[2] >> 2));
+                }
+                break;
+            }
+            continue;
+        }
+        let Some(v) = val(b) else {
+            break;
+        };
+        buf[len] = v;
+        len += 1;
+        if len == 4 {
+            out.push((buf[0] << 2) | (buf[1] >> 4));
+            out.push((buf[1] << 4) | (buf[2] >> 2));
+            out.push((buf[2] << 6) | buf[3]);
+            len = 0;
+            if out.len() >= max_bytes {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn read_ssh_string(bytes: &[u8], offset: &mut usize) -> Option<String> {
+    if bytes.len() < *offset + 4 {
+        return None;
+    }
+    let len = u32::from_be_bytes([
+        bytes[*offset],
+        bytes[*offset + 1],
+        bytes[*offset + 2],
+        bytes[*offset + 3],
+    ]) as usize;
+    *offset += 4;
+    if len > 128 || bytes.len() < *offset + len {
+        return None;
+    }
+    let s = std::str::from_utf8(&bytes[*offset..*offset + len])
+        .ok()?
+        .to_string();
+    *offset += len;
+    Some(s)
+}
+
+fn check_openssh_unencrypted(trimmed: &str) -> NasResult<()> {
+    let body = trimmed
+        .strip_prefix("-----BEGIN OPENSSH PRIVATE KEY-----")
+        .and_then(|rest| rest.strip_suffix("-----END OPENSSH PRIVATE KEY-----"))
+        .ok_or_else(|| NasError::Invalid("formato OPENSSH PRIVATE KEY inválido".into()))?;
+
+    let decoded = decode_base64_prefix(body, 256);
+    const MAGIC: &[u8] = b"openssh-key-v1\0";
+    if !decoded.starts_with(MAGIC) {
+        return Err(NasError::Invalid(
+            "cabecera openssh-key-v1 inválida en clave privada".into(),
+        ));
+    }
+    let mut offset = MAGIC.len();
+    let cipher = read_ssh_string(&decoded, &mut offset)
+        .ok_or_else(|| NasError::Invalid("ciphername faltante en clave OpenSSH".into()))?;
+    let kdf = read_ssh_string(&decoded, &mut offset)
+        .ok_or_else(|| NasError::Invalid("kdfname faltante en clave OpenSSH".into()))?;
+
+    if cipher != "none" || kdf != "none" {
+        return Err(NasError::Invalid(
+            "la clave privada está protegida por frase de paso (passphrase); para respaldos automatizados se requiere una clave sin contraseña".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Valida el formato y contenido de una clave privada SSH (Ed25519, RSA, ECDSA, OpenSSH PEM).
 pub fn validate_private_key(content: &str) -> NasResult<()> {
     let trimmed = content.trim();
@@ -210,27 +330,38 @@ pub fn validate_private_key(content: &str) -> NasResult<()> {
         ));
     }
 
-    let starts_valid = trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----")
-        || trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----")
-        || trimmed.starts_with("-----BEGIN PRIVATE KEY-----")
-        || trimmed.starts_with("-----BEGIN EC PRIVATE KEY-----")
-        || trimmed.starts_with("-----BEGIN DSA PRIVATE KEY-----");
-
-    let ends_valid = trimmed.ends_with("-----END OPENSSH PRIVATE KEY-----")
-        || trimmed.ends_with("-----END RSA PRIVATE KEY-----")
-        || trimmed.ends_with("-----END PRIVATE KEY-----")
-        || trimmed.ends_with("-----END EC PRIVATE KEY-----")
-        || trimmed.ends_with("-----END DSA PRIVATE KEY-----");
-
-    if !starts_valid || !ends_valid {
+    if trimmed.starts_with("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
         return Err(NasError::Invalid(
-            "formato de clave privada SSH no reconocido (debe iniciar con -----BEGIN ... PRIVATE KEY-----)".into(),
+            "la clave privada está protegida por frase de paso (passphrase); para respaldos automatizados se requiere una clave sin contraseña".into(),
         ));
     }
 
-    if trimmed.contains("Proc-Type: 4,ENCRYPTED") || trimmed.contains("ENCRYPTED") {
+    let valid_pairs = [
+        (
+            "-----BEGIN OPENSSH PRIVATE KEY-----",
+            "-----END OPENSSH PRIVATE KEY-----",
+        ),
+        (
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----END RSA PRIVATE KEY-----",
+        ),
+        ("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----"),
+        (
+            "-----BEGIN EC PRIVATE KEY-----",
+            "-----END EC PRIVATE KEY-----",
+        ),
+        (
+            "-----BEGIN DSA PRIVATE KEY-----",
+            "-----END DSA PRIVATE KEY-----",
+        ),
+    ];
+
+    if !valid_pairs
+        .iter()
+        .any(|(start, end)| trimmed.starts_with(start) && trimmed.ends_with(end))
+    {
         return Err(NasError::Invalid(
-            "la clave privada está protegida por frase de paso (passphrase); para respaldos automatizados se requiere una clave sin contraseña".into(),
+            "formato de clave privada SSH no reconocido (debe iniciar con -----BEGIN ... PRIVATE KEY-----)".into(),
         ));
     }
 
@@ -241,6 +372,20 @@ pub fn validate_private_key(content: &str) -> NasResult<()> {
         return Err(NasError::Invalid(
             "la clave privada contiene caracteres de control no permitidos".into(),
         ));
+    }
+
+    if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
+        check_openssh_unencrypted(trimmed)?;
+    } else {
+        let has_pem_encryption = trimmed.lines().skip(1).take(6).any(|line| {
+            let l = line.trim();
+            l.starts_with("Proc-Type:") && l.contains("ENCRYPTED") || l.starts_with("DEK-Info:")
+        });
+        if has_pem_encryption {
+            return Err(NasError::Invalid(
+                "la clave privada está protegida por frase de paso (passphrase); para respaldos automatizados se requiere una clave sin contraseña".into(),
+            ));
+        }
     }
 
     Ok(())
@@ -356,5 +501,66 @@ mod tests {
             cmd_con_clave,
             "ssh -i /etc/backup-credentials/tarea1.id_ed25519 -p 2222 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts_backup"
         );
+    }
+
+    #[test]
+    fn rechaza_clave_openssh_cifrada_con_bcrypt_y_acepta_comentario_con_encrypted() {
+        // Cabecera openssh-key-v1\0 + cipher="aes256-ctr" + kdf="bcrypt"
+        let bcrypt_header = "b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAAAA=";
+        let encrypted_openssh = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{bcrypt_header}\n-----END OPENSSH PRIVATE KEY-----"
+        );
+        let err = validate_private_key(&encrypted_openssh).unwrap_err();
+        assert!(err.to_string().contains("passphrase"));
+
+        // Cabecera openssh-key-v1\0 + cipher="none" + kdf="none" aunque el cuerpo contenga "ENCRYPTED"
+        let unencrypted_with_comment = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDHENCRYPTEDpayloadpadding1234567890abcdef==\n-----END OPENSSH PRIVATE KEY-----";
+        assert!(validate_private_key(unencrypted_with_comment).is_ok());
+
+        let pkcs8_encrypted = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFHDBOBgkqhkiG9w0BBQ0wQTApBgkqhkiG9w0BBQwwHAQIoQ==\n-----END ENCRYPTED PRIVATE KEY-----";
+        assert!(validate_private_key(pkcs8_encrypted).is_err());
+
+        let mismatched = "-----BEGIN RSA PRIVATE KEY-----\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n-----END OPENSSH PRIVATE KEY-----";
+        assert!(validate_private_key(mismatched).is_err());
+
+        if std::path::Path::new("/usr/bin/ssh-keygen").is_file() {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir =
+                std::env::temp_dir().join(format!("nas-sshkeygen-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let plain_key = dir.join("id_plain");
+            let enc_key = dir.join("id_enc");
+            let st1 = std::process::Command::new("ssh-keygen")
+                .args(["-t", "ed25519", "-N", "", "-C", "ENCRYPTED-comment", "-f"])
+                .arg(&plain_key)
+                .output()
+                .expect("ssh-keygen plain");
+            let st2 = std::process::Command::new("ssh-keygen")
+                .args(["-t", "ed25519", "-N", "FraseSecreta123", "-f"])
+                .arg(&enc_key)
+                .output()
+                .expect("ssh-keygen enc");
+            assert!(st1.status.success() && st2.status.success());
+            let plain_pem = std::fs::read_to_string(&plain_key).unwrap();
+            let enc_pem = std::fs::read_to_string(&enc_key).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(validate_private_key(&plain_pem).is_ok());
+            assert!(validate_private_key(&enc_pem).is_err());
+        }
+    }
+
+    #[test]
+    fn open_ssh_rechaza_host_o_usuario_con_guion_inicial() {
+        use super::{OpenSsh, RemoteExecutor};
+        let exec = OpenSsh::new();
+        let bad_host = SshTarget::new("-oProxyCommand=id", 22, "root");
+        assert!(exec.run(&bad_host, &["true".into()]).is_err());
+        let bad_user = SshTarget::new("10.10.1.1", 22, "-evil");
+        assert!(exec
+            .upload(&bad_user, Path::new("/tmp/a"), "/tmp/b")
+            .is_err());
     }
 }
