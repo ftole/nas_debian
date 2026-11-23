@@ -457,3 +457,142 @@ async fn files_acepta_prefijo_unidades_slash_id() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn files_upload_bloquea_rutas_protegidas_y_permite_carpetas_legitimas() {
+    let dir = temp_dir("upload-protected-paths");
+    let paths = paths_for(&dir);
+    for protected in [
+        ".trash",
+        ".trash/.meta",
+        ".nas_staging",
+        "LOGS_BACKUP",
+        "BACKUPS_HISTORICOS",
+        "BACKUPS_PERMANENTES",
+        "unidades/u1/BACKUPS_HISTORICOS",
+    ] {
+        std::fs::create_dir_all(paths.data_root.join(protected)).expect("mkdir protected");
+    }
+    std::fs::create_dir_all(paths.data_root.join("SISTEMAS")).expect("mkdir SISTEMAS");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("operador", &sha256_hex("Secreta123"), "operator")
+        .expect("operador");
+    let auth = Auth::new(db, 3600, false);
+    let state = AppState::new(auth, paths.clone(), ServerRole::ArquivosBackup);
+    let app = router(state);
+
+    let login = app
+        .clone()
+        .oneshot(login_request("operador", "Secreta123"))
+        .await
+        .expect("login");
+    let cookie = login
+        .headers()
+        .get(SET_COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .expect("cookie")
+        .split(';')
+        .next()
+        .expect("pair")
+        .to_string();
+
+    for blocked in [
+        ".trash",
+        ".trash/.meta",
+        "./.trash",
+        ".nas_staging",
+        "LOGS_BACKUP",
+        "BACKUPS_HISTORICOS",
+        "BACKUPS_PERMANENTES",
+        "unidades/u1/BACKUPS_HISTORICOS",
+    ] {
+        let boundary = "PROTBOUNDARY";
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/files/upload")
+            .header("cookie", &cookie)
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(upload_body(boundary, blocked, "evil.txt", "payload"))
+            .expect("req");
+        let resp = app.clone().oneshot(req).await.expect("upload protected");
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "subida a '{blocked}' debe bloquearse con 403"
+        );
+        assert!(
+            !paths.data_root.join(blocked).join("evil.txt").exists(),
+            "no debe escribir archivo en ruta protegida '{blocked}'"
+        );
+    }
+
+    // Subida con root=backups también debe rechazarse
+    let boundary = "PROTROOT";
+    let body_backups = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"root\"\r\n\r\n\
+         backups\r\n\
+         --{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"evil.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\n\
+         payload\r\n\
+         --{boundary}--\r\n"
+    );
+    let req_bkp = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(body_backups))
+        .expect("req bkp");
+    let resp_bkp = app.clone().oneshot(req_bkp).await.expect("upload bkp");
+    assert_eq!(resp_bkp.status(), StatusCode::FORBIDDEN);
+
+    // Subir un archivo llamado literalmente BACKUPS_HISTORICOS o .trash a la raíz también debe dar 403
+    for reserved_name in ["BACKUPS_HISTORICOS", ".trash", ".nas_staging"] {
+        let boundary = "RESNAMEBOUNDARY";
+        let req_res = Request::builder()
+            .method("POST")
+            .uri("/api/files/upload")
+            .header("cookie", &cookie)
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(upload_body(boundary, "", reserved_name, "evil"))
+            .expect("req reserved");
+        let resp_res = app.clone().oneshot(req_res).await.expect("upload reserved");
+        assert_eq!(
+            resp_res.status(),
+            StatusCode::FORBIDDEN,
+            "archivo llamado '{reserved_name}' debe rechazarse con 403"
+        );
+    }
+
+    // Flujo legítimo en carpeta compartida sigue funcionando
+    let ok_boundary = "OKBOUNDARY";
+    let ok_req = Request::builder()
+        .method("POST")
+        .uri("/api/files/upload")
+        .header("cookie", &cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={ok_boundary}"),
+        )
+        .body(upload_body(ok_boundary, "SISTEMAS", "readme.txt", "ok"))
+        .expect("req ok");
+    let ok_resp = app.oneshot(ok_req).await.expect("upload ok");
+    assert_eq!(ok_resp.status(), StatusCode::OK);
+    assert_eq!(
+        std::fs::read_to_string(paths.data_root.join("SISTEMAS/readme.txt")).expect("read"),
+        "ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
