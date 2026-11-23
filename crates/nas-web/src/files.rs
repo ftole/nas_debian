@@ -156,8 +156,11 @@ impl FileRoot {
         let clean = relative
             .trim_matches(['/', '\\'].as_ref())
             .replace('\\', "/");
-        let first = clean.split('/').next().unwrap_or("");
-        match first {
+        let comps: Vec<&str> = clean
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+        let protected_desc = |seg: &str| match seg {
             "BACKUPS_HISTORICOS" => Some("los respaldos históricos (inmutables contra ransomware)"),
             "BACKUPS_PERMANENTES" => {
                 Some("los respaldos permanentes (inmutables contra ransomware)")
@@ -166,7 +169,35 @@ impl FileRoot {
             ".trash" => Some("la papelera de reciclaje interna (.trash)"),
             ".nas_staging" => Some("el área temporal interna (.nas_staging)"),
             _ => None,
+        };
+        if let Some(first) = comps.first() {
+            if let Some(desc) = protected_desc(first) {
+                return Some(desc);
+            }
+            if *first == "unidades" {
+                if let Some(third) = comps.get(2) {
+                    if let Some(desc) = protected_desc(third) {
+                        return Some(desc);
+                    }
+                }
+            }
         }
+        None
+    }
+
+    pub(crate) fn check_resolved_not_protected(
+        &self,
+        resolved: &Path,
+        action: &str,
+    ) -> NasResult<()> {
+        if let Ok(canon_rel) = resolved.strip_prefix(&self.root) {
+            if let Some(desc) = self.is_protected_path(&canon_rel.to_string_lossy()) {
+                return Err(NasError::Denied(format!(
+                    "operación denegada: {desc} están protegidos contra {action}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Lista el contenido de un directorio (ordenado: carpetas primero).
@@ -216,6 +247,7 @@ impl FileRoot {
             )));
         }
         let path = self.resolve(relative)?;
+        self.check_resolved_not_protected(&path, "escritura")?;
         std::fs::create_dir_all(&path).map_err(|e| NasError::io(&path, e))?;
         set_dir_permissions(&path);
         Ok(path)
@@ -235,6 +267,8 @@ impl FileRoot {
         }
         let source = self.resolve(from)?;
         let target = self.resolve(to)?;
+        self.check_resolved_not_protected(&source, "modificaciones")?;
+        self.check_resolved_not_protected(&target, "modificaciones")?;
         if source == self.root || target == self.root {
             return Err(NasError::Denied("no se puede mover la raíz".into()));
         }
@@ -268,6 +302,7 @@ impl FileRoot {
             )));
         }
         let target = self.resolve(relative)?;
+        self.check_resolved_not_protected(&target, "eliminación")?;
         if target == self.root {
             return Err(NasError::Denied("no se puede eliminar la raíz".into()));
         }
@@ -332,7 +367,13 @@ impl FileRoot {
 
     /// Directorio validado para recibir una subida.
     pub fn resolve_dir(&self, relative: &str) -> NasResult<PathBuf> {
+        if let Some(desc) = self.is_protected_path(relative) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra escritura y subidas"
+            )));
+        }
         let dir = self.resolve(relative)?;
+        self.check_resolved_not_protected(&dir, "escritura y subidas")?;
         if !dir.is_dir() {
             return Err(NasError::NotFound(format!(
                 "no es un directorio: {relative}"
@@ -488,6 +529,14 @@ mod tests {
             root.resolve("externo/passwd").is_err(),
             "symlink fuera de la raíz debe rechazarse"
         );
+
+        std::fs::create_dir_all(root.root().join(".trash/.meta")).expect("mkdir .trash");
+        let internal_link = root.root().join("atajo_trash");
+        std::os::unix::fs::symlink(root.root().join(".trash"), &internal_link).expect("symlink");
+        assert!(root.resolve_dir("atajo_trash/.meta").is_err());
+        assert!(root.write("atajo_trash/evil.txt", "x").is_err());
+        assert!(root.mkdir("atajo_trash/sub").is_err());
+        assert!(root.delete_permanent("atajo_trash/.meta").is_err());
 
         let _ = std::fs::remove_dir_all(root.root());
     }
