@@ -237,10 +237,12 @@ pub(crate) fn onboard(
 
 pub(crate) fn onboard_script(host: &ResolvedHost) -> String {
     let user = &host.user;
+    let web = &host.web;
+    let state = &host.state;
     format!(
         r#"set -euo pipefail
 
-# 1. Usuario de desarrollo sin shell de sistema
+# 1. Usuario de desarrollo sin shell privilegiada innecesaria
 id -u {user} >/dev/null 2>&1 || useradd -m -s /bin/bash {user}
 
 # 2. Clave pública (pegue la clave del operador)
@@ -249,23 +251,20 @@ touch /home/{user}/.ssh/authorized_keys
 chown {user}:{user} /home/{user}/.ssh/authorized_keys
 chmod 600 /home/{user}/.ssh/authorized_keys
 
-# 3. Sudo acotado a los comandos del plan (revisar y endurecer antes de usar)
+# 3. Sudo estrictamente acotado (sin rm/mv/tar/rsync/mkdir para evitar escalada a root)
 cat > /etc/sudoers.d/nas-dev <<'SUDO'
-{user} ALL=(root) NOPASSWD: /usr/bin/mkdir, /usr/bin/rm, /usr/bin/tar, /usr/bin/mv, /usr/bin/rsync, /usr/bin/curl, /usr/bin/test, /usr/bin/systemctl reload nginx, /usr/bin/systemctl restart nas-web
+{user} ALL=(root) NOPASSWD: /usr/bin/true, /usr/bin/test -d {web}, /usr/bin/test -w {web}, /usr/bin/test -d {state}, /usr/sbin/nginx -t, /usr/bin/systemctl is-active --quiet nginx, /usr/bin/systemctl reload nginx, /usr/bin/systemctl restart nas-web
 SUDO
 chmod 0440 /etc/sudoers.d/nas-dev
 visudo -cf /etc/sudoers.d/nas-dev
 
-# 4. Docroot y estado aislados de producción
-install -d -m 775 -o nas-web -g nas-web {web}
+# 4. Docroot y estado propiedad de {user} para operar rsync/tar/mkdir sin sudo
+install -d -m 2775 -o {user} -g nas-web {web}
 install -d -m 750 -o {user} -g {user} {state}/dev-sync/incoming {state}/dev-sync/stage {state}/dev-sync/backups
 
 # 5. Verificación
 sudo -u {user} sudo -n true && echo 'sudo sin contraseña OK'
-"#,
-        web = host.web,
-        state = host.state,
-        user = user
+"#
     )
 }
 
