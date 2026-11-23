@@ -295,6 +295,18 @@ mod tests {
         assert!(script.contains("/var/www/nas-web-dev"));
         assert!(script.contains("/var/lib/nas-dev/dev-sync"));
         assert!(script.contains("visudo -cf"));
+        for forbidden in [
+            "/usr/bin/rm",
+            "/usr/bin/mv",
+            "/usr/bin/tar",
+            "/usr/bin/rsync",
+            "/usr/bin/mkdir",
+        ] {
+            assert!(
+                !script.contains(forbidden),
+                "sudoers de nas-dev no debe otorgar {forbidden} sin acotar"
+            );
+        }
     }
 
     #[test]
