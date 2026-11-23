@@ -506,3 +506,46 @@ fn update_verify_artefacto_relativo_resuelve_contra_el_padre_del_manifiesto() {
     );
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn security_status_y_harden_dry_run_responden_json() {
+    let status_out = nas()
+        .args(["--json", "security", "status"])
+        .output()
+        .expect("security status");
+    assert!(status_out.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status_out.stdout).expect("json status");
+    assert_eq!(status_json["success"], true);
+    assert!(status_json["data"].get("firewall_active").is_some());
+
+    let harden_out = nas()
+        .args(["--json", "security", "harden", "--dry-run"])
+        .output()
+        .expect("security harden dry-run");
+    assert!(harden_out.status.success());
+    let harden_json: serde_json::Value =
+        serde_json::from_slice(&harden_out.stdout).expect("json harden");
+    assert_eq!(harden_json["success"], true);
+    assert_eq!(harden_json["data"]["applied"], false);
+}
+
+#[test]
+fn helper_accounts_rechaza_contrasena_posicional_en_argv() {
+    let output = nas()
+        .args([
+            "--json",
+            "helper",
+            "accounts",
+            "create-user",
+            "operador_valido",
+            "Operador",
+            "ClaveSegura1!",
+        ])
+        .output()
+        .expect("ejecuta");
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert_eq!(payload["success"], false);
+    assert!(payload["error"].as_str().unwrap().contains("stdin"));
+}
