@@ -400,6 +400,12 @@ pub fn deploy_apply(
         }
     }
 
+    if failure.is_none() {
+        if let Err(error) = nas_engine::security::apply_safe_hardening(&runner, options.sudo) {
+            failure = Some(error);
+        }
+    }
+
     let (status, detail) = match &failure {
         None => ("SUCCESS", "despliegue aplicado".to_string()),
         Some(error) => ("FAILED", error.to_string()),
