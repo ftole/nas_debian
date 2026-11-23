@@ -75,9 +75,16 @@ fn post_update_sync_steps(root: &str, nas_bin: &Path, dst_release_pub: &Path) ->
             "resources".to_string(),
         ]);
         steps.push(vec![
-            nas_bin_str,
+            nas_bin_str.clone(),
             "deploy".to_string(),
             "ensure-deps".to_string(),
+        ]);
+        steps.push(vec![
+            nas_bin_str,
+            "security".to_string(),
+            "harden".to_string(),
+            "--apply".to_string(),
+            "--safe-only".to_string(),
         ]);
         steps.push(vec![
             "systemctl".to_string(),
@@ -115,6 +122,15 @@ fn post_update_sync_steps(root: &str, nas_bin: &Path, dst_release_pub: &Path) ->
         }
     }
     steps
+}
+
+fn post_update_step_timeout_secs(step: &[String]) -> u64 {
+    let joined = step.join(" ");
+    if joined.contains("ensure-deps") || joined.contains("security harden") {
+        900
+    } else {
+        60
+    }
 }
 
 pub fn update_status(json: bool) -> NasResult<ExitCode> {
@@ -647,14 +663,16 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
     let nas_bin = Path::new("/usr/local/bin/nas");
     let dst_release_pub = Path::new("/etc/nas/release.pub");
     let post_steps = post_update_sync_steps(root, nas_bin, dst_release_pub);
-    if nas_bin.is_file() {
-        for step in &post_steps {
-            let _ = run_step(&runner, step, sudo, 60);
-        }
-    } else {
+    if !nas_bin.is_file() {
         let _ = nas_engine::backup_dedup::repair_runners(&runner, Path::new("/usr/local/bin"));
-        for step in &post_steps {
-            let _ = run_step(&runner, step, sudo, 60);
+    }
+    for step in &post_steps {
+        let timeout_secs = post_update_step_timeout_secs(step);
+        if let Err(err) = run_step(&runner, step, sudo, timeout_secs) {
+            eprintln!(
+                "aviso: paso post-actualización ({}) falló: {err}",
+                step.join(" ")
+            );
         }
     }
     let dedup_marker =
@@ -808,9 +826,23 @@ mod tests {
         assert!(steps
             .iter()
             .any(|s| s.ends_with(&["deploy".to_string(), "ensure-deps".to_string()])));
+        assert!(steps.iter().any(|s| s.ends_with(&[
+            "security".to_string(),
+            "harden".to_string(),
+            "--apply".to_string(),
+            "--safe-only".to_string(),
+        ])));
         assert!(steps
             .iter()
             .any(|s| s == &vec!["systemctl", "restart", "nas-web"]));
+        for s in &steps {
+            let t = super::post_update_step_timeout_secs(s);
+            if s.iter().any(|a| a == "ensure-deps" || a == "security") {
+                assert_eq!(t, 900);
+            } else {
+                assert_eq!(t, 60);
+            }
+        }
         assert!(steps
             .iter()
             .any(|s| s.first().is_some_and(|a| a == "install")
