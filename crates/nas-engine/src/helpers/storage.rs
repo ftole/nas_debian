@@ -169,7 +169,7 @@ pub(super) fn prepare_mountpoint(runner: &Runner, path: &str) {
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", path]));
     let _ = runner.run(&CommandSpec::new("setfacl").args([
         "-m",
-        "u:nas-web:rwx,g:grp_samba:rwx,d:u:nas-web:rwx,d:g:grp_samba:rwx",
+        "u:nas-web:rwx,g:grp_samba:rwx,m::rwx,d:u:nas-web:rwx,d:g:grp_samba:rwx,d:m::rwx",
         path,
     ]));
 }
