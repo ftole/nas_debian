@@ -41,7 +41,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 - **Endurecimiento `systemd` (`packaging/nas-web.service`):**
   - `ProtectSystem=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`, `PrivateTmp=yes`, `RestrictNamespaces=yes`, `LockPersonality=yes`, `MemoryDenyWriteExecute=yes`, `SystemCallFilter=@system-service`.
   - `ReadWritePaths=/var/lib/nas /srv/nas /usr/local/bin -/etc/cron.d -/etc/backup-credentials -/etc/samba`.
-  - **`NoNewPrivileges=no` acotado con `CapabilityBoundingSet` y `AmbientCapabilities`:** necesario específicamente para que el binario pueda invocar `sudo -n` hacia la lista blanca de `/etc/sudoers.d/nas-web-rust` sin quedar bloqueado por el bit `no_new_privs`.
+  - **`NoNewPrivileges=no` acotado con `CapabilityBoundingSet` y `AmbientCapabilities=` vacío:** necesario específicamente para que el binario pueda invocar `sudo -n` hacia la lista blanca de `/etc/sudoers.d/nas-web-rust` sin quedar bloqueado por el bit `no_new_privs`, mientras el servidor web corre sin capacidades ambiente (`AmbientCapabilities=`).
 - **Ejecución sin shell (`nas-exec`):** todos los comandos externos se construyen con `CommandSpec` (arreglo explícito `argv`), `env_clear()`, `PATH` fijo, timeouts y redacción automática de secretos en mensajes de error.
 - **Sudoers y 7 Helpers Root:** `/etc/sudoers.d/nas-web-rust` (`0440`, validado con `visudo -cf`) restringe `sudo -n` a servicios y los 7 helpers en `/usr/local/sbin/` (`nas-samba-apply`, `nas-share-dir`, `nas-share-acl`, `nas-accounts`, `nas-backup-manage`, `nas-terminal`, `nas-storage-apply`).
 - **Credenciales de respaldo vía `stdin`:** el alta/edición de tareas desde el panel invoca `nas-backup-manage install-spec` pasando la definición JSON y contraseñas/claves SSH por entrada estándar (`stdin`), guardándolas en `/etc/backup-credentials/` con permisos `0600 root:root`. Nunca se exponen secretos en la lista de argumentos (`ps`).
@@ -59,23 +59,23 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 
 ---
 
-## 2. Endurecimiento Manual del Host Debian 13 (NO Automatizado)
+## 2. Endurecimiento del Host Debian 13 (Automatizado y Manual Opcional)
 
-> [!WARNING]
-> Ni `install.sh`, ni `packaging/install.sh`, ni `nas deploy apply` configuran automáticamente el cortafuegos, `fail2ban`, la política SSH del host, las actualizaciones desatendidas de Debian ni la base inicial de AIDE. El administrador debe aplicar estos controles manualmente en producción.
+> [!NOTE]
+> `install.sh`, `packaging/install.sh`, `nas deploy apply` y `nas update apply` ejecutan `nas security harden --apply --safe-only` para sincronizar el cortafuegos `ufw` (backend `iptables-nft` con detección LAN y regla anti-lockout sobre `$SSH_CONNECTION`), `fail2ban` (`backend = systemd`), `unattended-upgrades`, reglas `auditd`, exclusiones `aide`, `nas-web.service` sin `AmbientCapabilities`, `sudoers` validado con `visudo -cf` y máscara ACPI.
 
-| Control Manual | Paquete / Archivo en Debian 13 | Objetivo de Seguridad | Estado por Defecto Tras `install.sh` |
+| Control | Paquete / Archivo en Debian 13 | Objetivo de Seguridad | Estado por Defecto Tras `install.sh` / `nas update` |
 | :--- | :--- | :--- | :--- |
-| **Cortafuegos `UFW`** | `ufw` (`/etc/default/ufw`, reglas LAN) | Política `deny incoming`; abrir solo `22/tcp`, `443/tcp` (o `80/443`) y SMB (`445/tcp`, `139/tcp` si aplica) restringidos a la subred corporativa; fijar `IPV6=no`. | **No configurado** (sin reglas activas). |
-| **Endurecimiento SSH** | `/etc/ssh/sshd_config.d/99-nas-hardening.conf` | Fijar `PermitRootLogin no`, exigir llaves públicas (`PasswordAuthentication no` tras validar llaves), `AllowUsers` / `AllowGroups`. | **Por defecto de Debian** (permite contraseña según instalación base). |
-| **Prevención de intrusiones** | `fail2ban` (`/etc/fail2ban/jail.local`) | Bloqueo automático de IPs por intentos repetidos en `sshd` y endpoints Nginx. | **No instalado ni configurado automáticamente.** |
-| **Parches automáticos OS** | `unattended-upgrades` | Instalación automática de parches de seguridad de Debian 13 (`Debian-Security`). | **No configurado automáticamente.** |
-| **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`, exclusiones `packaging/75_aide_nas`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda excluyendo `/srv/nas`, `/var/lib/nas` y desarrollo. | **No inicializado** (exclusiones instaladas si existe `/etc/aide/aide.conf.d`; ejecutar `aideinit` tras cerrar la configuración). |
-| **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **Automatizado** en `packaging/install.sh` y `nas deploy apply`. |
-| **Protección eléctrica (UPS)** | No-Break / `nut` (Plug & Play opcional en `/dashboard#storage`) + supresor de picos + SSD con PLP en `/` | Evita corrupción FTL y bloqueo en solo lectura desde el controlador tras cortes de energía en hardware consumidor. El software opera sobre hardware low-cost sin exigir PLP/UPS físico, pero en producción se documenta como requisito indispensable recomendado. | **Integrado en panel (`nut` bajo demanda) y recomendado para producción.** |
+| **Cortafuegos `UFW`** | `ufw` (`/etc/default/ufw`, reglas LAN) | Política `deny incoming`; abrir solo `22/tcp`, `80/443/tcp`, SMB (`139,445/tcp`, `137,138/udp`) y `wsdd2` (`3702/udp`, `5355/tcp,udp`, `5357/tcp`) restringidos a la subred LAN; fijar `IPV6=no` y preservar `$SSH_CONNECTION`. | **Automatizado** (respeta reglas previas si ya está activo, salvo `--force-fw`). |
+| **Endurecimiento SSH** | `/etc/ssh/sshd_config.d/99-nas-hardening.conf` | Fijar `PermitRootLogin no`, exigir llaves públicas (`PasswordAuthentication no` tras validar llaves), `X11Forwarding no`. | **Bajo demanda** (`sudo nas security harden --apply --harden-ssh` cuando exista `authorized_keys`). |
+| **Prevención de intrusiones** | `fail2ban` (`/etc/fail2ban/jail.d/nas.local`) | Bloqueo automático de IPs por intentos repetidos en `sshd` (`backend = systemd`, `banaction = nftables`). | **Automatizado** en `install.sh`, `nas deploy` y `nas update`. |
+| **Parches automáticos OS** | `unattended-upgrades` (`/etc/apt/apt.conf.d/20auto-upgrades`, `51nas-unattended-upgrades`) | Instalación automática de parches de seguridad de Debian 13 sin reinicios automáticos inesperados. | **Automatizado** en `install.sh`, `nas deploy` y `nas update`. |
+| **Integridad de archivos (FIM)** | `aide` (`aideinit`, base `/var/lib/aide/aide.db`, exclusiones `packaging/75_aide_nas`) | Línea base criptográfica de binarios y `/etc` para detectar rootkits o alteraciones fuera de banda excluyendo `/srv/nas`, `/var/lib/nas` y desarrollo. | **Exclusiones automatizadas**; inicializar base con `--init-aide` o `aideinit`. |
+| **Anti-suspensión ACPI** | `systemd` (`systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`) | Evita que el servidor entre en suspensión por botones físicos o políticas `logind`. | **Automatizado** en `packaging/install.sh`, `nas deploy apply` y `nas update`. |
+| **Protección eléctrica (UPS)** | No-Break / `nut` (Plug & Play opcional en `/dashboard#storage`) + supresor de picos + SSD con PLP en `/` | Evita corrupción FTL y bloqueo en solo lectura desde el controlador tras cortes de energía en hardware consumidor. | **Integrado en panel (`nut` bajo demanda) y recomendado para producción.** |
 | **Certificado TLS definitivo** | `/etc/ssl/certs/nas-web.crt` y `.key` | Reemplazar el certificado autofirmado inicial generado por `packaging/install.sh` por uno emitido por la CA corporativa o ACME. | **Autofirmado** (generado por 3650 días en `packaging/install.sh`). |
 
-Los comandos concretos paso a paso para aplicar cada uno de estos puntos figuran en la sección de Endurecimiento Manual de [docs/manual.md](./manual.md).
+Los comandos concretos para verificación o endurecimiento adicional (`nas security status`, `--harden-ssh`, `--init-aide`) figuran en [docs/manual.md](./manual.md).
 
 ---
 
@@ -86,17 +86,16 @@ La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) regi
 **Riesgos operativos vigentes y registro de deuda técnica:**
 1. **Certificado TLS autofirmado por defecto:** requiere aceptación manual o sustitución por certificado emitido por CA interna / ACME en producción.
 2. **Actualización desde versiones `<= 0.1.10`:** en servidores instalados antes de `v0.1.11`, el primer paso debe hacerse por consola (`sudo rm -f /var/lock/nas-update.lock` si quedó huérfano, `sudo nas update apply --repo ftole/nas_debian --yes` y `sudo bash /opt/nas_debian/current/packaging/install.sh`) para aplicar la nueva regla `sudoers` de `nas-system-update`.
-3. **Brechas abiertas en código actual:** la verificación faltante de firma Ed25519 en `install.sh` (`DT-C02`), `FileRoot::resolve_dir` sin filtro de rutas protegidas (`DT-C01`) y otros hallazgos verificados código por código están registrados para corrección en **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
+3. **Brechas abiertas en código actual:** las brechas críticas de seguridad (`DT-C01`, `DT-C02`, `DT-C07`), altas de seguridad (`DT-A01`–`DT-A07`) y medias (`DT-M03`, `DT-M05`) quedaron remediadas; el resto de hallazgos funcionales/deuda estructural están registrados en **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
 
 ---
 
-## 4. Plan Pendiente: Automatización del Endurecimiento en Rust (`nas security`)
+## 4. Automatización del Endurecimiento en Rust (`nas security`)
 
 > [!NOTE]
-> **Estado: Pendiente de implementación.** Actualmente los controles de la Sección 2 siguen aplicándose manualmente tras la instalación.
+> **Estado: Implementado.** `nas security status | harden` sincroniza los controles en instalación (`packaging/install.sh`), despliegue (`nas deploy apply`) y actualización (`nas update apply`).
 
-Se proyecta automatizar el endurecimiento base directamente en Rust (`crates/nas-engine` + subcomando `nas security status | harden`) e invocarlo al cierre de `packaging/install.sh` (`nas security harden --apply`, con opción `--no-harden` para pruebas):
-- **Paquetes y controles sin riesgo de bloqueo:** instalación de `ufw`, `fail2ban`, `unattended-upgrades` y `aide`; configuración de `fail2ban` (`/etc/fail2ban/jail.d/nas.local`), parches de seguridad automáticos sin reinicio forzado, máscara ACPI (`sleep`/`suspend`/`hibernate`/`hybrid-sleep` manteniendo intacta la interfaz gráfica) e inicialización de AIDE al final de la instalación.
-- **Cortafuegos `ufw` con protección anti-lockout:** autodetección de subred LAN (anulable con `NAS_LAN_CIDR`), preservación de acceso `22/tcp` para la IP origen de `$SSH_CONNECTION` si es externa y respeto de reglas existentes cuando `ufw` ya esté activo (salvo `--force-fw`).
-- **Endurecimiento SSH seguro:** drop-in `/etc/ssh/sshd_config.d/99-nas-hardening.conf` validado con `sshd -t` (rollback automático ante fallo); solo desactivar `PasswordAuthentication` si existen llaves válidas en `authorized_keys` (o bandera explícita).
-- **Equipos ya desplegados:** soporte `--safe-only` / `--refresh-aide` tras actualizaciones verificadas y comando explícito `sudo nas security harden --dry-run` / `--apply`.
+- **Paquetes y controles sin riesgo de bloqueo:** auto-aprovisionamiento de `ufw`, `fail2ban`, `unattended-upgrades` y `aide`; configuración de `fail2ban` (`/etc/fail2ban/jail.d/nas.local` con `backend = systemd`), parches automáticos sin reinicio forzado, máscara ACPI (`sleep`/`suspend`/`hibernate`/`hybrid-sleep`), exclusiones AIDE y sincronización de `nas-web.service` (`AmbientCapabilities=` vacío) + `sudoers` validado con `visudo -cf`.
+- **Cortafuegos `ufw` con protección anti-lockout:** autodetección de subred LAN (anulable con `NAS_LAN_CIDR` / `--lan-cidr`), preservación de acceso `22/tcp` para la IP origen de `$SSH_CONNECTION` y respeto de reglas existentes cuando `ufw` o `nftables` ya estén activos (salvo `--force-fw`).
+- **Endurecimiento SSH seguro:** drop-in `/etc/ssh/sshd_config.d/99-nas-hardening.conf` validado con `sshd -t` (rollback automático ante fallo) bajo bandera explícita `--harden-ssh` y únicamente si existen llaves válidas en `authorized_keys`.
+- **Equipos ya desplegados:** soporte `--safe-only` (invocado automáticamente por `nas update`) / `--init-aide` y comando explícito `sudo nas security harden --dry-run` / `--apply`.
