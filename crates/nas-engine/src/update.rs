@@ -550,4 +550,74 @@ mod tests {
             Some("https://github.com/ftole/nas_debian/releases/download/v1.0.0/nas_debian-1.0.0.tar.gz")
         );
     }
+
+    #[test]
+    fn install_sh_usa_misma_clave_publica_y_es_compatible_con_openssl_ed25519() {
+        let release_pub = include_str!("../../../packaging/release.pub").trim();
+        let install_sh = include_str!("../../../install.sh");
+        assert!(
+            install_sh.contains(release_pub),
+            "install.sh debe embeber la misma clave pública Ed25519 que packaging/release.pub"
+        );
+        assert!(
+            !install_sh.contains("ed25519_verified\": true,\n  \"notes\": \"Compilación oficial"),
+            "--build-from-source no debe marcar ed25519_verified=true"
+        );
+        assert!(
+            install_sh.contains("${M_VERSION#v}\" != \"$TARGET_VER\"")
+                && install_sh.contains("\"$M_ARTIFACT\" != \"$PKG_FILE\""),
+            "install.sh debe validar coincidencia de versión y artefacto del manifiesto"
+        );
+
+        let signing = SigningKey::generate(&mut OsRng);
+        let mut signed = manifest();
+        let signature = signing.sign(signed.canonical_payload().as_bytes());
+        signed.signature = Some(hex::encode(signature.to_bytes()));
+        let pub_bytes = signing.verifying_key().to_bytes();
+
+        // Verificar que `openssl pkeyutl -verify -rawin` valida la firma generada por ed25519-dalek.
+        if std::path::Path::new("/usr/bin/openssl").is_file() {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir()
+                .join(format!("nas-ossl-ed25519-{}-{nanos}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut der = vec![
+                0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+            ];
+            der.extend_from_slice(&pub_bytes);
+            let pub_der = dir.join("pub.der");
+            let sig_bin = dir.join("sig.bin");
+            let payload_txt = dir.join("payload.txt");
+            std::fs::write(&pub_der, &der).unwrap();
+            std::fs::write(&sig_bin, signature.to_bytes()).unwrap();
+            std::fs::write(&payload_txt, signed.canonical_payload().as_bytes()).unwrap();
+
+            let out = std::process::Command::new("openssl")
+                .args([
+                    "pkeyutl",
+                    "-verify",
+                    "-pubin",
+                    "-keyform",
+                    "DER",
+                    "-inkey",
+                    &pub_der.to_string_lossy(),
+                    "-rawin",
+                    "-in",
+                    &payload_txt.to_string_lossy(),
+                    "-sigfile",
+                    &sig_bin.to_string_lossy(),
+                ])
+                .output()
+                .expect("openssl");
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(
+                out.status.success(),
+                "openssl debe verificar firma Ed25519 de ed25519-dalek: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
 }
