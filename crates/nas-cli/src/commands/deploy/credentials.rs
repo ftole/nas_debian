@@ -130,8 +130,7 @@ pub fn sync_panel_password(user: &str, password: &str) -> Result<(), String> {
         if !replaced {
             updated.push_str(&format!("NAS_WEB_PASSWORD_SHA256={hash}\n"));
         }
-        let staged = std::env::temp_dir().join(format!("nas-env-{}", std::process::id()));
-        std::fs::write(&staged, &updated)
+        let staged = nas_engine::deploy::write_unique_temp_file("nas-env", &updated)
             .map_err(|error| format!("escritura temporal: {error}"))?;
         let argv = vec![
             "install".to_string(),
@@ -185,13 +184,17 @@ pub fn write_artifacts(
     artifacts: &[nas_engine::deploy::Artifact],
     sudo: bool,
 ) -> Result<(), String> {
-    for (idx, artifact) in artifacts.iter().enumerate() {
+    for artifact in artifacts {
         let path = std::path::Path::new(&artifact.path);
         if sudo {
             let staged =
-                std::env::temp_dir().join(format!("nas-artifact-{}-{idx}", std::process::id()));
-            std::fs::write(&staged, &artifact.content)
-                .map_err(|error| format!("no se pudo preparar {}: {error}", staged.display()))?;
+                nas_engine::deploy::write_unique_temp_file("nas-artifact", &artifact.content)
+                    .map_err(|error| {
+                        format!(
+                            "no se pudo preparar temporal para {}: {error}",
+                            artifact.path
+                        )
+                    })?;
             let mode_str = format!("{:04o}", artifact.mode);
             let argv = vec![
                 "install".to_string(),
