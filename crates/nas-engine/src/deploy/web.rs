@@ -143,9 +143,7 @@ pub fn artifacts() -> Vec<Artifact> {
 
 /// Escribe un artefacto usando install(1).
 pub fn write_artifact(runner: &Runner, artifact: &Artifact, sudo: bool) -> NasResult<()> {
-    let staged = std::env::temp_dir().join(format!("nas-web-artifact-{}", std::process::id()));
-    std::fs::write(&staged, &artifact.content)
-        .map_err(|e| NasError::Denied(format!("no se pudo preparar {}: {e}", staged.display())))?;
+    let staged = super::write_unique_temp_file("nas-web-artifact", &artifact.content)?;
     let mode_str = format!("{:04o}", artifact.mode);
     let mut spec = CommandSpec::new("install")
         .args([
@@ -163,8 +161,9 @@ pub fn write_artifact(runner: &Runner, artifact: &Artifact, sudo: bool) -> NasRe
     if sudo {
         spec = spec.sudo(SudoMode::Passwordless);
     }
-    let out = runner.run(&spec)?;
+    let out = runner.run(&spec);
     let _ = std::fs::remove_file(&staged);
+    let out = out?;
     if !out.is_success() {
         return Err(NasError::Denied(format!(
             "no se pudo instalar {}: {}",
