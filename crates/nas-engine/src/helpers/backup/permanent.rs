@@ -100,6 +100,7 @@ pub(super) struct TaskScriptInfo {
     pub(super) src_user: Option<String>,
     pub(super) src_port: u16,
     pub(super) cred_file: Option<String>,
+    pub(super) key_file: Option<String>,
 }
 
 pub(super) fn read_task_info(id: &str) -> TaskScriptInfo {
@@ -155,6 +156,11 @@ pub(super) fn read_task_info(id: &str) -> TaskScriptInfo {
                 rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
                     .to_string(),
             );
+        } else if let Some(rest) = line.strip_prefix("KEY_FILE=") {
+            let val = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
+            if !val.is_empty() {
+                info.key_file = Some(val.to_string());
+            }
         }
     }
     info
