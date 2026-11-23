@@ -32,6 +32,8 @@ pub mod network;
 pub mod parsers;
 /// Edición de smb.conf y ACLs de recursos.
 pub mod samba;
+/// Endurecimiento del sistema operativo, firewall y sincronización de seguridad.
+pub mod security;
 /// Estado y gestión de demonios.
 pub mod services;
 /// Métricas de estado del sistema.
