@@ -193,6 +193,7 @@ async fn terminal_exige_superadministrador_y_valida_geometria() {
         .to_string();
 
     let response = app
+        .clone()
         .oneshot(post_json(
             "/api/terminal/session",
             &cookie,
@@ -201,6 +202,21 @@ async fn terminal_exige_superadministrador_y_valida_geometria() {
         .await
         .expect("sesión");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let hist_op = app
+        .oneshot(get("/api/terminal/history", &cookie))
+        .await
+        .expect("history op");
+    assert_eq!(hist_op.status(), StatusCode::FORBIDDEN);
+
+    // Superadmin sí puede consultar /api/terminal/history.
+    let (admin_app, _admin_dir) = app_with_fixtures(ServerRole::Arquivos, None);
+    let admin_cookie = cookie_for(&admin_app).await;
+    let hist_sa = admin_app
+        .oneshot(get("/api/terminal/history", &admin_cookie))
+        .await
+        .expect("history superadmin");
+    assert_eq!(hist_sa.status(), StatusCode::OK);
 }
 
 #[tokio::test]
