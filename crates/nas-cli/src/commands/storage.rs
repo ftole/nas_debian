@@ -1,26 +1,12 @@
 use std::process::ExitCode;
 
-use nas_core::{ApiResponse, NasError, NasResult};
-use nas_exec::{CommandSpec, Runner};
+use nas_core::{ApiResponse, NasResult};
+use nas_exec::Runner;
 
 use super::common::print_json;
 
 pub fn storage_list(json: bool) -> NasResult<ExitCode> {
-    let output = Runner::new().run(&CommandSpec::new("lsblk").args([
-        "-J",
-        "-o",
-        "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,ROTA",
-    ]))?;
-    if !output.is_success() {
-        return Err(NasError::Command {
-            command: "lsblk".into(),
-            code: output.code,
-            stderr: output.stderr,
-        });
-    }
-
-    let devices = nas_engine::parsers::lsblk::parse(&output.stdout)
-        .map_err(|error| NasError::Invalid(format!("lsblk inválido: {error}")))?;
+    let devices = nas_engine::storage::lsblk_devices_with_uuid(&Runner::new())?;
 
     if json {
         print_json(&ApiResponse::ok(&devices, "Dispositivos de bloque"))?;
