@@ -5,18 +5,15 @@ use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
 use nas_exec::{CommandSpec, Runner};
-use regex::Regex;
 
 /// Valida el nombre de un recurso compartido (`^[A-Za-z0-9_-]{1,32}\$?$`).
 pub fn is_valid_share_name(name: &str) -> bool {
-    let re = Regex::new(r"^[A-Za-z0-9_-]{1,32}\$?$").expect("regex válido");
-    re.is_match(name)
+    crate::validation::is_valid_share_name(name)
 }
 
 /// Valida el nombre de una unidad (`^[A-Za-z0-9_-]{1,32}$`).
 pub fn is_valid_unit_name(unit: &str) -> bool {
-    let re = Regex::new(r"^[A-Za-z0-9_-]{1,32}$").expect("regex válido");
-    re.is_match(unit)
+    crate::validation::is_valid_unit_name(unit)
 }
 
 /// Crea el directorio de un recurso compartido con permisos `2770` y pertenencia `root:grp_samba`.
@@ -118,12 +115,9 @@ pub fn apply_share_acl(
     }
 
     let principal = principal.trim().trim_start_matches('@');
-    let group_re = Regex::new(r"^grp_[a-z0-9_-]{1,28}$").expect("regex válido");
-    let user_re = Regex::new(r"^[a-z_][a-z0-9_-]{0,31}$").expect("regex válido");
-
-    let entry = if group_re.is_match(principal) {
+    let entry = if crate::validation::is_valid_group_name(principal) {
         format!("g:{principal}")
-    } else if user_re.is_match(principal) {
+    } else if crate::validation::is_valid_username_syntax(principal) {
         format!("u:{principal}")
     } else {
         return Err(NasError::Invalid(format!(
