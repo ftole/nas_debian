@@ -96,8 +96,206 @@ async function loadUpdates() {
         ${changelogBlock}
       </div>
     `;
+    renderRollbackSection(u);
   } catch (e) {
     container.innerHTML = '<p style="color:var(--accent-danger);">Error al consultar actualizaciones: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+function renderRollbackSection(u) {
+  const releases = Array.isArray(u.installed_releases) ? u.installed_releases : [];
+  const candidates = releases.filter(r => !r.current && r.has_binaries);
+  const listEl = document.getElementById('rollback-releases-list');
+  const controlsEl = document.getElementById('rollback-controls');
+  const selectEl = document.getElementById('rollback-target-version');
+  const emptyEl = document.getElementById('rollback-empty-msg');
+
+  if (listEl) {
+    listEl.innerHTML = releases.map(r => {
+      const ver = escapeHtml(r.version);
+      if (r.current) return `<span class="badge badge-ok">v${ver} · Activa</span>`;
+      if (r.has_binaries) return `<span class="badge badge-blue">v${ver} · Disponible</span>`;
+      return `<span class="badge badge-gray">v${ver} · Sin binarios</span>`;
+    }).join('');
+  }
+
+  if (!u.rollback_available || candidates.length === 0) {
+    if (controlsEl) controlsEl.style.display = 'none';
+    if (selectEl) selectEl.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+
+  if (selectEl) {
+    selectEl.innerHTML = candidates.map(r => {
+      const selected = r.version === u.previous_version ? ' selected' : '';
+      const commitPart = r.commit ? ` (${escapeHtml(String(r.commit).slice(0, 8))})` : '';
+      return `<option value="${escapeHtml(r.version)}"${selected}>v${escapeHtml(r.version)}${commitPart}</option>`;
+    }).join('');
+  }
+  if (controlsEl) controlsEl.style.display = 'flex';
+  if (emptyEl) emptyEl.style.display = 'none';
+}
+
+function openSystemRollbackModal() {
+  const select = document.getElementById('rollback-target-version');
+  const target = (select?.value || window.LAST_UPDATE_INFO?.previous_version || '').trim();
+  if (!target) {
+    showToast('No hay una versión anterior seleccionada para revertir.', 'warning');
+    return;
+  }
+  const label = document.getElementById('system-rollback-target-label');
+  const input = document.getElementById('rollback-confirm-input');
+  const progress = document.getElementById('system-rollback-progress');
+  const bar = document.getElementById('system-rollback-progress-bar');
+  const log = document.getElementById('system-rollback-log');
+  const stepLabel = document.getElementById('system-rollback-step-label');
+  const spinner = document.getElementById('system-rollback-spinner');
+  const footer = document.getElementById('system-rollback-footer');
+
+  if (label) label.textContent = `v${target}`;
+  if (input) input.value = '';
+  if (progress) progress.style.display = 'none';
+  if (bar) {
+    bar.style.width = '15%';
+    bar.style.background = 'var(--accent-warning)';
+  }
+  if (log) {
+    log.style.display = 'none';
+    log.textContent = '';
+  }
+  if (stepLabel) stepLabel.textContent = 'Iniciando regresión...';
+  if (spinner) spinner.style.display = '';
+  if (footer) {
+    footer.innerHTML = `
+      <button type="button" class="btn btn-secondary" id="btn-cancel-system-rollback" onclick="closeModal('modal-system-rollback')">Cancelar</button>
+      <button type="button" class="btn btn-danger" id="btn-start-system-rollback" onclick="startSystemRollback()">
+        <svg class="icon"><use href="#icon-alert"></use></svg> Ejecutar regresión ahora
+      </button>
+    `;
+  }
+  openModal('modal-system-rollback');
+}
+
+async function startSystemRollback() {
+  const select = document.getElementById('rollback-target-version');
+  const target = (select?.value || window.LAST_UPDATE_INFO?.previous_version || '').trim();
+  const confirmVal = (document.getElementById('rollback-confirm-input')?.value || '').trim();
+  if (!target) {
+    showToast('Selecciona una versión válida para revertir.', 'warning');
+    return;
+  }
+  if (confirmVal !== 'SI-REVERTIR') {
+    showToast('Debes escribir exactamente SI-REVERTIR para confirmar la regresión.', 'warning');
+    return;
+  }
+
+  const startBtn = document.getElementById('btn-start-system-rollback');
+  const cancelBtn = document.getElementById('btn-cancel-system-rollback');
+  const progress = document.getElementById('system-rollback-progress');
+  const bar = document.getElementById('system-rollback-progress-bar');
+  const log = document.getElementById('system-rollback-log');
+  const stepLabel = document.getElementById('system-rollback-step-label');
+  const spinner = document.getElementById('system-rollback-spinner');
+  const footer = document.getElementById('system-rollback-footer');
+
+  if (startBtn) { startBtn.disabled = true; startBtn.classList.add('is-loading'); }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (progress) progress.style.display = 'block';
+  if (bar) bar.style.width = '30%';
+  if (stepLabel) stepLabel.textContent = `Cambiando enlace atómico A/B hacia v${target}...`;
+
+  const prevRollbackTs = window.LAST_UPDATE_INFO?.last_rollback?.ts || null;
+
+  try {
+    const res = await apiFetch('/api/system/update/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ version: target, confirm: confirmVal }),
+    });
+
+    const outputText = res.data?.output || res.message || `Regresión hacia v${target} iniciada.`;
+    if (log) {
+      log.style.display = 'block';
+      log.textContent = outputText;
+    }
+
+    let finalState = null;
+    let rollbackFailedError = null;
+    if (res.data?.queued) {
+      const unitName = res.data?.unit || 'nas-system-rollback';
+      let sawActive = false;
+      let transientErrors = 0;
+
+      for (let attempt = 0; attempt < 72; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        try {
+          const poll = await apiFetch('/api/system/updates?local=1', { silentToast: true });
+          const d = poll.data || {};
+          transientErrors = 0;
+
+          if (d.rollback_in_progress) {
+            sawActive = true;
+            if (bar) bar.style.width = '65%';
+            if (stepLabel) stepLabel.textContent = `Aplicando regresión en segundo plano (${unitName})...`;
+            continue;
+          }
+
+          if (sawActive || attempt >= 1) {
+            const lastRb = d.last_rollback;
+            if (lastRb && lastRb.result === 'FAILED' && (lastRb.ts !== prevRollbackTs || sawActive)) {
+              rollbackFailedError = new Error(lastRb.detail || `La unidad ${unitName} finalizó con error.`);
+              break;
+            }
+            finalState = d;
+            break;
+          }
+        } catch (pollErr) {
+          if (pollErr && pollErr.message === 'Sesión expirada.') {
+            throw pollErr;
+          }
+          sawActive = true;
+          transientErrors++;
+          if (bar) bar.style.width = '85%';
+          if (stepLabel) stepLabel.textContent = 'Reiniciando nas-web tras regresión A/B...';
+          if (transientErrors >= 24) {
+            throw new Error(`El panel no volvió a responder tras reiniciar ${unitName}.`);
+          }
+        }
+      }
+
+      if (rollbackFailedError) throw rollbackFailedError;
+      if (!finalState) {
+        throw new Error(`La unidad ${unitName} sigue ejecutándose. Revise journalctl -u ${unitName}.`);
+      }
+    }
+
+    if (bar) { bar.style.width = '100%'; bar.style.background = '#22c55e'; }
+    if (spinner) spinner.style.display = 'none';
+    if (stepLabel) stepLabel.innerHTML = `<span style="color:#22c55e;">✔ Regresión a v${escapeHtml(finalState?.version || target)} completada</span>`;
+    if (footer) {
+      footer.innerHTML = `
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-system-rollback')">Cerrar</button>
+        <button type="button" class="btn btn-primary" onclick="window.location.reload()">
+          <svg class="icon"><use href="#icon-refresh"></use></svg> Recargar panel (Ctrl+F5)
+        </button>
+      `;
+    }
+    showToast(`Regresión a v${finalState?.version || target} completada con éxito.`, 'success');
+    loadUpdates();
+  } catch (e) {
+    if (bar) { bar.style.width = '100%'; bar.style.background = '#ef4444'; }
+    if (spinner) spinner.style.display = 'none';
+    if (stepLabel) stepLabel.innerHTML = `<span style="color:#ef4444;">✘ Error: ${escapeHtml(e.message)}</span>`;
+    if (log) {
+      log.style.display = 'block';
+      log.textContent = e.message;
+    }
+    if (footer) {
+      footer.innerHTML = `
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-system-rollback')">Cerrar</button>
+        <button type="button" class="btn btn-danger" onclick="startSystemRollback()">Reintentar</button>
+      `;
+    }
   }
 }
 
