@@ -91,7 +91,7 @@ sudo nas deploy apply \
 | `nas users <subcomando>` | Listado e inventario de usuarios/grupos del sistema y Samba. |
 | `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución, bitácoras, Golden Snapshots, `repair-runners` y `deduplicate`. |
 | `nas audit <subcomando>` | Consulta y verificación criptográfica SHA-256 de la bitácora `nas-audit`. |
-| `nas update <status \| check \| verify \| plan \| apply>` | Consulta de estado, verificación `Ed25519` y actualización atómica A/B desde consola (acepta `--previous <ver>` para rollback automático ante fallo). |
+| `nas update <status \| check \| list \| verify \| plan \| apply \| rollback>` | Consulta de estado, verificación `Ed25519`, actualización atómica A/B y regresión (*downgrade*) a releases locales en `/opt/nas_debian/releases/` (también accesible desde `/dashboard#applications`, pestaña **Actualizaciones**, con confirmación `SI-REVERTIR`). |
 | `nas uninstall [--yes --purge --scope os]` | Desinstalación controlada (conserva siempre `/srv/nas`). |
 
 ### 3.2 Asistente Visual de Terminal (`nas-tui`)
