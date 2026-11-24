@@ -53,6 +53,8 @@ pub mod update;
 pub mod ups;
 /// Inventario de usuarios y grupos locales.
 pub mod users;
+/// Validadores compartidos y utilidades puras de bloques e identidad.
+pub mod validation;
 
 pub use backup::{
     evaluate_space, parse_df, retention_victims, snapshot_dir_name, staging_dir_name, DfUsage,
