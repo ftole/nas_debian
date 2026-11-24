@@ -1,78 +1,15 @@
 use std::process::ExitCode;
 
-use nas_core::{ApiResponse, NasPaths, NasResult, ServerRole};
-use nas_exec::{CommandSpec, Runner};
-use serde::Serialize;
+use nas_core::{ApiResponse, NasPaths, NasResult};
+use nas_exec::Runner;
 
 use super::common::print_json;
-
-#[derive(Debug, Serialize)]
-pub struct Check {
-    pub name: String,
-    pub ok: bool,
-    pub detail: String,
-}
 
 pub fn diag(json: bool) -> NasResult<ExitCode> {
     let paths = NasPaths::from_env();
     let runner = Runner::new();
-    let role = ServerRole::from_file(&paths.role_file)?.unwrap_or(ServerRole::ArquivosBackup);
-
-    let mut checks = Vec::new();
-
-    checks.push(Check {
-        name: "role".to_string(),
-        ok: paths.role_file.exists(),
-        detail: format!("{} ({})", role.as_str(), role.label()),
-    });
-    checks.push(Check {
-        name: "samba_conf".to_string(),
-        ok: paths.samba_conf.exists(),
-        detail: paths.samba_conf.display().to_string(),
-    });
-    checks.push(Check {
-        name: "data_root".to_string(),
-        ok: paths.data_root.exists(),
-        detail: paths.data_root.display().to_string(),
-    });
-    checks.push(Check {
-        name: "state_dir".to_string(),
-        ok: paths.state_dir.exists(),
-        detail: paths.state_dir.display().to_string(),
-    });
-
-    for service in ["smbd", "nginx"] {
-        let active = runner
-            .run(&CommandSpec::new("systemctl").args(["is-active", service]))
-            .map(|out| out.stdout == "active")
-            .unwrap_or(false);
-        checks.push(Check {
-            name: format!("service:{service}"),
-            ok: active,
-            detail: if active { "activo" } else { "inactivo" }.to_string(),
-        });
-    }
-
-    let budget = nas_core::ResourceBudget::detect();
-    let res = &budget.resources;
-    checks.push(Check {
-        name: "resources".to_string(),
-        ok: res.total_mem_mb == 0 || res.available_mem_mb >= 64,
-        detail: format!(
-            "{} CPUs efec. ({} host), {} / {} MiB disp., presión={}, workers={}, sys_ops={}, heavy_ops={}, cgroup={}",
-            res.effective_cpus,
-            res.host_cpus,
-            res.available_mem_mb,
-            res.total_mem_mb,
-            res.memory_pressure.as_str(),
-            budget.tokio_worker_threads,
-            budget.max_concurrent_system_ops,
-            budget.max_concurrent_heavy_ops,
-            res.cgroup_limited
-        ),
-    });
-
-    let all_ok = checks.iter().all(|check| check.ok);
+    let checks = nas_engine::diagnostics::collect(&paths, &runner);
+    let all_ok = nas_engine::diagnostics::all_ok(&checks);
 
     if json {
         print_json(&ApiResponse::ok(&checks, "Diagnóstico integral"))?;
