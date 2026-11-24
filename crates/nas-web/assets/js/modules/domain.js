@@ -150,10 +150,19 @@ async function handleDomainJoin(e) {
 }
 
 async function handleDomainLeave() {
-  const user = window.prompt('Introduce el usuario administrador del dominio para desvincular (ej. Administrator):');
-  if (!user) return;
-  const password = window.prompt('Introduce la contraseña del administrador del dominio:');
-  if (!password) return;
+  const credentials = await promptModal({
+    title: 'Desvincular del dominio',
+    message: 'Introduce las credenciales de un administrador del dominio para desvincular este servidor de Active Directory.',
+    submitLabel: 'Desvincular',
+    fields: [
+      { id: 'user', label: 'Usuario administrador del dominio:', placeholder: 'ej. Administrator', autocomplete: 'username' },
+      { id: 'password', label: 'Contraseña del administrador del dominio:', type: 'password', autocomplete: 'current-password' },
+    ],
+  });
+  if (!credentials) return;
+  const user = (credentials.user || '').trim();
+  const password = credentials.password || '';
+  if (!user || !password) return;
 
   try {
     await apiFetch('/api/domain/leave', {
