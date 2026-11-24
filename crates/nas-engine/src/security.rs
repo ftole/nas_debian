@@ -322,6 +322,14 @@ pub fn harden(runner: &Runner, options: &HardenOptions) -> NasResult<HardenRepor
         restart_nas_web = true;
     }
 
+    sync_releases_dir_permissions(
+        runner,
+        Path::new("/opt/nas_debian/releases"),
+        options.sudo,
+        &mut actions,
+        &mut warnings,
+    );
+
     if restart_nas_web && service_is_active(runner, "nas-web") {
         let _ = runner.run(&spec_with_sudo(
             CommandSpec::new("systemctl")
@@ -539,4 +547,65 @@ pub fn apply_safe_hardening(runner: &Runner, sudo: bool) -> NasResult<HardenRepo
             sudo,
         },
     )
+}
+
+fn dir_lacks_world_rx(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|m| (m.permissions().mode() & 0o005) != 0o005)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn sync_releases_dir_permissions(
+    runner: &Runner,
+    releases_dir: &Path,
+    sudo: bool,
+    actions: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    if !releases_dir.is_dir() {
+        return;
+    }
+    let mut targets = Vec::new();
+    if dir_lacks_world_rx(releases_dir) {
+        targets.push(releases_dir.to_path_buf());
+    }
+    if let Ok(entries) = std::fs::read_dir(releases_dir) {
+        for entry in entries.flatten() {
+            let child = entry.path();
+            if child.is_dir() && dir_lacks_world_rx(&child) {
+                targets.push(child);
+            }
+        }
+    }
+    for target in targets {
+        let target_str = target.to_string_lossy().to_string();
+        match runner.run(&spec_with_sudo(
+            CommandSpec::new("chmod")
+                .args(["0755", &target_str])
+                .timeout(Duration::from_secs(10)),
+            sudo,
+        )) {
+            Ok(out) if out.is_success() => {
+                actions.push(format!("permisos 0755 aplicados en {target_str}"));
+            }
+            Ok(out) => {
+                warnings.push(format!(
+                    "no se pudo ajustar permisos 0755 en {target_str}: {}",
+                    out.stderr.trim()
+                ));
+            }
+            Err(e) => {
+                warnings.push(format!("error ajustando permisos en {target_str}: {e}"));
+            }
+        }
+    }
 }
