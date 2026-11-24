@@ -1,7 +1,7 @@
 # Manual Operativo, Administración y Diagnóstico
 
 > [!NOTE]
-> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento manual de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.12`.
+> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento manual de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.13`.
 
 ---
 
