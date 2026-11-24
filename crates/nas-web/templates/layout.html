@@ -2016,11 +2016,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <span>Recurso oculto (agrega sufijo <code>$</code> al nombre para no difundir en red)</span>
             </label>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-share')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-share">Crear recurso</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-share')">Cancelar</button>
+        <button type="submit" form="form-new-share" class="btn btn-primary" id="btn-submit-new-share">Crear recurso</button>
       </div>
     </div>
   </div>
@@ -2067,11 +2067,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <span>Recurso oculto (agrega sufijo <code>$</code>)</span>
             </label>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-share')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-edit-share">Guardar cambios</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-share')">Cancelar</button>
+        <button type="submit" form="form-edit-share" class="btn btn-primary" id="btn-submit-edit-share">Guardar cambios</button>
       </div>
     </div>
   </div>
@@ -2145,14 +2145,14 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               Crea automáticamente un Golden Snapshot inicial (FULL_..._INICIAL) y el día 1 de cada mes (FULL_..._MENSUAL) inmutable y deduplicado con hardlinks.
             </small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
-            <button type="button" class="btn btn-secondary" onclick="testBackupConnection()" id="btn-test-backup" style="margin-right:auto;">
-              <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
-            </button>
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-backup')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-backup">Programar respaldo</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="testBackupConnection()" id="btn-test-backup" style="margin-right:auto;">
+          <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-backup')">Cancelar</button>
+        <button type="submit" form="form-new-backup" class="btn btn-primary" id="btn-submit-new-backup">Programar respaldo</button>
       </div>
     </div>
   </div>
@@ -2225,14 +2225,14 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               Crea automáticamente un Golden Snapshot inicial (FULL_..._INICIAL) y el día 1 de cada mes (FULL_..._MENSUAL) inmutable y deduplicado con hardlinks.
             </small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
-            <button type="button" class="btn btn-secondary" onclick="testEditBackupConnection()" id="btn-test-edit-backup" style="margin-right:auto;">
-              <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
-            </button>
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-backup')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-edit-backup">Guardar cambios</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="testEditBackupConnection()" id="btn-test-edit-backup" style="margin-right:auto;">
+          <svg class="icon icon-sm"><use href="#icon-network"></use></svg> Probar conexión
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-backup')">Cancelar</button>
+        <button type="submit" form="form-edit-backup" class="btn btn-primary" id="btn-submit-edit-backup">Guardar cambios</button>
       </div>
     </div>
   </div>
@@ -2258,11 +2258,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="freeze-bkp-tag" placeholder="ej. cierre_mensual_octubre" pattern="[a-zA-Z0-9_\-]*">
             <small>Etiqueta identificativa para auditoría y recuperación rápida (máx. 32 caracteres).</small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-freeze-backup')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-freeze-backup">Congelar como Permanente</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-freeze-backup')">Cancelar</button>
+        <button type="submit" form="form-freeze-backup" class="btn btn-primary" id="btn-submit-freeze-backup">Congelar como Permanente</button>
       </div>
     </div>
   </div>
@@ -2300,11 +2300,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div class="alert alert-warning" style="margin-top:12px; font-size:12px;">
             <strong>Aviso de seguridad:</strong> La restauración sincronizará los archivos del respaldo en el destino seleccionado.
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-restore-backup')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-restore-backup">Confirmar Restauración</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-restore-backup')">Cancelar</button>
+        <button type="submit" form="form-restore-backup" class="btn btn-primary" id="btn-submit-restore-backup">Confirmar Restauración</button>
       </div>
     </div>
   </div>
@@ -2671,11 +2671,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <em style="color:var(--text-muted); font-size:12px;">Selecciona grupos departamentales para ver los permisos efectivos.</em>
             </div>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-user')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-user">Crear usuario</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-user')">Cancelar</button>
+        <button type="submit" form="form-new-user" class="btn btn-primary" id="btn-submit-new-user">Crear usuario</button>
       </div>
     </div>
   </div>
@@ -2697,11 +2697,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             </div>
             <small style="margin-top:5px; display:block; color:var(--text-secondary);">Identificador en el sistema: <strong id="group-name-preview">grp_...</strong></small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-group">Crear grupo</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-group')">Cancelar</button>
+        <button type="submit" form="form-new-group" class="btn btn-primary" id="btn-submit-new-group">Crear grupo</button>
       </div>
     </div>
   </div>
@@ -2793,11 +2793,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <em style="color:var(--text-muted); font-size:12px;">Selecciona grupos departamentales para ver los permisos efectivos.</em>
             </div>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-user')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-edit-user">Guardar cambios</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-edit-user')">Cancelar</button>
+        <button type="submit" form="form-edit-user" class="btn btn-primary" id="btn-submit-edit-user">Guardar cambios</button>
       </div>
     </div>
   </div>
@@ -2830,9 +2830,9 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <button type="button" class="btn btn-secondary btn-sm" onclick="addGroupMember()">Añadir</button>
           </div>
         </div>
-        <div class="modal-footer" style="padding:0; margin-top:20px;">
-          <button type="button" class="btn btn-primary" onclick="closeModal('modal-group-members')">Listo</button>
-        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-group-members')">Listo</button>
       </div>
     </div>
   </div>
@@ -2854,11 +2854,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <label for="rename-group-new">Nuevo nombre (prefijo <code>grp_</code>):</label>
             <input type="text" id="rename-group-new" required placeholder="ej. grp_finanzas2027" pattern="grp_[a-z0-9_\-]+">
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-group')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-rename-group">Renombrar</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-group')">Cancelar</button>
+        <button type="submit" form="form-rename-group" class="btn btn-primary" id="btn-submit-rename-group">Renombrar</button>
       </div>
     </div>
   </div>
@@ -2888,12 +2888,12 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <div class="form-group" id="welcome-user-info" style="background:var(--bg-body); padding:10px; border-radius:6px; font-size:13px;">
           <!-- Rellenado dinámicamente con usuario y rol -->
         </div>
-        <div class="modal-footer" style="padding:0; margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
-          <button type="button" class="btn btn-secondary" id="btn-copy-welcome-memo" onclick="copyUserWelcomeMemo()">
-            <svg class="icon"><use href="#icon-file-text"></use></svg> Copiar Ficha de Acceso
-          </button>
-          <button type="button" class="btn btn-primary" onclick="closeModal('modal-user-welcome')">Aceptar</button>
-        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" id="btn-copy-welcome-memo" onclick="copyUserWelcomeMemo()">
+          <svg class="icon"><use href="#icon-file-text"></use></svg> Copiar Ficha de Acceso
+        </button>
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-user-welcome')">Aceptar</button>
       </div>
     </div>
   </div>
@@ -2955,11 +2955,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="new-folder-name" required placeholder="ej. Documentos_2026" pattern="[A-Za-z0-9_\-\.]+">
             <small>Sin espacios ni caracteres especiales (/ \ : * ? &quot; &lt; &gt; |).</small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-folder')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-folder">Crear carpeta</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-folder')">Cancelar</button>
+        <button type="submit" form="form-new-folder" class="btn btn-primary" id="btn-submit-new-folder">Crear carpeta</button>
       </div>
     </div>
   </div>
@@ -2980,11 +2980,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               Extensiones compatibles: <code>.txt</code>, <code>.sh</code>, <code>.ps1</code>, <code>.json</code>, <code>.csv</code>, <code>.conf</code>. El archivo se abrirá en el editor web.
             </small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-file')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-new-file">Crear y abrir</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-file')">Cancelar</button>
+        <button type="submit" form="form-new-file" class="btn btn-primary" id="btn-submit-new-file">Crear y abrir</button>
       </div>
     </div>
   </div>
@@ -3003,11 +3003,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <label for="rename-file-newname">Nuevo nombre:</label>
             <input type="text" id="rename-file-newname" required placeholder="Nuevo nombre">
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-file')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-rename-file">Renombrar</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rename-file')">Cancelar</button>
+        <button type="submit" form="form-rename-file" class="btn btn-primary" id="btn-submit-rename-file">Renombrar</button>
       </div>
     </div>
   </div>
@@ -3031,11 +3031,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <input type="text" id="move-file-target" placeholder="ej. CAMPANA_UNO o dejar vacío para raíz">
             <small style="color:var(--text-muted); margin-top:4px; display:block;">Ruta relativa dentro de /srv/nas donde se moverá el elemento.</small>
           </div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-move-file')">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-move-file">Mover</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-move-file')">Cancelar</button>
+        <button type="submit" form="form-move-file" class="btn btn-primary" id="btn-submit-move-file">Mover</button>
       </div>
     </div>
   </div>
@@ -3273,11 +3273,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <p id="modal-prompt-message" style="display:none;"></p>
         <form id="form-modal-prompt" onsubmit="submitPromptModal(event)">
           <div id="modal-prompt-fields"></div>
-          <div class="modal-footer" style="padding:0; margin-top:20px;">
-            <button type="button" class="btn btn-secondary" id="btn-cancel-prompt" onclick="resolvePromptModal(null)">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btn-submit-prompt">Aceptar</button>
-          </div>
         </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-prompt" onclick="resolvePromptModal(null)">Cancelar</button>
+        <button type="submit" form="form-modal-prompt" class="btn btn-primary" id="btn-submit-prompt">Aceptar</button>
       </div>
     </div>
   </div>
