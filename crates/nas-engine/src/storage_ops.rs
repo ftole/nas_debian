@@ -19,18 +19,7 @@ pub fn confirm_ok(confirm: &str) -> bool {
 
 /// Valida un dispositivo de bloque (`/dev/sdb`, `/dev/nvme0n1p1`, `/dev/mapper/vg-lv`).
 pub fn valid_device(device: &str) -> bool {
-    let device = device.trim();
-    if !device.starts_with("/dev/")
-        || device.len() <= 5
-        || device.len() > 64
-        || device.ends_with('/')
-        || device.contains("..")
-    {
-        return false;
-    }
-    device
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+    crate::validation::is_valid_device_path(device)
 }
 
 /// Valida un identificador corto (unidad, VG, LV, subvolumen).
@@ -115,33 +104,6 @@ pub fn os_disks(runner: &Runner) -> Vec<String> {
     disks
 }
 
-fn disk_from_partition_name(name: &str) -> &str {
-    if let Some((disk, part)) = name.rsplit_once('p') {
-        if !part.is_empty()
-            && part.chars().all(|c| c.is_ascii_digit())
-            && disk.ends_with(|c: char| c.is_ascii_digit())
-        {
-            return disk;
-        }
-    }
-    if name.starts_with("nvme")
-        || name.starts_with("mmcblk")
-        || name.starts_with("loop")
-        || name.starts_with("nbd")
-        || name.starts_with("md")
-        || name.starts_with("ram")
-        || name.starts_with("pmem")
-    {
-        return name;
-    }
-    let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
-    if trimmed.is_empty() {
-        name
-    } else {
-        trimmed
-    }
-}
-
 /// Disco padre de un dispositivo (`/dev/sda1` → `/dev/sda`).
 pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
     let device = device.trim().trim_end_matches('/');
@@ -151,7 +113,7 @@ pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
     if let Ok(output) = run_capture(runner, "lsblk", &["-ndo", "PKNAME", device]) {
         let name = output.lines().next().unwrap_or_default().trim();
         if !name.is_empty() {
-            let disk_name = disk_from_partition_name(name);
+            let disk_name = crate::validation::disk_name_from_partition(name);
             return Some(format!("/dev/{disk_name}"));
         }
     }
@@ -159,7 +121,7 @@ pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
     if base.is_empty() || device.starts_with("/dev/mapper/") {
         return None;
     }
-    let disk_name = disk_from_partition_name(base);
+    let disk_name = crate::validation::disk_name_from_partition(base);
     Some(format!("/dev/{disk_name}"))
 }
 
