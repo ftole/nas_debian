@@ -4,7 +4,7 @@
 
 ![Debian 13 Trixie](https://img.shields.io/badge/OS-Debian%2013%20Trixie-A81D33?style=for-the-badge&logo=debian&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-1.80%2B%20Workspace-000000?style=for-the-badge&logo=rust&logoColor=white)
-![Versión](https://img.shields.io/badge/Release-v0.1.12-0EA5E9?style=for-the-badge)
+![Versión](https://img.shields.io/badge/Release-v0.1.13-0EA5E9?style=for-the-badge)
 ![Samba 4](https://img.shields.io/badge/SMB-2.10..3.11%20%2B%20VFS-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Offline](https://img.shields.io/badge/Panel%20Web-100%25%20Offline-0F172A?style=for-the-badge)
 
