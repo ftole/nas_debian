@@ -1,6 +1,6 @@
 //! Cálculo de métricas y tamaños de almacenamiento para tareas de respaldo con caché TTL.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -87,7 +87,7 @@ pub fn calculate_destination_disk(dest_root: &str) -> BackupDiskMetrics {
 }
 
 /// Resumen de almacenamiento de una tarea de respaldo.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TaskStorageSummary {
     /// Capacidad real que ocupa el respaldo completo (el último snapshot o full completado).
     pub full_size_bytes: u64,
@@ -106,14 +106,66 @@ const INITIAL_DU_TIMEOUT_SECS: u64 = 15;
 const BACKGROUND_DU_TIMEOUT_SECS: u64 = 180;
 const FALLBACK_MAX_ENTRIES: usize = 20_000;
 
-fn storage_cache() -> &'static Mutex<HashMap<String, TaskStorageSummary>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, TaskStorageSummary>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn cache_file_path() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    let state_dir = std::env::var("NAS_STATE_DIR")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/var/lib/nas".to_string());
+    Some(PathBuf::from(state_dir).join("backup_size_cache.json"))
 }
 
-fn in_flight_refreshes() -> &'static Mutex<HashSet<String>> {
-    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+fn load_persisted_cache_from_file(path: &Path) -> HashMap<String, TaskStorageSummary> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let Ok(mut map) = serde_json::from_str::<HashMap<String, TaskStorageSummary>>(&raw) else {
+        return HashMap::new();
+    };
+    // Marcar como obsoleto (epoch=1) para mostrar el último valor tras reinicio y refrescar en segundo plano.
+    for summary in map.values_mut() {
+        summary.computed_at_epoch = 1;
+    }
+    map
+}
+
+fn persist_cache_to_file(path: &Path, map: &HashMap<String, TaskStorageSummary>) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(parent);
+    let Ok(json) = serde_json::to_string(map) else {
+        return;
+    };
+    let tmp = parent.join(format!(".backup_size_cache.tmp.{}", std::process::id()));
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn storage_cache() -> &'static Mutex<HashMap<String, TaskStorageSummary>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, TaskStorageSummary>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let initial = cache_file_path()
+            .map(|p| load_persisted_cache_from_file(&p))
+            .unwrap_or_default();
+        Mutex::new(initial)
+    })
+}
+
+#[derive(Default)]
+struct BackgroundRefreshQueue {
+    pending: VecDeque<nas_engine::tasks::BackupTask>,
+    queued_ids: HashSet<String>,
+    worker_running: bool,
+}
+
+fn background_queue() -> &'static Mutex<BackgroundRefreshQueue> {
+    static QUEUE: OnceLock<Mutex<BackgroundRefreshQueue>> = OnceLock::new();
+    QUEUE.get_or_init(|| Mutex::new(BackgroundRefreshQueue::default()))
 }
 
 fn now_epoch() -> u64 {
@@ -132,55 +184,85 @@ fn get_cached_entry(task_id: &str) -> Option<(TaskStorageSummary, bool)> {
 }
 
 fn store_task_storage(task_id: &str, summary: TaskStorageSummary) {
-    if let Ok(mut cache) = storage_cache().lock() {
+    let snapshot = if let Ok(mut cache) = storage_cache().lock() {
         cache.insert(task_id.to_string(), summary);
+        cache.clone()
+    } else {
+        return;
+    };
+    if let Some(path) = cache_file_path() {
+        persist_cache_to_file(&path, &snapshot);
     }
 }
 
 /// Invalida la caché de almacenamiento de una tarea tras congelar o eliminar respaldos.
 pub fn invalidate_task_storage_cache(task_id: &str) {
-    if let Ok(mut cache) = storage_cache().lock() {
+    let snapshot = if let Ok(mut cache) = storage_cache().lock() {
         cache.remove(task_id);
+        Some(cache.clone())
+    } else {
+        None
+    };
+    if let (Some(path), Some(snap)) = (cache_file_path(), snapshot) {
+        persist_cache_to_file(&path, &snap);
     }
 }
 
-fn max_concurrent_background_refreshes() -> usize {
-    nas_core::ResourceBudget::detect()
-        .max_concurrent_background_refreshes
-        .max(1)
+fn run_background_worker_loop() {
+    loop {
+        let next_task = {
+            let Ok(mut q) = background_queue().lock() else {
+                return;
+            };
+            match q.pending.pop_front() {
+                Some(task) => Some(task),
+                None => {
+                    q.worker_running = false;
+                    return;
+                }
+            }
+        };
+
+        if let Some(task) = next_task {
+            let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
+            store_task_storage(&task.id, fresh);
+            if let Ok(mut q) = background_queue().lock() {
+                q.queued_ids.remove(&task.id);
+            }
+        }
+    }
 }
 
 fn spawn_background_refresh(task: nas_engine::tasks::BackupTask) {
-    let id = task.id.clone();
-    let max_refreshes = max_concurrent_background_refreshes();
-    {
-        let Ok(mut set) = in_flight_refreshes().lock() else {
+    let should_spawn = {
+        let Ok(mut q) = background_queue().lock() else {
             return;
         };
-        if set.len() >= max_refreshes || !set.insert(id.clone()) {
+        if !q.queued_ids.insert(task.id.clone()) {
             return;
         }
-    }
-
-    let id_for_name = task.id.clone();
-    let id_for_err = task.id.clone();
-    let work = move || {
-        let fresh = calculate_task_storage_with_timeout(&task, BACKGROUND_DU_TIMEOUT_SECS);
-        store_task_storage(&task.id, fresh);
-        if let Ok(mut set) = in_flight_refreshes().lock() {
-            set.remove(&id);
+        q.pending.push_back(task);
+        if q.worker_running {
+            false
+        } else {
+            q.worker_running = true;
+            true
         }
     };
 
+    if !should_spawn {
+        return;
+    }
+
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        drop(handle.spawn_blocking(work));
+        drop(handle.spawn_blocking(run_background_worker_loop));
     } else if std::thread::Builder::new()
-        .name(format!("storage-refresh-{id_for_name}"))
-        .spawn(work)
+        .name("storage-refresh-worker".to_string())
+        .spawn(run_background_worker_loop)
         .is_err()
     {
-        if let Ok(mut set) = in_flight_refreshes().lock() {
-            set.remove(&id_for_err);
+        if let Ok(mut q) = background_queue().lock() {
+            q.worker_running = false;
         }
     }
 }
@@ -240,17 +322,46 @@ fn parse_du_total_bytes(stdout: &str) -> Option<u64> {
     bytes_str.parse::<u64>().ok()
 }
 
+fn run_du_low_prio(
+    runner: &Runner,
+    du_args: &[String],
+    timeout_secs: u64,
+) -> Option<nas_exec::CommandOutput> {
+    let mut nice_args = vec![
+        "-n".to_string(),
+        "19".to_string(),
+        "ionice".to_string(),
+        "-c".to_string(),
+        "3".to_string(),
+        "du".to_string(),
+    ];
+    nice_args.extend(du_args.iter().cloned());
+    if let Ok(out) = runner.run(
+        &nas_exec::CommandSpec::new("nice")
+            .args(nice_args)
+            .timeout(Duration::from_secs(timeout_secs)),
+    ) {
+        if out.is_success() || !out.stdout.trim().is_empty() {
+            return Some(out);
+        }
+    }
+    runner
+        .run(
+            &nas_exec::CommandSpec::new("du")
+                .args(du_args.iter().cloned())
+                .timeout(Duration::from_secs(timeout_secs)),
+        )
+        .ok()
+}
+
 fn calculate_single_dir_size_with_timeout(dir: &Path, timeout_secs: u64) -> (u64, bool) {
     if !dir.is_dir() {
         return (0, true);
     }
 
     let runner = Runner::new();
-    let spec = nas_exec::CommandSpec::new("du")
-        .args(["-sb", &dir.to_string_lossy()])
-        .timeout(Duration::from_secs(timeout_secs));
-
-    if let Ok(out) = runner.run(&spec) {
+    let args = vec!["-sb".to_string(), dir.to_string_lossy().to_string()];
+    if let Some(out) = run_du_low_prio(&runner, &args, timeout_secs) {
         if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
             return (bytes, out.is_success());
         }
@@ -278,34 +389,21 @@ fn calculate_dirs_combined_size_with_timeout(dirs: &[PathBuf], timeout_secs: u64
         args.push(d.to_string_lossy().to_string());
     }
 
-    let spec = nas_exec::CommandSpec::new("du")
-        .args(args)
-        .timeout(Duration::from_secs(timeout_secs));
-
-    match runner.run(&spec) {
-        Ok(out) => {
-            if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
-                return (bytes, out.is_success());
-            }
-            if !out.is_success() {
-                // Fallback a `-scb` solo si `-B1` no fuera soportado (p. ej. du no GNU).
-                let mut compat_args = vec!["-scb".to_string()];
-                for d in dirs {
-                    compat_args.push(d.to_string_lossy().to_string());
-                }
-                if let Ok(compat_out) = runner.run(
-                    &nas_exec::CommandSpec::new("du")
-                        .args(compat_args)
-                        .timeout(Duration::from_secs(timeout_secs)),
-                ) {
-                    if let Some(bytes) = parse_du_total_bytes(&compat_out.stdout) {
-                        return (bytes, compat_out.is_success());
-                    }
-                }
-            }
+    if let Some(out) = run_du_low_prio(&runner, &args, timeout_secs) {
+        if let Some(bytes) = parse_du_total_bytes(&out.stdout) {
+            return (bytes, out.is_success());
         }
-        Err(_) => {
-            // Timeout o fallo de ejecución: no duplicar la espera con un segundo `du`.
+        if !out.is_success() {
+            // Fallback a `-scb` solo si `-B1` no fuera soportado (p. ej. du no GNU).
+            let mut compat_args = vec!["-scb".to_string()];
+            for d in dirs {
+                compat_args.push(d.to_string_lossy().to_string());
+            }
+            if let Some(compat_out) = run_du_low_prio(&runner, &compat_args, timeout_secs) {
+                if let Some(bytes) = parse_du_total_bytes(&compat_out.stdout) {
+                    return (bytes, compat_out.is_success());
+                }
+            }
         }
     }
 
@@ -408,7 +506,7 @@ pub fn calculate_task_storage(task: &nas_engine::tasks::BackupTask) -> TaskStora
 }
 
 /// Obtiene el resumen de almacenamiento de una tarea respetando la caché en memoria
-/// (stale-while-revalidate con exclusión de refrescos duplicados).
+/// (stale-while-revalidate no bloqueante con cola serializada en segundo plano).
 pub fn task_storage_with_cache(task: &nas_engine::tasks::BackupTask) -> TaskStorageSummary {
     if let Some((cached, fresh)) = get_cached_entry(&task.id) {
         if !fresh {
@@ -417,16 +515,36 @@ pub fn task_storage_with_cache(task: &nas_engine::tasks::BackupTask) -> TaskStor
         return cached;
     }
 
-    let mut computed = calculate_task_storage_with_timeout(task, INITIAL_DU_TIMEOUT_SECS);
-    if !computed.complete {
-        // Marcar como obsoleto para que el sondeo en segundo plano lo complete sin truncar.
-        computed.computed_at_epoch = 0;
-        store_task_storage(&task.id, computed);
-        spawn_background_refresh(task.clone());
+    let hist_dir = task.task_dir();
+    let s = hist_dir.to_string_lossy();
+    let perm_dir = if s.contains("BACKUPS_HISTORICOS") {
+        PathBuf::from(s.replace("BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES"))
     } else {
-        store_task_storage(&task.id, computed);
+        PathBuf::from(format!("/srv/nas/BACKUPS_PERMANENTES/{}", task.id))
+    };
+
+    if !hist_dir.is_dir() && !perm_dir.is_dir() {
+        let empty = TaskStorageSummary {
+            full_size_bytes: 0,
+            disk_usage_bytes: 0,
+            complete: true,
+            computed_at_epoch: now_epoch(),
+        };
+        store_task_storage(&task.id, empty);
+        return empty;
     }
-    computed
+
+    let placeholder = TaskStorageSummary {
+        full_size_bytes: 0,
+        disk_usage_bytes: 0,
+        complete: false,
+        computed_at_epoch: 0,
+    };
+    if let Ok(mut cache) = storage_cache().lock() {
+        cache.insert(task.id.clone(), placeholder);
+    }
+    spawn_background_refresh(task.clone());
+    placeholder
 }
 
 /// Compatibilidad: calcula el espacio en bytes consumido por el directorio de la tarea de respaldo.
@@ -500,5 +618,58 @@ mod tests {
         assert!(get_cached_entry(&task.id).is_some());
         invalidate_task_storage_cache(&task.id);
         assert!(get_cached_entry(&task.id).is_none());
+    }
+
+    #[test]
+    fn cache_persistida_marca_obsoleta_y_no_bloquea_en_arranque_frio() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-stg-cold-{}-{nanos}", std::process::id()));
+        let task_dir = root.join("cold_task");
+        fs::create_dir_all(&task_dir).unwrap();
+        fs::write(task_dir.join("data.bin"), vec![1u8; 4096]).unwrap();
+
+        let cache_path = root.join("cache.json");
+        let mut map = HashMap::new();
+        map.insert(
+            "cold_task".to_string(),
+            TaskStorageSummary {
+                full_size_bytes: 4096,
+                disk_usage_bytes: 4096,
+                complete: true,
+                computed_at_epoch: 9_999_999,
+            },
+        );
+        persist_cache_to_file(&cache_path, &map);
+        let loaded = load_persisted_cache_from_file(&cache_path);
+        let entry = loaded.get("cold_task").expect("loaded entry");
+        assert_eq!(entry.full_size_bytes, 4096);
+        assert_eq!(entry.computed_at_epoch, 1);
+
+        let task = nas_engine::tasks::BackupTask {
+            id: format!("cold_task_{nanos}"),
+            kind: nas_engine::tasks::SourceKind::Local,
+            source_ip: None,
+            share: None,
+            path: Some("/tmp".into()),
+            user: None,
+            port: None,
+            retention: 3,
+            destination_root: root.to_string_lossy().to_string(),
+            log_dir: root.to_string_lossy().to_string(),
+            credentials_file: None,
+            key_file: None,
+            auto_permanent: false,
+        };
+        fs::create_dir_all(task.task_dir()).unwrap();
+        let initial = task_storage_with_cache(&task);
+        assert!(!initial.complete);
+        assert_eq!(initial.full_size_bytes, 0);
+        invalidate_task_storage_cache(&task.id);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
