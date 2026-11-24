@@ -1,6 +1,9 @@
 //! Utilidades de permisos POSIX (`grp_samba`), saneamiento de nombres y cálculo recursivo de tamaño.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use nas_core::{NasError, NasResult};
 
@@ -44,21 +47,86 @@ pub fn sanitize_filename(name: &str) -> NasResult<String> {
     Ok(name.to_string())
 }
 
+const DIR_SIZE_CACHE_TTL: Duration = Duration::from_secs(60);
+const DIR_SIZE_CACHE_MAX_ENTRIES: usize = 512;
+const DIR_LIST_SIZE_MAX_ENTRIES: usize = 512;
+const DIR_LIST_SIZE_MAX_DURATION: Duration = Duration::from_millis(25);
+
+type DirSizeCacheMap = HashMap<PathBuf, (i64, u64, Instant)>;
+
+fn dir_size_cache() -> &'static Mutex<DirSizeCacheMap> {
+    static CACHE: OnceLock<Mutex<DirSizeCacheMap>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn is_heavy_subtree(path: &Path) -> bool {
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name.starts_with("snapshot_") || name.starts_with("FULL_") {
+            return true;
+        }
+    }
+    path.components().any(|comp| {
+        let s = comp.as_os_str().to_string_lossy();
+        matches!(
+            s.as_ref(),
+            "BACKUPS_HISTORICOS"
+                | "BACKUPS_PERMANENTES"
+                | "LOGS_BACKUP"
+                | "unidades"
+                | ".snapshots"
+                | ".recycle"
+        )
+    })
+}
+
 pub(super) fn entry_metadata(entry: &std::fs::DirEntry) -> (bool, u64, i64) {
     let Ok(metadata) = entry.metadata() else {
         return (false, 0, 0);
     };
     let is_dir = metadata.is_dir();
-    let size = if is_dir {
-        dir_size_recursive_bounded(&entry.path(), 10_000)
-    } else {
-        metadata.len()
-    };
     let modified = metadata
         .modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_secs() as i64);
+    let size = if is_dir {
+        let path = entry.path();
+        if is_heavy_subtree(&path) {
+            0
+        } else {
+            let now = Instant::now();
+            let cached = dir_size_cache().lock().ok().and_then(|cache| {
+                cache.get(&path).and_then(|(m, sz, at)| {
+                    if *m == modified && now.duration_since(*at) < DIR_SIZE_CACHE_TTL {
+                        Some(*sz)
+                    } else {
+                        None
+                    }
+                })
+            });
+            if let Some(sz) = cached {
+                sz
+            } else {
+                let computed = dir_size_recursive_bounded_timed(
+                    &path,
+                    DIR_LIST_SIZE_MAX_ENTRIES,
+                    DIR_LIST_SIZE_MAX_DURATION,
+                );
+                if let Ok(mut cache) = dir_size_cache().lock() {
+                    if cache.len() >= DIR_SIZE_CACHE_MAX_ENTRIES {
+                        cache.retain(|_, (_, _, at)| now.duration_since(*at) < DIR_SIZE_CACHE_TTL);
+                        if cache.len() >= DIR_SIZE_CACHE_MAX_ENTRIES {
+                            cache.clear();
+                        }
+                    }
+                    cache.insert(path, (modified, computed, now));
+                }
+                computed
+            }
+        }
+    } else {
+        metadata.len()
+    };
     (is_dir, size, modified)
 }
 
@@ -101,17 +169,25 @@ pub(super) fn set_dir_permissions(path: &Path) {
 #[cfg(not(unix))]
 pub(super) fn set_dir_permissions(_path: &Path) {}
 
-/// Calcula el tamaño acumulado de un directorio en bytes, con un límite de elementos para evitar bloqueos.
-pub fn dir_size_recursive_bounded(root: &Path, max_entries: usize) -> u64 {
+/// Calcula el tamaño acumulado de un directorio en bytes, con límites de elementos y tiempo.
+pub fn dir_size_recursive_bounded_timed(
+    root: &Path,
+    max_entries: usize,
+    max_duration: Duration,
+) -> u64 {
+    let started = Instant::now();
     let mut total = 0u64;
     let mut count = 0usize;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        if started.elapsed() >= max_duration {
+            return total;
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for entry in entries.flatten() {
-            let Ok(meta) = entry.metadata() else {
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
             };
             if meta.file_type().is_symlink() {
@@ -123,12 +199,17 @@ pub fn dir_size_recursive_bounded(root: &Path, max_entries: usize) -> u64 {
             } else {
                 total = total.saturating_add(meta.len());
             }
-            if count >= max_entries {
+            if count >= max_entries || (count & 63 == 0 && started.elapsed() >= max_duration) {
                 return total;
             }
         }
     }
     total
+}
+
+/// Calcula el tamaño acumulado de un directorio en bytes, con un límite de elementos para evitar bloqueos.
+pub fn dir_size_recursive_bounded(root: &Path, max_entries: usize) -> u64 {
+    dir_size_recursive_bounded_timed(root, max_entries, Duration::from_secs(300))
 }
 
 /// Calcula el tamaño acumulado completo de un directorio en bytes.
