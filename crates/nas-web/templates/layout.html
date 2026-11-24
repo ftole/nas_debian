@@ -1771,6 +1771,25 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
               <p>Cargando información de versiones...</p>
             </div>
           </div>
+
+          <div class="panel-card" id="rollback-card" style="margin-bottom:20px;">
+            <div class="panel-card-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="margin:0;">Regresión de versión (Downgrade A/B)</h3>
+                <div class="text-muted" style="font-size:12px;">Cambia atómicamente a una release local previa sin perder configuración ni datos.</div>
+              </div>
+              <div id="rollback-controls" style="display:none; align-items:center; gap:8px; flex-wrap:wrap;">
+                <select id="rollback-target-version" class="form-control" style="width:auto; min-width:170px;"></select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openSystemRollbackModal()">
+                  <svg class="icon icon-sm"><use href="#icon-alert"></use></svg> Revertir a versión
+                </button>
+              </div>
+            </div>
+            <div class="panel-card-body">
+              <div id="rollback-releases-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+              <p id="rollback-empty-msg" class="text-muted" style="font-size:12px; margin:0;">No hay versiones anteriores con binarios completos en <code>/opt/nas_debian/releases/</code>. Las futuras actualizaciones firmadas conservan la versión previa en su ranura para permitir revertir con un clic.</p>
+            </div>
+          </div>
         </div>
 
         <!-- Panel 3: Hardening & Ciberseguridad Kernel -->
@@ -3512,6 +3531,44 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <button type="button" class="btn btn-secondary" id="btn-cancel-system-update" onclick="closeModal('modal-system-update')">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btn-start-system-update" onclick="startSystemUpdate()">
           <svg class="icon"><use href="#icon-download"></use></svg> Iniciar actualización ahora
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Regresión (Downgrade A/B) del Sistema -->
+  <div class="modal-backdrop modal-static" id="modal-system-rollback">
+    <div class="modal-dialog" style="max-width:650px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-warning);"><use href="#icon-alert"></use></svg> Regresión de Versión (Downgrade A/B)</h3>
+        <button class="modal-close" onclick="closeModal('modal-system-rollback')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert-box alert-box-warning" style="margin-bottom:14px;">
+          <svg class="icon"><use href="#icon-alert"></use></svg>
+          <div>
+            Se cambiará la ranura activa <code>current</code> hacia <strong id="system-rollback-target-label">v--</strong>, se reinstalarán sus binarios/helpers y se reiniciará <code>nas-web</code>. Si el <em>healthcheck</em> falla, el sistema revertirá automáticamente a la versión anterior.
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label for="rollback-confirm-input">Confirmación obligatoria (escribe <code>SI-REVERTIR</code>)</label>
+          <input type="text" id="rollback-confirm-input" class="form-control" placeholder="SI-REVERTIR" autocomplete="off">
+        </div>
+        <div id="system-rollback-progress" style="display:none; background:var(--bg-body); padding:14px; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+            <span class="spinner" id="system-rollback-spinner" style="width:18px;height:18px;border:2px solid var(--accent-warning);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 1s linear infinite;"></span>
+            <strong id="system-rollback-step-label" style="font-size:13px;">Iniciando regresión...</strong>
+          </div>
+          <div class="progress-bar-bg" style="height:8px; border-radius:4px; background:var(--bg-card); overflow:hidden; margin-bottom:12px;">
+            <div id="system-rollback-progress-bar" style="height:100%; width:15%; background:var(--accent-warning); transition:width 0.4s ease;"></div>
+          </div>
+          <pre id="system-rollback-log" style="background:#0f172a; color:#e2e8f0; padding:12px; border-radius:6px; font-size:12px; max-height:200px; overflow-y:auto; white-space:pre-wrap; font-family:monospace; display:none;"></pre>
+        </div>
+      </div>
+      <div class="modal-footer" id="system-rollback-footer">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-system-rollback" onclick="closeModal('modal-system-rollback')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-start-system-rollback" onclick="startSystemRollback()">
+          <svg class="icon"><use href="#icon-alert"></use></svg> Ejecutar regresión ahora
         </button>
       </div>
     </div>
