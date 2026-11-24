@@ -271,9 +271,14 @@ async function submitNewShare(event) {
 }
 
 async function deleteShare(name) {
-  if (!window.confirm(`¿Confirmas la eliminación del recurso compartido [${name}]? (Los archivos en disco se conservarán)`)) {
-    return;
-  }
+  const confirmed = await confirmModal({
+    title: 'Eliminar recurso compartido',
+    message: `¿Confirmas la eliminación del recurso compartido [${name}]?`,
+    note: 'Los archivos en disco se conservarán; solo se retira el acceso por red.',
+    confirmLabel: 'Eliminar recurso',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   try {
     await apiFetch('/api/shares/delete', {
