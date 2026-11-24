@@ -8,6 +8,12 @@ use nas_exec::Runner;
 
 use super::common::{print_json, run_step};
 
+mod rollback;
+#[cfg(test)]
+mod tests;
+
+pub use rollback::{update_list, update_rollback};
+
 pub struct UpdateDispatchArgs {
     pub manifest: Option<PathBuf>,
     pub artifact: Option<PathBuf>,
@@ -588,58 +594,7 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
     ));
 
     let runner = Runner::new();
-    let mut failure: Option<NasError> = None;
-
-    for step in &plan.steps {
-        let is_health = step.first().is_some_and(|arg| arg == "curl");
-        if is_health {
-            let mut last_code = String::new();
-            let mut last_err: Option<NasError> = None;
-            let mut healthy = false;
-            for attempt in 0..6 {
-                match run_step(&runner, step, sudo, 30) {
-                    Ok(output) => {
-                        let code = output.stdout.trim().to_string();
-                        if code == "200" || code == "302" {
-                            healthy = true;
-                            break;
-                        }
-                        last_code = code;
-                        last_err = None;
-                    }
-                    Err(error) => {
-                        last_err = Some(error);
-                    }
-                }
-                if attempt < 5 {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
-            }
-            if !healthy {
-                failure = Some(last_err.unwrap_or_else(|| {
-                    NasError::Denied(format!(
-                        "healthcheck devolvió {last_code}; se revierte la release"
-                    ))
-                }));
-                break;
-            }
-            continue;
-        }
-
-        match run_step(&runner, step, sudo, 900) {
-            Ok(_) => {}
-            Err(error) => {
-                failure = Some(error);
-                break;
-            }
-        }
-    }
-
-    if failure.is_some() {
-        for step in &plan.rollback {
-            let _ = run_step(&runner, step, sudo, 300);
-        }
-    }
+    let failure = rollback::execute_ab_plan(&runner, &plan, sudo);
 
     let (status, detail) = match &failure {
         None => ("SUCCESS", format!("release={}", manifest.version)),
@@ -729,140 +684,4 @@ fn update_apply(options: UpdateApplyOptions<'_>, json: bool) -> NasResult<ExitCo
     }
 
     Ok(ExitCode::SUCCESS)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{detect_previous_version, post_update_sync_steps, read_deployed_version};
-    use std::os::unix::fs::symlink;
-
-    #[test]
-    fn read_deployed_version_respeta_precedencia_y_respaldo() {
-        let dir = std::env::temp_dir().join(format!(
-            "nas_cli_ver_test_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(dir.join("current")).expect("mkdir current");
-        let p_current = dir.join("current/version.json");
-        let p_etc = dir.join("etc_version.json");
-        let p_root = dir.join("root_version.json");
-        std::fs::write(&p_etc, r#"{"version":"1.0.0"}"#).expect("write etc");
-        std::fs::write(&p_root, r#"{"version":"0.9.0"}"#).expect("write root");
-
-        assert_eq!(
-            read_deployed_version(&[&p_current, &p_etc, &p_root], "0.0.0"),
-            "1.0.0"
-        );
-
-        std::fs::write(&p_current, r#"{"version":"1.2.3"}"#).expect("write current");
-        assert_eq!(
-            read_deployed_version(&[&p_current, &p_etc, &p_root], "0.0.0"),
-            "1.2.3"
-        );
-
-        assert_eq!(
-            read_deployed_version(&[&dir.join("missing.json")], "9.9.9"),
-            "9.9.9"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn detect_previous_version_resuelve_enlace_current() {
-        let dir = std::env::temp_dir().join(format!(
-            "nas_cli_prev_test_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let prev = dir.join("releases/1.2.2");
-        std::fs::create_dir_all(&prev).expect("mkdir prev");
-        symlink(&prev, dir.join("current")).expect("symlink current");
-
-        let root_str = dir.to_string_lossy();
-        assert_eq!(
-            detect_previous_version(&root_str, "1.2.3"),
-            Some("1.2.2".to_string())
-        );
-        assert_eq!(detect_previous_version(&root_str, "1.2.2"), None);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn post_update_sync_steps_incluye_recursos_y_sincroniza_release_pub() {
-        let dir = std::env::temp_dir().join(format!(
-            "nas_cli_post_sync_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let src_pkg = dir.join("current/packaging");
-        std::fs::create_dir_all(&src_pkg).expect("mkdir pkg");
-        let fake_bin = dir.join("nas");
-        std::fs::write(&fake_bin, b"bin").expect("write fake nas");
-        let dst_pub = dir.join("etc_release.pub");
-        let valid_pub = "a".repeat(64);
-        let old_pub = "b".repeat(64);
-        std::fs::write(src_pkg.join("release.pub"), format!("{valid_pub}\n")).expect("write src");
-        std::fs::write(&dst_pub, format!("{old_pub}\n")).expect("write dst");
-
-        let root_str = dir.to_string_lossy();
-        let steps = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
-        assert!(steps
-            .iter()
-            .any(|s| s.ends_with(&["backup".to_string(), "repair-runners".to_string()])));
-        assert!(steps
-            .iter()
-            .any(|s| s.ends_with(&["deploy".to_string(), "resources".to_string()])));
-        assert!(steps
-            .iter()
-            .any(|s| s.ends_with(&["deploy".to_string(), "ensure-deps".to_string()])));
-        assert!(steps.iter().any(|s| s.ends_with(&[
-            "security".to_string(),
-            "harden".to_string(),
-            "--apply".to_string(),
-            "--safe-only".to_string(),
-        ])));
-        assert!(steps
-            .iter()
-            .any(|s| s == &vec!["systemctl", "restart", "nas-web"]));
-        for s in &steps {
-            let t = super::post_update_step_timeout_secs(s);
-            if s.iter().any(|a| a == "ensure-deps" || a == "security") {
-                assert_eq!(t, 900);
-            } else {
-                assert_eq!(t, 60);
-            }
-        }
-        assert!(steps
-            .iter()
-            .any(|s| s.first().is_some_and(|a| a == "install")
-                && s.last().is_some_and(|p| p == &dst_pub.to_string_lossy())));
-
-        // Si ya coincide `/etc/nas/release.pub`, no añade `install` innecesario.
-        std::fs::write(&dst_pub, format!("{valid_pub}\n")).expect("sync dst");
-        let steps_same = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
-        assert!(!steps_same
-            .iter()
-            .any(|s| s.first().is_some_and(|a| a == "install")));
-
-        // Si `release.pub` origen es inválido, no toca el destino.
-        std::fs::write(src_pkg.join("release.pub"), "ssh-ed25519 INVALIDA\n").expect("bad src");
-        std::fs::write(&dst_pub, format!("{old_pub}\n")).expect("restore dst");
-        let steps_bad = post_update_sync_steps(&root_str, &fake_bin, &dst_pub);
-        assert!(!steps_bad
-            .iter()
-            .any(|s| s.first().is_some_and(|a| a == "install")));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
