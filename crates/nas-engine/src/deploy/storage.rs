@@ -48,12 +48,7 @@ pub fn partition_path(device: &str) -> Option<String> {
     if device == "LOCAL" {
         return None;
     }
-    let suffix = if device.starts_with("/dev/nvme") || device.starts_with("/dev/mmcblk") {
-        "p1"
-    } else {
-        "1"
-    };
-    Some(format!("{}{}", device.trim_end_matches('/'), suffix))
+    Some(crate::validation::first_partition_path(device))
 }
 
 /// Opciones de montaje derivadas del sistema de archivos y del tipo de disco.
@@ -104,12 +99,7 @@ pub fn ensure_not_os_disk(runner: &Runner, device: &str, keep_data: bool) -> Nas
 
 /// Valida un dispositivo de bloque.
 pub fn valid_device(device: &str) -> bool {
-    device.starts_with("/dev/")
-        && device.len() <= 64
-        && !device.contains("..")
-        && device
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+    crate::validation::is_valid_device_path(device)
 }
 
 fn run_checked(runner: &Runner, spec: CommandSpec) -> NasResult<()> {
