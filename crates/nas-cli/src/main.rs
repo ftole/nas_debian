@@ -121,6 +121,12 @@ enum UsersAction {
 enum UpdateAction {
     /// Muestra el estado del actualizador y versión instalada.
     Status,
+    /// Lista las releases locales instaladas disponibles para regresión A/B.
+    List {
+        /// Raíz del despliegue.
+        #[arg(long, default_value = "/opt/nas_debian")]
+        root: String,
+    },
     /// Comprueba si existe una versión más reciente en GitHub Releases.
     Check {
         /// Repositorio en GitHub (`propietario/repo`).
@@ -194,6 +200,21 @@ enum UpdateAction {
         /// Versión instalada actualmente (para el rollback).
         #[arg(long)]
         previous: Option<String>,
+    },
+    /// Revierte a una release local anterior mediante ranura A/B (requiere --yes).
+    Rollback {
+        /// Raíz del despliegue.
+        #[arg(long, default_value = "/opt/nas_debian")]
+        root: String,
+        /// Versión objetivo instalada bajo `<root>/releases/` (por defecto, la anterior).
+        #[arg(long)]
+        version: Option<String>,
+        /// Confirma la ejecución real.
+        #[arg(long)]
+        yes: bool,
+        /// Elevar privilegios con `sudo -n`.
+        #[arg(long)]
+        sudo: bool,
     },
 }
 
@@ -523,6 +544,7 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
         },
         Command::Update { action } => match action {
             None | Some(UpdateAction::Status) => commands::update::update_status(cli.json),
+            Some(UpdateAction::List { root }) => commands::update::update_list(&root, cli.json),
             Some(UpdateAction::Check { repo }) => commands::update::update_check(&repo, cli.json),
             Some(UpdateAction::Verify {
                 manifest,
@@ -569,6 +591,12 @@ fn run(cli: Cli) -> NasResult<ExitCode> {
                 previous.as_deref(),
                 cli.json,
             ),
+            Some(UpdateAction::Rollback {
+                root,
+                version,
+                yes,
+                sudo,
+            }) => commands::update::update_rollback(&root, version.as_deref(), yes, sudo, cli.json),
         },
         Command::Migrate { action } => match action {
             MigrateAction::Status => commands::migrate::migrate_status(cli.json),
