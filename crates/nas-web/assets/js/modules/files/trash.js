@@ -291,9 +291,14 @@ async function restoreTrashItem(id, name) {
 }
 
 async function deleteTrashItem(id, name) {
-  if (!window.confirm(`¿Eliminar definitivamente "${name}"? Esta acción no se puede deshacer.`)) {
-    return;
-  }
+  const confirmed = await confirmModal({
+    title: 'Eliminar elemento de la papelera',
+    message: `¿Eliminar definitivamente "${name}"?`,
+    warning: 'Esta acción no se puede deshacer.',
+    confirmLabel: 'Eliminar definitivamente',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   try {
     await apiFetch('/api/files/trash/delete', {
