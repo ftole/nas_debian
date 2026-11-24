@@ -1,7 +1,7 @@
 # Seguridad y Endurecimiento del Sistema
 
 > [!IMPORTANT]
-> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) riesgos/brechas abiertas** sobre la plataforma actual (`v0.1.12`; detalle completo en [docs/deuda_tecnica.md](./deuda_tecnica.md)).
+> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) riesgos/brechas abiertas** sobre la plataforma actual (`v0.1.13`; detalle completo en [docs/deuda_tecnica.md](./deuda_tecnica.md)).
 
 ![Modelo de Seguridad en Profundidad](./assets/modelo_seguridad.svg)
 
@@ -79,7 +79,7 @@ Los comandos concretos para verificación o endurecimiento adicional (`nas secur
 
 ---
 
-## 3. Estado de Brechas y Riesgos Operativos (`v0.1.12`)
+## 3. Estado de Brechas y Riesgos Operativos (`v0.1.13`)
 
 La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró hallazgos críticos resueltos en `v0.1.11`–`v0.1.12` (`system_update_run` vía `systemd-run`, unificación de plantillas `packaging/` ↔ `deploy/` vía `include_str!`, `su root grp_samba` en `logrotate`, actualización de `web_users` en `packaging/install.sh` y sincronización post-update).
 
