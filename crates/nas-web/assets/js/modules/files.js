@@ -33,6 +33,9 @@ function getFileFormattedSize(item) {
   if (!isNaN(bytes) && bytes > 0) {
     return formatBytesLocal(bytes);
   }
+  if (item.is_dir) {
+    return '--';
+  }
   if (item.size_formatted && item.size_formatted !== '--') {
     return item.size_formatted;
   }
