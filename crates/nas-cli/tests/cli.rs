@@ -357,5 +357,46 @@ fn uninstall_alcance_os_planifica_ajustes_del_sistema() {
     assert!(!bad.status.success());
 }
 
+#[test]
+fn update_list_y_rollback_cli_validan_confirmacion() {
+    let dir = fixture_dir("update-rb");
+    let r1 = dir.join("releases/0.1.11");
+    let r2 = dir.join("releases/0.1.12");
+    std::fs::create_dir_all(r1.join("bin")).unwrap();
+    std::fs::create_dir_all(r2.join("bin")).unwrap();
+    for b in ["nas", "nas-web"] {
+        std::fs::write(r1.join("bin").join(b), b"bin").unwrap();
+        std::fs::write(r2.join("bin").join(b), b"bin").unwrap();
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&r2, dir.join("current")).unwrap();
+
+    let list_out = nas()
+        .args(["--json", "update", "list", "--root", &dir.to_string_lossy()])
+        .output()
+        .expect("update list");
+    assert!(list_out.status.success());
+    let payload = json_of(&list_out);
+    assert_eq!(payload["data"]["current"], "0.1.12");
+    assert_eq!(payload["data"]["previous_version"], "0.1.11");
+    assert_eq!(payload["data"]["rollback_available"], true);
+
+    let denied = nas()
+        .args([
+            "--json",
+            "update",
+            "rollback",
+            "--root",
+            &dir.to_string_lossy(),
+            "--version",
+            "0.1.11",
+        ])
+        .output()
+        .expect("update rollback sin yes");
+    assert!(!denied.status.success());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[path = "cli/helpers.rs"]
 mod helpers;
