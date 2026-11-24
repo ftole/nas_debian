@@ -22,7 +22,7 @@
   <text x="80" y="45" fill="#f8fafc" font-size="16" font-weight="700">Arquitectura General del Sistema</text>
   <text x="80" y="63" fill="#94a3b8" font-size="11.5">Debian 13 Trixie (x86_64) • Workspace Rust (11 crates) • Panel Web 100% Offline • Mínimo Privilegio</text>
   <rect x="838" y="36" width="80" height="24" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1"/>
-  <text x="878" y="52" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">v0.1.12</text>
+  <text x="878" y="52" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">v0.1.13</text>
 
   <!-- CAPA 1: CLIENTES Y ORÍGENES -->
   <g transform="translate(24, 96)">
