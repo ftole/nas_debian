@@ -71,6 +71,7 @@
 /api/system/applications
 /api/system/audit/verify
 /api/system/reboot
+/api/system/update/rollback
 /api/system/update/run
 /api/system/updates
 /api/terminal/capture
