@@ -59,6 +59,7 @@ if grep -qE '^AmbientCapabilities=.*CAP_' "$UNIT"; then
 else
     echo "[OK]    unit: AmbientCapabilities vacío"
 fi
+check "$UNIT" "srv-nas.mount" "unit: ordena arranque tras srv-nas.mount"
 
 check "$INSTALL" "nginx -t" "install: valida nginx"
 check "$INSTALL" "systemctl enable --now nas-web.service" "install: habilita servicio"
