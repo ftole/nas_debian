@@ -46,8 +46,9 @@ pub mod storage_ops;
 pub mod tasks;
 /// Terminal web sobre sesiones tmux.
 pub mod terminal;
-/// Verificación y planificación de actualizaciones firmadas.
+/// Desinstalación controlada de la plataforma.
 pub mod uninstall;
+/// Verificación, planificación de actualizaciones firmadas y regresión A/B.
 pub mod update;
 /// Gestión opcional Plug & Play de UPS/No-Break mediante NUT.
 pub mod ups;
@@ -75,7 +76,8 @@ pub use storage::{Disk, StorageOverview};
 pub use tasks::{last_snapshot, run as run_backup, BackupTask, RunOptions, RunReport, SourceKind};
 pub use terminal::TerminalSession;
 pub use update::{
-    build_plan as build_update_plan, download_and_verify_release, download_file,
-    fetch_latest_release, ReleaseManifest, RemoteReleaseInfo, UpdatePlan,
+    build_plan as build_update_plan, build_rollback_plan, download_and_verify_release,
+    download_file, fetch_latest_release, list_installed_releases, InstalledRelease,
+    ReleaseManifest, RemoteReleaseInfo, UpdatePlan,
 };
 pub use users::{GroupEntry, UserEntry};
