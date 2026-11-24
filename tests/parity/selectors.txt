@@ -2,6 +2,7 @@
 #group-members-list > div
 #groups-table-body tr[data-group]
 #logs-filter-chips .chip-btn
+#modal-prompt-fields input[data-field-id]
 #perm-filter-chips .chip-btn
 #perm-matrix-container table tbody tr[data-entity]
 #trash-table-body tr.selected
@@ -31,6 +32,7 @@
 [id^=
 button[type=
 form
+input
 input[name=
 meta[name=
 option[data-custom=
@@ -71,8 +73,11 @@ bkp-proto
 bkp-retention
 bkp-share
 bkp-user
+btn-cancel-confirm
+btn-cancel-prompt
 btn-cancel-system-rollback
 btn-cancel-system-update
+btn-confirm-accept
 btn-confirm-audit-btrfs
 btn-confirm-delete
 btn-confirm-empty-trash
@@ -121,6 +126,7 @@ btn-submit-new-folder
 btn-submit-new-group
 btn-submit-new-share
 btn-submit-new-user
+btn-submit-prompt
 btn-submit-rename-file
 btn-submit-rename-group
 btn-submit-restore-backup
@@ -232,6 +238,7 @@ files-table-body
 files-table-container
 files-trash-view
 files-units-optgroup
+form-modal-prompt
 form-new-backup
 form-new-group
 form-new-share
@@ -277,9 +284,13 @@ masthead-hostname
 mobile-menu-btn
 modal-backup-logs-content
 modal-backup-logs-title
+modal-confirm
+modal-confirm-icon
 modal-file-preview
 modal-format-disk
 modal-group-members-title
+modal-prompt
+modal-prompt-fields
 modal-storage-manage
 move-file-name-label
 move-file-source
