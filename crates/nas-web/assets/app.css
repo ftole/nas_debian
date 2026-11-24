@@ -1767,7 +1767,7 @@ code, kbd, pre, samp {
 .modal-close:hover { color: var(--text-main); }
 .modal-body { padding: 22px; }
 .modal-footer {
-  padding: 14px 22px;
+  padding: 18px 22px;
   background: var(--bg-card-header);
   border-top: 1px solid var(--border-color);
   display: flex;
