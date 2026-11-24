@@ -52,6 +52,7 @@ check "$INSTALL" "/usr/bin/systemctl enable sssd" "sudoers: ciclo sssd"
 check "$INSTALL" "/usr/local/sbin/nas-terminal *" "sudoers: helper de terminal"
 check "$INSTALL" "/usr/local/sbin/nas-storage-apply *" "sudoers: helper de almacenamiento"
 check "$INSTALL" "/usr/local/sbin/nas-backup-manage *" "sudoers: helper de respaldos"
+check "$INSTALL" "nas-system-rollback" "sudoers: rollback controlado A/B"
 check "$UNIT" "NoNewPrivileges=no" "unit: NoNewPrivileges documentado"
 if grep -qE '^AmbientCapabilities=.*CAP_' "$UNIT"; then
     echo "[FALLO] unit: AmbientCapabilities debe estar vacío en $UNIT"
