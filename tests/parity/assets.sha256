@@ -22,7 +22,7 @@ a35193c57cf3649c77ee3c73878df928632bcad6cd7a67e197373fdabe4f2e0f     16863  crat
 a7ffd522c9b3ecc6f790d7974d618259905fe310b2a1bf339fa6dd29342bbd1f      3995  crates/nas-web/assets/js/modules/services.js
 635756b501fe2cd97049003734fec8bc31ae8c58c968b9a231cbc0acbe7b705b      8811  crates/nas-web/assets/js/modules/logs.js
 8e78f28a3f16fa6ae5814a71e1b4179f2471166cbc559d2bb3cba31971e0906a      8357  crates/nas-web/assets/js/modules/terminal.js
-47cdde921c6f9353231fae0bfb08db64fc6a91da81e7893bb73aa17d57a8c048     14167  crates/nas-web/assets/js/modules/system.js
+12e4b83534f0a662a993942c3ad5ba7c9180da0ae0088976302f2dc34c05e055     22642  crates/nas-web/assets/js/modules/system.js
 d88e61ec1f2821bc8cea24dbb3ef58143f1b707063135e65f457d7528758d360     12295  crates/nas-web/assets/js/modules/system/apps.js
 5b3090f47943e84707bb8868b50e168d2dcc29e643e30458bab7a6db493fda88      7634  crates/nas-web/assets/js/modules/misc.js
 81ccbf900dfa864514858bf87e298153bcaeb645b03e032b3724e042b595c423     15853  crates/nas-web/assets/js/modules/files.js
