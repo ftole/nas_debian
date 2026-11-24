@@ -1,6 +1,8 @@
 //! Gestión de respaldos permanentes inmutables (Golden Snapshots).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
@@ -29,6 +31,72 @@ pub struct PermanentBackupInfo {
 
 /// Tope estricto de inodos distintos en memoria al calcular estadísticas de un respaldo permanente.
 const DIR_STATS_MAX_INODES: usize = 250_000;
+
+fn permanent_stats_cache_path() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    let state_dir = std::env::var("NAS_STATE_DIR")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/var/lib/nas".to_string());
+    Some(PathBuf::from(state_dir).join("permanent_backup_stats.json"))
+}
+
+fn load_permanent_stats_from_file(path: &Path) -> HashMap<String, (u64, u64)> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, (u64, u64)>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn persist_permanent_stats_to_file(path: &Path, map: &HashMap<String, (u64, u64)>) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(parent);
+    let Ok(json) = serde_json::to_string(map) else {
+        return;
+    };
+    let tmp = parent.join(format!(
+        ".permanent_backup_stats.tmp.{}",
+        std::process::id()
+    ));
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn permanent_stats_cache() -> &'static Mutex<HashMap<String, (u64, u64)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (u64, u64)>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let initial = permanent_stats_cache_path()
+            .map(|p| load_permanent_stats_from_file(&p))
+            .unwrap_or_default();
+        Mutex::new(initial)
+    })
+}
+
+fn cached_dir_stats(path: &Path) -> (u64, u64) {
+    let key = path.to_string_lossy().to_string();
+    if let Ok(cache) = permanent_stats_cache().lock() {
+        if let Some(&stats) = cache.get(&key) {
+            return stats;
+        }
+    }
+    let stats = dir_stats(path);
+    let snapshot = if let Ok(mut cache) = permanent_stats_cache().lock() {
+        cache.insert(key, stats);
+        Some(cache.clone())
+    } else {
+        None
+    };
+    if let (Some(cache_path), Some(snap)) = (permanent_stats_cache_path(), snapshot) {
+        persist_permanent_stats_to_file(&cache_path, &snap);
+    }
+    stats
+}
 
 fn dir_stats(path: &Path) -> (u64, u64) {
     let mut files = 0u64;
@@ -397,8 +465,8 @@ pub fn list_permanent_backups(task_filter: Option<&str>) -> NasResult<Vec<Perman
                     (parts.first().unwrap_or(&"desconocida").to_string(), None)
                 };
 
-                let (files_count, size_bytes) = dir_stats(&bkp_path);
-                result.push(PermanentBackupInfo {
+                let (files_count, size_bytes) = cached_dir_stats(&bkp_path);
+                let info = PermanentBackupInfo {
                     task: task_name.clone(),
                     name: folder_name,
                     path: bkp_path.to_string_lossy().to_string(),
@@ -406,7 +474,11 @@ pub fn list_permanent_backups(task_filter: Option<&str>) -> NasResult<Vec<Perman
                     tag,
                     size_bytes,
                     files_count,
-                });
+                };
+                if let Ok(meta_json) = serde_json::to_string_pretty(&info) {
+                    let _ = std::fs::write(&meta_path, meta_json);
+                }
+                result.push(info);
             }
         }
     }
@@ -594,6 +666,37 @@ mod tests {
         let (files, bytes) = dir_stats(&dir);
         assert_eq!(files, 0);
         assert_eq!(bytes, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_de_estadisticas_permanentes_persiste_y_reutiliza_resultado() {
+        let dir = std::env::temp_dir().join(format!(
+            "nas_perm_cache_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let full = dir.join("FULL_2026-11-04_230001_INICIAL");
+        std::fs::create_dir_all(&full).unwrap();
+        std::fs::write(full.join("doc.bin"), vec![0xAAu8; 2048]).unwrap();
+
+        let (files, bytes) = cached_dir_stats(&full);
+        assert_eq!(files, 1);
+        assert_eq!(bytes, 2048);
+
+        let cache_file = dir.join("permanent_backup_stats.json");
+        let mut map = HashMap::new();
+        map.insert(full.to_string_lossy().to_string(), (files, bytes));
+        persist_permanent_stats_to_file(&cache_file, &map);
+        let reloaded = load_permanent_stats_from_file(&cache_file);
+        assert_eq!(
+            reloaded.get(&full.to_string_lossy().to_string()),
+            Some(&(1, 2048))
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
