@@ -438,6 +438,26 @@ mod tests {
     }
 
     #[test]
+    fn omite_recorrido_recursivo_en_subarboles_de_respaldo() {
+        let root = unique_root("omision-pesados");
+        root.mkdir("NORMAL").expect("mkdir");
+        std::fs::write(root.root().join("NORMAL/doc.txt"), b"12345").expect("write");
+        let hist = root.root().join("BACKUPS_HISTORICOS/t1/snapshot_1");
+        std::fs::create_dir_all(&hist).expect("mkdir hist");
+        std::fs::write(hist.join("blob.bin"), vec![1u8; 4096]).expect("write hist");
+
+        let entries = root.list("").expect("list");
+        let normal = entries.iter().find(|e| e.name == "NORMAL").expect("normal");
+        let backups = entries
+            .iter()
+            .find(|e| e.name == "BACKUPS_HISTORICOS")
+            .expect("backups");
+        assert_eq!(normal.size, 5);
+        assert_eq!(backups.size, 0);
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
     fn renombra_y_envia_a_papelera() {
         let root = unique_root("operaciones");
         std::fs::write(root.root().join("original.txt"), b"x").expect("write");
