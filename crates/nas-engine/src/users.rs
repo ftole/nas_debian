@@ -35,31 +35,13 @@ pub struct GroupEntry {
     pub members: Vec<String>,
 }
 
-const RESERVED_SYSTEM_USERS: &[&str] = &[
-    "root",
-    "daemon",
-    "bin",
-    "sys",
-    "sync",
-    "nobody",
-    "nogroup",
-    "www-data",
-    "nas",
-    "nas-web",
-    "sshd",
-    "messagebus",
-];
-
 fn is_system_user(name: &str, uid: u32) -> bool {
-    !(1000..60000).contains(&uid)
-        || RESERVED_SYSTEM_USERS.contains(&name)
-        || name.starts_with("systemd-")
+    !(1000..60000).contains(&uid) || crate::validation::is_reserved_system_user(name)
 }
 
 /// Indica si una cuenta pertenece al sistema operativo y no puede modificarse desde el panel.
 pub fn is_protected_system_account(name: &str, uid: Option<u32>) -> bool {
-    let lower = name.trim().to_ascii_lowercase();
-    if RESERVED_SYSTEM_USERS.contains(&lower.as_str()) || lower.starts_with("systemd-") {
+    if crate::validation::is_reserved_system_user(name) {
         return true;
     }
     if let Some(uid) = uid {
