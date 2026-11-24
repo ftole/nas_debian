@@ -1,29 +1,13 @@
 use std::process::ExitCode;
 
 use nas_core::{ApiResponse, NasResult};
-use nas_exec::{CommandSpec, Runner};
-use serde::Serialize;
+use nas_exec::Runner;
 
 use super::common::print_json;
 
-#[derive(Debug, Serialize)]
-pub struct ServiceStatus {
-    pub service: String,
-    pub active: bool,
-}
-
 pub fn services(json: bool) -> NasResult<ExitCode> {
-    let runner = Runner::new();
-    let list: Vec<ServiceStatus> = ["smbd", "nmbd", "wsdd2", "nginx"]
-        .into_iter()
-        .map(|service| ServiceStatus {
-            service: service.to_string(),
-            active: runner
-                .run(&CommandSpec::new("systemctl").args(["is-active", service]))
-                .map(|out| out.stdout == "active")
-                .unwrap_or(false),
-        })
-        .collect();
+    let list =
+        nas_engine::services::collect(&Runner::new(), nas_engine::services::DEFAULT_SERVICES);
 
     if json {
         print_json(&ApiResponse::ok(list, "Estado de servicios"))?;
