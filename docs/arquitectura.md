@@ -1,7 +1,7 @@
 # Arquitectura del Sistema
 
 > [!NOTE]
-> Documento de diseño estructural del sistema sobre **Debian 13 Trixie (`x86_64`)** (plataforma Rust `v0.1.12`).
+> Documento de diseño estructural del sistema sobre **Debian 13 Trixie (`x86_64`)** (plataforma Rust `v0.1.13`).
 > Los parámetros finos de montaje y comandos de consola viven en **[docs/manual.md](./manual.md)**; el glosario completo del stack en **[docs/tecnologias.md](./tecnologias.md)**; y el modelo de endurecimiento en **[docs/seguridad.md](./seguridad.md)**.
 
 ---
