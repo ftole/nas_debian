@@ -154,11 +154,15 @@ pub fn backup_row_with_context(
 
     let full_size_formatted = if storage_summary.complete {
         human_bytes(full_size_bytes)
+    } else if full_size_bytes == 0 {
+        "Calculando...".to_string()
     } else {
         format!("≈ {}", human_bytes(full_size_bytes))
     };
     let disk_usage_formatted = if storage_summary.complete {
         human_bytes(disk_usage_bytes)
+    } else if disk_usage_bytes == 0 {
+        "Calculando...".to_string()
     } else {
         format!("≈ {}", human_bytes(disk_usage_bytes))
     };
@@ -201,6 +205,7 @@ pub fn backup_row_with_context(
         "full_size_formatted": full_size_formatted,
         "disk_usage_bytes": disk_usage_bytes,
         "disk_usage_formatted": disk_usage_formatted,
+        "size_calculating": !storage_summary.complete,
         "disk_total_bytes": disk_info.total_bytes,
         "disk_used_bytes": disk_info.used_bytes,
         "disk_available_bytes": disk_info.available_bytes,
