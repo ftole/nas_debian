@@ -70,10 +70,9 @@
 
 ## 4. Hallazgos de Severidad MEDIA
 
-- **`DT-M01` — Duplicación crítica entre módulos de sistema:**
-  - `valid_device` / `is_valid_device` (4 variantes), cálculo `parent_disk` / `partition_path` (5 variantes), `is_os_disk` (4 variantes), `update_fstab` (3 variantes), listas `RESERVED` de usuarios (3 variantes, `samba.rs` omite `"nas"`), validadores de share/ID/usuario (algunos compilan `Regex::new` en cada llamada), parsers de `df -Pk` e IP primaria.
-  - `nas-cli` reimplementa `services`, `diag` (omitiendo `sqlite`, `red` y `montaje:rw` de `nas-engine`) y `storage` (usando `lsblk` propio en vez de `nas_engine::storage::disks`).
-  - Dos motores de ejecución de backups divergentes (`tasks/runner.rs` vs `backup_spec/render.rs`) y 3 parsers distintos de `backup_<id>.sh`.
+- **`DT-M01` [PARCIAL] — Duplicación crítica entre módulos de sistema:**
+  - *Resuelto:* validadores de dispositivo, nombres de usuario/grupo/share/unidad, cálculo `parent_disk`/`first_partition_path` y `RESERVED_SYSTEM_USERS` centralizados en `crates/nas-engine/src/validation.rs` (con `OnceLock<Regex>`); `nas-cli` (`services`, `diag`, `storage`) delega directamente en `nas_engine`.
+  - *Pendiente:* `is_os_disk` (4 variantes), `update_fstab` (3 variantes), parsers de `df -Pk`/IP primaria, dos motores de ejecución de backups divergentes (`tasks/runner.rs` vs `backup_spec/render.rs`) y 3 parsers distintos de `backup_<id>.sh`.
 - **`DT-M02` [RESUELTO] — `tasks/runner.rs` limpia `.inprogress_*` y resuelve pool sin `[subvol]`:** `crates/nas-engine/src/tasks/runner.rs` purga `.inprogress_*` tanto al inicio (`clean_orphan_inprogress_dirs`) como al fallar (`remove_dir_all(task.staging_path(now))`), añade `umount -f`/`-l` ante caída CIFS y recorta `[subvol]` en `destination_pool_key`.
 - **`DT-M03` [RESUELTO] — `nas-exec::command.rs` combina `SudoMode::WithPassword` + `stdin_data` y evita bloqueos con nietos en timeout:** `crates/nas-exec/src/command.rs` y `redact.rs` ordenan secretos por longitud descendente, redactan `CommandOutput::command` y acotan la espera de pipes tras timeout.
 - **`DT-M04` — SQLite en `db.rs` corre `ALTER TABLE web_audit` antes de `CREATE TABLE web_audit` y serializa toda la concurrencia bajo un `Mutex` único:** `crates/nas-web/src/db.rs:37,111-124,140`.
@@ -97,7 +96,7 @@
 - `crates/nas-web/templates/layout.html` (**3,359** líneas) y `assets/js/app.js` (**818** líneas)
 - `crates/nas-engine/src/backup_dedup.rs` (**2,889** líneas; `deduplicate_task_inner` mide 448 líneas)
 - `crates/nas-core/src/resources.rs` (**867** líneas)
-- `crates/nas-engine/src/storage.rs` (**857** líneas), `helpers/backup.rs` (**850**), `helpers/accounts.rs` (**707**), `backup_spec.rs` (**685**), `update.rs` (**553**), `deploy/samba.rs` (**514**), `deploy/mod.rs` (**509**), `deploy/artifacts.rs` (**502**), `deploy/storage.rs` (**493**), `tasks/runner.rs` (**481**), `tasks.rs` (**472**), `backup_spec/render.rs` (**465**), `storage_ops.rs` (**461**)
+- `crates/nas-engine/src/helpers/backup.rs` (**850**), `helpers/accounts.rs` (**707**), `backup_spec.rs` (**685**), `update.rs` (**553**), `deploy/samba.rs` (**514**), `deploy/mod.rs` (**509**), `deploy/artifacts.rs` (**502**), `deploy/storage.rs` (**493**), `tasks/runner.rs` (**481**), `tasks.rs` (**472**), `backup_spec/render.rs` (**465**), `storage_ops.rs` (**461**) *(ya modularizados en submódulos: `security.rs`, `storage.rs` y `helpers/storage.rs`)*
 - `crates/nas-cli/src/commands/update.rs` (**828**), `main.rs` (**578**), `helper/dispatch.rs` (**537**), `commands/deploy.rs` (**489**)
 - `crates/nas-web/src/routes/users.rs` (**686**), `files/zip.rs` (**668**), `routes/system.rs` (**625**), `routes/files/mutations.rs` (**619**), `db.rs` (**531**), `legacy/storage.rs` (**504**), `files.rs` (**494**), `files/trash.rs` (**471**)
 - `src/core/updater.sh` (**705**), `src/core/deploy.sh` (**626**), `scripts/qa_live_runner.py` (**619**)
