@@ -2334,7 +2334,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div><strong>Horario habitual:</strong> <span id="confirm-run-backup-cron"></span></div>
         </div>
       </div>
-      <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+      <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-run-backup-confirm')">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btn-confirm-run-backup" onclick="executeRunBackupConfirm()">
           <svg class="icon icon-sm"><use href="#icon-play"></use></svg> Iniciar Respaldo Ahora
@@ -2367,7 +2367,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <div><strong>Velocidad / Tasa:</strong> <span id="confirm-stop-backup-speed"></span></div>
         </div>
       </div>
-      <div class="modal-footer" style="padding:0; margin-top:20px; gap:10px;">
+      <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-stop-backup-confirm')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-confirm-stop-backup" onclick="executeStopBackupConfirm()">
           <svg class="icon icon-sm"><use href="#icon-stop"></use></svg> Detener Respaldo
@@ -2916,7 +2916,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
         <p id="user-action-confirm-desc" style="color:var(--text-secondary); font-size:13px; line-height:1.5; margin-bottom:12px;"></p>
         <p style="font-weight:600; font-size:13px;" id="user-action-confirm-prompt">¿Deseas proceder con esta acción?</p>
       </div>
-      <div class="modal-footer" style="padding:0; margin-top:20px;">
+      <div class="modal-footer">
         <button type="button" class="btn btn-secondary" onclick="closeModal('modal-user-action-confirm')">Cancelar</button>
         <button type="button" class="btn btn-danger" id="btn-user-action-confirm-submit" onclick="executeUserActionConfirm()">Confirmar</button>
       </div>
