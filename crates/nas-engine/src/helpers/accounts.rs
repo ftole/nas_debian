@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
 use nas_exec::{CommandSpec, Runner, SecretInput};
-use regex::Regex;
 
 mod groups;
 
@@ -15,40 +14,20 @@ pub use groups::{
 };
 
 /// Cuentas reservadas del sistema que nunca pueden gestionarse mediante el helper.
-pub const RESERVED_USERS: &[&str] = &[
-    "root",
-    "daemon",
-    "bin",
-    "sys",
-    "sync",
-    "nobody",
-    "nogroup",
-    "www-data",
-    "nas",
-    "nas-web",
-    "sshd",
-    "messagebus",
-];
+pub use crate::validation::RESERVED_SYSTEM_USERS as RESERVED_USERS;
 
 /// Grupos protegidos de la plataforma que no pueden eliminarse ni renombrarse.
 pub const PROTECTED_GROUPS: &[&str] = &["grp_samba", "grp_web", "grp_superadmin", "grp_backups"];
 
 /// Valida si el nombre de usuario cumple con la sintaxis POSIX y no está reservado.
 pub fn is_valid_user(username: &str) -> bool {
-    let re = Regex::new(r"^[a-z_][a-z0-9_-]{0,31}$").expect("regex válido");
-    if !re.is_match(username) {
-        return false;
-    }
-    if username.starts_with("systemd-") {
-        return false;
-    }
-    !RESERVED_USERS.contains(&username)
+    crate::validation::is_valid_username_syntax(username)
+        && !crate::validation::is_reserved_system_user(username)
 }
 
 /// Valida si el nombre de grupo cumple con la convención corporativa `grp_*`.
 pub fn is_valid_group(group: &str) -> bool {
-    let re = Regex::new(r"^grp_[a-z0-9_-]{1,28}$").expect("regex válido");
-    re.is_match(group)
+    crate::validation::is_valid_group_name(group)
 }
 
 /// Comprueba si la cuenta es la superadministradora (inmutable).
