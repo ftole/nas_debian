@@ -96,9 +96,9 @@
 - `crates/nas-web/templates/layout.html` (**3,359** líneas) y `assets/js/app.js` (**818** líneas)
 - `crates/nas-engine/src/backup_dedup.rs` (**2,889** líneas; `deduplicate_task_inner` mide 448 líneas)
 - `crates/nas-core/src/resources.rs` (**867** líneas)
-- `crates/nas-engine/src/helpers/backup.rs` (**850**), `helpers/accounts.rs` (**707**), `backup_spec.rs` (**685**), `update.rs` (**553**), `deploy/samba.rs` (**514**), `deploy/mod.rs` (**509**), `deploy/artifacts.rs` (**502**), `deploy/storage.rs` (**493**), `tasks/runner.rs` (**481**), `tasks.rs` (**472**), `backup_spec/render.rs` (**465**), `storage_ops.rs` (**461**) *(ya modularizados en submódulos: `security.rs`, `storage.rs` y `helpers/storage.rs`)*
-- `crates/nas-cli/src/commands/update.rs` (**828**), `main.rs` (**578**), `helper/dispatch.rs` (**537**), `commands/deploy.rs` (**489**)
-- `crates/nas-web/src/routes/users.rs` (**686**), `files/zip.rs` (**668**), `routes/system.rs` (**625**), `routes/files/mutations.rs` (**619**), `db.rs` (**531**), `legacy/storage.rs` (**504**), `files.rs` (**494**), `files/trash.rs` (**471**)
+- `crates/nas-engine/src/backup_spec.rs` (**685**), `deploy/samba.rs` (**514**), `deploy/mod.rs` (**509**), `deploy/artifacts.rs` (**502**), `deploy/storage.rs` (**493**), `tasks/runner.rs` (**481**), `tasks.rs` (**472**), `backup_spec/render.rs` (**465**), `storage_ops.rs` (**461**) *(ya modularizados en submódulos: `security.rs`, `storage.rs`, `helpers/storage.rs`, `update.rs`, `helpers/backup.rs` y `helpers/accounts.rs`)*
+- `crates/nas-cli/src/main.rs` (**578**), `helper/dispatch.rs` (**537**), `commands/deploy.rs` (**489**) *(ya modularizado: `commands/update.rs`)*
+- `crates/nas-web/src/routes/users.rs` (**686**), `files/zip.rs` (**668**), `routes/files/mutations.rs` (**619**), `db.rs` (**531**), `legacy/storage.rs` (**504**), `files.rs` (**494**), `files/trash.rs` (**471**) *(ya modularizado: `routes/system.rs`)*
 - `src/core/updater.sh` (**705**), `src/core/deploy.sh` (**626**), `scripts/qa_live_runner.py` (**619**)
 
 ### `DT-B02` a `DT-B08` — Código muerto, restos PHP/Whiptail y deuda de pruebas
