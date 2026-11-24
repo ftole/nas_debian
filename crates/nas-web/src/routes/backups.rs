@@ -99,7 +99,7 @@ pub async fn backups(State(state): State<AppState>, _user: AuthenticatedUser) ->
     }
 
     let dir = state.backup_dir.clone();
-    let discovered = match state
+    match state
         .run_system_blocking(move || {
             let tasks = nas_engine::tasks::BackupTask::discover(&dir).unwrap_or_default();
             let running_ids = crate::legacy::running_backup_task_ids();
@@ -111,55 +111,26 @@ pub async fn backups(State(state): State<AppState>, _user: AuthenticatedUser) ->
                         crate::legacy::calculate_destination_disk(&task.destination_root)
                     });
             }
-            (tasks, running_ids, disk_cache)
+            tasks
+                .into_iter()
+                .map(|task| {
+                    let last = last_snapshot(&task);
+                    let mut row = crate::legacy::backup_row_with_context(
+                        &task,
+                        &mut disk_cache,
+                        Some(&running_ids),
+                    );
+                    row["task"] = serde_json::json!(task);
+                    row["last_snapshot"] = serde_json::json!(last);
+                    row
+                })
+                .collect::<Vec<serde_json::Value>>()
         })
         .await
     {
-        Ok(tuple) => tuple,
-        Err(_) => return server_error("consulta de respaldos interrumpida"),
-    };
-
-    let (tasks, running_ids, disk_cache) = discovered;
-    let running_shared = std::sync::Arc::new(running_ids);
-    let disk_shared = std::sync::Arc::new(disk_cache);
-
-    let mut handles = Vec::with_capacity(tasks.len());
-    for (idx, task) in tasks.into_iter().enumerate() {
-        let sem = state.system_ops.clone();
-        let running_ref = running_shared.clone();
-        let disk_ref = disk_shared.clone();
-        handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire_owned().await.ok();
-            let row = tokio::task::spawn_blocking(move || {
-                let mut local_disk = std::collections::HashMap::new();
-                if let Some(cached) = disk_ref.get(&task.destination_root) {
-                    local_disk.insert(task.destination_root.clone(), cached.clone());
-                }
-                let last = last_snapshot(&task);
-                let mut row = crate::legacy::backup_row_with_context(
-                    &task,
-                    &mut local_disk,
-                    Some(running_ref.as_ref()),
-                );
-                row["task"] = serde_json::json!(task);
-                row["last_snapshot"] = serde_json::json!(last);
-                row
-            })
-            .await
-            .unwrap_or_else(|_| serde_json::json!({}));
-            (idx, row)
-        }));
+        Ok(list) => axum::Json(ApiResponse::ok(list, "Tareas de respaldo")).into_response(),
+        Err(_) => server_error("consulta de respaldos interrumpida"),
     }
-
-    let mut indexed = Vec::with_capacity(handles.len());
-    for handle in handles {
-        if let Ok(pair) = handle.await {
-            indexed.push(pair);
-        }
-    }
-    indexed.sort_by_key(|(idx, _)| *idx);
-    let list: Vec<serde_json::Value> = indexed.into_iter().map(|(_, row)| row).collect();
-    axum::Json(ApiResponse::ok(list, "Tareas de respaldo")).into_response()
 }
 
 /// Plan de ejecución de una tarea de respaldo.
