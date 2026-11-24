@@ -301,6 +301,7 @@ nas-web ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl s
     /usr/bin/systemctl restart cron, /usr/bin/systemctl reload cron, \
     /usr/bin/systemd-run --no-block --collect systemctl reboot, \
     /usr/bin/systemd-run --no-block --collect --unit=nas-system-update /usr/local/bin/nas --json update apply --repo ftole/nas_debian --root /opt/nas_debian --yes, \
+    /usr/bin/systemd-run --no-block --collect --unit=nas-system-rollback /usr/local/bin/nas --json update rollback --root /opt/nas_debian --yes --version *, \
     /usr/bin/smbstatus -b, /usr/bin/testparm -s, \
     /usr/sbin/realm list, /usr/sbin/realm discover *, /usr/sbin/realm join *, /usr/sbin/realm leave, \
     /usr/bin/btrfs scrub status /srv/nas, /usr/bin/btrfs scrub start /srv/nas, /usr/bin/btrfs subvolume list /srv/nas, \
