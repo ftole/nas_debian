@@ -1,7 +1,7 @@
 # Laboratorio, Flujo de Desarrollo, CI y Releases
 
 > [!NOTE]
-> Documento unificado para desarrolladores, integradores y agentes de IA. Reemplaza `MANUAL_DESARROLLADORES.md`, `Preparar_Laboratorio.md`, `despliegue_rust.md` y `releases.md`, reflejando el flujo activo sobre Debian 13 (plataforma Rust `0.1.12`).
+> Documento unificado para desarrolladores, integradores y agentes de IA. Reemplaza `MANUAL_DESARROLLADORES.md`, `Preparar_Laboratorio.md`, `despliegue_rust.md` y `releases.md`, reflejando el flujo activo sobre Debian 13 (plataforma Rust `0.1.13`).
 
 ---
 
