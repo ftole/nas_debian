@@ -181,15 +181,7 @@ impl DeployParams {
 
     /// Ruta de la partición principal del disco indicado.
     pub fn partition_path(&self) -> Option<String> {
-        if self.disk == "LOCAL" {
-            return None;
-        }
-        let suffix = if self.disk.starts_with("/dev/nvme") || self.disk.starts_with("/dev/mmcblk") {
-            "p1"
-        } else {
-            "1"
-        };
-        Some(format!("{}{suffix}", self.disk.trim_end_matches('/')))
+        storage::partition_path(&self.disk)
     }
 
     /// Plan de referencia (informativo) del despliegue.
