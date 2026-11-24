@@ -131,9 +131,14 @@ async function viewBackupLogs(taskId) {
 }
 
 async function deleteBackupTask(taskId) {
-  if (!window.confirm(`¿Deseas eliminar la tarea de backup [${taskId}]? Los snapshots históricos ya creados se preservarán.`)) {
-    return;
-  }
+  const confirmed = await confirmModal({
+    title: 'Eliminar tarea de backup',
+    message: `¿Deseas eliminar la tarea de backup [${taskId}]?`,
+    note: 'Los snapshots históricos ya creados se preservarán.',
+    confirmLabel: 'Eliminar tarea',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   try {
     await apiFetch('/api/backups/delete', {
@@ -355,9 +360,15 @@ async function submitRestoreBackup(event) {
     }
   }
 
-  if (!window.confirm(`¿Confirmas la restauración del snapshot [${snapshot}]?\nDestino: ${target ? target : 'Origen de red original (sobrescribe archivos)'}`)) {
-    return;
-  }
+  const destLabel = target ? target : 'Origen de red original (sobrescribe archivos)';
+  const confirmed = await confirmModal({
+    title: 'Restaurar snapshot',
+    message: `¿Confirmas la restauración del snapshot [${snapshot}]?`,
+    warning: `Destino: ${destLabel}`,
+    confirmLabel: 'Restaurar ahora',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   if (btn) btn.disabled = true;
   try {
@@ -376,9 +387,14 @@ async function submitRestoreBackup(event) {
 }
 
 async function deletePermanentBackup(taskId, name) {
-  if (!window.confirm(`¿Deseas eliminar permanentemente el respaldo [${name}] de la tarea [${taskId}]? Esta acción no se puede deshacer.`)) {
-    return;
-  }
+  const confirmed = await confirmModal({
+    title: 'Eliminar respaldo permanente',
+    message: `¿Deseas eliminar permanentemente el respaldo [${name}] de la tarea [${taskId}]?`,
+    warning: 'Esta acción no se puede deshacer.',
+    confirmLabel: 'Eliminar permanentemente',
+    danger: true,
+  });
+  if (!confirmed) return;
 
   try {
     const res = await apiFetch('/api/backups/permanent/delete', {
