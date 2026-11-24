@@ -99,21 +99,7 @@ pub fn validate_principal(principal: &str) -> NasResult<()> {
     if trimmed.starts_with('@') {
         return validate_group(trimmed);
     }
-    const RESERVED: &[&str] = &[
-        "root",
-        "daemon",
-        "bin",
-        "sys",
-        "sync",
-        "nobody",
-        "nogroup",
-        "www-data",
-        "nas-web",
-        "sshd",
-        "messagebus",
-    ];
-    let lower = trimmed.to_ascii_lowercase();
-    if RESERVED.contains(&lower.as_str()) || lower.starts_with("systemd-") {
+    if crate::validation::is_reserved_system_user(trimmed) {
         return Err(NasError::Invalid(format!(
             "cuenta reservada no permitida en Samba: {trimmed}"
         )));
