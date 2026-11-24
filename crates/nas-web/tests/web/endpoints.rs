@@ -570,3 +570,90 @@ async fn system_updates_local_expone_ultimo_resultado_de_auditoria() {
         .unwrap_or("")
         .contains("Ed25519"));
 }
+
+#[tokio::test]
+async fn system_updates_expone_releases_y_rollback_valida_confirmacion_y_version() {
+    let dir = temp_dir("sys-rollback-ep");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("usuario");
+    let auth = Auth::new(db, 3600, false);
+    let mut paths = paths_for(&dir);
+    paths.repo = dir.clone();
+
+    for ver in ["0.1.11", "0.1.12"] {
+        let rel = dir.join("releases").join(ver);
+        std::fs::create_dir_all(rel.join("bin")).unwrap();
+        std::fs::write(rel.join("bin/nas"), b"bin").unwrap();
+        std::fs::write(rel.join("bin/nas-web"), b"bin").unwrap();
+        std::fs::write(
+            rel.join("version.json"),
+            format!(r#"{{"version":"{ver}","commit":"abc","ed25519_verified":true}}"#),
+        )
+        .unwrap();
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(dir.join("releases/0.1.12"), dir.join("current")).unwrap();
+
+    let app = router(AppState::new(auth, paths, ServerRole::Arquivos));
+    let cookie = cookie_for(&app).await;
+
+    let res = app
+        .clone()
+        .oneshot(get("/api/system/updates?local=1", &cookie))
+        .await
+        .expect("updates local");
+    assert_eq!(res.status(), StatusCode::OK);
+    let payload: serde_json::Value = serde_json::from_str(&body_text(res).await).expect("json");
+    assert_eq!(payload["data"]["rollback_available"], true);
+    assert_eq!(payload["data"]["previous_version"], "0.1.11");
+    assert_eq!(
+        payload["data"]["installed_releases"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+
+    let bad_confirm = app
+        .clone()
+        .oneshot(post_json(
+            "/api/system/update/rollback",
+            &cookie,
+            r#"{"version":"0.1.11","confirm":"NO"}"#,
+        ))
+        .await
+        .expect("bad confirm");
+    assert_eq!(bad_confirm.status(), StatusCode::BAD_REQUEST);
+
+    let bad_trav = app
+        .clone()
+        .oneshot(post_json(
+            "/api/system/update/rollback",
+            &cookie,
+            r#"{"version":"../etc","confirm":"SI-REVERTIR"}"#,
+        ))
+        .await
+        .expect("bad trav");
+    assert_eq!(bad_trav.status(), StatusCode::BAD_REQUEST);
+
+    let active_ver = app
+        .clone()
+        .oneshot(post_json(
+            "/api/system/update/rollback",
+            &cookie,
+            r#"{"version":"0.1.12","confirm":"SI-REVERTIR"}"#,
+        ))
+        .await
+        .expect("active ver");
+    assert_eq!(active_ver.status(), StatusCode::BAD_REQUEST);
+
+    let missing_ver = app
+        .oneshot(post_json(
+            "/api/system/update/rollback",
+            &cookie,
+            r#"{"version":"9.9.9","confirm":"SI-REVERTIR"}"#,
+        ))
+        .await
+        .expect("missing ver");
+    assert_eq!(missing_ver.status(), StatusCode::NOT_FOUND);
+}
