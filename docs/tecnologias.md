@@ -7,7 +7,7 @@
 
 ## 1. Núcleo de Plataforma y Lenguaje Rust
 
-La plataforma actual (`0.1.12`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
+La plataforma actual (`0.1.13`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
 
 | Tecnología / Crate | Qué Significa | Qué Problema Resuelve y Beneficio Práctico |
 | :--- | :--- | :--- |
