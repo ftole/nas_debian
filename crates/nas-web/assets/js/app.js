@@ -164,7 +164,6 @@ function switchView(viewName, updateHash = true) {
       break;
     case 'files':
       loadFiles();
-      updateTrashBadge();
       break;
     case 'shares':
       loadShares();
