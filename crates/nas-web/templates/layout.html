@@ -3243,6 +3243,45 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
     </div>
   </div>
 
+  <!-- Modal: Confirmación Genérica (sustituye a confirm() nativo) -->
+  <div class="modal-backdrop modal-static" id="modal-confirm">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon" id="modal-confirm-icon" style="color:var(--accent-danger);"><use href="#icon-alert-triangle"></use></svg> <span id="modal-confirm-title">Confirmar acción</span></h3>
+        <button class="modal-close" onclick="resolveConfirmModal(false)">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-confirm-message"></p>
+        <p id="modal-confirm-note" style="color:var(--text-secondary); font-size:12.5px; margin-top:8px; display:none;"></p>
+        <p id="modal-confirm-warning" style="color:var(--accent-danger); font-size:12.5px; margin-top:8px; display:none;"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-confirm" onclick="resolveConfirmModal(false)">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-accept" onclick="resolveConfirmModal(true)">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Captura Genérica de Datos (sustituye a prompt() nativo) -->
+  <div class="modal-backdrop modal-static" id="modal-prompt">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-primary);"><use href="#icon-key"></use></svg> <span id="modal-prompt-title">Datos requeridos</span></h3>
+        <button class="modal-close" onclick="resolvePromptModal(null)">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-prompt-message" style="display:none;"></p>
+        <form id="form-modal-prompt" onsubmit="submitPromptModal(event)">
+          <div id="modal-prompt-fields"></div>
+          <div class="modal-footer" style="padding:0; margin-top:20px;">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-prompt" onclick="resolvePromptModal(null)">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-prompt">Aceptar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Confirmar Reinicio -->
   <div class="modal-backdrop modal-static" id="modal-reboot-server">
     <div class="modal-dialog">
