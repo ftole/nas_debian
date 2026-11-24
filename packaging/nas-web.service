@@ -1,7 +1,7 @@
 [Unit]
 Description=Panel web NAS (Rust/axum)
 Documentation=https://github.com/ftole/nas_debian
-After=network-online.target
+After=network-online.target local-fs.target srv-nas.mount
 Wants=network-online.target
 
 [Service]
