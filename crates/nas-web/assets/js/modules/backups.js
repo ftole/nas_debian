@@ -63,7 +63,7 @@ function renderBackupsTable() {
           : (isErr ? 'Error · Reintentar' : 'Pendiente')));
 
     const taskSize = t.full_size_formatted || t.size_formatted || t.task_size_formatted || '0 B';
-    const diskUsage = (t.disk_usage_formatted && t.disk_usage_formatted !== '0 B')
+    const diskUsage = (t.disk_usage_formatted && t.disk_usage_formatted !== '0 B' && t.disk_usage_formatted !== 'Calculando...')
       ? `Ocupación en disco: ${escapeHtml(t.disk_usage_formatted)}`
       : null;
     const diskText = (t.disk_total_formatted && t.disk_total_formatted !== '')
@@ -135,26 +135,29 @@ async function loadBackups() {
     renderBackupsTable();
 
     const anyRunning = tasks.some(t => Boolean(t.running || t.last_status === 'En curso'));
-    scheduleBackupRefresh(anyRunning);
+    const anyCalculating = tasks.some(t => Boolean(t.size_calculating));
+    scheduleBackupRefresh(anyRunning, anyCalculating);
   } catch (e) {
     _backupPollFailures = Math.min(_backupPollFailures + 1, 4);
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-danger);">Error al cargar tareas de backup: ${escapeHtml(e.message)}</td></tr>`;
     const wasRunning = _backupsData.some(t => Boolean(t.running || t.last_status === 'En curso'));
-    scheduleBackupRefresh(wasRunning);
+    const wasCalculating = _backupsData.some(t => Boolean(t.size_calculating));
+    scheduleBackupRefresh(wasRunning, wasCalculating);
   } finally {
     _backupLoadInFlight = false;
   }
 }
 
-function scheduleBackupRefresh(anyRunning) {
+function scheduleBackupRefresh(anyRunning, anyCalculating = false) {
   if (_backupRefreshTimer) {
     clearTimeout(_backupRefreshTimer);
     _backupRefreshTimer = null;
   }
-  if (anyRunning && AppState.activeView === 'backups') {
+  if ((anyRunning || anyCalculating) && AppState.activeView === 'backups') {
+    const baseDelay = anyRunning ? 2000 : 4000;
     const delay = document.hidden
       ? 10000
-      : Math.min(15000, 2000 * Math.pow(2, _backupPollFailures));
+      : Math.min(15000, baseDelay * Math.pow(2, _backupPollFailures));
     _backupRefreshTimer = setTimeout(() => {
       if (AppState.activeView === 'backups') loadBackups();
     }, delay);
