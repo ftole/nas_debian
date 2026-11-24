@@ -71,6 +71,7 @@ bkp-proto
 bkp-retention
 bkp-share
 bkp-user
+btn-cancel-system-rollback
 btn-cancel-system-update
 btn-confirm-audit-btrfs
 btn-confirm-delete
@@ -107,6 +108,7 @@ btn-restart-wsdd
 btn-sanitize-fstab
 btn-scrub-btrfs
 btn-scrub-storage
+btn-start-system-rollback
 btn-start-system-update
 btn-submit-edit-backup
 btn-submit-edit-share
@@ -344,6 +346,11 @@ restore-bkp-snap-display
 restore-bkp-snapshot-path
 restore-bkp-task-id
 restore-bkp-task-name
+rollback-confirm-input
+rollback-controls
+rollback-empty-msg
+rollback-releases-list
+rollback-target-version
 sanitize-fstab-alert-summary
 sanitize-fstab-issues-list
 services-table-body
@@ -411,6 +418,13 @@ storage-pools-grid
 storage-subvols-body
 storage-units-body
 system-banners
+system-rollback-footer
+system-rollback-log
+system-rollback-progress
+system-rollback-progress-bar
+system-rollback-spinner
+system-rollback-step-label
+system-rollback-target-label
 system-update-footer
 system-update-log
 system-update-progress
