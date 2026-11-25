@@ -191,6 +191,7 @@ pub async fn users(
                 Vec::new()
             };
 
+            let configured_super = crate::routes::common::configured_superadmin();
             let list: Vec<serde_json::Value> = users
                 .into_iter()
                 .map(|user| {
@@ -200,9 +201,11 @@ pub async fn users(
                         .map(|group| group.name.clone())
                         .collect();
                     let role = db.user_role(&user.name).ok().flatten();
-                    let is_superadmin = role.as_deref() == Some("superadmin");
-                    let is_admin = matches!(role.as_deref(), Some("admin") | Some("superadmin"));
-                    let can_web = role.is_some();
+                    let is_superadmin = configured_super.as_deref() == Some(user.name.as_str())
+                        || role.as_deref() == Some("superadmin");
+                    let is_admin = is_superadmin
+                        || matches!(role.as_deref(), Some("admin") | Some("superadmin"));
+                    let can_web = is_superadmin || role.is_some();
                     let runtime = status_map
                         .as_ref()
                         .and_then(|map| map.get(&user.name).copied())
@@ -399,6 +402,21 @@ pub async fn user_update(
     let password = body.password.clone();
     let grant_admin = target_is_super || body.is_superadmin || body.is_admin;
     let can_web = target_is_super || body.can_web || grant_admin;
+
+    // DT-A18: al habilitar acceso web por primera vez sin hash previo en SQLite,
+    // se exige definir una contraseña explícita en lugar de devolver un 200 OK falso.
+    if can_web && body.password.is_empty() {
+        let uname_check = body.username.clone();
+        let has_existing_web_hash = state
+            .run_db(move |db| Ok(db.user_hash(&uname_check)?.is_some()))
+            .await
+            .unwrap_or(false);
+        if !has_existing_web_hash {
+            return bad_request(
+                "debe establecer una contraseña de al menos 6 caracteres al habilitar el acceso web por primera vez",
+            );
+        }
+    }
 
     let hash_password = if can_web && !body.password.is_empty() {
         Some(body.password.clone())
