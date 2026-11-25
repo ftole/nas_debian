@@ -414,7 +414,27 @@ fn asset_version_stamp() -> String {
         .get_or_init(|| {
             let mut h = Sha256::new();
             h.update(APP_CSS.as_bytes());
-            h.update(crate::assets::APP_JS);
+            for asset in [
+                crate::assets::APP_JS,
+                crate::assets::LIB_API_JS,
+                crate::assets::LIB_MODAL_JS,
+                crate::assets::LIB_UTILS_JS,
+                crate::assets::LIB_TOAST_JS,
+                crate::assets::MODULE_STORAGE_JS,
+                crate::assets::MODULE_USERS_JS,
+                crate::assets::MODULE_BACKUPS_JS,
+                crate::assets::MODULE_DASHBOARD_JS,
+                crate::assets::MODULE_DOMAIN_JS,
+                crate::assets::MODULE_FILES_JS,
+                crate::assets::MODULE_LOGS_JS,
+                crate::assets::MODULE_MISC_JS,
+                crate::assets::MODULE_SERVICES_JS,
+                crate::assets::MODULE_SHARES_JS,
+                crate::assets::MODULE_SYSTEM_JS,
+                crate::assets::MODULE_TERMINAL_JS,
+            ] {
+                h.update(asset);
+            }
             let hex_str = hex::encode(h.finalize());
             format!("{}-{}", env!("CARGO_PKG_VERSION"), &hex_str[..8])
         })
