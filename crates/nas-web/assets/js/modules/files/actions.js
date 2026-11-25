@@ -213,28 +213,19 @@ async function downloadFolderZip(relPath, force = false) {
       return;
     }
 
-    const blob = await res.blob();
-    let downloadFilename = `${folderName}.zip`;
-    const disp = res.headers.get('Content-Disposition') || '';
-    const match = disp.match(/filename="?([^";]+)"?/i);
-    if (match && match[1]) {
-      try {
-        downloadFilename = decodeURIComponent(match[1]);
-      } catch (_) {
-        downloadFilename = match[1];
-      }
+    // Fallback seguro en streaming directo sin cargar el ZIP en RAM del navegador (DT-C03).
+    if (res.body && typeof res.body.cancel === 'function') {
+      try { await res.body.cancel(); } catch (_) { }
     }
-
-    showToast(`Compresión finalizada. Iniciando descarga de "${downloadFilename}"...`, 'success');
-
-    const blobUrl = URL.createObjectURL(blob);
+    const fallbackFilename = `${folderName}.zip`;
+    showToast(`Iniciando descarga directa en streaming de "${fallbackFilename}"...`, 'info');
     const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = downloadFilename;
+    link.href = `/api/files/zip?root=${root}&path=${path}`;
+    link.download = fallbackFilename;
+    link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
   } catch (err) {
     showToast(`Error durante la compresión o descarga ZIP: ${err.message || err}`, 'error');
   } finally {
