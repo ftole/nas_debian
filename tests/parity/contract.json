@@ -1325,7 +1325,8 @@
       "meta[name=",
       "option[data-custom=",
       "option[value=",
-      "script, foreignObject, iframe, object, embed",
+      "parsererror",
+      "script, foreignObject, iframe, object, embed, animate, set, animateTransform, style, meta, link",
       "script, iframe, object, embed, form, base, meta",
       "style",
       "use"
@@ -1476,7 +1477,7 @@
     "layout_ids": 547,
     "layout_classes": 159,
     "app_ids": 461,
-    "app_selectors": 45,
+    "app_selectors": 46,
     "app_endpoints": 89,
     "inline_handlers": 48
   }
