@@ -348,16 +348,28 @@ pub fn restore_backup(
                     "falta SRC_SHARE en la configuración de la tarea".into(),
                 ));
             };
-            let Some(cred) = task_info.cred_file.as_deref() else {
+            let Some(cred_raw) = task_info.cred_file.as_deref() else {
                 return Err(NasError::Invalid(
                     "falta CRED_FILE en la configuración de la tarea".into(),
                 ));
             };
+            let cred_base = std::fs::canonicalize("/etc/backup-credentials")
+                .unwrap_or_else(|_| PathBuf::from("/etc/backup-credentials"));
+            let cred_canon = std::fs::canonicalize(cred_raw).map_err(|_| {
+                NasError::Denied(format!("archivo de credenciales no accesible: {cred_raw}"))
+            })?;
+            if !cred_canon.starts_with(&cred_base) {
+                return Err(NasError::Denied(
+                    "CRED_FILE fuera de /etc/backup-credentials".into(),
+                ));
+            }
+            let cred = cred_canon.to_string_lossy().to_string();
 
             let mount_dir = format!("/mnt/restore_targets/{id}");
             std::fs::create_dir_all(&mount_dir).map_err(|e| NasError::Denied(e.to_string()))?;
 
-            let mount_opt = format!("credentials={cred},rw,iocharset=utf8,vers=3.1.1,noserverino");
+            let mount_opt =
+                format!("credentials={cred},rw,soft,iocharset=utf8,vers=3.1.1,noserverino");
             let mount_res = runner.run(
                 &CommandSpec::new("mount")
                     .args([
@@ -390,11 +402,29 @@ pub fn restore_backup(
                     .timeout(timeout),
             );
 
-            let _ = runner.run(
-                &CommandSpec::new("umount")
-                    .args([&mount_dir])
-                    .timeout(Duration::from_secs(15)),
-            );
+            let umount_ok = runner
+                .run(
+                    &CommandSpec::new("umount")
+                        .args([&mount_dir])
+                        .timeout(Duration::from_secs(15)),
+                )
+                .is_ok_and(|o| o.is_success());
+            if !umount_ok {
+                let f_ok = runner
+                    .run(
+                        &CommandSpec::new("umount")
+                            .args(["-f", &mount_dir])
+                            .timeout(Duration::from_secs(10)),
+                    )
+                    .is_ok_and(|o| o.is_success());
+                if !f_ok {
+                    let _ = runner.run(
+                        &CommandSpec::new("umount")
+                            .args(["-l", &mount_dir])
+                            .timeout(Duration::from_secs(10)),
+                    );
+                }
+            }
 
             match rsync_res {
                 Ok(res) if res.is_success() || res.code == 24 || res.code == 23 => Ok(format!(
@@ -435,9 +465,15 @@ pub fn restore_backup(
             } else {
                 let cred = task_info.cred_file.as_deref().unwrap_or_default();
                 let mut pass = String::new();
-                if Path::new(cred).is_file() {
-                    if let Ok(c) = std::fs::read_to_string(cred) {
-                        pass = c.lines().next().unwrap_or("").trim().to_string();
+                if !cred.is_empty() {
+                    let cred_base = std::fs::canonicalize("/etc/backup-credentials")
+                        .unwrap_or_else(|_| PathBuf::from("/etc/backup-credentials"));
+                    if let Ok(cred_canon) = std::fs::canonicalize(cred) {
+                        if cred_canon.starts_with(&cred_base) && cred_canon.is_file() {
+                            if let Ok(c) = std::fs::read_to_string(&cred_canon) {
+                                pass = c.lines().next().unwrap_or("").trim().to_string();
+                            }
+                        }
                     }
                 }
                 let ssh_cmd = nas_ssh::rsync_ssh_command(task_info.src_port, None);
