@@ -170,7 +170,7 @@ update_progress() {{
         fi
         if [ "$eff_pct" -gt 100 ]; then eff_pct=100; fi
 
-        now_sec=$(date +%s)
+        printf -v now_sec '%(%s)T' -1
         if [ "$now_sec" = "$last_sec" ] && [ "$eff_pct" = "$last_pct" ]; then
             continue
         fi
@@ -387,7 +387,11 @@ if [ "$TOTAL_SNAPS" -gt "$RETENTION" ]; then
     for ((i = 0; i < TO_REMOVE; i++)); do
         OLD="${{ALL_SNAPS[$i]}}"
         chattr -i "$OLD" 2>/dev/null || true
-        if ! rm -rf -- "$OLD" 2>/dev/null; then
+        if btrfs subvolume show "$OLD" >/dev/null 2>&1; then
+            btrfs property set "$OLD" ro false 2>/dev/null || true
+            btrfs subvolume delete "$OLD" 2>/dev/null || true
+        fi
+        if [ -e "$OLD" ] && ! rm -rf -- "$OLD" 2>/dev/null; then
             chattr -R -i "$OLD" 2>/dev/null || true
             find "$OLD" -type d -exec chmod u+w {{}} + 2>/dev/null || true
             rm -rf -- "$OLD" 2>/dev/null || true
