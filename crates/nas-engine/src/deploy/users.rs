@@ -10,8 +10,6 @@ use std::time::Duration;
 use nas_core::{NasError, NasResult};
 use nas_exec::{CommandSpec, Runner};
 
-use super::Artifact;
-
 /// Grupos corporativos que el despliegue garantiza que existan.
 pub const DEPLOY_GROUPS: &[&str] = &["grp_samba", "grp_web", "grp_superadmin", "grp_backups"];
 
@@ -164,51 +162,6 @@ pub fn provision_superadmin(
     Ok(created)
 }
 
-/// Contenido de la plantilla de sudoers para el panel web.
-pub fn sudoers_content() -> String {
-    "Cmnd_Alias NAS_USERS = /usr/sbin/useradd, /usr/sbin/userdel, /usr/sbin/usermod,\n\
-     /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/sbin/groupmod\n\
-# nas-web sudoers template (generado por nas deploy)\n\
-%grp_superadmin ALL=(ALL) NOPASSWD: ALL\n"
-        .to_string()
-}
-
-/// Artefacto de sudoers generado por el despliegue.
-pub fn sudoers_artifact() -> Artifact {
-    Artifact {
-        path: "/etc/sudoers.d/nas-web".into(),
-        mode: 0o440,
-        content: sudoers_content(),
-    }
-}
-
-/// Escribe la plantilla de sudoers en disco validándola con visudo.
-pub fn install_sudoers(runner: &Runner) -> NasResult<()> {
-    let artifact = sudoers_artifact();
-    let spec = CommandSpec::new("tee")
-        .args([&artifact.path])
-        .stdin_secret(nas_exec::SecretInput::new(artifact.content.clone()))
-        .timeout(Duration::from_secs(20));
-    runner.run(&spec)?.ensure_success()?;
-
-    let check = runner.run(
-        &CommandSpec::new("visudo")
-            .args(["-cf", &artifact.path])
-            .timeout(Duration::from_secs(20)),
-    )?;
-    if !check.is_success() {
-        return Err(NasError::Invalid(format!(
-            "sudoers inválido: {}",
-            if check.stderr.is_empty() {
-                check.stdout
-            } else {
-                check.stderr
-            }
-        )));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,20 +191,6 @@ mod tests {
     fn grupos_de_despliegue_incluyen_los_base() {
         assert!(DEPLOY_GROUPS.contains(&"grp_samba"));
         assert!(DEPLOY_GROUPS.contains(&"grp_superadmin"));
-    }
-
-    #[test]
-    fn sudoers_contiene_superadmin() {
-        let content = sudoers_content();
-        assert!(content.contains("grp_superadmin"));
-        assert!(content.contains("nas-web"));
-    }
-
-    #[test]
-    fn artefacto_sudoers_tiene_ruta() {
-        let art = sudoers_artifact();
-        assert_eq!(art.path, "/etc/sudoers.d/nas-web");
-        assert_eq!(art.mode, 0o440);
     }
 
     #[test]
