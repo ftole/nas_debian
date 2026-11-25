@@ -47,16 +47,20 @@ PubkeyAuthentication yes
 X11Forwarding no
 ";
 
-/// Comprueba si existe alguna clave SSH autorizada en `/root` o `/home/*`.
+/// Comprueba si existe alguna clave SSH autorizada en `/home/*` (usuarios no root).
+/// No considera `/root/.ssh/authorized_keys` porque `SSH_HARDENING_CONF` fija
+/// `PermitRootLogin no`: depender solo de la clave de `root` dejaría el host inaccesible.
 pub(super) fn has_any_ssh_authorized_key() -> bool {
-    let mut candidates = vec![std::path::PathBuf::from("/root/.ssh/authorized_keys")];
-    if let Ok(entries) = std::fs::read_dir("/home") {
-        for entry in entries.flatten() {
-            candidates.push(entry.path().join(".ssh/authorized_keys"));
-        }
-    }
-    candidates.into_iter().any(|p| {
-        std::fs::read_to_string(p).is_ok_and(|txt| {
+    has_ssh_authorized_key_in(Path::new("/home"))
+}
+
+pub(super) fn has_ssh_authorized_key_in(home_root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(home_root) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let auth_keys = entry.path().join(".ssh/authorized_keys");
+        std::fs::read_to_string(auth_keys).is_ok_and(|txt| {
             txt.lines().any(|line| {
                 let t = line.trim();
                 !t.is_empty()
