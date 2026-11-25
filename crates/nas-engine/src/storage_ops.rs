@@ -89,29 +89,30 @@ fn run_capture(runner: &Runner, program: &str, args: &[&str]) -> Result<String, 
     }
 }
 
-/// Discos del sistema operativo (`/`, `/boot`, `/boot/efi`).
+/// Discos del sistema operativo (`/`, `/boot`, `/boot/efi`), con soporte para
+/// subvolúmenes Btrfs (`[/@]`) y múltiples padres LVM/mdadm.
 pub fn os_disks(runner: &Runner) -> Vec<String> {
-    let mut disks = Vec::new();
-    for mount in ["/", "/boot", "/boot/efi"] {
-        if let Ok(source) = run_capture(runner, "findmnt", &["-no", "SOURCE", mount]) {
-            if let Some(parent) = parent_disk(runner, source.trim()) {
-                disks.push(parent);
-            }
-        }
-    }
-    disks.sort();
-    disks.dedup();
-    disks
+    crate::helpers::storage::os_disks(runner)
 }
 
-/// Disco padre de un dispositivo (`/dev/sda1` → `/dev/sda`).
+/// Disco padre de un dispositivo (`/dev/sda1` → `/dev/sda`, `/dev/nvme0n1p2[/@]` → `/dev/nvme0n1`).
 pub fn parent_disk(runner: &Runner, device: &str) -> Option<String> {
-    let device = device.trim().trim_end_matches('/');
+    let device = device.trim();
+    let device = device
+        .split('[')
+        .next()
+        .unwrap_or(device)
+        .trim()
+        .trim_end_matches('/');
     if device.is_empty() {
         return None;
     }
     if let Ok(output) = run_capture(runner, "lsblk", &["-ndo", "PKNAME", device]) {
-        let name = output.lines().next().unwrap_or_default().trim();
+        let name = output
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or_default();
         if !name.is_empty() {
             let disk_name = crate::validation::disk_name_from_partition(name);
             return Some(format!("/dev/{disk_name}"));
@@ -164,13 +165,13 @@ pub fn mount_points(runner: &Runner, device: &str) -> Vec<String> {
     mounts
 }
 
-/// Indica si el dispositivo contiene firmas LVM/RAID.
+/// Indica si el dispositivo contiene firmas LVM/RAID (`lvm`, `raid0`, `raid1`, `raid5`, `raid6`, `raid10`, etc.).
 pub fn has_critical_metadata(runner: &Runner, device: &str) -> bool {
     if let Ok(output) = run_capture(runner, "lsblk", &["-no", "TYPE", device]) {
         if output
             .lines()
             .map(str::trim)
-            .any(|kind| kind == "lvm" || kind == "raid")
+            .any(|kind| kind == "lvm" || kind.starts_with("raid"))
         {
             return true;
         }
@@ -180,6 +181,11 @@ pub fn has_critical_metadata(runner: &Runner, device: &str) -> bool {
 
 /// Protecciones comunes antes de cualquier operación destructiva.
 fn ensure_safe(runner: &Runner, device: &str, confirm: &str) -> Result<(), String> {
+    if crate::helpers::storage::is_os_disk(runner, device).unwrap_or(false) {
+        return Err(fail(
+            "operación prohibida: es el disco del sistema operativo",
+        ));
+    }
     if let Some(parent) = parent_disk(runner, device) {
         if os_disks(runner)
             .iter()
