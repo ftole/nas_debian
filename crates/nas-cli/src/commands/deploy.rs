@@ -357,38 +357,42 @@ pub fn deploy_apply(
         }
 
         if failure.is_none() {
-            let spec = CommandSpec::new("mkdir")
-                .args(["-p", "/srv/nas/SISTEMAS"])
-                .sudo(if options.sudo {
-                    nas_exec::SudoMode::Passwordless
-                } else {
-                    nas_exec::SudoMode::None
-                })
-                .timeout(std::time::Duration::from_secs(30));
-            let _ = runner.run(&spec);
-            steps_executed += 1;
-            if params.role != ServerRole::Arquivos {
-                for dir in ["BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES", "LOGS_BACKUP"] {
-                    let path = format!("/srv/nas/{dir}");
-                    let spec = CommandSpec::new("mkdir")
-                        .args(["-p", &path])
-                        .sudo(if options.sudo {
-                            nas_exec::SudoMode::Passwordless
-                        } else {
-                            nas_exec::SudoMode::None
-                        })
-                        .timeout(std::time::Duration::from_secs(30));
-                    let _ = runner.run(&spec);
-                }
+            let run_mkdir = |dir: &str| -> NasResult<()> {
                 let spec = CommandSpec::new("mkdir")
-                    .args(["-p", "/etc/backup-credentials"])
+                    .args(["-p", dir])
                     .sudo(if options.sudo {
                         nas_exec::SudoMode::Passwordless
                     } else {
                         nas_exec::SudoMode::None
                     })
                     .timeout(std::time::Duration::from_secs(30));
-                let _ = runner.run(&spec);
+                let out = runner.run(&spec)?;
+                if !out.is_success() {
+                    return Err(NasError::Command {
+                        command: spec.describe(),
+                        code: out.code,
+                        stderr: out.stderr,
+                    });
+                }
+                Ok(())
+            };
+            if let Err(error) = run_mkdir("/srv/nas/SISTEMAS") {
+                failure = Some(error);
+            }
+            steps_executed += 1;
+            if failure.is_none() && params.role != ServerRole::Arquivos {
+                for dir in ["BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES", "LOGS_BACKUP"] {
+                    let path = format!("/srv/nas/{dir}");
+                    if let Err(error) = run_mkdir(&path) {
+                        failure = Some(error);
+                        break;
+                    }
+                }
+                if failure.is_none() {
+                    if let Err(error) = run_mkdir("/etc/backup-credentials") {
+                        failure = Some(error);
+                    }
+                }
             }
         }
     }
