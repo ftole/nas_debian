@@ -12,7 +12,12 @@ pub fn diag(json: bool) -> NasResult<ExitCode> {
     let all_ok = nas_engine::diagnostics::all_ok(&checks);
 
     if json {
-        print_json(&ApiResponse::ok(&checks, "Diagnóstico integral"))?;
+        let payload = if all_ok {
+            ApiResponse::ok(&checks, "Diagnóstico integral")
+        } else {
+            ApiResponse::err(&checks, "Diagnóstico integral con fallos")
+        };
+        print_json(&payload)?;
     } else {
         println!("DIAGNÓSTICO INTEGRAL");
         for check in &checks {
