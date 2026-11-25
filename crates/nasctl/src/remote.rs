@@ -260,7 +260,7 @@ pub fn exec(
 
     let results: Vec<ExecResult> = slots
         .into_inner()
-        .unwrap_or_default()
+        .unwrap_or_else(|e| e.into_inner())
         .into_iter()
         .flatten()
         .collect();
@@ -282,13 +282,16 @@ pub fn exec(
     }
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&ApiResponse::ok(
-                &results,
-                format!("{} host(s) consultados", results.len())
-            ))?
+        let msg = format!(
+            "{} host(s) consultados ({failures} fallo(s))",
+            results.len()
         );
+        let payload = if failures > 0 {
+            ApiResponse::err(&results, msg)
+        } else {
+            ApiResponse::ok(&results, msg)
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         println!(
             "EJECUCIÓN REMOTA: {} ({} host(s))",
