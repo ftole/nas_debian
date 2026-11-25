@@ -246,6 +246,13 @@ pub fn freeze_backup_task(
         )));
     }
 
+    let lock_path = format!("/var/lock/backup_{id}.lock");
+    let _task_lock = match crate::lock::TaskLock::acquire(&lock_path) {
+        Ok(lock) => Some(lock),
+        Err(NasError::Denied(msg)) => return Err(NasError::Denied(msg)),
+        Err(_) => None,
+    };
+
     let task_info = read_task_info(id);
     let task_dir = Path::new(&task_info.dest_root).join(id);
 
@@ -305,11 +312,27 @@ pub fn freeze_backup_task(
     let stage_path = perm_task_dir.join(format!(".freezing_{folder_name}"));
     let target_path = perm_task_dir.join(&folder_name);
 
+    struct ImmutableRestoreGuard<'a> {
+        runner: &'a Runner,
+        path: String,
+    }
+    impl Drop for ImmutableRestoreGuard<'_> {
+        fn drop(&mut self) {
+            let _ = self
+                .runner
+                .run(&CommandSpec::new("chattr").args(["+i", &self.path]));
+        }
+    }
+
     // Levantar temporalmente inmutabilidad en el snapshot origen para permitir crear enlaces duros
-    let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &latest.to_string_lossy()]));
+    let latest_s = latest.to_string_lossy().to_string();
+    let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &latest_s]));
+    let _imm_guard = ImmutableRestoreGuard {
+        runner,
+        path: latest_s.clone(),
+    };
 
     // Clonación en directorio temporal `.freezing_*` para evitar `FULL_*` huérfanos ante un corte eléctrico.
-    let latest_s = latest.to_string_lossy().to_string();
     let stage_s = stage_path.to_string_lossy().to_string();
     let target_s = target_path.to_string_lossy().to_string();
     let cp_res = runner.run(
@@ -338,8 +361,7 @@ pub fn freeze_backup_task(
         }
     };
 
-    // Restaurar inmutabilidad en el contenedor origen (sin -R ni chmod -R a-w para permitir hardlinks)
-    let _ = runner.run(&CommandSpec::new("chattr").args(["+i", &latest_s]));
+    drop(_imm_guard);
 
     if let Err(err) = cp_ok {
         return Err(NasError::Invalid(format!(
@@ -539,7 +561,11 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
     // únicamente si rm -rf falla (respaldo legado con +i/permisos anidados), ejecutar saneamiento recursivo.
     let _ = runner.run(&CommandSpec::new("chattr").args(["-i", &path_s]));
     let mut rm_success = runner
-        .run(&CommandSpec::new("rm").args(["-rf", &path_s]))
+        .run(
+            &CommandSpec::new("rm")
+                .args(["-rf", &path_s])
+                .timeout(Duration::from_secs(600)),
+        )
         .map(|r| r.is_success())
         .unwrap_or(false);
     if !rm_success && std::fs::remove_dir_all(&path).is_ok() {
@@ -556,7 +582,11 @@ pub fn delete_permanent_backup(runner: &Runner, id: &str, name: &str) -> NasResu
                 .args([&path_s, "-type", "d", "-exec", "chmod", "u+w", "{}", "+"])
                 .timeout(Duration::from_secs(600)),
         );
-        if let Ok(res) = runner.run(&CommandSpec::new("rm").args(["-rf", &path_s])) {
+        if let Ok(res) = runner.run(
+            &CommandSpec::new("rm")
+                .args(["-rf", &path_s])
+                .timeout(Duration::from_secs(600)),
+        ) {
             if res.is_success() {
                 rm_success = true;
             }
