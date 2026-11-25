@@ -22,7 +22,13 @@ pub(in crate::helpers::storage) fn register_btrfs_scrub_for_target(
     let content = format!(
         "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n{minute_hour} root nice -n 19 ionice -c 3 btrfs scrub start -B {target} >/dev/null 2>&1\n"
     );
-    let _ = std::fs::write(&cron_path, content);
+    if std::fs::write(&cron_path, content).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&cron_path, std::fs::Permissions::from_mode(0o644));
+        }
+    }
 }
 
 pub(in crate::helpers::storage) fn remove_btrfs_scrub_for_unit(unit_id: &str) {
