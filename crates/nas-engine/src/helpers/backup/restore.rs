@@ -73,7 +73,7 @@ fn is_protected_restore_subpath(rel: &Path) -> bool {
         return true;
     }
     if comps.first().map(String::as_str) == Some("unidades")
-        && comps.get(2).is_some_and(|s| is_protected_name(s))
+        && (comps.len() < 3 || comps.get(2).is_some_and(|s| is_protected_name(s)))
     {
         return true;
     }
@@ -174,6 +174,15 @@ fn resolve_safe_restore_target(target: &str) -> NasResult<PathBuf> {
         return Err(NasError::Denied(
             "el destino de restauración escapa de /srv/nas o /tmp".into(),
         ));
+    }
+    if canon_root == Path::new("/srv/nas") {
+        if let Ok(rel) = final_canon.strip_prefix(&canon_root) {
+            if is_protected_restore_subpath(rel) {
+                return Err(NasError::Denied(
+                    "no se puede restaurar sobre directorios protegidos del sistema".into(),
+                ));
+            }
+        }
     }
     Ok(final_canon)
 }
@@ -539,7 +548,24 @@ pub fn restore_backup(
 }
 
 fn validate_local_restore_target(raw_path: Option<&str>) -> NasResult<String> {
+    let raw = raw_path.unwrap_or("").trim();
+    if raw.contains("//") || raw.split('/').any(|seg| seg == ".") {
+        return Err(NasError::Denied(
+            "ruta de restauración con separadores duplicados o segmentos '.' no permitida".into(),
+        ));
+    }
     let path = validate_restore_source_path(raw_path)?;
+    let target = Path::new(&path);
+    if target.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return Err(NasError::Denied(
+            "ruta de restauración con segmentos relativos no permitida".into(),
+        ));
+    }
     if path == "/srv/nas" {
         return Err(NasError::Denied(
             "no se puede restaurar sobre el directorio raíz /srv/nas".into(),
@@ -552,7 +578,7 @@ fn validate_local_restore_target(raw_path: Option<&str>) -> NasResult<String> {
             ));
         }
     }
-    let target = Path::new(&path);
+
     let mut deepest_existing = None;
     for ancestor in target.ancestors() {
         if ancestor == Path::new("/") || ancestor.as_os_str().is_empty() {
@@ -579,20 +605,30 @@ fn validate_local_restore_target(raw_path: Option<&str>) -> NasResult<String> {
             }
         }
     }
-    if let Some(existing) = deepest_existing {
-        if let Ok(canon) = std::fs::canonicalize(existing) {
-            if canon == Path::new("/srv/nas") {
-                return Err(NasError::Denied(
-                    "no se puede restaurar sobre el directorio raíz /srv/nas".into(),
-                ));
-            }
-            if let Ok(rest) = canon.strip_prefix("/srv/nas") {
-                if !rest.as_os_str().is_empty() && is_protected_restore_subpath(rest) {
-                    return Err(NasError::Denied(
-                        "no se puede restaurar sobre directorios protegidos del sistema".into(),
-                    ));
-                }
-            }
+
+    let resolved = if let Some(existing) = deepest_existing {
+        let canon = std::fs::canonicalize(existing).map_err(|source| NasError::Io {
+            path: existing.to_path_buf(),
+            source,
+        })?;
+        match target.strip_prefix(existing) {
+            Ok(tail) if !tail.as_os_str().is_empty() => canon.join(tail),
+            _ => canon,
+        }
+    } else {
+        target.to_path_buf()
+    };
+
+    if resolved == Path::new("/srv/nas") {
+        return Err(NasError::Denied(
+            "no se puede restaurar sobre el directorio raíz /srv/nas".into(),
+        ));
+    }
+    if let Ok(rest) = resolved.strip_prefix("/srv/nas") {
+        if !rest.as_os_str().is_empty() && is_protected_restore_subpath(rest) {
+            return Err(NasError::Denied(
+                "no se puede restaurar sobre directorios protegidos del sistema".into(),
+            ));
         }
     }
     Ok(path.to_string())
@@ -677,6 +713,18 @@ mod tests {
         assert!(validate_local_restore_target(Some("/srv/nas")).is_err());
         assert!(validate_local_restore_target(Some("/srv/nas/")).is_err());
         assert!(validate_local_restore_target(Some("/srv/nas/BACKUPS_HISTORICOS/x")).is_err());
+        assert!(validate_local_restore_target(Some("/srv/nas/unidades")).is_err());
+        assert!(validate_local_restore_target(Some("/srv/nas/unidades/u1")).is_err());
+        assert!(validate_local_restore_target(Some(
+            "/srv//nas/unidades/u1/BACKUPS_HISTORICOS/sub"
+        ))
+        .is_err());
+        assert!(validate_local_restore_target(Some("/srv/nas/./SISTEMAS")).is_err());
+        assert_eq!(
+            validate_local_restore_target(Some("/srv/nas/mi_carpeta_nueva_inexistente"))
+                .expect("subdirectorio legítimo no existente bajo /srv/nas"),
+            "/srv/nas/mi_carpeta_nueva_inexistente"
+        );
 
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -688,6 +736,8 @@ mod tests {
         let link_dir = base.join("link");
         std::fs::create_dir_all(&real_dir).unwrap();
         std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+        let new_sub = real_dir.join("sub_nuevo");
+        assert!(validate_local_restore_target(Some(&new_sub.to_string_lossy())).is_ok());
         let target_via_link = link_dir.join("sub");
         assert!(validate_local_restore_target(Some(&target_via_link.to_string_lossy())).is_err());
         let _ = std::fs::remove_dir_all(&base);
