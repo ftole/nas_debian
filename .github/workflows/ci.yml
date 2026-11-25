@@ -39,6 +39,7 @@ jobs:
       - name: Ejecutar ShellCheck en los scripts vigentes
         run: |
           find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
+          shellcheck -x packaging/nas-accounts packaging/nas-backup-manage packaging/nas-samba-apply packaging/nas-share-acl packaging/nas-share-dir packaging/nas-storage-apply packaging/nas-terminal
           shellcheck -x install.sh
 
   test-bash:
@@ -51,11 +52,6 @@ jobs:
 
       - name: Instalar BATS
         run: sudo apt-get update && sudo apt-get install -y bats
-
-      - name: Deshabilitar tests que requieren el runner real
-        run: |
-          # Los tests que requieren ejecutar nas o sudo no se ven en CI
-          mv -n tests/deploy_shim.bats tests/deploy_shim.bats.skipped || true
 
       - name: Ejecutar suite del motor de despliegue
         run: |
