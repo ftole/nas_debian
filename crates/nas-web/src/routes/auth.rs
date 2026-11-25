@@ -273,11 +273,11 @@ pub async fn api_login(
                             .user_role(&uname)
                             .ok()
                             .flatten()
-                            .unwrap_or_else(|| "admin".into()))
+                            .unwrap_or_else(|| "operator".into()))
                     }
                 })
                 .await
-                .unwrap_or_else(|_| "admin".into());
+                .unwrap_or_else(|_| "operator".into());
             let csrf = state.auth.csrf_for_session(&session);
             let mut response = axum::Json(ApiResponse::ok(
                 serde_json::json!({
