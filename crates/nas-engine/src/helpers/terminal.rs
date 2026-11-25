@@ -18,18 +18,22 @@ fn prepare_terminal_socket(runner: &Runner, user: &str) -> NasResult<(u32, Strin
         .unwrap_or_else(|_| user.to_string());
 
     let sock_dir = PathBuf::from(format!("/run/nas-terminal/{uid}"));
-    let _ = std::fs::create_dir_all("/run/nas-terminal");
-    let _ = std::fs::create_dir_all(&sock_dir);
+    std::fs::create_dir_all("/run/nas-terminal")
+        .map_err(|e| NasError::io(Path::new("/run/nas-terminal"), e))?;
+    std::fs::create_dir_all(&sock_dir).map_err(|e| NasError::io(&sock_dir, e))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ =
-            std::fs::set_permissions("/run/nas-terminal", std::fs::Permissions::from_mode(0o755));
-        let _ = std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700));
+        std::fs::set_permissions("/run/nas-terminal", std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| NasError::io(Path::new("/run/nas-terminal"), e))?;
+        std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| NasError::io(&sock_dir, e))?;
     }
     let sock_dir_str = sock_dir.to_string_lossy().to_string();
-    let _ = runner.run(&CommandSpec::new("chown").args([format!("{user}:{group}"), sock_dir_str]));
+    runner
+        .run(&CommandSpec::new("chown").args([format!("{user}:{group}"), sock_dir_str]))?
+        .ensure_success()?;
 
     let sock = sock_dir.join("tmux.sock");
     Ok((uid, group, sock))
@@ -74,10 +78,20 @@ pub fn start_terminal(
     let unit_name = format!("nas-pty-{user}");
     let home = resolve_home_dir(runner, user);
 
-    // Comprobar si ya existe la sesión
+    // Comprobar si ya existe la sesión ejecutando como el usuario propietario del socket
     let check = runner.run(
-        &CommandSpec::new("tmux")
-            .args(["-S", &sock.to_string_lossy(), "has-session", "-t", &session])
+        &CommandSpec::new("runuser")
+            .args([
+                "-u",
+                user,
+                "--",
+                "tmux",
+                "-S",
+                &sock.to_string_lossy(),
+                "has-session",
+                "-t",
+                &session,
+            ])
             .timeout(Duration::from_secs(5)),
     );
     if check.map(|o| o.is_success()).unwrap_or(false) {
@@ -250,23 +264,25 @@ pub fn capture_terminal(runner: &Runner, user: &str) -> NasResult<String> {
     let (_, _, sock) = prepare_terminal_socket(runner, user)?;
     let session = format!("nas-web-{user}");
 
-    let cap_out = runner.run(
-        &CommandSpec::new("runuser")
-            .args([
-                "-u",
-                user,
-                "--",
-                "tmux",
-                "-S",
-                &sock.to_string_lossy(),
-                "capture-pane",
-                "-e",
-                "-t",
-                &session,
-                "-p",
-            ])
-            .timeout(Duration::from_secs(10)),
-    )?;
+    let cap_out = runner
+        .run(
+            &CommandSpec::new("runuser")
+                .args([
+                    "-u",
+                    user,
+                    "--",
+                    "tmux",
+                    "-S",
+                    &sock.to_string_lossy(),
+                    "capture-pane",
+                    "-e",
+                    "-t",
+                    &session,
+                    "-p",
+                ])
+                .timeout(Duration::from_secs(10)),
+        )?
+        .ensure_success()?;
 
     let cwd = runner
         .run(&CommandSpec::new("runuser").args([
@@ -304,21 +320,23 @@ pub fn resize_terminal(runner: &Runner, user: &str, cols: u16, rows: u16) -> Nas
     let (_, _, sock) = prepare_terminal_socket(runner, user)?;
     let session = format!("nas-web-{user}");
 
-    let _ = runner.run(&CommandSpec::new("runuser").args([
-        "-u",
-        user,
-        "--",
-        "tmux",
-        "-S",
-        &sock.to_string_lossy(),
-        "resize-window",
-        "-t",
-        &session,
-        "-x",
-        &cols.to_string(),
-        "-y",
-        &rows.to_string(),
-    ]));
+    runner
+        .run(&CommandSpec::new("runuser").args([
+            "-u",
+            user,
+            "--",
+            "tmux",
+            "-S",
+            &sock.to_string_lossy(),
+            "resize-window",
+            "-t",
+            &session,
+            "-x",
+            &cols.to_string(),
+            "-y",
+            &rows.to_string(),
+        ]))?
+        .ensure_success()?;
     Ok(())
 }
 
