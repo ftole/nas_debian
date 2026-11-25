@@ -190,16 +190,30 @@ impl FileRoot {
         let (real_id, source) = self.resolve_trash_entry(id)?;
         let (_, fallback_name) = split_trash_name(&real_id);
         let meta = self.read_trash_meta_record(&real_id);
-        let name = meta
+        let raw_name = meta
             .as_ref()
             .map(|m| m.filename.as_str())
             .filter(|s| !s.is_empty())
             .unwrap_or(fallback_name);
+        let name_path = Path::new(raw_name);
+        let mut name_comps = name_path.components();
+        let name = match (name_comps.next(), name_comps.next()) {
+            (Some(std::path::Component::Normal(c)), None)
+                if !raw_name.contains('/') && !raw_name.contains('\\') =>
+            {
+                c.to_string_lossy().to_string()
+            }
+            _ => {
+                return Err(NasError::Denied(
+                    "nombre de archivo en metadatos de papelera inválido".into(),
+                ));
+            }
+        };
         let relative = meta
             .as_ref()
             .map(|m| m.original_path.clone())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| name.to_string());
+            .unwrap_or_else(|| name.clone());
 
         if let Some(desc) = self.is_protected_path(&relative) {
             return Err(NasError::Denied(format!(
@@ -209,7 +223,7 @@ impl FileRoot {
 
         let mut target = self.resolve(&relative)?;
         if target == self.root || target.parent().is_none() {
-            target = self.root.join(name);
+            target = self.resolve(&name)?;
         }
         self.check_resolved_not_protected(&target, "restauración")?;
 
@@ -221,10 +235,18 @@ impl FileRoot {
         let mut counter = 1;
         while std::fs::symlink_metadata(&target).is_ok() {
             let candidate = format!("{name}.{counter}");
-            target = match target.parent() {
-                Some(parent) => parent.join(&candidate),
-                None => self.root.join(&candidate),
-            };
+            let rel_candidate = target
+                .parent()
+                .and_then(|p| p.strip_prefix(&self.root).ok())
+                .map(|rel_p| {
+                    if rel_p.as_os_str().is_empty() {
+                        candidate.clone()
+                    } else {
+                        rel_p.join(&candidate).to_string_lossy().to_string()
+                    }
+                })
+                .unwrap_or_else(|| candidate.clone());
+            target = self.resolve(&rel_candidate)?;
             self.check_resolved_not_protected(&target, "restauración")?;
             counter += 1;
         }
@@ -513,6 +535,20 @@ mod trash_tests {
         )
         .unwrap();
         assert!(root.restore_trash(id).is_err());
+
+        for bad_name in ["../escape", "/tmp/escape", "foo/../BACKUPS_HISTORICOS/x"] {
+            let payload = serde_json::json!({
+                "original_path": "docs/a.txt",
+                "filename": bad_name,
+                "deleted_by": "admin",
+                "deleted_at": "2026-01-01 00:00:00"
+            });
+            std::fs::write(&meta_path, payload.to_string()).unwrap();
+            assert!(
+                root.restore_trash(id).is_err(),
+                "restore_trash debería rechazar filename malicioso: {bad_name}"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(root.root());
     }
