@@ -100,16 +100,29 @@ fn run_loop(
                         }
                     }
                     KeyCode::Enter => {
+                        let prev_path = app.path.clone();
                         app.activate();
                         if app.current() == nas_tui::Section::Files {
+                            if app.path != prev_path {
+                                app.refresh(runner, paths);
+                            }
+                        } else if app.current() == nas_tui::Section::Services {
+                            let status_after_activate = app.status.clone();
                             app.refresh(runner, paths);
+                            app.status = status_after_activate;
                         }
                     }
                     KeyCode::Backspace => {
                         app.go_up();
+                        if app.current() != nas_tui::Section::Quit {
+                            app.refresh(runner, paths);
+                        }
+                    }
+                    KeyCode::F(5) | KeyCode::Char('r')
+                        if app.current() != nas_tui::Section::Quit =>
+                    {
                         app.refresh(runner, paths);
                     }
-                    KeyCode::F(5) | KeyCode::Char('r') => app.refresh(runner, paths),
                     _ => {}
                 }
             }
