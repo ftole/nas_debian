@@ -199,7 +199,9 @@ impl FileRoot {
         let mut name_comps = name_path.components();
         let name = match (name_comps.next(), name_comps.next()) {
             (Some(std::path::Component::Normal(c)), None)
-                if !raw_name.contains('/') && !raw_name.contains('\\') =>
+                if !raw_name.trim().is_empty()
+                    && !raw_name.contains('/')
+                    && !raw_name.contains('\\') =>
             {
                 c.to_string_lossy().to_string()
             }
@@ -225,6 +227,9 @@ impl FileRoot {
         if target == self.root || target.parent().is_none() {
             target = self.resolve(&name)?;
         }
+        if target == self.root {
+            return Err(NasError::Denied("destino de restauración inválido".into()));
+        }
         self.check_resolved_not_protected(&target, "restauración")?;
 
         if let Some(parent) = target.parent() {
@@ -232,8 +237,13 @@ impl FileRoot {
             set_dir_permissions(parent);
         }
 
-        let mut counter = 1;
+        let mut counter = 1u32;
         while std::fs::symlink_metadata(&target).is_ok() {
+            if counter > 10_000 {
+                return Err(NasError::Invalid(
+                    "demasiadas colisiones de nombre al restaurar desde la papelera".into(),
+                ));
+            }
             let candidate = format!("{name}.{counter}");
             let rel_candidate = target
                 .parent()
@@ -536,7 +546,12 @@ mod trash_tests {
         .unwrap();
         assert!(root.restore_trash(id).is_err());
 
-        for bad_name in ["../escape", "/tmp/escape", "foo/../BACKUPS_HISTORICOS/x"] {
+        for bad_name in [
+            "../escape",
+            "/tmp/escape",
+            "foo/../BACKUPS_HISTORICOS/x",
+            "   ",
+        ] {
             let payload = serde_json::json!({
                 "original_path": "docs/a.txt",
                 "filename": bad_name,
