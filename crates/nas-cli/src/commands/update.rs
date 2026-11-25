@@ -170,13 +170,41 @@ pub fn update_status(json: bool) -> NasResult<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn parse_semver_triplet(raw: &str) -> Option<(u64, u64, u64)> {
+    let clean = raw.trim().trim_start_matches('v');
+    let core = clean.split('-').next().unwrap_or(clean);
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
+    Some((major, minor, patch))
+}
+
+fn is_newer_version(candidate: &str, installed: &str) -> bool {
+    match (
+        parse_semver_triplet(candidate),
+        parse_semver_triplet(installed),
+    ) {
+        (Some(cand), Some(inst)) => cand > inst,
+        _ => candidate.trim().trim_start_matches('v') != installed.trim().trim_start_matches('v'),
+    }
+}
+
 pub fn update_check(repo: &str, json: bool) -> NasResult<ExitCode> {
     let runner = Runner::new();
-    let current_version = env!("CARGO_PKG_VERSION");
+    let pkg_version = env!("CARGO_PKG_VERSION");
+    let current_version = read_deployed_version(
+        &[
+            Path::new("/opt/nas_debian/current/version.json"),
+            Path::new("/etc/nas/version.json"),
+            Path::new("/opt/nas_debian/version.json"),
+        ],
+        pkg_version,
+    );
     let release = nas_engine::fetch_latest_release(&runner, repo)?;
 
     let clean_tag = release.tag_name.trim_start_matches('v');
-    let has_update = clean_tag != current_version;
+    let has_update = is_newer_version(clean_tag, &current_version);
 
     if json {
         print_json(&ApiResponse::ok(
@@ -292,16 +320,19 @@ pub fn update_verify(
     }
 
     if json {
-        print_json(&ApiResponse::ok(
-            serde_json::json!({
-                "version": manifest.version,
-                "artifact": artifact.display().to_string(),
-                "sha256_ok": artifact_check.is_ok(),
-                "signature_ok": signature_check.is_ok(),
-                "detail": detail,
-            }),
-            "Verificación de release",
-        ))?;
+        let data = serde_json::json!({
+            "version": manifest.version,
+            "artifact": artifact.display().to_string(),
+            "sha256_ok": artifact_check.is_ok(),
+            "signature_ok": signature_check.is_ok(),
+            "detail": detail,
+        });
+        let payload = if ok {
+            ApiResponse::ok(data, "Verificación de release")
+        } else {
+            ApiResponse::err(data, "Verificación de release fallida")
+        };
+        print_json(&payload)?;
     } else {
         println!("VERIFICACIÓN DE RELEASE {}", manifest.version);
         println!("Artefacto : {}", artifact.display());
@@ -455,7 +486,12 @@ pub fn update_apply_dispatch(args: UpdateDispatchArgs, json: bool) -> NasResult<
 
     let (manifest_path, artifact_path) = match (args.manifest, args.artifact) {
         (Some(m), Some(a)) => (m, a),
-        _ => {
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(NasError::Invalid(
+                "para aplicar un release local debes especificar ambos argumentos: --manifest y --artifact".into(),
+            ));
+        }
+        (None, None) => {
             let runner = Runner::new();
             let cache_dir = Path::new("/var/cache/nas/updates");
             if !json {
