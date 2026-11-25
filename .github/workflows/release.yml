@@ -40,16 +40,16 @@ jobs:
       - name: Instalar toolchain estable de Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Ejecutar pruebas del workspace
+        run: cargo test --workspace --locked
+
       - name: Compilar binarios en release
         run: cargo build --workspace --release --locked
 
       - name: Validar empaquetado
         run: bash packaging/verify.sh
 
-      - name: Generar paquete oficial, suma y manifiesto
-        run: bash scripts/package.sh "${{ steps.vars.outputs.version }}" dist/out target/release
-
-      - name: Preparar clave Ed25519 y derivar la pública
+      - name: Preparar clave pública Ed25519 antes de empaquetar
         env:
           NAS_RELEASE_KEY: ${{ secrets.NAS_RELEASE_KEY }}
         run: |
@@ -62,17 +62,21 @@ jobs:
             echo "[-] NAS_RELEASE_KEY debe ser hex de 32 bytes (64 caracteres)" >&2
             exit 1
           fi
-          printf '%s' "${NAS_RELEASE_KEY}" > /tmp/release.key
-          chmod 0600 /tmp/release.key
-          cargo run --quiet -p nas-cli -- update pubkey --key /tmp/release.key > /tmp/pubkey.txt
-          RELEASE_PUB_HEX=$(tail -1 /tmp/pubkey.txt | tr -d '[:space:]')
-          rm -f /tmp/release.key /tmp/pubkey.txt
+          umask 077
+          KEY_TMP="$(mktemp)"
+          PUB_TMP="$(mktemp)"
+          trap 'rm -f "$KEY_TMP" "$PUB_TMP"' EXIT
+          printf '%s' "${NAS_RELEASE_KEY}" > "$KEY_TMP"
+          cargo run --quiet -p nas-cli -- update pubkey --key "$KEY_TMP" > "$PUB_TMP"
+          RELEASE_PUB_HEX=$(tail -1 "$PUB_TMP" | tr -d '[:space:]')
           if [ -z "${RELEASE_PUB_HEX}" ]; then
             echo "[-] No se pudo derivar la clave pública" >&2
             exit 1
           fi
-          echo "${RELEASE_PUB_HEX}" > "dist/out/release.pub"
           echo "${RELEASE_PUB_HEX}" > packaging/release.pub
+
+      - name: Generar paquete oficial, suma y manifiesto
+        run: bash scripts/package.sh "${{ steps.vars.outputs.version }}" dist/out target/release
 
       - name: Firmar manifiesto con Ed25519 (obligatorio)
         env:
@@ -80,13 +84,15 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.vars.outputs.version }}"
-          printf '%s' "${NAS_RELEASE_KEY}" > /tmp/release.key
-          chmod 0600 /tmp/release.key
+          umask 077
+          KEY_TMP="$(mktemp)"
+          trap 'rm -f "$KEY_TMP"' EXIT
+          printf '%s' "${NAS_RELEASE_KEY}" > "$KEY_TMP"
+          cp packaging/release.pub "dist/out/release.pub"
           cargo run --quiet -p nas-cli -- update sign \
             "dist/out/nas-${VERSION}.json" \
             --out "dist/out/nas-${VERSION}.json" \
-            --key /tmp/release.key
-          rm -f /tmp/release.key
+            --key "$KEY_TMP"
           cargo run --quiet -p nas-cli -- update verify \
             "dist/out/nas-${VERSION}.json" \
             --artifact "dist/out/nas_debian-${VERSION}.tar.gz" \
