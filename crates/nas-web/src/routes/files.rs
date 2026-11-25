@@ -36,31 +36,46 @@ const PREPARED_ZIP_MAX_ENTRIES: usize = 8;
 
 fn prepared_zips() -> &'static Mutex<HashMap<String, PreparedZip>> {
     static STORE: OnceLock<Mutex<HashMap<String, PreparedZip>>> = OnceLock::new();
-    static CLEANER: OnceLock<()> = OnceLock::new();
-    CLEANER.get_or_init(|| {
+    static CLEANER_STARTED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if !CLEANER_STARTED.load(std::sync::atomic::Ordering::Relaxed) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async {
-                let mut interval = tokio::time::interval(Duration::from_secs(120));
-                loop {
+            if CLEANER_STARTED
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                handle.spawn(async {
+                    let mut interval = tokio::time::interval(Duration::from_secs(120));
                     interval.tick().await;
-                    let expired: Vec<PreparedZip> = if let Ok(mut guard) = prepared_zips().lock() {
-                        let now = Instant::now();
-                        let keys: Vec<String> = guard
-                            .iter()
-                            .filter(|(_, entry)| {
-                                now.duration_since(entry.created_at) >= PREPARED_ZIP_TTL
-                            })
-                            .map(|(k, _)| k.clone())
-                            .collect();
-                        keys.into_iter().filter_map(|k| guard.remove(&k)).collect()
-                    } else {
-                        Vec::new()
-                    };
-                    drop(expired);
-                }
-            });
+                    loop {
+                        interval.tick().await;
+                        let expired: Vec<PreparedZip> =
+                            if let Ok(mut guard) = prepared_zips().lock() {
+                                let now = Instant::now();
+                                let keys: Vec<String> = guard
+                                    .iter()
+                                    .filter(|(_, entry)| {
+                                        now.duration_since(entry.created_at) >= PREPARED_ZIP_TTL
+                                    })
+                                    .map(|(k, _)| k.clone())
+                                    .collect();
+                                keys.into_iter().filter_map(|k| guard.remove(&k)).collect()
+                            } else {
+                                Vec::new()
+                            };
+                        if !expired.is_empty() {
+                            let _ = tokio::task::spawn_blocking(move || drop(expired)).await;
+                        }
+                    }
+                });
+            }
         }
-    });
+    }
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
