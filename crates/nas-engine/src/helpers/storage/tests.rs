@@ -192,3 +192,14 @@ fn strip_subvol_suffix_y_parse_pknames_soportan_btrfs_y_multi_padre() {
     let parents = parse_pknames("sda1\nsdb1\nsda1\n\n");
     assert_eq!(parents, vec!["/dev/sda1", "/dev/sdb1"]);
 }
+
+#[test]
+fn pv_belongs_to_disk_evita_colision_de_prefijo() {
+    use super::disks::pv_belongs_to_disk;
+
+    assert!(pv_belongs_to_disk("/dev/sda1", "/dev/sda"));
+    assert!(pv_belongs_to_disk("/dev/sda", "/dev/sda"));
+    assert!(!pv_belongs_to_disk("/dev/sdaa1", "/dev/sda"));
+    assert!(pv_belongs_to_disk("/dev/nvme0n1p1", "/dev/nvme0n1"));
+    assert!(!pv_belongs_to_disk("/dev/nvme0n10p1", "/dev/nvme0n1"));
+}
