@@ -10,7 +10,7 @@ use nas_core::ApiResponse;
 use nas_exec::Runner;
 use serde::Deserialize;
 
-use super::common::{audit_ip, bad_request, configured_superadmin, forbidden, server_error};
+use super::common::{audit_ip, bad_request, forbidden, server_error};
 use crate::AppState;
 
 pub use groups::{group_create, group_delete, group_rename, groups, user_groups};
@@ -84,25 +84,7 @@ pub fn is_protected_posix_account(username: &str) -> bool {
 }
 
 pub fn is_target_superadmin(state: &AppState, username: &str) -> bool {
-    if configured_superadmin().as_deref() == Some(username) {
-        return true;
-    }
-    if state
-        .auth
-        .db()
-        .user_role(username)
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("superadmin")
-    {
-        return true;
-    }
-    let (_, groups) = nas_engine::users::load_local();
-    groups
-        .into_iter()
-        .find(|g| g.name == "grp_superadmin")
-        .is_some_and(|g| g.members.iter().any(|m| m == username))
+    super::common::is_user_superadmin(state.auth.db(), username)
 }
 
 pub fn run_accounts(args: &[&str], password: Option<&str>) -> Result<String, String> {
@@ -201,12 +183,15 @@ pub async fn users(
                         .map(|group| group.name.clone())
                         .collect();
                     let role = db.user_role(&user.name).ok().flatten();
-                    let is_superadmin = configured_super.as_deref() == Some(user.name.as_str())
-                        || role.as_deref() == Some("superadmin")
-                        || member_of.iter().any(|g| g == "grp_superadmin");
+                    let is_superadmin = super::common::is_superadmin_from_sources(
+                        &user.name,
+                        configured_super.as_deref(),
+                        role.as_deref(),
+                        member_of.iter().any(|g| g == "grp_superadmin"),
+                    );
                     let is_admin = is_superadmin
                         || matches!(role.as_deref(), Some("admin") | Some("superadmin"));
-                    let can_web = is_superadmin || role.is_some();
+                    let can_web = role.is_some();
                     let runtime = status_map
                         .as_ref()
                         .and_then(|map| map.get(&user.name).copied())
