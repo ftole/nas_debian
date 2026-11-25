@@ -173,14 +173,14 @@ async function loadSecurityStatus() {
     const privKnown = d.privileged_check !== false;
     const unprivBadge = '<span class="badge badge-gray">No verificable sin privilegios</span>';
     if (auditBody) {
-      const auditBadge = !privKnown
+      const auditRulesBadge = !privKnown
         ? unprivBadge
         : (st.audit_rules_present ? '<span class="badge badge-ok">Presentes</span>' : '<span class="badge badge-warn">Pendientes</span>');
       const sudoersBadge = !privKnown
         ? unprivBadge
         : (st.sudoers_synced ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-warn">Revisar</span>');
       auditBody.innerHTML = `
-        <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas <code>/etc/audit/rules.d/nas.rules</code>: ${auditBadge}</p>
+        <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas <code>/etc/audit/rules.d/nas.rules</code>: ${auditRulesBadge}</p>
         <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
           <li>Vigilancia de <code>/etc/sudoers*</code> y <code>/etc/samba/smb.conf</code></li>
           <li>Auditoría de credenciales <code>/etc/backup-credentials/</code></li>
@@ -192,14 +192,22 @@ async function loadSecurityStatus() {
     const aideBadge = document.getElementById('sec-aide-badge');
     const aideBody = document.getElementById('sec-aide-body');
     if (aideBadge) {
-      aideBadge.className = (st.aide_rules_present && st.fail2ban_active) ? 'badge badge-ok' : 'badge badge-warn';
-      aideBadge.textContent = st.aide_db_initialized ? 'AIDE listo' : (st.aide_rules_present ? 'Reglas listas' : 'Revisar');
+      if (!privKnown) {
+        aideBadge.className = st.aide_rules_present ? 'badge badge-gray' : 'badge badge-warn';
+        aideBadge.textContent = st.aide_rules_present ? 'Reglas listas (BD sin verificar)' : 'No verificable';
+      } else {
+        aideBadge.className = (st.aide_rules_present && st.fail2ban_active) ? 'badge badge-ok' : 'badge badge-warn';
+        aideBadge.textContent = st.aide_db_initialized ? 'AIDE listo' : (st.aide_rules_present ? 'Reglas listas' : 'Revisar');
+      }
     }
     if (aideBody) {
       const chip = (ok, label) => `<span class="badge ${ok ? 'badge-ok' : 'badge-gray'}">${escapeHtml(label)}: ${ok ? 'Activo' : 'Inactivo'}</span>`;
       const aideDbLabel = !privKnown
         ? unprivBadge
         : (st.aide_db_initialized ? 'Inicializada' : 'Sin inicializar');
+      const aideRulesLabel = !privKnown
+        ? (st.aide_rules_present ? 'OK' : 'Sin verificar')
+        : (st.aide_rules_present ? 'OK' : 'Falta');
       aideBody.innerHTML = `
         <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
           ${chip(st.fail2ban_active, 'Fail2ban')}
@@ -208,7 +216,7 @@ async function loadSecurityStatus() {
           ${chip(st.firewall_active, `Firewall (${st.firewall_backend || 'ufw'})`)}
           ${chip(st.ssh_hardened, 'SSH llave obligatoria')}
         </div>
-        <div class="text-muted">Base AIDE <code>/var/lib/aide/aide.db</code>: ${aideDbLabel} · Exclusiones <code>75_aide_nas</code>: ${st.aide_rules_present ? 'OK' : 'Falta'}</div>
+        <div class="text-muted">Base AIDE <code>/var/lib/aide/aide.db</code>: ${aideDbLabel} · Exclusiones <code>75_aide_nas</code>: ${aideRulesLabel}</div>
       `;
     }
   } catch (e) {
