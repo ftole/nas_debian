@@ -96,7 +96,8 @@ async function loadTrash() {
   }
 
   try {
-    const res = await apiFetch('/api/files/trash');
+    const root = encodeURIComponent(AppState.files.root || 'nas');
+    const res = await apiFetch(`/api/files/trash?root=${root}`);
     const items = res.data?.items ?? res.items ?? [];
     const count = res.data?.count ?? res.count ?? items.length;
     const totalSizeFormatted = res.data?.total_size_formatted ?? res.total_size_formatted ?? '0 B';
@@ -153,7 +154,7 @@ function renderTrashRows(items) {
     const fileSize = isDir ? '—' : (item.size_formatted || formatBytesLocal(item.size_bytes ?? item.size ?? 0));
 
     return `
-      <tr class="trash-table-row" data-id="${item.id}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
+      <tr class="trash-table-row" data-id="${escapeHtml(item.id)}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
         <td style="width:36px; text-align:center;"><svg class="icon ${isDir ? 'icon-folder-colored' : ''}" style="${isDir ? '' : 'color:' + meta.color + ';'} width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
         <td>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -214,6 +215,7 @@ async function confirmRestoreAllTrash() {
   try {
     const res = await apiFetch('/api/files/trash/restore-all', {
       method: 'POST',
+      body: JSON.stringify({ root: AppState.files.root || 'nas' }),
     });
 
     closeModal('modal-restore-all-trash');
@@ -239,7 +241,8 @@ function selectTrashRow(tr) {
 async function handleTrashAction(btn, action) {
   const tr = btn.closest('tr');
   if (!tr) return;
-  const id = parseInt(tr.getAttribute('data-id'), 10);
+  const id = String(tr.getAttribute('data-id') || '').trim();
+  if (!id) return;
   const name = tr.getAttribute('data-filename') || '';
 
   btn.disabled = true;
@@ -259,7 +262,8 @@ async function handleTrashAction(btn, action) {
 
 async function updateTrashBadge() {
   try {
-    const res = await apiFetch('/api/files/trash', { silentToast: true });
+    const root = encodeURIComponent(AppState.files.root || 'nas');
+    const res = await apiFetch(`/api/files/trash?root=${root}`, { silentToast: true });
     const count = res.data?.count ?? res.count ?? (res.data?.items?.length ?? 0);
     updateTrashBadgeCount(count);
   } catch (e) {
@@ -279,7 +283,7 @@ async function restoreTrashItem(id, name) {
   try {
     await apiFetch('/api/files/trash/restore', {
       method: 'POST',
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, root: AppState.files.root || 'nas' }),
     });
 
     showToast(`Elemento "${name}" restaurado correctamente a su ubicación.`, 'success');
@@ -303,7 +307,7 @@ async function deleteTrashItem(id, name) {
   try {
     await apiFetch('/api/files/trash/delete', {
       method: 'POST',
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, root: AppState.files.root || 'nas' }),
     });
 
     showToast(`Elemento "${name}" eliminado definitivamente.`, 'info');
@@ -328,6 +332,7 @@ async function confirmEmptyTrash() {
   try {
     await apiFetch('/api/files/trash/empty', {
       method: 'POST',
+      body: JSON.stringify({ root: AppState.files.root || 'nas' }),
     });
 
     closeModal('modal-empty-trash');
