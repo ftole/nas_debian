@@ -105,21 +105,12 @@ async function previewFile(relPath, fileName) {
     const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
     const imgEl = document.getElementById('preview-img-element');
     if (imgEl) {
-      let revokeAfterLoad = null;
       imgEl.onload = () => {
-        if (revokeAfterLoad) {
-          URL.revokeObjectURL(revokeAfterLoad);
-          revokeAfterLoad = null;
-        }
         if (loading) loading.style.display = 'none';
         if (imgContainer) imgContainer.style.display = 'flex';
         if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Imagen ${ext.toUpperCase()} • ${imgEl.naturalWidth}x${imgEl.naturalHeight} px`;
       };
       imgEl.onerror = () => {
-        if (revokeAfterLoad) {
-          URL.revokeObjectURL(revokeAfterLoad);
-          revokeAfterLoad = null;
-        }
         if (loading) loading.style.display = 'none';
         if (binaryContainer) {
           binaryContainer.style.display = 'block';
@@ -137,12 +128,15 @@ async function previewFile(relPath, fileName) {
           const rawSvg = await resp.text();
           const parser = new DOMParser();
           const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
-          doc.querySelectorAll('script, foreignObject, iframe, object, embed').forEach(n => n.remove());
+          if (doc.querySelector('parsererror') || !doc.documentElement || doc.documentElement.localName !== 'svg') {
+            throw new Error('SVG inválido');
+          }
+          doc.querySelectorAll('script, foreignObject, iframe, object, embed, animate, set, animateTransform, style, meta, link').forEach(n => n.remove());
           doc.querySelectorAll('*').forEach(el => {
             for (const attr of Array.from(el.attributes)) {
               const name = attr.name.toLowerCase();
-              const val = (attr.value || '').trim().toLowerCase();
-              if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('data:text/html')) {
+              const val = (attr.value || '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
+              if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('vbscript:') || val.startsWith('data:text/html') || val.startsWith('data:image/svg+xml')) {
                 el.removeAttribute(attr.name);
               }
             }
