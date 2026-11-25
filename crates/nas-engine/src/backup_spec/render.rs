@@ -72,6 +72,7 @@ impl BackupSpec {
         format!(
             r#"#!/bin/bash
 set -euo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 TASK={q_id}
 SOURCE_TYPE={q_type}
 SRC_IP={q_ip}
