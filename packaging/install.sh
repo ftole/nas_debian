@@ -201,9 +201,10 @@ PYEOF
         chmod 0640 "$STATE_DIR"/nas.sqlite*
     fi
 
-    # Guardar contraseña temporalmente para presentarse una sola vez al usuario
+    # Guardar contraseña temporalmente con modo 0600 atómico para presentarse una sola vez al usuario
+    rm -f /etc/nas/.initial_admin_password
+    install -m 0600 -o root -g root /dev/null /etc/nas/.initial_admin_password
     printf '%s' "$password" > /etc/nas/.initial_admin_password
-    chmod 0600 /etc/nas/.initial_admin_password
 else
     echo "    $ENV_FILE ya existe: se conserva"
 fi
