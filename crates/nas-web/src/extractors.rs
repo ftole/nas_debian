@@ -183,15 +183,7 @@ where
             let Some(username) = auth.authenticate(&cookie_owned, now)? else {
                 return Ok(None);
             };
-            let role = if crate::routes::configured_superadmin().as_deref() == Some(&username) {
-                "superadmin".to_string()
-            } else {
-                auth.db()
-                    .user_role(&username)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "operator".to_string())
-            };
+            let role = crate::routes::resolve_effective_role(auth.db(), &username);
             Ok::<_, nas_core::NasError>(Some((username, role)))
         })
         .await;
