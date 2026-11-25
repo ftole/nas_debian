@@ -8,6 +8,7 @@
 #trash-table-body tr.selected
 #users-filter-chips .chip-btn
 #users-table-body tr[data-username]
+*
 .btn-secondary
 .cp-disk-check
 .cp-disk-check:checked
@@ -23,6 +24,7 @@
 .preview-pptx-slide-thumb
 .preview-sheet-tab
 .role-card
+.role-card[data-role=
 .sidebar
 .sidebar-nav .nav-item
 .storage-wizard-step
@@ -37,6 +39,9 @@ input[name=
 meta[name=
 option[data-custom=
 option[value=
+script, foreignObject, iframe, object, embed
+script, iframe, object, embed, form, base, meta
+style
 use
 app-badge-btrfs
 app-badge-rsync
@@ -364,6 +369,12 @@ rollback-releases-list
 rollback-target-version
 sanitize-fstab-alert-summary
 sanitize-fstab-issues-list
+sec-aide-badge
+sec-aide-body
+sec-auditd-badge
+sec-auditd-body
+sec-sysctl-badge
+sec-sysctl-list
 services-table-body
 share-comment
 share-groups-list
