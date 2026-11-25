@@ -319,3 +319,34 @@ pub(crate) fn sha256_file(path: &Path) -> NasResult<String> {
     }
     Ok(hex::encode(hasher.finalize()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_file_calcula_digest_en_streaming_multibloque() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!("nas-dev-sha-{}-{nanos}", std::process::id()));
+        // > 64 KiB para ejercitar múltiples lecturas del buffer
+        let data = vec![b'A'; 150 * 1024];
+        std::fs::write(&path, &data).unwrap();
+        let digest = sha256_file(&path).expect("sha256");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(digest.len(), 64);
+
+        let mut expected = Sha256::new();
+        expected.update(&data);
+        assert_eq!(digest, hex::encode(expected.finalize()));
+    }
+
+    #[test]
+    fn run_preflight_checks_sobre_repositorio_actual_no_falla() {
+        let (checks, failed) = run_preflight_checks(Path::new("."));
+        assert!(!checks.is_empty());
+        assert_eq!(failed, 0);
+    }
+}
