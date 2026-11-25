@@ -56,7 +56,7 @@ async function loadApplications() {
     const bodyBtrfs = document.getElementById('app-body-btrfs');
     if (badgeBtrfs) {
       badgeBtrfs.className = a.btrfs.active ? 'badge badge-ok' : 'badge badge-gray';
-      badgeBtrfs.textContent = a.btrfs.active ? '● Saludable' : '○ ' + escapeHtml(a.btrfs.filesystem);
+      badgeBtrfs.textContent = a.btrfs.active ? '● Saludable' : '○ ' + (a.btrfs.filesystem || '');
     }
     if (bodyBtrfs) {
       bodyBtrfs.innerHTML = `
@@ -119,8 +119,89 @@ async function loadApplications() {
         </div>
       `;
     }
+    loadSecurityStatus();
   } catch (e) {
     // Silencioso ante errores menores de red
+  }
+}
+
+async function loadSecurityStatus() {
+  try {
+    const res = await apiFetch('/api/security/status', { silentToast: true });
+    const d = res.data || res;
+    if (!d || !d.status) return;
+    const st = d.status;
+    const sys = d.sysctl || {};
+
+    const sysBadge = document.getElementById('sec-sysctl-badge');
+    const sysList = document.getElementById('sec-sysctl-list');
+    if (sysBadge) {
+      const okCount = [
+        sys.rp_filter === '2',
+        sys.tcp_syncookies === '1',
+        sys.kptr_restrict === '2',
+        sys.dmesg_restrict === '1',
+        sys.yama_ptrace_scope === '2',
+      ].filter(Boolean).length;
+      sysBadge.className = okCount >= 4 ? 'badge badge-ok' : 'badge badge-warn';
+      sysBadge.textContent = `${okCount}/5 controles activos`;
+    }
+    if (sysList) {
+      const row = (label, val, cls, note) => `
+        <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
+          <span><code>${escapeHtml(label)}</code></span>
+          <span class="badge ${cls}">${escapeHtml(String(val ?? 'n/d'))}${note ? ' (' + escapeHtml(note) + ')' : ''}</span>
+        </div>`;
+      sysList.innerHTML = [
+        row('fs.inotify.max_user_watches', sys.inotify_max_watches, 'badge-ok', 'watches'),
+        row('net.ipv4.tcp_keepalive_time', sys.tcp_keepalive_time ? sys.tcp_keepalive_time + 's' : 'n/d', 'badge-blue', ''),
+        row('vm.dirty_bytes', sys.vm_dirty_bytes, 'badge-teal', ''),
+        row('net.ipv4.conf.all.rp_filter', sys.rp_filter, sys.rp_filter === '2' ? 'badge-ok' : 'badge-warn', sys.rp_filter === '2' ? 'Loose RFC 3704' : ''),
+        row('net.ipv4.tcp_syncookies', sys.tcp_syncookies, sys.tcp_syncookies === '1' ? 'badge-ok' : 'badge-warn', sys.tcp_syncookies === '1' ? 'Anti SYN-Flood' : ''),
+        row('kernel.kptr_restrict / dmesg', `${sys.kptr_restrict ?? '?'} / ${sys.dmesg_restrict ?? '?'}`, sys.kptr_restrict === '2' ? 'badge-purple' : 'badge-warn', ''),
+        row('kernel.yama.ptrace_scope', sys.yama_ptrace_scope, sys.yama_ptrace_scope === '2' ? 'badge-ok' : 'badge-warn', ''),
+        row('net.ipv6.conf.all.disable_ipv6', sys.disable_ipv6, sys.disable_ipv6 === '1' ? 'badge-ok' : 'badge-gray', sys.disable_ipv6 === '1' ? 'IPv6 Desactivado' : 'Activo'),
+      ].join('');
+    }
+
+    const auditBadge = document.getElementById('sec-auditd-badge');
+    const auditBody = document.getElementById('sec-auditd-body');
+    if (auditBadge) {
+      auditBadge.className = st.auditd_active ? 'badge badge-ok' : 'badge badge-warn';
+      auditBadge.textContent = st.auditd_active ? 'Activo' : 'Inactivo';
+    }
+    if (auditBody) {
+      auditBody.innerHTML = `
+        <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas <code>/etc/audit/rules.d/nas.rules</code>: ${st.audit_rules_present ? '<span class="badge badge-ok">Presentes</span>' : '<span class="badge badge-warn">Pendientes</span>'}</p>
+        <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
+          <li>Vigilancia de <code>/etc/sudoers*</code> y <code>/etc/samba/smb.conf</code></li>
+          <li>Auditoría de credenciales <code>/etc/backup-credentials/</code></li>
+          <li>Sudoers acotado: ${st.sudoers_synced ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-warn">Revisar</span>'} · systemd sin AmbientCapabilities: ${st.systemd_hardened ? '<span class="badge badge-ok">OK</span>' : '<span class="badge badge-warn">Revisar</span>'}</li>
+        </ul>
+      `;
+    }
+
+    const aideBadge = document.getElementById('sec-aide-badge');
+    const aideBody = document.getElementById('sec-aide-body');
+    if (aideBadge) {
+      aideBadge.className = (st.aide_rules_present && st.fail2ban_active) ? 'badge badge-ok' : 'badge badge-warn';
+      aideBadge.textContent = st.aide_db_initialized ? 'AIDE listo' : (st.aide_rules_present ? 'Reglas listas' : 'Revisar');
+    }
+    if (aideBody) {
+      const chip = (ok, label) => `<span class="badge ${ok ? 'badge-ok' : 'badge-gray'}">${escapeHtml(label)}: ${ok ? 'Activo' : 'Inactivo'}</span>`;
+      aideBody.innerHTML = `
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+          ${chip(st.fail2ban_active, 'Fail2ban')}
+          ${chip(st.unattended_upgrades_configured, 'Parches OS')}
+          ${chip(st.sleep_masked, 'Anti-suspensión ACPI')}
+          ${chip(st.firewall_active, `Firewall (${st.firewall_backend || 'ufw'})`)}
+          ${chip(st.ssh_hardened, 'SSH llave obligatoria')}
+        </div>
+        <div class="text-muted">Base AIDE <code>/var/lib/aide/aide.db</code>: ${st.aide_db_initialized ? 'Inicializada' : 'Sin inicializar'} · Exclusiones <code>75_aide_nas</code>: ${st.aide_rules_present ? 'OK' : 'Falta'}</div>
+      `;
+    }
+  } catch (e) {
+    // Silencioso si no hay permisos o red
   }
 }
 
@@ -140,6 +221,9 @@ function switchApplicationsTab(tabName) {
       panel.style.display = (t === tabName) ? 'block' : 'none';
     }
   });
+  if (tabName === 'security' && typeof loadSecurityStatus === 'function') {
+    loadSecurityStatus();
+  }
 }
 
 /**
