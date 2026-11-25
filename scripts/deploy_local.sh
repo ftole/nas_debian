@@ -128,8 +128,12 @@ if [ "$BUILD_ALL" -eq 1 ]; then
     run_cargo_build build --workspace --release --locked
     BINS_TO_INSTALL=("nas" "nas-web" "nas-tui" "nasctl" "nas-dev")
 else
-    echo "[1/3] Compilando paquete '$TARGET_BIN' en modo --release (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})..."
-    run_cargo_build build --release --locked -p "$TARGET_BIN"
+    TARGET_PKG="$TARGET_BIN"
+    if [ "$TARGET_BIN" = "nas" ]; then
+        TARGET_PKG="nas-cli"
+    fi
+    echo "[1/3] Compilando paquete '$TARGET_PKG' (binario '$TARGET_BIN') en modo --release (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})..."
+    run_cargo_build build --release --locked -p "$TARGET_PKG"
     BINS_TO_INSTALL=("$TARGET_BIN")
 fi
 
@@ -157,6 +161,9 @@ for bin in "${BINS_TO_INSTALL[@]}"; do
     if [ ! -f "$SRC" ]; then
         echo "[-] Error: No se encontró el binario compilado $SRC" >&2
         exit 1
+    fi
+    if [ "$bin" = "nas-web" ] && [ -f "$PREFIX/$bin" ]; then
+        "${SUDO_CMD[@]}" cp -f "$PREFIX/$bin" "$PREFIX/${bin}.prev" 2>/dev/null || true
     fi
     "${SUDO_CMD[@]}" install -m 0755 "$SRC" "$PREFIX/$bin"
     echo "  -> Instalado: $PREFIX/$bin"
@@ -197,6 +204,13 @@ if [ "$RESTART_SERVICE" -eq 1 ]; then
             "${SUDO_CMD[@]}" systemctl restart nas-web
             if "${SUDO_CMD[@]}" systemctl is-active --quiet nas-web; then
                 echo "  -> Servicio nas-web activo y en ejecución."
+                if command -v curl >/dev/null 2>&1; then
+                    if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+                        echo "  -> Healthcheck /healthz OK."
+                    else
+                        echo "[!] Advertencia: /healthz no respondió en 127.0.0.1:8080." >&2
+                    fi
+                fi
             else
                 echo "[!] Advertencia: nas-web no reporta estado 'active'." >&2
             fi
@@ -215,10 +229,11 @@ if [ -x "$PREFIX/nas" ]; then
     if "${SUDO_CMD[@]}" test ! -f /var/lib/nas/migrations/backup_dedup_v2.done && { "${SUDO_CMD[@]}" test -d /srv/nas/BACKUPS_HISTORICOS || "${SUDO_CMD[@]}" test -d /srv/nas/BACKUPS_PERMANENTES || "${SUDO_CMD[@]}" test -d /srv/nas/unidades; }; then
         if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
             "${SUDO_CMD[@]}" systemd-run --quiet --no-block --collect --unit=nas-backup-dedup-migration \
-                -p Nice=19 -p IOSchedulingClass=idle \
+                -p Nice=19 -p IOSchedulingClass=idle -p IOWeight=10 \
+                -p MemoryHigh=512M -p MemoryMax=1024M -p TasksMax=64 \
                 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
         else
-            "${SUDO_CMD[@]}" "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
+            "${SUDO_CMD[@]}" nice -n 19 ionice -c 3 "$PREFIX/nas" backup deduplicate --migration >/dev/null 2>&1 || true
         fi
     fi
 fi
