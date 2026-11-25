@@ -40,6 +40,17 @@ impl<T> ApiResponse<T> {
             error: None,
         }
     }
+
+    /// Respuesta de fallo preservando datos de diagnóstico/detalle.
+    pub fn err(data: T, message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self {
+            success: false,
+            message: message.clone(),
+            data: Some(data),
+            error: Some(message),
+        }
+    }
 }
 
 impl ApiResponse<serde_json::Value> {
