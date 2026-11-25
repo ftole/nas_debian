@@ -236,9 +236,9 @@ async function loadDiagnostics() {
             </div>
           </div>
           <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:13px;">
-            <div><strong>Almacenamiento (/srv/nas):</strong> ${d.storage.used_gb} GB / ${d.storage.total_gb} GB (${d.storage.usage_percent}%)</div>
-            <div><strong>Recursos Samba:</strong> ${d.shares_count} activos</div>
-            <div><strong>Tareas de Respaldo:</strong> ${d.backups_count} programadas</div>
+            <div><strong>Almacenamiento (/srv/nas):</strong> ${d.storage ? `${d.storage.used_gb ?? 0} GB / ${d.storage.total_gb ?? 0} GB (${d.storage.usage_percent ?? 0}%)` : 'No disponible'}</div>
+            <div><strong>Recursos Samba:</strong> ${d.shares_count ?? 0} activos</div>
+            <div><strong>Tareas de Respaldo:</strong> ${d.backups_count ?? 0} programadas</div>
           </div>
         </div>
       `;
