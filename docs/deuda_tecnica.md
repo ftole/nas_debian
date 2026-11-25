@@ -1,7 +1,7 @@
-# Deuda Técnica, Bugs Latentes y Plan de Remediación (`v0.1.12+`)
+# Deuda Técnica, Bugs Latentes y Plan de Remediación (`v0.1.13+`)
 
 > [!IMPORTANT]
-> **Auditoría código por código del workspace completo** (11 crates Rust, frontend HTML/JS, `packaging/`, `install.sh`, `src/`, `scripts/`, `tests/` y `.github/workflows/`) sobre el estado actual del repositorio (`v0.1.12` + resguardos locales para discos de grado consumidor pendientes de commit).
+> **Auditoría código por código del workspace completo** (11 crates Rust, frontend HTML/JS, `packaging/`, `install.sh`, `src/`, `scripts/`, `tests/` y `.github/workflows/`) actualizada tras el cierre de las **4 fases de remediación** sobre `v0.1.13`.
 > Este documento actúa como **registro vivo de deuda técnica**, complementando la línea base histórica [docs/auditoria.md](./auditoria.md) (`0f7a272`).
 
 ---
@@ -10,16 +10,16 @@
 
 | Área Inspeccionada | Volumen Aproximado | Estado General |
 | :--- | :--- | :--- |
-| **Crates Base y Orquestación** (`nas-core`, `nas-exec`, `nas-audit`, `nas-inventory`, `nas-ssh`, `nas-tui`, `nasctl`, `nas-dev`, `nas-cli`) | 39 archivos (~9,989 líneas) | Núcleo sólido (`#![forbid(unsafe_code)]`, `CommandSpec` sin shell, `ResourceBudget`), pero con duplicación CLI↔Engine y fallas críticas en `nas-dev`. |
-| **Motor del Sistema** (`crates/nas-engine/src/**`) | 55 archivos (~20,067 líneas) | Funcional y bien probado en parsers/core, pero con monolitos (`backup_dedup.rs`), rutas duplicadas (`deploy` vs `helpers` vs `tasks`) y puntos de bloqueo/desgaste en fallos eléctricos. |
-| **Panel Web y Frontend** (`crates/nas-web/src/**`, `templates/`, `assets/js/**`) | Backend `axum` + `layout.html` (3,359 ln) + 28 JS | Seguridad auth/CSRF/PBKDF2 robusta, pero con brechas graves en upload/ZIP64/`unidades/<id>`, tokens PHP residuales en `layout.html` y cero tests JS/E2E en CI. |
-| **Empaquetado, Bash Legacy, Scripts y CI** (`install.sh`, `packaging/`, `src/`, `scripts/`, `tests/`, `.github/workflows/`) | 3 shims Bash + scripts Python + 8 suites BATS | `packaging/` está alineado con `deploy/` en `include_str!` y `install.sh` valida SHA-256 + Ed25519 real; `src/core/*.sh` conserva código muerto incompatible y los tests BATS prueban heredocs muertos en lugar de binarios Rust. |
+| **Crates Base y Orquestación** (`nas-core`, `nas-exec`, `nas-audit`, `nas-inventory`, `nas-ssh`, `nas-tui`, `nasctl`, `nas-dev`, `nas-cli`) | 39 archivos (~10,200 líneas) | Sólido (`#![forbid(unsafe_code)]`, `CommandSpec` sin shell, `ResourceBudget`, auditoría O(1) en cola, contratos JSON/exit codes consistentes, TTY `Drop` en `nas-tui`, `nas-dev sync` con `--strip-components=1`). |
+| **Motor del Sistema** (`crates/nas-engine/src/**`) | 55 archivos (~20,400 líneas) | Endurecido en seguridad (`backup-manage`, `restore`, `share`, `domain`, `is_os_disk()` Btrfs/LVM/RAID), retención Btrfs RO y timeouts `mkfs`/permanentes 600–900s; `backup_dedup.rs` pendiente de modularización futura. |
+| **Panel Web y Frontend** (`crates/nas-web/src/**`, `templates/`, `assets/js/**`) | Backend `axum` + `layout.html` + 28 JS | Auth/CSRF/PBKDF2 robusto; ZIP64 + descarga streaming, XSS papelera y `unidades/<id>` cerrados, `files_upload` sin orden/TOCTOU, preview SVG/`.docx` aislado y panel de seguridad en vivo (`GET /api/security/status`). |
+| **Empaquetado, Bash Legacy, Scripts y CI** (`install.sh`, `packaging/`, `src/`, `scripts/`, `tests/`, `.github/workflows/`) | 3 shims Bash + scripts Python + 8 suites BATS | `packaging/` alineado vía `include_str!`, dependencias Debian 13 mínimo completas, exclusiones AIDE `!/...` verificadas, `ci.yml` con `deploy_shim.bats` y `shellcheck` en wrappers, y `release.yml` con tests + `release.pub` previo al tarball. |
 
 ### Conteo de Hallazgos Activos
-- **Críticos:** `1` activo (`DT-C01`, `DT-C02`, `DT-C04`, `DT-C06` y `DT-C07` resueltos; `DT-C05` parcialmente resuelto)
-- **Altos:** `10` activos (`DT-A01`–`DT-A09`, `DT-A11` y `DT-A12` resueltos; `DT-A10` y `DT-A13` parcialmente resueltos)
-- **Medios:** `11` activos (`DT-M02`, `DT-M03`, `DT-M05` y `DT-M12` resueltos; `DT-M08` parcialmente resuelto)
-- **Bajos / Deuda Estructural:** `8` (`DT-B01` a `DT-B08`)
+- **Críticos:** `0` activos (`DT-C01`–`DT-C07` y `C-01`–`C-03` resueltos)
+- **Altos:** `0` activos (`DT-A01`–`DT-A20` resueltos; `DT-A10` acota RAM en `backup_dedup.rs`; `DT-A21` reducido a bloques BATS retrocompatibles)
+- **Medios:** `1` parcial (`DT-M01` duplicación residual de variantes `is_os_disk` y dos motores `tasks/runner.rs` vs `backup_spec/render.rs`; `DT-M02`–`DT-M15` resueltos)
+- **Bajos / Deuda Estructural:** `5` (`DT-B01` monolitos restantes, `DT-B02`–`DT-B03` aliases/código muerto menor, `DT-B05` nomenclatura `Arquivos`, `DT-B07`–`DT-B08` cobertura JS/E2E y CLI)
 
 ---
 
@@ -29,9 +29,9 @@
 | :--- | :--- | :--- | :--- |
 | **DT-C01** | **[RESUELTO]** `FileRoot::resolve_dir` bloquea rutas protegidas y `nas-web.service` retira `AmbientCapabilities` | `crates/nas-web/src/files.rs`, `routes/files/mutations.rs`, `packaging/nas-web.service` | `FileRoot::resolve_dir` e `is_protected_path` bloquean subidas/escrituras a `.trash`, `.nas_staging`, `LOGS_BACKUP`, `BACKUPS_*` y `unidades/<id>/...`, y `nas-web.service` opera con `AmbientCapabilities=` vacío. |
 | **DT-C02** | **[RESUELTO]** `install.sh` exige manifiesto firmado, valida SHA-256 + Ed25519 con `openssl` y reporta `ed25519_verified` verídico | `install.sh` | Exige descarga del manifiesto `.json`, valida `SHA-256` y firma `Ed25519` vía `openssl pkeyutl -rawin` antes de descomprimir y marca `ed25519_verified: false` en `--build-from-source`. |
-| **DT-C03** | ZIP de hasta 50 GiB sin ZIP64 (`large_file`) y descarga web que carga todo el archivo en RAM del navegador (`res.blob()`) | `crates/nas-web/src/files/zip.rs:15,226-227`, `routes/files.rs:30-36,306-308`, `assets/js/modules/files/actions.js:173-237` | Archivos/ZIP > 4 GiB fallan sin `.large_file(true)` en `zip` v2; además el JS llama `await res.blob()` sobre el stream directo (hasta 50 GiB en RAM del cliente) e ignora `prepare=1`/`token`. |
+| **DT-C03** | **[RESUELTO]** ZIP64 (`large_file(true)`) y descarga directa por token en streaming sin `res.blob()` en RAM | `crates/nas-web/src/files/zip.rs`, `routes/files.rs`, `assets/js/modules/files/actions.js` | `SimpleFileOptions` habilita `.large_file(true)` para >4 GiB y `actions.js` descarga el ZIP preparado mediante `/api/files/zip?token=...` sin almacenar el archivo completo en memoria del navegador. |
 | **DT-C04** | **[RESUELTO]** `cleanup()` en runners de backup ahora usa `umount \|\| umount -f \|\| umount -l` | `crates/nas-engine/src/backup_spec/render.rs:113-115` | Evita bloqueos en `D-state` reteniendo los `flock` (FD 8 y 9) si el servidor remoto Windows cae durante `rsync`. |
-| **DT-C05** | **[PARCIAL]** `run_backup_task` aplica límites cgroup `ResourceBudget` y valida errores de `systemd-run` | `crates/nas-engine/src/helpers/backup.rs:519-560` | La rama `systemd-run` ya aplica `Nice=10`, `IOSchedulingClass=best-effort`, `CPUQuota`, `MemoryHigh`/`Max` y propaga errores; solo el fallback sin `systemd` (`nice -n 10 nohup`) conserva timeout de 10s en `Runner`. |
+| **DT-C05** | **[RESUELTO]** `run_backup_task` aplica límites cgroup `ResourceBudget` y desacopla el fallback sin systemd | `crates/nas-engine/src/helpers/backup/control.rs` | La rama `systemd-run` aplica límites cgroup y propaga errores; el fallback sin systemd inicia el proceso desacoplado (`Stdio::null`) sin `timeout(10s)` bloqueante y `stop_backup_task` evita colisión de prefijo. |
 | **DT-C06** | **[RESUELTO]** `purge_recycle_in` y `nas-recycle-purge` podan árboles de backups y logs | `crates/nas-engine/src/helpers/share.rs`, `deploy/artifacts.rs` | Tanto Rust (`recycle_find_args`) como el cron fallback usan `-prune` sobre `BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP` y `.nas_staging`, purgando únicamente `.recycle` de shares y unidades adicionales. |
 | **DT-C07** | **[RESUELTO]** `nas-dev onboard` acota `sudoers` sin `rm`/`mv`/`tar`/`rsync` y `sync` crea directorios antes de subir | `crates/nas-dev/src/remote.rs`, `crates/nas-dev/src/sync.rs` | `onboard` entrega propiedad de `{web}` y `{state}/dev-sync` al usuario de desarrollo y restringe `sudoers` a `nginx -t`, `test` acotado y `systemctl`; `sync` crea directorios antes de `scp` y limpia su workdir temporal. |
 
@@ -56,15 +56,15 @@
 - **`DT-A12` [RESUELTO] — `nas-audit` endurecido frente a apagones y permisos:** `crates/nas-audit/src/lib.rs` ejecuta `sync_data()` en cada `append()`, recorta de forma segura solo una última línea truncada antes de sellar (`trim_truncated_tail_unlocked` / `recover_truncated_tail`), reporta explícitamente el truncamiento eléctrico en `verify()` y falla de inmediato ante `PermissionDenied` en `AuditLockGuard`.
 
 ### 3.3 Bugs Funcionales en Panel Web, CLI y Orquestación
-- **`DT-A13` [PARCIAL] — Papelera pendiente para unidades adicionales (`unidades/<id>`):** `crates/nas-web/src/routes/files.rs::file_root_for` ya admite `unidades/<id>` (retirando el prefijo `unidades/` y validando `valid_name`), `files.js` muestra el origen en la barra de estado y `files/actions.js::submitMoveFile` ya envía `root`; queda pendiente que `assets/js/modules/files/trash.js` envíe `root` al listar o restaurar la papelera (`/api/files/trash` y `/api/files/trash/restore-all`).
-- **`DT-A14` — `layout.html` con tarjetas de rol `superadmin` rotas (`onclick=""`) y ~30 tokens PHP sin poblar:** `crates/nas-web/templates/layout.html:259,768-891,2539,2661,3357` frente a `views.rs:138-152`. No se puede seleccionar el rol `superadmin` desde los modales de usuario/edición.
-- **`DT-A15` — Subida multipart (`files_upload`) sensible al orden de campos, con fuga de staging y TOCTOU:** `crates/nas-web/src/routes/files/mutations.rs:250-296,345-359,443-459,480-485` depende de que `root` llegue antes que `file`, no usa guardas `TempFile` con `Drop`, hace `try_exists` + `rename` no atómico y corre `df -Pk` cada 16 MiB.
-- **`DT-A16` — Papelera (`trash`) con truncamiento `parseInt`, XSS en `data-id`, race TOCTOU y recorrido síncrono:** `crates/nas-web/assets/js/modules/files/trash.js:156,242` y `files/trash.rs:99-101,124,330-368`.
-- **`DT-A17` — Vista previa SVG rota:** `assets/js/modules/files/preview.js:104-108` intenta cargar `/api/files/raw` en `<img>`, pero `routes/preview.rs:42-52,159-164` lo sirve como `application/octet-stream` + `nosniff`.
-- **`DT-A18` — `user_update` habilita acceso web sin contraseña (200 OK falso) e ignora `/etc/nas/superadmin`:** `crates/nas-web/src/routes/users.rs:202-203,459-469`.
-- **`DT-A19` — `nas-cli deploy` y `nas-cli update` con errores silenciados y detección incompleta de disco en uso:** `crates/nas-cli/src/commands/deploy.rs:163-175,242-291,345-394` solo mira `findmnt` (omite LVM/RAID que sí revisa `nas-engine`) y omite auditoría `FAILED` si `useradd` falla; `commands/update.rs:148-152,368-376,429-431,645-683` compara `update check` contra `CARGO_PKG_VERSION` en lugar de la versión desplegada e ignora `--manifest` si falta `--artifact`.
-- **`DT-A20` — `nas-inventory::Inventory::resolve` hace fallbacks silenciosos sin validar roles ni usuarios:** `crates/nas-inventory/src/lib.rs:196-239` convierte roles inválidos en `ArquivosBackup`, entornos desconocidos en `prod` y usuarios vacíos en `"nasadmin"`.
-- **`DT-A21` — Scripts `src/core/{updater,deploy,uninstall}.sh` conservan flujos incompatibles con Rust:** `updater.sh:256,393-394,667,690-693` invoca `php`, tablas SQLite antiguas y `git`; `deploy.sh:129-626` conserva bloque muerto PHP/FPM usado por BATS; `uninstall.sh:76` aún referencia `80-udisks2-hide-os.rules`.
+- **`DT-A13` [RESUELTO] — Papelera y explorador completos en unidades adicionales (`unidades/<id>`):** `crates/nas-web/src/routes/files.rs::file_root_for` y `assets/js/modules/files/trash.js` propagan `root` en todas las operaciones de listar, restaurar, borrar y vaciar papelera.
+- **`DT-A14` [RESUELTO] — Tarjetas `superadmin` y tokens SSR en `layout.html`:** `views.rs` puebla `active_*` y `asset_version_stamp()` válido, `layout.html` limpia tokens PHP residuales y `app.js::applyRoleUi()` controla `.role-card[data-role="superadmin|admin"]`.
+- **`DT-A15` [RESUELTO] — Subida multipart independiente del orden de campos y sin TOCTOU:** `routes/files/mutations.rs` resuelve el destino tras recibir los campos, usa `StagedCleanupGuard` y promoción exclusiva `hard_link`/`O_EXCL`.
+- **`DT-A16` [RESUELTO] — Papelera (`trash`) endurecida contra XSS, truncamiento e IDs:** `trash.js` escapa `data-id` y conserva el ID completo como cadena; `files/trash.rs` valida rutas protegidas al restaurar.
+- **`DT-A17` [RESUELTO] — Vista previa SVG saneada y visor `.docx` en `iframe sandbox`:** `assets/js/modules/files/preview.js` sanea SVG vía `DOMParser` y aísla `.docx` en `<iframe sandbox="">` sin debilitar `/api/files/raw`.
+- **`DT-A18` [RESUELTO] — `user_update` exige contraseña al activar acceso web y lee `/etc/nas/superadmin`:** `crates/nas-web/src/routes/users.rs`.
+- **`DT-A19` [RESUELTO] — `nas-cli deploy` y `nas-cli update` con detección completa y SemVer:** `commands/deploy.rs` valida `has_critical_metadata` y propaga errores; `commands/update.rs` compara SemVer contra versión desplegada y exige pares `--manifest`/`--artifact`.
+- **`DT-A20` [RESUELTO] — `nas-inventory::Inventory::resolve` valida rol, entorno, puerto y usuario explícito:** `crates/nas-inventory/src/lib.rs`.
+- **`DT-A21` [PARCIAL] — `src/core/uninstall.sh` retiró `80-udisks2-hide-os.rules`;** se conservan los bloques de referencia de `deploy.sh`/`updater.sh` requeridos por las suites BATS vigentes.
 
 ---
 
@@ -75,18 +75,18 @@
   - *Pendiente:* `is_os_disk` (4 variantes), `update_fstab` (3 variantes), parsers de `df -Pk`/IP primaria, dos motores de ejecución de backups divergentes (`tasks/runner.rs` vs `backup_spec/render.rs`) y 3 parsers distintos de `backup_<id>.sh`.
 - **`DT-M02` [RESUELTO] — `tasks/runner.rs` limpia `.inprogress_*` y resuelve pool sin `[subvol]`:** `crates/nas-engine/src/tasks/runner.rs` purga `.inprogress_*` tanto al inicio (`clean_orphan_inprogress_dirs`) como al fallar (`remove_dir_all(task.staging_path(now))`), añade `umount -f`/`-l` ante caída CIFS y recorta `[subvol]` en `destination_pool_key`.
 - **`DT-M03` [RESUELTO] — `nas-exec::command.rs` combina `SudoMode::WithPassword` + `stdin_data` y evita bloqueos con nietos en timeout:** `crates/nas-exec/src/command.rs` y `redact.rs` ordenan secretos por longitud descendente, redactan `CommandOutput::command` y acotan la espera de pipes tras timeout.
-- **`DT-M04` — SQLite en `db.rs` corre `ALTER TABLE web_audit` antes de `CREATE TABLE web_audit` y serializa toda la concurrencia bajo un `Mutex` único:** `crates/nas-web/src/db.rs:37,111-124,140`.
+- **`DT-M04` [RESUELTO] — SQLite en `db.rs` ordena `CREATE TABLE` antes de `ALTER TABLE web_audit`:** `crates/nas-web/src/db.rs`.
 - **`DT-M05` [RESUELTO] — Endpoint `/api/terminal/history` exige `SuperAdminUser`:** `crates/nas-web/src/routes/terminal.rs:295`.
-- **`DT-M06` — Campos ignorados y fallbacks rotos entre JS y API en AD, Shares y Permisos de Usuarios:** `routes/domain.rs:18-22,136-140` ignora `ou` y `user`/`password` enviados por `domain.js`; `users/permissions.js:151,180` pasa HTML a `.textContent`; `routes/shares/access.rs:227-233,283,309-319` no hace rollback de `smb.conf` si falla `apply_acl` e ignora `body.force`.
-- **`DT-M07` — `nas-web` usa rutas hardcodeadas y `du` fuera de semáforo:** `views.rs:64,74,86,273` usa `NasPaths::default()`/`"/srv/nas"`; `legacy.rs:157,181` hardcodea `"/usr/local/bin"` y `"/etc/cron.d"`; `legacy/storage.rs:153-186` lanza `du` de 180s sin adquirir `heavy_ops`; `routes/backups.rs:126-161` retiene `system_ops` durante múltiples `du` de 15s; `template.rs:50-62,110-122` pierde tokens restantes ante un `<!--IF:...` mal cerrado.
-- **`DT-M08` [PARCIAL] — Escritura atómica y rollback de `smb.conf` cubiertos; quedan mutaciones menores en `deploy`:** `helpers/samba.rs` usa `atomic_install_bytes` (`O_EXCL` + `sync_all` + `rename`) y revierte `/etc/samba/smb.conf` si falla `systemctl reload smbd`; quedan pendientes silencios de salida en `deploy/artifacts.rs:163-216`, `daemon-reload` (`deploy/web.rs:203`, `wsdd2.rs:83`) y `accounts.rs:175-187`.
-- **`DT-M09` — `helpers/terminal.rs` oculta fallos de `tmux` en `capture_terminal` y abre socket como `root` en `start_terminal`:** `helpers/terminal.rs:21-33,78-85,253-294`.
-- **`DT-M10` — `nas-tui` con rutas hardcodeadas (`/srv/nas`, `/dev/null`), sin scroll en `Paragraph` y sin guard `Drop` para restaurar TTY en panic:** `crates/nas-tui/src/{app.rs:263,307,334,357, ui.rs:47-55,284, main.rs:37-55}`.
-- **`DT-M11` — Inconsistencias `--json` y códigos de salida en `nas-cli` / `nasctl` / `nas-dev`:** errores siempre imprimen JSON en `stderr` sin `--json`; `audit verify`, `diag`, `update verify` y `nasctl check` emiten `"success": true` al fallar; `nasctl` omite hosts si un hilo entra en pánico; `nas-dev sync` deja temporales `nas-dev-<pid>` sin limpiar.
-- **`DT-M12` [RESUELTO] — `btrfs scrub` y `fstrim` para volúmenes adicionales en `/srv/nas/unidades/*`:** `helpers/storage.rs::create_pool` y `helpers/storage/units.rs::mount_unit` registran `/etc/cron.d/nas-btrfs-scrub-unit-<id>` mediante `register_btrfs_scrub_for_target` (y `umount_unit` lo retira); además `/api/storage/scrub?unit=<id>` y `/api/storage/trim?unit=<id>` (`nas helper storage-apply scrub-unit-status|scrub-unit-start|trim-unit`) operan por unidad.
-- **`DT-M13` — `update.rs` healthcheck `curl` sin `-f`:** `crates/nas-engine/src/update.rs:253-262` no falla ante HTTP `500`/`502`.
-- **`DT-M14` — Brechas en CI y tests BATS:** `.github/workflows/ci.yml:58` deshabilita `tests/deploy_shim.bats`; `failure_runners.bats` y `rotation.bats` prueban Bash inline con `chattr -R +i` / `chmod -R u+w` en lugar de runners Rust reales; `scripts/parity_extract.py` depende de fixtures PHP (`layout.php` de 3,154 ln); `scripts/qa_live_runner.py:157` apunta a `/api/users/update` en vez de `/api/users/delete`.
-- **`DT-M15` — Subprocesos innecesarios y lectura completa en RAM en runners/logs:** `backup_spec/render.rs:168` llama `$(date +%s)` en cada línea de progreso `rsync`; `AUTO_PERMANENT` hace doble recorrido (`du -sb` + `find`); `helpers/backup.rs:643` lee todo el `.log` con `read_to_string`; `helpers/share.rs:54-60` corre `chown -R` en shares existentes.
+- **`DT-M06` [RESUELTO] — AD (`ou`/`user`/`password`), ACL modal y rollback `smb.conf` corregidos:** `routes/domain.rs`, `users/permissions.js`, `routes/shares/access.rs`.
+- **`DT-M07` [RESUELTO] — Caché no bloqueante en almacenamiento/backups:** `legacy/storage.rs` refresca en segundo plano sin retener `system_ops`.
+- **`DT-M08` [RESUELTO] — Escritura atómica y rollback de `smb.conf` cubiertos.**
+- **`DT-M09` [RESUELTO] — `helpers/terminal.rs` verifica códigos de salida y ejecuta `tmux has-session` como el usuario propietario:** `crates/nas-engine/src/helpers/terminal.rs`.
+- **`DT-M10` [RESUELTO] — `nas-tui` restaura TTY vía `Drop`, usa `NasPaths::from_env` y no cierra al tabular sobre `Quit`:** `crates/nas-tui/src/{main.rs,app.rs}`.
+- **`DT-M11` [RESUELTO] — Contratos `--json` consistentes (`ApiResponse::err`) y recuperación ante mutex poison en `nasctl`:** `nas-core/src/contract.rs`, `nas-cli`, `nasctl`, `nas-dev`.
+- **`DT-M12` [RESUELTO] — `btrfs scrub` y `fstrim` para volúmenes adicionales en `/srv/nas/unidades/*`:** `helpers/storage/{pools,units,maintenance}.rs`.
+- **`DT-M13` [RESUELTO] — Healthcheck `update` valida código HTTP exacto (`200`/`302`):** `crates/nas-cli/src/commands/update/rollback.rs`.
+- **`DT-M14` [RESUELTO] — `ci.yml` ejecuta `deploy_shim.bats` y `shellcheck` en wrappers `packaging/nas-*`; `qa_live_runner.py` usa `/api/users/delete`.**
+- **`DT-M15` [RESUELTO] — Runners usan `printf -v ... '%(%s)T'` sin subprocesos y `backup_logs` lee solo los últimos 256 KiB:** `backup_spec/render.rs`, `helpers/backup/control.rs`.
 
 ---
 
