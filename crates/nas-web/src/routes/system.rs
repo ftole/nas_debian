@@ -266,12 +266,52 @@ pub async fn system_applications(
     }
 }
 
+fn read_sysctl(proc_rel: &str) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/sys/{proc_rel}"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Estado en vivo de endurecimiento y parámetros sysctl (solo lectura).
+pub async fn security_status(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> impl IntoResponse {
+    match state
+        .run_system_blocking(|| {
+            let runner = Runner::new();
+            let status = nas_engine::security::status(&runner);
+            let sysctl = serde_json::json!({
+                "inotify_max_watches": read_sysctl("fs/inotify/max_user_watches"),
+                "tcp_keepalive_time": read_sysctl("net/ipv4/tcp_keepalive_time"),
+                "vm_dirty_bytes": read_sysctl("vm/dirty_bytes"),
+                "rp_filter": read_sysctl("net/ipv4/conf/all/rp_filter"),
+                "tcp_syncookies": read_sysctl("net/ipv4/tcp_syncookies"),
+                "kptr_restrict": read_sysctl("kernel/kptr_restrict"),
+                "dmesg_restrict": read_sysctl("kernel/dmesg_restrict"),
+                "yama_ptrace_scope": read_sysctl("kernel/yama/ptrace_scope"),
+                "disable_ipv6": read_sysctl("net/ipv6/conf/all/disable_ipv6"),
+            });
+            serde_json::json!({
+                "status": status,
+                "sysctl": sysctl,
+            })
+        })
+        .await
+    {
+        Ok(payload) => axum::Json(ApiResponse::ok(payload, "Estado de seguridad")).into_response(),
+        Err(_) => server_error("consulta de seguridad interrumpida"),
+    }
+}
+
 /// Router del dominio de sistema y métricas.
 pub fn router() -> Router<AppState> {
     use axum::routing::{get, post};
     Router::new()
         .route("/api/metrics", get(metrics))
         .route("/api/network", get(network))
+        .route("/api/security/status", get(security_status))
         .route("/api/system/updates", get(system_updates))
         .route("/api/system/applications", get(system_applications))
         .route("/api/system/reboot", post(system_reboot))
