@@ -101,10 +101,11 @@ install_runtime_deps() {
     local mode="${1:-runtime}"
     local pkgs=(
         sudo curl wget ca-certificates tar gzip acl openssl
-        btrfs-progs lvm2 parted e2fsprogs util-linux psmisc
+        btrfs-progs lvm2 parted e2fsprogs util-linux psmisc procps iputils-ping
         smartmontools hdparm logrotate auditd aide ufw fail2ban unattended-upgrades cron
-        samba samba-vfs-modules cifs-utils rsync nginx-light
-        tmux realmd adcli sssd sssd-tools sssd-ad libnss-sss libpam-sss
+        samba samba-vfs-modules smbclient wsdd2 cifs-utils rsync openssh-client sshpass
+        sqlite3 python3 nginx-light
+        tmux realmd adcli krb5-user packagekit sssd sssd-tools sssd-ad libnss-sss libpam-sss
     )
     if [ "$mode" = "build" ]; then
         pkgs+=(git build-essential pkg-config)
