@@ -195,7 +195,11 @@ pub fn create_pool(
         "ext4" => {
             let part = partition_disk_single_gpt(runner, &clean_devs[0], "ext4")?;
             runner
-                .run(&CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", &label, &part]))?
+                .run(
+                    &CommandSpec::new("mkfs.ext4")
+                        .args(["-F", "-m", "1", "-L", &label, &part])
+                        .timeout(Duration::from_secs(900)),
+                )?
                 .ensure_success()?;
             let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
             (part, "ext4")
@@ -216,7 +220,7 @@ pub fn create_pool(
                 .run(
                     &CommandSpec::new("mkfs.btrfs")
                         .args(args)
-                        .timeout(Duration::from_secs(300)),
+                        .timeout(Duration::from_secs(900)),
                 )?
                 .ensure_success()?;
             let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
@@ -276,13 +280,18 @@ pub fn create_pool(
             let path_lv = format!("/dev/{vg}/{lv}");
             if fs == "btrfs" {
                 runner
-                    .run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", &label, &path_lv]))?
+                    .run(
+                        &CommandSpec::new("mkfs.btrfs")
+                            .args(["-f", "-L", &label, &path_lv])
+                            .timeout(Duration::from_secs(900)),
+                    )?
                     .ensure_success()?;
             } else {
                 runner
                     .run(
                         &CommandSpec::new("mkfs.ext4")
-                            .args(["-F", "-m", "1", "-L", &label, &path_lv]),
+                            .args(["-F", "-m", "1", "-L", &label, &path_lv])
+                            .timeout(Duration::from_secs(900)),
                     )?
                     .ensure_success()?;
             }
@@ -394,11 +403,19 @@ pub fn extend_pool_target(
 
         if fstype.eq_ignore_ascii_case("btrfs") {
             runner
-                .run(&CommandSpec::new("btrfs").args(["filesystem", "resize", "max", &mount_dir]))?
+                .run(
+                    &CommandSpec::new("btrfs")
+                        .args(["filesystem", "resize", "max", &mount_dir])
+                        .timeout(Duration::from_secs(900)),
+                )?
                 .ensure_success()?;
         } else {
             runner
-                .run(&CommandSpec::new("resize2fs").args([clean_source]))?
+                .run(
+                    &CommandSpec::new("resize2fs")
+                        .args([clean_source])
+                        .timeout(Duration::from_secs(900)),
+                )?
                 .ensure_success()?;
         }
 
@@ -413,7 +430,7 @@ pub fn extend_pool_target(
             .run(
                 &CommandSpec::new("btrfs")
                     .args(["device", "add", "-f", &part, &mount_dir])
-                    .timeout(Duration::from_secs(300)),
+                    .timeout(Duration::from_secs(900)),
             )?
             .ensure_success()?;
         let mut extra_note = String::new();
