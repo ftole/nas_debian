@@ -164,6 +164,9 @@ pub fn disk_in_use(runner: &Runner, disk: &str) -> bool {
     if disk == "LOCAL" {
         return false;
     }
+    if nas_engine::storage_ops::has_critical_metadata(runner, disk) {
+        return true;
+    }
     runner
         .run(
             &CommandSpec::new("findmnt")
@@ -240,8 +243,11 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
-        let _ =
-            nas_engine::deploy::samba::configure_wsdd2(&runner, &params.netbios, &params.workgroup);
+        if let Err(error) =
+            nas_engine::deploy::samba::configure_wsdd2(&runner, &params.netbios, &params.workgroup)
+        {
+            failure = Some(NasError::Denied(error.to_string()));
+        }
     }
 
     if failure.is_none() {
@@ -264,12 +270,14 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
-        let _ = nas_engine::deploy::users::provision_superadmin(
+        if let Err(error) = nas_engine::deploy::users::provision_superadmin(
             &runner,
             &params.admin_user,
             params.admin_password.as_deref(),
             "",
-        );
+        ) {
+            failure = Some(NasError::Denied(error.to_string()));
+        }
     }
 
     if failure.is_none() {
@@ -282,12 +290,12 @@ pub fn deploy_apply(
                 "/bin/bash".to_string(),
                 params.admin_user.clone(),
             ];
-            run_step(&runner, &useradd_cmd, options.sudo, 60).map_err(|error| {
-                NasError::Denied(format!(
+            if let Err(error) = run_step(&runner, &useradd_cmd, options.sudo, 60) {
+                failure = Some(NasError::Denied(format!(
                     "no se pudo crear el usuario {}: {error}",
                     params.admin_user
-                ))
-            })?;
+                )));
+            }
         }
 
         if failure.is_none() && !params.keep_data && params.disk != "LOCAL" {
@@ -320,13 +328,19 @@ pub fn deploy_apply(
                     nas_exec::SudoMode::None
                 })
                 .timeout(std::time::Duration::from_secs(30));
-            if let Err(error) = runner
-                .run(&spec)
-                .map_err(|e| NasError::Denied(e.to_string()))
-            {
-                failure = Some(error);
-            } else {
-                steps_executed += 1;
+            match runner.run(&spec) {
+                Ok(out) if out.is_success() => {
+                    steps_executed += 1;
+                }
+                Ok(out) => {
+                    failure = Some(NasError::Denied(format!(
+                        "mkdir /srv/nas falló: {}",
+                        out.stderr.trim()
+                    )));
+                }
+                Err(e) => {
+                    failure = Some(NasError::Denied(e.to_string()));
+                }
             }
         }
 
