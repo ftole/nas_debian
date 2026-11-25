@@ -170,7 +170,12 @@ pub fn base_disk(runner: &Runner, device: &str) -> String {
         );
         match output {
             Ok(out) if out.is_success() => {
-                let next = out.stdout.trim();
+                let next = out
+                    .stdout
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or_default();
                 if next.is_empty() {
                     break;
                 }
