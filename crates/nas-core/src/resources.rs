@@ -531,7 +531,11 @@ pub fn parse_meminfo_kb(raw: &str) -> (u64, u64) {
 
 /// Parsea la carga promedio de 1 minuto desde `/proc/loadavg`.
 pub fn parse_loadavg_1m(raw: &str) -> Option<f64> {
-    raw.split_whitespace().next()?.parse::<f64>().ok()
+    raw.split_whitespace()
+        .next()?
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
 }
 
 /// Parsea `some avg10=X.XX` de `/proc/pressure/*`.
@@ -544,7 +548,9 @@ pub fn parse_psi_avg10(raw: &str) -> Option<f64> {
         for token in trimmed.split_whitespace() {
             if let Some(value) = token.strip_prefix("avg10=") {
                 if let Ok(parsed) = value.parse::<f64>() {
-                    return Some(parsed);
+                    if parsed.is_finite() && parsed >= 0.0 {
+                        return Some(parsed);
+                    }
                 }
             }
         }
