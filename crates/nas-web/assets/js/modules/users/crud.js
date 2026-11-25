@@ -32,8 +32,8 @@ async function loadUsersAndGroups() {
         }
 
         const membersHtml = (g.members || []).map(m => {
-          if (m === 'www-data') {
-            return `<span class="tag-pill" style="border:1px solid var(--accent-primary); color:var(--accent-primary); font-weight:600;" title="Cuenta del servicio web necesaria para el panel">www-data (sistema)</span>`;
+          if (m === 'nas-web' || m === 'www-data') {
+            return `<span class="tag-pill" style="border:1px solid var(--accent-primary); color:var(--accent-primary); font-weight:600;" title="Cuenta del servicio web necesaria para el panel">${escapeHtml(m)} (sistema)</span>`;
           }
           return `<span class="tag-pill">${escapeHtml(m)}</span>`;
         }).join(' ') || '<em style="color:var(--text-muted);">Sin miembros</em>';
@@ -257,7 +257,7 @@ function openGroupMembers(group) {
   const list = document.getElementById('group-members-list');
   list.innerHTML = members.length
     ? members.map(m => {
-        if (m === 'www-data') {
+        if (m === 'nas-web' || m === 'www-data') {
           return `
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; background:var(--bg-surface); border-radius:6px;" data-username="${escapeHtml(m)}">
               <span class="member-name"><strong>${escapeHtml(m)}</strong> <span class="badge badge-primary">Sistema (Protegido)</span></span>
@@ -299,8 +299,8 @@ async function addGroupMember() {
 }
 
 async function removeGroupMember(username) {
-  if (username === 'www-data') {
-    showToast('La cuenta www-data está protegida y es requerida por el panel web.', 'warning');
+  if (username === 'nas-web' || username === 'www-data') {
+    showToast(`La cuenta ${username} está protegida y es requerida por el panel web.`, 'warning');
     return;
   }
   showUserActionConfirm({
