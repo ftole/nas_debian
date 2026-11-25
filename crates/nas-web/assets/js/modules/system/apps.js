@@ -170,13 +170,21 @@ async function loadSecurityStatus() {
       auditBadge.className = st.auditd_active ? 'badge badge-ok' : 'badge badge-warn';
       auditBadge.textContent = st.auditd_active ? 'Activo' : 'Inactivo';
     }
+    const privKnown = d.privileged_check !== false;
+    const unprivBadge = '<span class="badge badge-gray">No verificable sin privilegios</span>';
     if (auditBody) {
+      const auditBadge = !privKnown
+        ? unprivBadge
+        : (st.audit_rules_present ? '<span class="badge badge-ok">Presentes</span>' : '<span class="badge badge-warn">Pendientes</span>');
+      const sudoersBadge = !privKnown
+        ? unprivBadge
+        : (st.sudoers_synced ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-warn">Revisar</span>');
       auditBody.innerHTML = `
-        <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas <code>/etc/audit/rules.d/nas.rules</code>: ${st.audit_rules_present ? '<span class="badge badge-ok">Presentes</span>' : '<span class="badge badge-warn">Pendientes</span>'}</p>
+        <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas <code>/etc/audit/rules.d/nas.rules</code>: ${auditBadge}</p>
         <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
           <li>Vigilancia de <code>/etc/sudoers*</code> y <code>/etc/samba/smb.conf</code></li>
           <li>Auditoría de credenciales <code>/etc/backup-credentials/</code></li>
-          <li>Sudoers acotado: ${st.sudoers_synced ? '<span class="badge badge-ok">Sincronizado</span>' : '<span class="badge badge-warn">Revisar</span>'} · systemd sin AmbientCapabilities: ${st.systemd_hardened ? '<span class="badge badge-ok">OK</span>' : '<span class="badge badge-warn">Revisar</span>'}</li>
+          <li>Sudoers acotado: ${sudoersBadge} · systemd sin AmbientCapabilities: ${st.systemd_hardened ? '<span class="badge badge-ok">OK</span>' : '<span class="badge badge-warn">Revisar</span>'}</li>
         </ul>
       `;
     }
@@ -189,6 +197,9 @@ async function loadSecurityStatus() {
     }
     if (aideBody) {
       const chip = (ok, label) => `<span class="badge ${ok ? 'badge-ok' : 'badge-gray'}">${escapeHtml(label)}: ${ok ? 'Activo' : 'Inactivo'}</span>`;
+      const aideDbLabel = !privKnown
+        ? unprivBadge
+        : (st.aide_db_initialized ? 'Inicializada' : 'Sin inicializar');
       aideBody.innerHTML = `
         <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
           ${chip(st.fail2ban_active, 'Fail2ban')}
@@ -197,7 +208,7 @@ async function loadSecurityStatus() {
           ${chip(st.firewall_active, `Firewall (${st.firewall_backend || 'ufw'})`)}
           ${chip(st.ssh_hardened, 'SSH llave obligatoria')}
         </div>
-        <div class="text-muted">Base AIDE <code>/var/lib/aide/aide.db</code>: ${st.aide_db_initialized ? 'Inicializada' : 'Sin inicializar'} · Exclusiones <code>75_aide_nas</code>: ${st.aide_rules_present ? 'OK' : 'Falta'}</div>
+        <div class="text-muted">Base AIDE <code>/var/lib/aide/aide.db</code>: ${aideDbLabel} · Exclusiones <code>75_aide_nas</code>: ${st.aide_rules_present ? 'OK' : 'Falta'}</div>
       `;
     }
   } catch (e) {
