@@ -26,6 +26,8 @@ pub const BASE_RUNTIME_PACKAGES: &[&str] = &[
     "e2fsprogs",
     "util-linux",
     "psmisc",
+    "procps",
+    "iputils-ping",
     "smartmontools",
     "hdparm",
     "logrotate",
@@ -37,12 +39,20 @@ pub const BASE_RUNTIME_PACKAGES: &[&str] = &[
     "cron",
     "samba",
     "samba-vfs-modules",
+    "smbclient",
+    "wsdd2",
     "cifs-utils",
     "rsync",
+    "openssh-client",
+    "sshpass",
+    "sqlite3",
+    "python3",
     "nginx-light",
     "tmux",
     "realmd",
     "adcli",
+    "krb5-user",
+    "packagekit",
     "sssd",
     "sssd-tools",
     "sssd-ad",
@@ -80,8 +90,8 @@ pub fn ensure_packages(runner: &Runner, packages: &[&str], sudo: bool) -> NasRes
         return Ok(Vec::new());
     }
 
-    let mut update_spec = CommandSpec::new("apt-get")
-        .args(["update", "-qq"])
+    let mut update_spec = CommandSpec::new("env")
+        .args(["DEBIAN_FRONTEND=noninteractive", "apt-get", "update", "-qq"])
         .timeout(Duration::from_secs(180));
     if sudo {
         update_spec = update_spec.sudo(SudoMode::Passwordless);
@@ -89,6 +99,8 @@ pub fn ensure_packages(runner: &Runner, packages: &[&str], sudo: bool) -> NasRes
     let _ = runner.run(&update_spec);
 
     let mut args: Vec<String> = vec![
+        "DEBIAN_FRONTEND=noninteractive".to_string(),
+        "nice".to_string(),
         "-n".to_string(),
         "10".to_string(),
         "apt-get".to_string(),
@@ -99,9 +111,8 @@ pub fn ensure_packages(runner: &Runner, packages: &[&str], sudo: bool) -> NasRes
     ];
     args.extend(missing.iter().map(|s| (*s).to_string()));
 
-    let mut install_spec = CommandSpec::new("nice")
+    let mut install_spec = CommandSpec::new("env")
         .args(args)
-        .env("DEBIAN_FRONTEND", "noninteractive")
         .timeout(Duration::from_secs(600));
     if sudo {
         install_spec = install_spec.sudo(SudoMode::Passwordless);
