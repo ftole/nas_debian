@@ -146,7 +146,7 @@ pub fn fetch_latest_release(runner: &nas_exec::Runner, repo: &str) -> NasResult<
     let output = runner.run(
         &nas_exec::CommandSpec::new("curl")
             .args([
-                "-sSL",
+                "-fsSL",
                 "-H",
                 "Accept: application/vnd.github.v3+json",
                 "-H",
