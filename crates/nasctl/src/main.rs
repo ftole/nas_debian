@@ -84,14 +84,19 @@ impl From<&ResolvedHost> for HostSummary {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let json_output = cli.json;
     match run(cli) {
         Ok(code) => code,
         Err(error) => {
-            let payload = ApiResponse::<serde_json::Value>::error(error.to_string());
-            eprintln!(
-                "{}",
-                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| error.to_string())
-            );
+            if json_output {
+                let payload = ApiResponse::<serde_json::Value>::error(error.to_string());
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| error.to_string())
+                );
+            } else {
+                eprintln!("Error: {error}");
+            }
             ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(1))
         }
     }
@@ -152,17 +157,17 @@ fn check(inventory: &Inventory, path: &std::path::Path, json: bool) -> NasResult
     let ok = problems.is_empty();
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&ApiResponse::ok(
-                serde_json::json!({
-                    "inventory": path.display().to_string(),
-                    "ok": ok,
-                    "problems": problems,
-                }),
-                "Validación del inventario"
-            ))?
-        );
+        let data = serde_json::json!({
+            "inventory": path.display().to_string(),
+            "ok": ok,
+            "problems": problems,
+        });
+        let payload = if ok {
+            ApiResponse::ok(data, "Validación del inventario")
+        } else {
+            ApiResponse::err(data, "Validación del inventario con errores")
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         println!("VALIDACIÓN DEL INVENTARIO: {}", path.display());
         if ok {
