@@ -34,9 +34,19 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
+    struct TtyRestoreGuard;
+    impl Drop for TtyRestoreGuard {
+        fn drop(&mut self) {
+            let _ = disable_raw_mode();
+            let mut out = io::stdout();
+            let _ = execute!(out, LeaveAlternateScreen, crossterm::cursor::Show);
+        }
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    let _tty_guard = TtyRestoreGuard;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -46,13 +56,7 @@ fn main() -> io::Result<()> {
     let mut app = App::new();
     app.refresh(&runner, &paths);
 
-    let result = run_loop(&mut terminal, &mut app, &runner, &paths);
-
-    let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
-    let _ = terminal.show_cursor();
-
-    result
+    run_loop(&mut terminal, &mut app, &runner, &paths)
 }
 
 fn run_loop(
@@ -81,15 +85,25 @@ fn run_loop(
                     KeyCode::Up | KeyCode::Char('k') => app.move_up(),
                     KeyCode::Tab | KeyCode::Right => {
                         app.next_section();
-                        app.refresh(runner, paths);
+                        if app.current() == nas_tui::Section::Quit {
+                            app.status = "Pulsa Enter o 'q' para salir".to_string();
+                        } else {
+                            app.refresh(runner, paths);
+                        }
                     }
                     KeyCode::BackTab | KeyCode::Left => {
                         app.previous_section();
-                        app.refresh(runner, paths);
+                        if app.current() == nas_tui::Section::Quit {
+                            app.status = "Pulsa Enter o 'q' para salir".to_string();
+                        } else {
+                            app.refresh(runner, paths);
+                        }
                     }
                     KeyCode::Enter => {
                         app.activate();
-                        app.refresh(runner, paths);
+                        if app.current() == nas_tui::Section::Files {
+                            app.refresh(runner, paths);
+                        }
                     }
                     KeyCode::Backspace => {
                         app.go_up();
