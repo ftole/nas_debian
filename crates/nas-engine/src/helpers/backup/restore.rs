@@ -510,14 +510,7 @@ pub fn restore_backup(
             }
         }
         "local" => {
-            let path = validate_restore_source_path(task_info.src_path.as_deref())?;
-            if let Some(rest) = path.strip_prefix("/srv/nas/") {
-                if is_protected_restore_subpath(Path::new(rest)) {
-                    return Err(NasError::Denied(
-                        "no se puede restaurar sobre directorios protegidos del sistema".into(),
-                    ));
-                }
-            }
+            let path = validate_local_restore_target(task_info.src_path.as_deref())?;
             let res = runner.run(
                 &CommandSpec::new("rsync")
                     .args([
@@ -543,6 +536,66 @@ pub fn restore_backup(
             "tipo de origen de tarea no soportado para restauración: '{other}'"
         ))),
     }
+}
+
+fn validate_local_restore_target(raw_path: Option<&str>) -> NasResult<String> {
+    let path = validate_restore_source_path(raw_path)?;
+    if path == "/srv/nas" {
+        return Err(NasError::Denied(
+            "no se puede restaurar sobre el directorio raíz /srv/nas".into(),
+        ));
+    }
+    if let Some(rest) = path.strip_prefix("/srv/nas/") {
+        if is_protected_restore_subpath(Path::new(rest)) {
+            return Err(NasError::Denied(
+                "no se puede restaurar sobre directorios protegidos del sistema".into(),
+            ));
+        }
+    }
+    let target = Path::new(&path);
+    let mut deepest_existing = None;
+    for ancestor in target.ancestors() {
+        if ancestor == Path::new("/") || ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err(NasError::Denied(format!(
+                        "no se puede restaurar sobre un enlace simbólico: {}",
+                        ancestor.display()
+                    )));
+                }
+                if deepest_existing.is_none() {
+                    deepest_existing = Some(ancestor);
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(NasError::Io {
+                    path: ancestor.to_path_buf(),
+                    source: err,
+                })
+            }
+        }
+    }
+    if let Some(existing) = deepest_existing {
+        if let Ok(canon) = std::fs::canonicalize(existing) {
+            if canon == Path::new("/srv/nas") {
+                return Err(NasError::Denied(
+                    "no se puede restaurar sobre el directorio raíz /srv/nas".into(),
+                ));
+            }
+            if let Ok(rest) = canon.strip_prefix("/srv/nas") {
+                if !rest.as_os_str().is_empty() && is_protected_restore_subpath(rest) {
+                    return Err(NasError::Denied(
+                        "no se puede restaurar sobre directorios protegidos del sistema".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(path.to_string())
 }
 
 #[cfg(test)]
@@ -616,5 +669,27 @@ mod tests {
             validate_restore_source_path(Some("/var/www/app/")).expect("válido"),
             "/var/www/app"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_local_restore_target_rechaza_raiz_protegidos_y_symlinks() {
+        assert!(validate_local_restore_target(Some("/srv/nas")).is_err());
+        assert!(validate_local_restore_target(Some("/srv/nas/")).is_err());
+        assert!(validate_local_restore_target(Some("/srv/nas/BACKUPS_HISTORICOS/x")).is_err());
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let base =
+            std::env::temp_dir().join(format!("nas-local-restore-{}-{nanos}", std::process::id()));
+        let real_dir = base.join("real");
+        let link_dir = base.join("link");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+        let target_via_link = link_dir.join("sub");
+        assert!(validate_local_restore_target(Some(&target_via_link.to_string_lossy())).is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
