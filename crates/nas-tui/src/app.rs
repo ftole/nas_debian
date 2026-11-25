@@ -394,4 +394,28 @@ mod tests {
         app.activate();
         assert!(app.should_quit);
     }
+
+    #[test]
+    fn navegacion_secciones_y_go_up_en_files() {
+        let mut app = App::new();
+        let start = app.current();
+        app.next_section();
+        assert_ne!(app.current(), start);
+        app.previous_section();
+        assert_eq!(app.current(), start);
+
+        // Ir a Files y probar go_up
+        while app.current() != Section::Files {
+            app.next_section();
+        }
+        app.path = "/srv/nas/SISTEMAS/docs".to_string();
+        app.selected = 3;
+        app.go_up();
+        assert_eq!(app.path, "/srv/nas/SISTEMAS");
+        assert_eq!(app.selected, 0);
+
+        app.path = "archivo".to_string();
+        app.go_up();
+        assert_eq!(app.path, "");
+    }
 }
