@@ -293,16 +293,7 @@ impl DeployParams {
 
     /// Comprueba que el disco no sea el del sistema operativo antes de proceder con el despliegue.
     pub fn ensure_not_os_disk(&self, runner: &nas_exec::Runner) -> NasResult<()> {
-        if self.disk == "LOCAL" || self.keep_data {
-            return Ok(());
-        }
-        if crate::helpers::storage::is_os_disk(runner, &self.disk)? {
-            return Err(NasError::Denied(format!(
-                "el disco {} contiene el sistema operativo y está protegido contra formateo",
-                self.disk
-            )));
-        }
-        Ok(())
+        storage::ensure_not_os_disk(runner, &self.disk, self.keep_data)
     }
 
     /// Persiste el montaje de `/srv/nas` en `/etc/fstab` usando el UUID de la partición.
