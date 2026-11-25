@@ -76,6 +76,18 @@ fn collect_device_ancestors(runner: &Runner, device: &str) -> HashSet<String> {
         let mut had_pkname = false;
         if let Ok(out) = runner.run(
             &CommandSpec::new("lsblk")
+                .args(["-s", "-no", "KNAME", &cur])
+                .timeout(Duration::from_secs(5)),
+        ) {
+            if out.is_success() {
+                for parent in parse_pknames(&out.stdout) {
+                    had_pkname = true;
+                    push_if_new(parent, &mut visited, &mut queue);
+                }
+            }
+        }
+        if let Ok(out) = runner.run(
+            &CommandSpec::new("lsblk")
                 .args(["-no", "PKNAME", &cur])
                 .timeout(Duration::from_secs(5)),
         ) {
@@ -412,6 +424,26 @@ pub fn format_single(
     ))
 }
 
+/// Comprueba si un PV (`pv_name`) corresponde al disco base o una de sus particiones
+/// sin sufrir colisiones de prefijo (`/dev/sda` vs `/dev/sdaa`).
+pub fn pv_belongs_to_disk(pv: &str, disk: &str) -> bool {
+    let pv = pv.trim();
+    let disk = disk.trim();
+    if pv.is_empty() || disk.is_empty() {
+        return false;
+    }
+    if pv == disk {
+        return true;
+    }
+    if let (Some(pv_base), Some(disk_base)) = (pv.strip_prefix("/dev/"), disk.strip_prefix("/dev/"))
+    {
+        if !pv_base.contains('/') && !disk_base.contains('/') {
+            return crate::validation::disk_name_from_partition(pv_base) == disk_base;
+        }
+    }
+    false
+}
+
 /// Configura LVM sobre un disco y lo monta en `/srv/nas`.
 #[allow(clippy::too_many_arguments)]
 pub fn setup_lvm(
@@ -483,12 +515,12 @@ pub fn setup_lvm(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                if vg_pvs.iter().all(|p| p == disk || p.starts_with(disk)) {
+                if !vg_pvs.is_empty() && vg_pvs.iter().all(|p| pv_belongs_to_disk(p, disk)) {
                     let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", existing_vg]));
                     let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", existing_vg]));
                 } else {
                     return Err(NasError::Denied(format!(
-                        "el disco {disk} pertenece al Volume Group '{existing_vg}' compartido con otros discos"
+                        "el disco {disk} pertenece al Volume Group '{existing_vg}' compartido o no verificable"
                     )));
                 }
             }
@@ -513,7 +545,7 @@ pub fn setup_lvm(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        if !vg_pvs.is_empty() && vg_pvs.iter().all(|p| p == disk || p.starts_with(disk)) {
+        if !vg_pvs.is_empty() && vg_pvs.iter().all(|p| pv_belongs_to_disk(p, disk)) {
             let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", vg]));
             let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", vg]));
         } else if !vg_pvs.is_empty() {
