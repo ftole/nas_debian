@@ -114,16 +114,24 @@ pub fn lsblk_devices_with_uuid(runner: &Runner) -> NasResult<Vec<lsblk::BlockDev
         .map_err(|error| NasError::Invalid(format!("lsblk inválido: {error}")))
 }
 
-/// Determina si `path` reside actualmente sobre el mismo disco o partición del sistema operativo (`/`).
+/// Determina si `path` reside actualmente sobre el mismo disco o partición del sistema operativo.
 pub fn is_path_on_os_disk(runner: &Runner, path: &Path) -> bool {
-    let os_source = findmnt_value(runner, "/", "SOURCE")
-        .or_else(|| mount_source_from_proc_mounts(Path::new("/")));
     let target_source = findmnt_value(runner, &path.to_string_lossy(), "SOURCE")
         .or_else(|| mount_source_from_proc_mounts(path));
-    match (os_source, target_source) {
-        (Some(os_src), Some(tgt_src)) => {
+    let Some(tgt_src) = target_source else {
+        return findmnt_value(runner, "/", "SOURCE")
+            .or_else(|| mount_source_from_proc_mounts(Path::new("/")))
+            .is_some();
+    };
+    let tgt_clean = clean_block_source(&tgt_src);
+    if let Ok(is_os) = crate::helpers::storage::is_os_disk(runner, tgt_clean) {
+        return is_os;
+    }
+    let os_source = findmnt_value(runner, "/", "SOURCE")
+        .or_else(|| mount_source_from_proc_mounts(Path::new("/")));
+    match os_source {
+        Some(os_src) => {
             let os_clean = clean_block_source(&os_src);
-            let tgt_clean = clean_block_source(&tgt_src);
             if os_clean == tgt_clean {
                 return true;
             }
@@ -131,8 +139,7 @@ pub fn is_path_on_os_disk(runner: &Runner, path: &Path) -> bool {
             let tgt_parent = parent_disk(tgt_clean);
             os_parent.is_some() && os_parent == tgt_parent
         }
-        (Some(_), None) => true,
-        _ => false,
+        None => false,
     }
 }
 
@@ -254,15 +261,22 @@ pub fn overview(runner: &Runner, path: &str) -> NasResult<StorageOverview> {
 /// Lista los discos físicos, marcando el del sistema operativo y todos los miembros de pools Btrfs.
 pub fn disks(runner: &Runner) -> NasResult<Vec<Disk>> {
     let devices = lsblk_devices_with_uuid(runner)?;
-    let os_source = findmnt_value(runner, "/", "SOURCE");
-    let os_disk = os_source.as_deref().and_then(parent_disk);
+    let mut os_list = crate::helpers::storage::os_disks(runner);
+    if os_list.is_empty() {
+        if let Some(os_disk) = findmnt_value(runner, "/", "SOURCE")
+            .as_deref()
+            .and_then(parent_disk)
+        {
+            os_list.push(os_disk);
+        }
+    }
 
-    Ok(compute_disks_from_lsblk(&devices, os_disk.as_deref()))
+    Ok(compute_disks_from_lsblk(&devices, &os_list))
 }
 
 pub(super) fn compute_disks_from_lsblk(
     devices: &[lsblk::BlockDevice],
-    os_disk: Option<&str>,
+    os_disks: &[String],
 ) -> Vec<Disk> {
     let btrfs_pools = btrfs_pools_from_lsblk(devices);
     devices
@@ -302,8 +316,11 @@ pub(super) fn compute_disks_from_lsblk(
                     Some("/" | "/boot" | "/boot/efi" | "/var" | "[SWAP]")
                 )
             });
-            let matches_os_disk = os_disk.is_some_and(|name| {
-                name == device.name || format!("/dev/{name}") == device.device_path()
+            let matches_os_disk = os_disks.iter().any(|name| {
+                let clean = name.strip_prefix("/dev/").unwrap_or(name.as_str());
+                clean == device.name
+                    || name == &device.device_path()
+                    || format!("/dev/{clean}") == device.device_path()
             });
             let protected = has_os_mount || matches_os_disk;
 
