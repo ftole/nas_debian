@@ -16,12 +16,73 @@ pub fn is_valid_unit_name(unit: &str) -> bool {
     crate::validation::is_valid_unit_name(unit)
 }
 
+const PROTECTED_SHARE_SEGMENTS: [&str; 6] = [
+    "BACKUPS_HISTORICOS",
+    "BACKUPS_PERMANENTES",
+    "LOGS_BACKUP",
+    ".trash",
+    ".nas_staging",
+    "unidades",
+];
+
+fn is_protected_share_path(path: &str) -> bool {
+    let Some(rel) = path.strip_prefix("/srv/nas/") else {
+        return true;
+    };
+    let comps: Vec<&str> = rel.split('/').filter(|s| !s.is_empty()).collect();
+    if comps.is_empty() {
+        return true;
+    }
+    if comps[0] == "unidades" {
+        if comps.len() < 3 {
+            return true;
+        }
+        return PROTECTED_SHARE_SEGMENTS.contains(&comps[2]);
+    }
+    PROTECTED_SHARE_SEGMENTS.contains(&comps[0])
+}
+
+fn ensure_no_symlink_under_srv_nas(path: &Path) -> NasResult<()> {
+    let base = Path::new("/srv/nas");
+    let Ok(rel) = path.strip_prefix(base) else {
+        return Err(NasError::Denied("ruta fuera de /srv/nas".into()));
+    };
+    let mut cur = base.to_path_buf();
+    for comp in rel.components() {
+        match comp {
+            std::path::Component::Normal(part) => {
+                cur.push(part);
+                if let Ok(meta) = std::fs::symlink_metadata(&cur) {
+                    if meta.file_type().is_symlink() {
+                        return Err(NasError::Denied(format!(
+                            "ruta con enlace simbólico no permitido: {}",
+                            cur.display()
+                        )));
+                    }
+                }
+            }
+            std::path::Component::ParentDir => {
+                return Err(NasError::Denied(
+                    "recorrido de directorios no permitido".into(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Crea el directorio de un recurso compartido con permisos `2770` y pertenencia `root:grp_samba`.
 pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasResult<String> {
     let name = name.trim();
     if !is_valid_share_name(name) {
         return Err(NasError::Invalid(format!(
             "nombre de recurso inválido: '{name}'"
+        )));
+    }
+    if PROTECTED_SHARE_SEGMENTS.contains(&name.trim_end_matches('$')) {
+        return Err(NasError::Denied(format!(
+            "nombre de recurso reservado o protegido: '{name}'"
         )));
     }
 
@@ -40,20 +101,41 @@ pub fn create_share_dir(runner: &Runner, name: &str, unit: Option<&str>) -> NasR
     };
 
     let dir = format!("{base}/{name}");
-    if !dir.starts_with("/srv/nas") || dir.contains("..") {
-        return Err(NasError::Denied("ruta fuera de /srv/nas".into()));
+    if !dir.starts_with("/srv/nas/") || dir.contains("..") || is_protected_share_path(&dir) {
+        return Err(NasError::Denied(
+            "ruta fuera de /srv/nas o directorio protegido del sistema".into(),
+        ));
     }
 
     let dir_path = Path::new(&dir);
+    ensure_no_symlink_under_srv_nas(dir_path)?;
     std::fs::create_dir_all(dir_path)
         .map_err(|e| NasError::Denied(format!("no se pudo crear el directorio {dir}: {e}")))?;
+    ensure_no_symlink_under_srv_nas(dir_path)?;
+    if let (Ok(canon_root), Ok(canon_dir)) = (
+        std::fs::canonicalize("/srv/nas"),
+        std::fs::canonicalize(dir_path),
+    ) {
+        if !canon_dir.starts_with(&canon_root) || canon_dir == canon_root {
+            return Err(NasError::Denied(
+                "el directorio del recurso escapa de /srv/nas".into(),
+            ));
+        }
+    }
 
     let had_entries = std::fs::read_dir(dir_path).is_ok_and(|mut it| it.next().is_some());
 
+    // Evitar tormenta recursiva de metadatos (DT-M15): en carpetas ya pobladas
+    // ajustamos solo el contenedor raíz y propagamos ACLs mínimas sin seguir symlinks.
+    let chown_args: Vec<&str> = if had_entries {
+        vec!["root:grp_samba", "--", &dir]
+    } else {
+        vec!["-R", "root:grp_samba", "--", &dir]
+    };
     runner
         .run(
             &CommandSpec::new("chown")
-                .args(["-R", "root:grp_samba", "--", &dir])
+                .args(chown_args)
                 .timeout(Duration::from_secs(30)),
         )?
         .ensure_success()?;
@@ -101,17 +183,33 @@ pub fn apply_share_acl(
     level: &str,
 ) -> NasResult<String> {
     let path = path.trim();
-    if !path.starts_with("/srv/nas/") || path.contains("..") {
+    if !path.starts_with("/srv/nas/") || path.contains("..") || path.contains('\0') {
         return Err(NasError::Denied(
             "ruta no permitida (debe estar dentro de /srv/nas/)".into(),
         ));
     }
+    if is_protected_share_path(path) {
+        return Err(NasError::Denied(
+            "ruta protegida del sistema: no se permite modificar ACLs sobre respaldos, papelera o staging".into(),
+        ));
+    }
 
     let dir_path = Path::new(path);
+    ensure_no_symlink_under_srv_nas(dir_path)?;
     if !dir_path.is_dir() {
         return Err(NasError::NotFound(format!(
             "no existe el directorio del recurso: {path}"
         )));
+    }
+    if let (Ok(canon_root), Ok(canon_dir)) = (
+        std::fs::canonicalize("/srv/nas"),
+        std::fs::canonicalize(dir_path),
+    ) {
+        if !canon_dir.starts_with(&canon_root) || canon_dir == canon_root {
+            return Err(NasError::Denied(
+                "la ruta del recurso escapa de /srv/nas".into(),
+            ));
+        }
     }
 
     let principal = principal.trim().trim_start_matches('@');
@@ -293,6 +391,19 @@ mod tests {
         let runner = Runner::new();
         let err = apply_share_acl(&runner, "/etc/samba", "grp_samba", "read").unwrap_err();
         assert!(err.to_string().contains("ruta no permitida"));
+        assert!(
+            apply_share_acl(&runner, "/srv/nas/BACKUPS_HISTORICOS", "grp_samba", "write").is_err()
+        );
+        assert!(apply_share_acl(
+            &runner,
+            "/srv/nas/unidades/u1/BACKUPS_PERMANENTES",
+            "grp_samba",
+            "write"
+        )
+        .is_err());
+        assert!(apply_share_acl(&runner, "/srv/nas/.nas_staging", "grp_samba", "write").is_err());
+        assert!(create_share_dir(&runner, "BACKUPS_HISTORICOS", None).is_err());
+        assert!(create_share_dir(&runner, "unidades", None).is_err());
     }
 
     #[test]
