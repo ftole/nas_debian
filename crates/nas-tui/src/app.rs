@@ -285,7 +285,7 @@ impl App {
                 nas_engine::storage::overview_for(paths, runner).ok(),
                 nas_engine::storage::disks(runner).unwrap_or_default(),
             ),
-            Section::Files => self.load_files(),
+            Section::Files => self.load_files(paths),
             Section::Domain => Data::Domain(nas_engine::domain::status(runner)),
             Section::Terminal => Data::Message(
                 "El terminal interactivo está disponible en el panel web (/terminal).".to_string(),
@@ -303,8 +303,8 @@ impl App {
         self.status = format!("{} actualizado", self.current().title());
     }
 
-    fn load_files(&self) -> Data {
-        match list_files(std::path::Path::new("/srv/nas"), &self.path) {
+    fn load_files(&self, paths: &NasPaths) -> Data {
+        match list_files(&paths.data_root, &self.path) {
             Ok(entries) => Data::Files(entries),
             Err(error) => Data::Message(error.to_string()),
         }
@@ -378,5 +378,20 @@ impl App {
             self.path.clear();
             self.selected = 0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activate_en_quit_marca_salida() {
+        let mut app = App::new();
+        app.previous_section();
+        assert_eq!(app.current(), Section::Quit);
+        assert!(!app.should_quit);
+        app.activate();
+        assert!(app.should_quit);
     }
 }
