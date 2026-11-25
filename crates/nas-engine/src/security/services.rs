@@ -55,10 +55,31 @@ pub(super) fn has_any_ssh_authorized_key() -> bool {
 }
 
 pub(super) fn has_ssh_authorized_key_in(home_root: &Path) -> bool {
+    let passwd = std::fs::read_to_string("/etc/passwd").ok();
+    has_ssh_authorized_key_in_with_passwd(home_root, passwd.as_deref())
+}
+
+fn has_ssh_authorized_key_in_with_passwd(home_root: &Path, passwd_content: Option<&str>) -> bool {
+    let blocked_users: std::collections::HashSet<&str> = passwd_content
+        .unwrap_or("")
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split(':');
+            let user = parts.next()?;
+            let shell = parts.nth(5)?.trim();
+            let is_nologin = shell.ends_with("/nologin") || shell.ends_with("/false");
+            is_nologin.then_some(user)
+        })
+        .collect();
     let Ok(entries) = std::fs::read_dir(home_root) else {
         return false;
     };
     entries.flatten().any(|entry| {
+        if let Some(name) = entry.file_name().to_str() {
+            if blocked_users.contains(name) {
+                return false;
+            }
+        }
         let auth_keys = entry.path().join(".ssh/authorized_keys");
         std::fs::read_to_string(auth_keys).is_ok_and(|txt| {
             txt.lines().any(|line| {
@@ -174,4 +195,40 @@ pub(super) fn sync_nginx_conf_validated(runner: &Runner, sudo: bool) -> NasResul
         sudo,
     ));
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_ssh_authorized_key_in_with_passwd;
+
+    #[test]
+    fn ignora_cuentas_nologin_al_detectar_llaves_ssh() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-ssh-keys-{}-{nanos}", std::process::id()));
+        let samba_ssh = root.join("operador/.ssh");
+        std::fs::create_dir_all(&samba_ssh).unwrap();
+        std::fs::write(
+            samba_ssh.join("authorized_keys"),
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest key\n",
+        )
+        .unwrap();
+
+        let passwd_nologin = "operador:x:1001:1001::/home/operador:/usr/sbin/nologin\n";
+        assert!(!has_ssh_authorized_key_in_with_passwd(
+            &root,
+            Some(passwd_nologin)
+        ));
+
+        let passwd_bash = "operador:x:1001:1001::/home/operador:/bin/bash\n";
+        assert!(has_ssh_authorized_key_in_with_passwd(
+            &root,
+            Some(passwd_bash)
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
