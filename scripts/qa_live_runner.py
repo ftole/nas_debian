@@ -154,7 +154,7 @@ def run_qa_live():
                 page.evaluate(f"""
                     async () => {{
                         try {{ await apiFetch('/api/shares/delete', {{ method: 'POST', body: JSON.stringify({{ name: '{TEST_SHARE}' }}) }}); }} catch(e){{}}
-                        try {{ await apiFetch('/api/users/update', {{ method: 'POST', body: JSON.stringify({{ action: 'delete', username: '{TEST_USER}' }}) }}); }} catch(e){{}}
+                        try {{ await apiFetch('/api/users/delete', {{ method: 'POST', body: JSON.stringify({{ username: '{TEST_USER}' }}) }}); }} catch(e){{}}
                         try {{ await apiFetch('/api/groups/delete', {{ method: 'POST', body: JSON.stringify({{ name: '{TEST_GROUP}' }}) }}); }} catch(e){{}}
                         try {{ await apiFetch('/api/files/delete', {{ method: 'POST', body: JSON.stringify({{ path: '{TEST_FOLDER}', permanent: true }}) }}); }} catch(e){{}}
                     }}
