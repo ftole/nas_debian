@@ -62,9 +62,11 @@ pub async fn groups(State(state): State<AppState>, _user: AuthenticatedUser) -> 
 /// Añade o quita un miembro de un grupo.
 pub async fn user_groups(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    admin: AdminUser,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<MemberBody>,
 ) -> Response {
+    let actor = admin.user().username().to_string();
     let check_user = body.username.clone();
     let protected = state
         .run_system_blocking(move || is_protected_posix_account(&check_user))
@@ -84,17 +86,42 @@ pub async fn user_groups(
     };
     let username = body.username.clone();
     let group = body.group.clone();
+    let audit_target = format!("{}:{}", body.username, body.group);
     let result = state
         .run_system_blocking(move || run_accounts(&[action, &username, &group], None))
         .await
         .unwrap_or_else(|_| Err("membresía interrumpida".to_string()));
 
     match result {
-        Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
-            "Membresía actualizada",
-        ))
-        .into_response(),
-        Err(error) => server_error(&error),
+        Ok(_) => {
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_groups",
+                &audit_target,
+                "SUCCESS",
+                action,
+            )
+            .await;
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Membresía actualizada",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "user_groups",
+                &audit_target,
+                "FAILED",
+                &error,
+            )
+            .await;
+            server_error(&error)
+        }
     }
 }
 
@@ -145,9 +172,11 @@ pub async fn group_create(
 /// Renombra un grupo.
 pub async fn group_rename(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    admin: AdminUser,
+    headers: HeaderMap,
     axum::Json(body): axum::Json<RenameGroupBody>,
 ) -> Response {
+    let actor = admin.user().username().to_string();
     let raw_new = if body.new.is_empty() {
         body.new_name.trim()
     } else {
@@ -166,17 +195,42 @@ pub async fn group_rename(
 
     let old = body.old.clone();
     let target = new_name.clone();
+    let audit_target = format!("{}->{}", body.old, new_name);
     let result = state
         .run_system_blocking(move || run_accounts(&["rename-group", &old, &target], None))
         .await
         .unwrap_or_else(|_| Err("renombrado interrumpido".to_string()));
 
     match result {
-        Ok(_) => axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
-            "Grupo renombrado",
-        ))
-        .into_response(),
-        Err(error) => server_error(&error),
+        Ok(_) => {
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "group_rename",
+                &audit_target,
+                "SUCCESS",
+                "",
+            )
+            .await;
+            axum::Json(ApiResponse::<serde_json::Value>::ok_empty(
+                "Grupo renombrado",
+            ))
+            .into_response()
+        }
+        Err(error) => {
+            audit_ip(
+                &state,
+                &headers,
+                &actor,
+                "group_rename",
+                &audit_target,
+                "FAILED",
+                &error,
+            )
+            .await;
+            server_error(&error)
+        }
     }
 }
 
