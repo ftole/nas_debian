@@ -230,7 +230,13 @@ pub async fn share_access_update(
             } else {
                 body.level.as_str()
             };
-            apply_acl(&spec.path, &principal, acl_level)?;
+            if let Err(acl_err) = apply_acl(&spec.path, &principal, acl_level) {
+                // Rollback atómico de smb.conf para mantener consistencia con las ACL POSIX.
+                let _ = stage_and_apply(&conf);
+                return Err(format!(
+                    "falló la aplicación de ACL ({acl_err}); se revirtió smb.conf"
+                ));
+            }
             Ok(())
         })
         .await
@@ -280,7 +286,7 @@ pub async fn share_access_repair(
     if !state.role.has_shares() {
         return forbidden("el rol BACKUP no expone recursos compartidos");
     }
-    let _ = body.force;
+    let force = body.force;
     let target_filter = if body.share.trim().is_empty() {
         body.name.trim().to_string()
     } else {
@@ -290,6 +296,7 @@ pub async fn share_access_repair(
 
     let outcome = state
         .run_system_blocking(move || -> Result<usize, String> {
+            let runner = Runner::new();
             let conf = std::fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
             let shares = nas_engine::parsers::smb::parse_shares(&conf);
             let mut applied = 0;
@@ -300,21 +307,49 @@ pub async fn share_access_repair(
                 let Some(path) = share.path.clone() else {
                     continue;
                 };
+                let current_acl = if !force {
+                    acl_entries(&runner, &path)
+                } else {
+                    None
+                };
                 for group in &share.valid_users {
                     let level = if share.write_list.contains(group) {
                         "write"
                     } else {
                         "read"
                     };
+                    if !force {
+                        let is_group = group.starts_with('@');
+                        let entry = group.trim_start_matches('@');
+                        let perms = if level == "write" { "rwx" } else { "r-x" };
+                        if let Some(ref acl_txt) = current_acl {
+                            if acl_has(acl_txt, entry, is_group, perms, false)
+                                && acl_has(acl_txt, entry, is_group, perms, true)
+                            {
+                                continue;
+                            }
+                        }
+                    }
                     if apply_acl(&path, group, level).is_ok() {
                         applied += 1;
                     }
                 }
                 for group in &share.write_list {
-                    if !share.valid_users.contains(group)
-                        && apply_acl(&path, group, "write").is_ok()
-                    {
-                        applied += 1;
+                    if !share.valid_users.contains(group) {
+                        if !force {
+                            let is_group = group.starts_with('@');
+                            let entry = group.trim_start_matches('@');
+                            if let Some(ref acl_txt) = current_acl {
+                                if acl_has(acl_txt, entry, is_group, "rwx", false)
+                                    && acl_has(acl_txt, entry, is_group, "rwx", true)
+                                {
+                                    continue;
+                                }
+                            }
+                        }
+                        if apply_acl(&path, group, "write").is_ok() {
+                            applied += 1;
+                        }
                     }
                 }
             }
