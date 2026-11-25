@@ -110,7 +110,61 @@ pub async fn files_rename(
     }
 }
 
-const UPLOAD_SPACE_CHECK_INTERVAL_BYTES: u64 = 16 * 1024 * 1024;
+const UPLOAD_SPACE_CHECK_INTERVAL_BYTES: u64 = 64 * 1024 * 1024;
+const UPLOAD_SPACE_CHECK_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+enum PromoteError {
+    AlreadyExists,
+    CrossDevice,
+    Io(std::io::Error),
+}
+
+/// Promueve un archivo temporal a `destination` sin sobrescribir un archivo ya existente
+/// (cierra la condición de carrera TOCTOU entre `try_exists` y `rename`).
+fn promote_staged_same_fs_exclusive(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), PromoteError> {
+    match std::fs::hard_link(src, dst) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(src);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(PromoteError::AlreadyExists),
+        Err(e)
+            if e.raw_os_error() == Some(18)
+                || e.kind() == std::io::ErrorKind::Unsupported
+                || e.kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            Err(PromoteError::CrossDevice)
+        }
+        Err(e) => Err(PromoteError::Io(e)),
+    }
+}
+
+/// Copia exclusiva (`O_EXCL`) para promoción entre volúmenes distintos (p. ej. cuando `root`
+/// llega en el multipart después de `file`).
+fn copy_staged_exclusive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), PromoteError> {
+    let mut reader = std::fs::File::open(src).map_err(PromoteError::Io)?;
+    let mut writer = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dst)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(PromoteError::AlreadyExists);
+        }
+        Err(e) => return Err(PromoteError::Io(e)),
+    };
+    if let Err(e) = std::io::copy(&mut reader, &mut writer) {
+        drop(writer);
+        let _ = std::fs::remove_file(dst);
+        return Err(PromoteError::Io(e));
+    }
+    let _ = std::fs::remove_file(src);
+    Ok(())
+}
 
 fn upload_reserve_bytes(total_fs_bytes: u64) -> u64 {
     (total_fs_bytes / 50).clamp(16 * 1024 * 1024, 512 * 1024 * 1024)
@@ -258,6 +312,7 @@ pub async fn files_upload(
     let mut saved: Vec<String> = Vec::new();
     let mut total_written_all: u64 = 0;
     let mut last_space_check: u64 = 0;
+    let mut last_space_check_at = std::time::Instant::now();
 
     loop {
         let field = match multipart.next_field().await {
@@ -370,8 +425,10 @@ pub async fn files_upload(
                     }
                     if total_written_all.saturating_sub(last_space_check)
                         >= UPLOAD_SPACE_CHECK_INTERVAL_BYTES
+                        && last_space_check_at.elapsed() >= UPLOAD_SPACE_CHECK_MIN_INTERVAL
                     {
                         last_space_check = total_written_all;
+                        last_space_check_at = std::time::Instant::now();
                         let check_dir = active_staging_dir.clone();
                         if let Ok(Some((free_now, total_fs_now))) = state
                             .run_system_blocking(move || free_and_total_bytes_at(&check_dir))
@@ -498,36 +555,76 @@ pub async fn files_upload(
         }
     }
 
-    for (idx, (temporary, filename)) in staged_files.iter().enumerate() {
+    for (temporary, filename) in &staged_files {
         let destination = target_dir.join(filename);
-        if let Err(_error) = tokio::fs::rename(temporary, &destination).await {
-            let staged_size = tokio::fs::metadata(temporary)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
-            let check_target = target_dir.clone();
-            if let Ok(Some((free_dest, total_dest))) = state
-                .run_system_blocking(move || free_and_total_bytes_at(&check_target))
-                .await
-            {
-                let reserve = upload_reserve_bytes(total_dest);
-                if staged_size.saturating_add(reserve) > free_dest {
-                    for (rem, _) in &staged_files[idx..] {
-                        let _ = tokio::fs::remove_file(rem).await;
+        let src_for_link = temporary.clone();
+        let dst_for_link = destination.clone();
+        let promote_res = state
+            .run_system_blocking(move || {
+                promote_staged_same_fs_exclusive(&src_for_link, &dst_for_link)
+            })
+            .await
+            .map_err(|_| PromoteError::Io(std::io::Error::other("promoción interrumpida")))
+            .and_then(|r| r);
+
+        match promote_res {
+            Ok(()) => {}
+            Err(PromoteError::AlreadyExists) => {
+                return (
+                    StatusCode::CONFLICT,
+                    axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                        "el archivo '{filename}' ya existe"
+                    ))),
+                )
+                    .into_response();
+            }
+            Err(PromoteError::CrossDevice) => {
+                let staged_size = tokio::fs::metadata(temporary)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                let check_target = target_dir.clone();
+                if let Ok(Some((free_dest, total_dest))) = state
+                    .run_system_blocking(move || free_and_total_bytes_at(&check_target))
+                    .await
+                {
+                    let reserve = upload_reserve_bytes(total_dest);
+                    if staged_size.saturating_add(reserve) > free_dest {
+                        return insufficient_storage_response(format!(
+                            "espacio insuficiente en el volumen destino para '{}'",
+                            filename
+                        ));
                     }
-                    return insufficient_storage_response(format!(
-                        "espacio insuficiente en el volumen destino para '{}'",
-                        filename
-                    ));
+                }
+                let src_cp = temporary.clone();
+                let dst_cp = destination.clone();
+                let cp_res = state
+                    .run_system_blocking(move || copy_staged_exclusive(&src_cp, &dst_cp))
+                    .await
+                    .map_err(|_| PromoteError::Io(std::io::Error::other("copia interrumpida")))
+                    .and_then(|r| r);
+                match cp_res {
+                    Ok(()) => {}
+                    Err(PromoteError::AlreadyExists) => {
+                        return (
+                            StatusCode::CONFLICT,
+                            axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                                "el archivo '{filename}' ya existe"
+                            ))),
+                        )
+                            .into_response();
+                    }
+                    Err(PromoteError::Io(cp_err)) => {
+                        return server_error(&format!("no se pudo promover la carga: {cp_err}"));
+                    }
+                    Err(PromoteError::CrossDevice) => {
+                        return server_error("no se pudo promover la carga entre volúmenes");
+                    }
                 }
             }
-            if let Err(cp_err) = tokio::fs::copy(temporary, &destination).await {
-                for (rem, _) in &staged_files[idx..] {
-                    let _ = tokio::fs::remove_file(rem).await;
-                }
-                return server_error(&format!("no se pudo promover la carga: {cp_err}"));
+            Err(PromoteError::Io(err)) => {
+                return server_error(&format!("no se pudo promover la carga: {err}"));
             }
-            let _ = tokio::fs::remove_file(temporary).await;
         }
         let dest_for_perms = destination.clone();
         let _ = state
