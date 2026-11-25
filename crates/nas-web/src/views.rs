@@ -12,8 +12,6 @@ pub const LOGIN: &str = include_str!("../templates/login.html");
 pub const APP_CSS: &str = include_str!("../assets/app.css");
 /// Estilos del acceso.
 pub const LOGIN_CSS: &str = include_str!("../assets/login.css");
-/// Sprite de iconos (no se usa directamente: va embebido en layout.html).
-pub const ICONS_SVG: &str = include_str!("../assets/icons.svg");
 /// Favicon.
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.svg");
 /// Favicon binario ICO multi-resolución (16x16, 32x32, 48x48).
