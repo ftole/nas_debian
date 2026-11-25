@@ -202,7 +202,8 @@ pub async fn users(
                         .collect();
                     let role = db.user_role(&user.name).ok().flatten();
                     let is_superadmin = configured_super.as_deref() == Some(user.name.as_str())
-                        || role.as_deref() == Some("superadmin");
+                        || role.as_deref() == Some("superadmin")
+                        || member_of.iter().any(|g| g == "grp_superadmin");
                     let is_admin = is_superadmin
                         || matches!(role.as_deref(), Some("admin") | Some("superadmin"));
                     let can_web = is_superadmin || role.is_some();
