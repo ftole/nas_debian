@@ -148,9 +148,7 @@ async function previewFile(relPath, fileName) {
             }
           });
           const safeSvg = new XMLSerializer().serializeToString(doc.documentElement);
-          const blob = new Blob([safeSvg], { type: 'image/svg+xml;charset=utf-8' });
-          revokeAfterLoad = URL.createObjectURL(blob);
-          imgEl.src = revokeAfterLoad;
+          imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(safeSvg);
         } catch (_) {
           imgEl.onerror();
         }
