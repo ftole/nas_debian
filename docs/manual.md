@@ -159,7 +159,7 @@ systemctl cat nas-web | grep -E "MemoryHigh|MemoryMax|CPUQuota|TasksMax"
 ## 5. Checklist de Endurecimiento Manual en Debian 13
 
 > [!NOTE]
-> **Automatización integrada:** La ejecución de los controles seguros (`ufw` con anti-lockout LAN/SSH, `fail2ban`, `unattended-upgrades`, `auditd`, `aide` exclusiones, máscara ACPI y sincronización de `nas-web.service`/`sudoers`) se ejecuta automáticamente mediante `nas security harden --apply --safe-only` en `install.sh`, `nas deploy apply` y `nas update apply`. Para verificar el estado o endurecer SSH/AIDE manualmente:
+> **Automatización integrada:** La ejecución de los controles seguros (`ufw` con anti-lockout LAN/SSH, `fail2ban`, `unattended-upgrades`, `auditd`, `aide` exclusiones, máscara ACPI y sincronización de `nas-web.service`/`sudoers`) se ejecuta automáticamente mediante `nas security harden --apply --safe-only` en `install.sh`, `nas deploy apply` y `nas update apply`. Desde el panel web, la pestaña de seguridad (`GET /api/security/status`) consulta `sudo -n /usr/local/bin/nas --json security status` y degrada limpiamente mostrando *"No verificable sin privilegios"* si `sudoers` aún no está sincronizado. Para verificar el estado o endurecer SSH/AIDE manualmente:
 
 ```bash
 # Ver estado completo de controles de seguridad del host
