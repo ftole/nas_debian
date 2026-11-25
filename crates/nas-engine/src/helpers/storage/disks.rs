@@ -1,5 +1,6 @@
 //! Operaciones de particionado, formateo, LVM y protección del disco del sistema.
 
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::time::Duration;
 
@@ -12,69 +13,166 @@ use crate::storage_ops::{confirm_ok, valid_device, valid_name, valid_size};
 use super::maintenance::register_btrfs_scrub_for_target;
 use super::pools::ensure_device_not_in_active_pool;
 
-/// Comprueba si el dispositivo de bloque o alguno de sus ancestros contiene el sistema operativo.
-pub fn is_os_disk(runner: &Runner, device: &str) -> NasResult<bool> {
-    if !valid_device(device) {
-        return Ok(false);
+/// Elimina el sufijo de subvolumen Btrfs (`[/@]`, `[/subvol]`) de una fuente `findmnt`.
+pub(crate) fn strip_subvol_suffix(source: &str) -> &str {
+    let trimmed = source.trim();
+    let without_subvol = trimmed.split('[').next().unwrap_or(trimmed).trim();
+    without_subvol.trim_end_matches('/')
+}
+
+/// Parsea líneas de `lsblk -no PKNAME` devolviendo múltiples padres (LVM multi-PV / mdadm RAID).
+pub(crate) fn parse_pknames(raw: &str) -> Vec<String> {
+    let mut parents = Vec::new();
+    for line in raw.lines() {
+        let name = line.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let dev = if name.starts_with("/dev/") {
+            name.to_string()
+        } else {
+            format!("/dev/{name}")
+        };
+        if !parents.contains(&dev) {
+            parents.push(dev);
+        }
+    }
+    parents
+}
+
+/// Recorre en anchura (BFS) todos los ancestros de bloque de un dispositivo,
+/// soportando subvolúmenes Btrfs (`[/@]`), symlinks `/dev/mapper/*` y múltiples
+/// padres `PKNAME` (LVM / mdadm RAID).
+fn collect_device_ancestors(runner: &Runner, device: &str) -> HashSet<String> {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    let clean = strip_subvol_suffix(device);
+    if clean.is_empty() {
+        return visited;
     }
 
-    // 1. Obtener ancestros del dispositivo objetivo con lsblk
-    let mut target_ancestors = Vec::new();
-    let mut cur = device.to_string();
-    for _ in 0..8 {
-        target_ancestors.push(cur.clone());
+    let push_if_new = |dev: String, visited: &mut HashSet<String>, queue: &mut VecDeque<String>| {
+        if visited.insert(dev.clone()) {
+            queue.push_back(dev);
+        }
+    };
+
+    push_if_new(clean.to_string(), &mut visited, &mut queue);
+    if let Ok(canon) = std::fs::canonicalize(clean) {
+        let canon_str = canon.to_string_lossy().to_string();
+        if canon_str.starts_with("/dev/") {
+            push_if_new(canon_str, &mut visited, &mut queue);
+        }
+    }
+
+    let mut steps = 0usize;
+    while let Some(cur) = queue.pop_front() {
+        if steps >= 64 {
+            break;
+        }
+        steps += 1;
+
+        let mut had_pkname = false;
         if let Ok(out) = runner.run(
             &CommandSpec::new("lsblk")
                 .args(["-no", "PKNAME", &cur])
                 .timeout(Duration::from_secs(5)),
         ) {
-            let next = out.stdout.trim();
-            if next.is_empty() {
-                break;
+            if out.is_success() {
+                for parent in parse_pknames(&out.stdout) {
+                    had_pkname = true;
+                    push_if_new(parent, &mut visited, &mut queue);
+                }
             }
-            cur = format!("/dev/{next}");
-        } else {
-            break;
+        }
+
+        // Respaldo determinista para particiones cuando lsblk no devuelve PKNAME
+        if !had_pkname && cur.starts_with("/dev/") && !cur.starts_with("/dev/mapper/") {
+            if let Some(base) = cur.strip_prefix("/dev/") {
+                if !base.contains('/') {
+                    let disk_name = crate::validation::disk_name_from_partition(base);
+                    if !disk_name.is_empty() && disk_name != base {
+                        push_if_new(format!("/dev/{disk_name}"), &mut visited, &mut queue);
+                    }
+                }
+            }
         }
     }
 
-    // 2. Comprobar contra montajes críticos del sistema operativo
+    visited
+}
+
+/// Devuelve el conjunto de todos los dispositivos y discos ancestros que respaldan
+/// `/`, `/boot` y `/boot/efi`.
+fn os_device_ancestors(runner: &Runner) -> HashSet<String> {
+    let mut all = HashSet::new();
     for mount in ["/", "/boot", "/boot/efi"] {
         if let Ok(out) = runner.run(
             &CommandSpec::new("findmnt")
                 .args(["-no", "SOURCE", mount])
                 .timeout(Duration::from_secs(5)),
         ) {
-            let src = out.stdout.trim();
-            if src.is_empty() {
+            if !out.is_success() {
                 continue;
             }
-            let mut src_cur = src.to_string();
-            for _ in 0..8 {
-                if target_ancestors.iter().any(|a| a == &src_cur) {
-                    return Ok(true);
+            for line in out.stdout.lines() {
+                let src = strip_subvol_suffix(line);
+                if src.is_empty() {
+                    continue;
                 }
-                if let Ok(pout) = runner.run(
-                    &CommandSpec::new("lsblk")
-                        .args(["-no", "PKNAME", &src_cur])
-                        .timeout(Duration::from_secs(5)),
-                ) {
-                    let next = pout.stdout.trim();
-                    if next.is_empty() {
-                        break;
-                    }
-                    src_cur = format!("/dev/{next}");
-                } else {
-                    break;
-                }
+                all.extend(collect_device_ancestors(runner, src));
             }
         }
+    }
+    all
+}
+
+/// Lista los discos del sistema operativo (`/`, `/boot`, `/boot/efi`), incluyendo
+/// miembros de LVM/mdadm y particiones con subvolúmenes Btrfs.
+pub fn os_disks(runner: &Runner) -> Vec<String> {
+    let mut disks: Vec<String> = os_device_ancestors(runner)
+        .into_iter()
+        .filter(|dev| dev.starts_with("/dev/"))
+        .map(|dev| {
+            if !dev.starts_with("/dev/mapper/") {
+                if let Some(base) = dev.strip_prefix("/dev/") {
+                    if !base.contains('/') {
+                        let base_disk = crate::validation::disk_name_from_partition(base);
+                        if !base_disk.is_empty() {
+                            return format!("/dev/{base_disk}");
+                        }
+                    }
+                }
+            }
+            dev
+        })
+        .collect();
+    disks.sort();
+    disks.dedup();
+    disks
+}
+
+/// Comprueba si el dispositivo de bloque o alguno de sus ancestros contiene el sistema operativo.
+pub fn is_os_disk(runner: &Runner, device: &str) -> NasResult<bool> {
+    let clean = strip_subvol_suffix(device);
+    if !valid_device(clean) {
+        return Ok(false);
+    }
+
+    // 1. Obtener todos los ancestros del dispositivo objetivo (soporta LVM/mdadm multi-padre).
+    let target_ancestors = collect_device_ancestors(runner, clean);
+
+    // 2. Comprobar intersección contra los ancestros de montajes críticos del SO.
+    let os_ancestors = os_device_ancestors(runner);
+    if target_ancestors.iter().any(|a| os_ancestors.contains(a)) {
+        return Ok(true);
     }
 
     // 3. Comprobar si el dispositivo tiene algún punto de montaje de sistema
     if let Ok(out) = runner.run(
         &CommandSpec::new("lsblk")
-            .args(["-no", "MOUNTPOINT", device])
+            .args(["-no", "MOUNTPOINT", clean])
             .timeout(Duration::from_secs(5)),
     ) {
         for line in out.stdout.lines() {
