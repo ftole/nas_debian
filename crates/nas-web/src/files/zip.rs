@@ -223,8 +223,9 @@ impl FileRoot {
 
         let mut buffered = BufWriter::new(file);
         let mut writer = zip::ZipWriter::new(&mut buffered);
-        let options =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .large_file(true);
         let mut total: u64 = 0;
 
         let mut total_written: u64 = 0;
