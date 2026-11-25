@@ -342,8 +342,47 @@ pub fn run(
     let mut removed = 0_u32;
     for victim in &victims {
         let target = task.task_dir().join(victim);
+        let target_s = target.to_string_lossy().to_string();
+        let mut chattr_spec = CommandSpec::new("chattr")
+            .args(["-i".to_string(), target_s.clone()])
+            .timeout(Duration::from_secs(15));
+        if options.sudo {
+            chattr_spec = chattr_spec.sudo(SudoMode::Passwordless);
+        }
+        let _ = runner.run(&chattr_spec);
+
+        let mut ro_spec = CommandSpec::new("btrfs")
+            .args([
+                "property".to_string(),
+                "set".to_string(),
+                target_s.clone(),
+                "ro".to_string(),
+                "false".to_string(),
+            ])
+            .timeout(Duration::from_secs(15));
+        if options.sudo {
+            ro_spec = ro_spec.sudo(SudoMode::Passwordless);
+        }
+        let _ = runner.run(&ro_spec);
+
+        let mut btrfs_del = CommandSpec::new("btrfs")
+            .args([
+                "subvolume".to_string(),
+                "delete".to_string(),
+                target_s.clone(),
+            ])
+            .timeout(Duration::from_secs(120));
+        if options.sudo {
+            btrfs_del = btrfs_del.sudo(SudoMode::Passwordless);
+        }
+        if runner.run(&btrfs_del).is_ok_and(|o| o.is_success()) {
+            removed += 1;
+            append_log(&log_path, "INFO", &format!("retención: eliminado {victim}"));
+            continue;
+        }
+
         let mut spec = CommandSpec::new("rm")
-            .args(["-rf".to_string(), target.to_string_lossy().to_string()])
+            .args(["-rf".to_string(), target_s])
             .timeout(Duration::from_secs(600));
         if options.sudo {
             spec = spec.sudo(SudoMode::Passwordless);
