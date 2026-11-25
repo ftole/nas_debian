@@ -21,17 +21,20 @@ fn sync_groups(
 ) -> NasResult<()> {
     let mut keep: HashSet<String> = HashSet::new();
 
-    if let Ok(out) = runner.run(
+    let out = runner.run(
         &CommandSpec::new("id")
             .args(["-nG", user])
             .timeout(Duration::from_secs(10)),
-    ) {
-        if out.is_success() {
-            for g in out.stdout.split_whitespace() {
-                if !g.starts_with("grp_") || g == "grp_superadmin" {
-                    keep.insert(g.to_string());
-                }
-            }
+    )?;
+    if !out.is_success() {
+        return Err(NasError::Denied(format!(
+            "no se pudieron consultar los grupos actuales de '{user}': {}",
+            out.stderr.trim()
+        )));
+    }
+    for g in out.stdout.split_whitespace() {
+        if !g.starts_with("grp_") || g == "grp_superadmin" {
+            keep.insert(g.to_string());
         }
     }
 
