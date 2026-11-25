@@ -205,69 +205,6 @@ pub fn format_disk(
     }
 }
 
-/// Crea un volumen físico LVM.
-pub fn lvm_pv_create(runner: &Runner, device: &str) -> NasResult<()> {
-    if !valid_device(device) {
-        return Err(NasError::Invalid(format!("dispositivo inválido: {device}")));
-    }
-    ensure_not_os_disk(runner, device, false)?;
-    run_checked(
-        runner,
-        CommandSpec::new("pvcreate")
-            .arg(device)
-            .sudo(nas_exec::SudoMode::Passwordless)
-            .timeout(Duration::from_secs(120)),
-    )
-}
-
-/// Crea un grupo de volúmenes LVM.
-pub fn lvm_vg_create(runner: &Runner, vg: &str, device: &str) -> NasResult<()> {
-    if !crate::storage_ops::valid_name(vg) {
-        return Err(NasError::Invalid(format!("nombre de VG inválido: {vg}")));
-    }
-    run_checked(
-        runner,
-        CommandSpec::new("vgcreate")
-            .args([vg, device])
-            .sudo(nas_exec::SudoMode::Passwordless)
-            .timeout(Duration::from_secs(120)),
-    )
-}
-
-/// Crea un volumen lógico LVM.
-pub fn lvm_lv_create(runner: &Runner, vg: &str, lv: &str, size: &str) -> NasResult<()> {
-    if !crate::storage_ops::valid_name(vg) || !crate::storage_ops::valid_name(lv) {
-        return Err(NasError::Invalid("nombre LVM inválido".into()));
-    }
-    if !crate::storage_ops::valid_size(size) {
-        return Err(NasError::Invalid(format!("tamaño inválido: {size}")));
-    }
-    run_checked(
-        runner,
-        CommandSpec::new("lvcreate")
-            .args(["-L", size, "-n", lv, vg])
-            .sudo(nas_exec::SudoMode::Passwordless)
-            .timeout(Duration::from_secs(120)),
-    )
-}
-
-/// Extiende un volumen lógico LVM.
-pub fn lvm_lv_extend(runner: &Runner, vg: &str, lv: &str, size: &str) -> NasResult<()> {
-    if !crate::storage_ops::valid_name(vg) || !crate::storage_ops::valid_name(lv) {
-        return Err(NasError::Invalid("nombre LVM inválido".into()));
-    }
-    if !crate::storage_ops::valid_size(size) {
-        return Err(NasError::Invalid(format!("tamaño inválido: {size}")));
-    }
-    run_checked(
-        runner,
-        CommandSpec::new("lvextend")
-            .args(["-L", size, &format!("/dev/{vg}/{lv}")])
-            .sudo(nas_exec::SudoMode::Passwordless)
-            .timeout(Duration::from_secs(120)),
-    )
-}
-
 /// Monta un dispositivo en un punto de montaje con las opciones indicadas.
 pub fn mount(runner: &Runner, source: &str, target: &str, options: &str) -> NasResult<()> {
     let _ = runner.run(
@@ -318,31 +255,6 @@ pub fn install_btrfs_scrub_cron(_runner: &Runner) -> NasResult<()> {
     let path = "/etc/cron.d/nas-btrfs-scrub";
     std::fs::write(path, content)
         .map_err(|e| NasError::Denied(format!("no se pudo escribir {path}: {e}")))?;
-    Ok(())
-}
-
-/// Monta y persiste `/srv/nas` aplicando el flujo completo (formateo opcional).
-pub fn setup_storage(
-    runner: &Runner,
-    device: &str,
-    fs: FileSystem,
-    rotational: bool,
-    keep_data: bool,
-) -> NasResult<()> {
-    ensure_not_os_disk(runner, device, keep_data)?;
-    if device != "LOCAL" {
-        format_disk(runner, device, fs, keep_data)?;
-        let part = partition_path(device).unwrap_or_else(|| device.to_string());
-        let opts = mount_options(fs, rotational);
-        mount(runner, &part, "/srv/nas", &opts)?;
-        update_fstab(runner, &part, "/srv/nas", &opts)?;
-    }
-    if !rotational {
-        let _ = enable_fstrim(runner);
-    }
-    if fs == FileSystem::Btrfs {
-        let _ = install_btrfs_scrub_cron(runner);
-    }
     Ok(())
 }
 
