@@ -338,8 +338,10 @@ if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
         chmod 0600 /etc/ssl/private/nas-web.key 2>/dev/null || true
         chmod 0644 /etc/ssl/certs/nas-web.crt 2>/dev/null || true
     fi
+    NGINX_BACKUP=""
     if [ -f "$NGINX_SITE" ]; then
-        cp -a "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
+        NGINX_BACKUP="$NGINX_SITE.bak.$(date +%Y%m%d%H%M%S)"
+        cp -a "$NGINX_SITE" "$NGINX_BACKUP"
     fi
     install -m 0644 "$SCRIPT_DIR/nginx-nas-web.conf" "$NGINX_SITE"
     rm -f /etc/nginx/sites-enabled/default
@@ -347,7 +349,13 @@ if [ "$CONFIGURE_NGINX" -eq 1 ] && command -v nginx >/dev/null 2>&1; then
     if nginx -t; then
         systemctl reload nginx
     else
-        echo "[-] Nginx rechazó la configuración; se conserva el respaldo" >&2
+        echo "[-] Nginx rechazó la configuración; restaurando respaldo previo..." >&2
+        if [ -n "$NGINX_BACKUP" ] && [ -f "$NGINX_BACKUP" ]; then
+            cp -a "$NGINX_BACKUP" "$NGINX_SITE"
+            if nginx -t >/dev/null 2>&1; then
+                systemctl reload nginx || true
+            fi
+        fi
         exit 1
     fi
 else
