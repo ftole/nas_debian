@@ -203,6 +203,10 @@ impl AuditLog {
                 .map(|idx| idx + 1)
                 .unwrap_or(0);
             if trimmed_end == 0 {
+                if start > 0 && read_len < file_len {
+                    window = (window * 2).min(file_len);
+                    continue;
+                }
                 return Ok(false);
             }
             let content_no_trailing_nl = &tail_bytes[..trimmed_end];
@@ -588,6 +592,30 @@ mod tests {
             .expect("append");
         assert_eq!(entry.prev_hash, "0");
         assert_eq!(log.verify().expect("verify"), 1);
+        let _ = std::fs::remove_file(log.path());
+    }
+
+    #[test]
+    fn recorta_cola_con_saltos_finales_mayores_a_64kib() {
+        let log = temp_log("corrupt-large-trailing-nl");
+        let e1 = log
+            .append(AuditEntry::new(
+                "admin", "panel", "login", "web", "SUCCESS", "ok",
+            ))
+            .expect("append 1");
+        let mut raw = std::fs::read(log.path()).expect("read");
+        raw.extend_from_slice(b"{\"ts\":999,\"corrupt");
+        raw.extend(std::iter::repeat_n(b'\n', 70 * 1024));
+        std::fs::write(log.path(), &raw).expect("write");
+
+        assert!(log.recover_truncated_tail().expect("recover"));
+        assert_eq!(log.verify().expect("verify"), 1);
+        let e2 = log
+            .append(AuditEntry::new(
+                "admin", "panel", "logout", "web", "SUCCESS", "ok",
+            ))
+            .expect("append 2");
+        assert_eq!(e2.prev_hash, e1.hash);
         let _ = std::fs::remove_file(log.path());
     }
 }
