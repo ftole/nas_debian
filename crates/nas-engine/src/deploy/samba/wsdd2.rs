@@ -14,11 +14,6 @@ pub fn wsdd2_override_content(netbios: &str, workgroup: &str) -> String {
     )
 }
 
-/// Alias de `wsdd2_override_content`.
-pub fn wsdd2_override(netbios: &str, workgroup: &str) -> String {
-    wsdd2_override_content(netbios, workgroup)
-}
-
 /// Configura el override de `wsdd2` en el sistema.
 pub fn configure_wsdd2(runner: &Runner, netbios: &str, workgroup: &str) -> NasResult<String> {
     let default_content = format!(
@@ -81,19 +76,4 @@ pub fn configure_wsdd2(runner: &Runner, netbios: &str, workgroup: &str) -> NasRe
     );
 
     Ok("wsdd2 configurado".to_string())
-}
-
-/// Alias de `configure_wsdd2`.
-pub fn setup_wsdd2(runner: &Runner, netbios: &str, workgroup: &str) -> NasResult<String> {
-    configure_wsdd2(runner, netbios, workgroup)
-}
-
-/// Alias de `configure_wsdd2`.
-pub fn configure_wsdd(runner: &Runner, netbios: &str, workgroup: &str) -> NasResult<String> {
-    configure_wsdd2(runner, netbios, workgroup)
-}
-
-/// Alias de `configure_wsdd2`.
-pub fn wsdd2_configure(runner: &Runner, netbios: &str, workgroup: &str) -> NasResult<String> {
-    configure_wsdd2(runner, netbios, workgroup)
 }
