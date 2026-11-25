@@ -80,11 +80,7 @@ pub fn validate_comment(comment: &str) -> NasResult<()> {
 /// Valida un grupo autorizado (`@grp_...`).
 pub fn validate_group(group: &str) -> NasResult<()> {
     let name = group.trim().trim_start_matches('@');
-    if !name.starts_with("grp_")
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    {
+    if !crate::validation::is_valid_group_name(name) {
         return Err(NasError::Invalid(format!("grupo inválido: {group}")));
     }
     Ok(())
