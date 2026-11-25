@@ -18,8 +18,8 @@
 ### Conteo de Hallazgos Activos
 - **Críticos:** `0` activos (`DT-C01`–`DT-C07` y `C-01`–`C-03` resueltos)
 - **Altos:** `0` activos (`DT-A01`–`DT-A20` resueltos; `DT-A10` acota RAM en `backup_dedup.rs`; `DT-A21` reducido a bloques BATS retrocompatibles)
-- **Medios:** `1` parcial (`DT-M01` duplicación residual de variantes `is_os_disk` y dos motores `tasks/runner.rs` vs `backup_spec/render.rs`; `DT-M02`–`DT-M15` resueltos)
-- **Bajos / Deuda Estructural:** `5` (`DT-B01` monolitos restantes, `DT-B02`–`DT-B03` aliases/código muerto menor, `DT-B05` nomenclatura `Arquivos`, `DT-B07`–`DT-B08` cobertura JS/E2E y CLI)
+- **Medios:** `0` activos (`DT-M01`–`DT-M15` resueltos; `tasks/runner.rs` y `backup_spec/render.rs` coexisten intencionalmente por roles distintos)
+- **Bajos / Deuda Estructural:** `2` parciales (`DT-B01` restante en HTML/JS y `backup_dedup.rs`; `DT-B05` nomenclatura `Arquivos` / `legacy.rs`; `DT-B07` cobertura JS/E2E) y `DT-B08` ampliado (`nas-tui`, `nasctl`, `nas-dev`, `nas-cli`)
 
 ---
 
@@ -70,9 +70,9 @@
 
 ## 4. Hallazgos de Severidad MEDIA
 
-- **`DT-M01` [PARCIAL] — Duplicación crítica entre módulos de sistema:**
-  - *Resuelto:* validadores de dispositivo, nombres de usuario/grupo/share/unidad, cálculo `parent_disk`/`first_partition_path` y `RESERVED_SYSTEM_USERS` centralizados en `crates/nas-engine/src/validation.rs` (con `OnceLock<Regex>`); `nas-cli` (`services`, `diag`, `storage`) delega directamente en `nas_engine`.
-  - *Pendiente:* `is_os_disk` (4 variantes), `update_fstab` (3 variantes), parsers de `df -Pk`/IP primaria, dos motores de ejecución de backups divergentes (`tasks/runner.rs` vs `backup_spec/render.rs`) y 3 parsers distintos de `backup_<id>.sh`.
+- **`DT-M01` [RESUELTO] — Unificación de validadores, detección de disco SO y parsers:**
+  - *Resuelto:* validadores de dispositivo, nombres de usuario/grupo/share/unidad, cálculo `parent_disk`/`first_partition_path` y `RESERVED_SYSTEM_USERS` centralizados en `crates/nas-engine/src/validation.rs`; `nas-cli` (`services`, `diag`, `storage`) delega en `nas_engine`; `is_os_disk`/`os_disks` unificados en `helpers/storage/disks.rs` (consumido por `storage_ops.rs`, `deploy/mod.rs` y `storage/pools.rs`); `read_task_info` delega en `BackupTask::load`.
+  - *Nota de diseño:* `tasks/runner.rs` (planificación tipada/dry-run para CLI, TUI y vista previa) y `backup_spec/render.rs` (emisión de scripts Bash para `cron`/`systemd-run` desde el panel web) coexisten intencionalmente por responsabilidades distintas.
 - **`DT-M02` [RESUELTO] — `tasks/runner.rs` limpia `.inprogress_*` y resuelve pool sin `[subvol]`:** `crates/nas-engine/src/tasks/runner.rs` purga `.inprogress_*` tanto al inicio (`clean_orphan_inprogress_dirs`) como al fallar (`remove_dir_all(task.staging_path(now))`), añade `umount -f`/`-l` ante caída CIFS y recorta `[subvol]` en `destination_pool_key`.
 - **`DT-M03` [RESUELTO] — `nas-exec::command.rs` combina `SudoMode::WithPassword` + `stdin_data` y evita bloqueos con nietos en timeout:** `crates/nas-exec/src/command.rs` y `redact.rs` ordenan secretos por longitud descendente, redactan `CommandOutput::command` y acotan la espera de pipes tras timeout.
 - **`DT-M04` [RESUELTO] — SQLite en `db.rs` ordena `CREATE TABLE` antes de `ALTER TABLE web_audit`:** `crates/nas-web/src/db.rs`.
@@ -92,23 +92,18 @@
 
 ## 5. Severidad BAJA, Monolitos y Código Legado/Muerto
 
-### `DT-B01` — Archivos sobredimensionados (>450 líneas) que requieren modularización
-- `crates/nas-web/templates/layout.html` (**3,359** líneas) y `assets/js/app.js` (**818** líneas)
-- `crates/nas-engine/src/backup_dedup.rs` (**2,889** líneas; `deduplicate_task_inner` mide 448 líneas)
-- `crates/nas-core/src/resources.rs` (**867** líneas)
-- `crates/nas-engine/src/backup_spec.rs` (**685**), `deploy/samba.rs` (**514**), `deploy/mod.rs` (**509**), `deploy/artifacts.rs` (**502**), `deploy/storage.rs` (**493**), `tasks/runner.rs` (**481**), `tasks.rs` (**472**), `backup_spec/render.rs` (**465**), `storage_ops.rs` (**461**) *(ya modularizados en submódulos: `security.rs`, `storage.rs`, `helpers/storage.rs`, `update.rs`, `helpers/backup.rs` y `helpers/accounts.rs`)*
-- `crates/nas-cli/src/main.rs` (**578**), `helper/dispatch.rs` (**537**), `commands/deploy.rs` (**489**) *(ya modularizado: `commands/update.rs`)*
-- `crates/nas-web/src/routes/users.rs` (**686**), `files/zip.rs` (**668**), `routes/files/mutations.rs` (**619**), `db.rs` (**531**), `legacy/storage.rs` (**504**), `files.rs` (**494**), `files/trash.rs` (**471**) *(ya modularizado: `routes/system.rs`)*
-- `src/core/updater.sh` (**705**), `src/core/deploy.sh` (**626**), `scripts/qa_live_runner.py` (**619**)
+### `DT-B01` — Archivos sobredimensionados (>450 líneas)
+- *Ya modularizados en submódulos:* `nas-core/src/resources.rs` (`parsers.rs`, `cgroup.rs`, `tests.rs`), `security/acls.rs` (`probe.rs`, `discover.rs`), `helpers/backup/install.rs` (`install/tests.rs`), `storage_ops.rs` (`maintenance.rs`, `tests.rs`), `routes/files/mutations.rs` (`upload.rs`), además de `security.rs`, `storage.rs`, `helpers/storage.rs`, `update.rs`, `helpers/backup.rs`, `helpers/accounts.rs`, `commands/update.rs` y `routes/system.rs`.
+- *Pendientes de modularización futura:* `crates/nas-web/templates/layout.html` (**3,591** líneas), `assets/js/app.js` (**818** líneas), `crates/nas-engine/src/backup_dedup.rs` (**2,889** líneas), `src/core/{updater,deploy}.sh` y `scripts/qa_live_runner.py`.
 
 ### `DT-B02` a `DT-B08` — Código muerto, restos PHP/Whiptail y deuda de pruebas
-- **`DT-B02` (31 aliases triviales en `deploy/`):** `deploy/helpers.rs:30-271` (16), `deploy/samba.rs:192-401` (11), `deploy/samba/wsdd2.rs:17-20,92-105` (4).
-- **`DT-B03` (Funciones sin callers / `dead_code`):** `terminal.rs:84-100` (`fn tmux`), `storage_ops.rs:265-280` (`LvmRequest`), `deploy/users.rs:168-210` (`sudoers_content` con `%grp_superadmin ALL=(ALL)`), `deploy/storage.rs:219-280,298-306,405-427`, `deploy/samba.rs:170-176,208-386`, `deploy/mod.rs:265-285` (`deploy_sh_invocation`), `nasctl/src/main.rs:218-222` (`remote_not_available`), `files/zip.rs:281-284` (`FileRoot::zip`), `legacy/storage.rs:433-441` (`calculate_task_size`), `views.rs:16` (`ICONS_SVG`), `routes/common.rs:304` (`ExtQuery`).
-- **`DT-B04` (Textos y etiquetas heredadas de PHP/Whiptail/GPG):** `users/crud.js:35-36,260,302-303` protege/nombra `"www-data (sistema)"` en vez de `"nas-web"`; `src/lib/colors.sh:20-40` conserva `NEWT_COLORS`; `install.sh:236` usa fallback `TARGET_TAG="v0.1.4"`; `commands/migrate.rs:27` lista `install.sh` como legado a retirar; `nasctl/src/main.rs:23-24` anuncia transporte SSH futuro (F3).
+- **`DT-B02` [RESUELTO]:** retirados los aliases triviales sin uso en `deploy/{helpers.rs, samba.rs, samba/wsdd2.rs}` y migrados los llamadores en `commands/deploy.rs`.
+- **`DT-B03` [RESUELTO]:** retiradas las funciones/estructuras sin llamadores (`terminal.rs::tmux`, `storage_ops::LvmRequest`, `deploy/users::{sudoers_content, sudoers_artifact, install_sudoers}`, `deploy/storage::{lvm_*, setup_storage}`, `deploy/samba::{generate_smb_conf, posix_acl_plan, apply_posix_acls}`, `nasctl::remote_not_available`, `legacy/storage::calculate_task_size*`, `views::ICONS_SVG`) y confinado `FileRoot::zip` a `#[cfg(test)]`. *(Nota: `deploy_sh_invocation` y `ExtQuery` sí tienen llamadores activos y se conservan).*
+- **`DT-B04` [RESUELTO]:** retirado `install.sh` de `migrate.rs` (al ser el instalador activo), actualizado el texto `"fase F3"` en `nasctl` y eliminado `NEWT_COLORS` de `src/lib/colors.sh`.
 - **`DT-B05` (Nomenclatura inconsistente):** `ServerRole::Arquivos` / `ArquivosBackup` (ortografía portuguesa en `nas-core/src/config.rs:14,18`); módulo `crates/nas-web/src/legacy.rs` cuyo nombre sugiere código muerto aunque atiende la API productiva.
-- **`DT-B06` (Edge cases menores):** `parse_loadavg_1m` / `parse_psi_avg10` sin filtro `is_finite()` (`resources.rs:510-530`); `Inventory::load` mapea `PermissionDenied` a `NotFound` (`nas-inventory/src/lib.rs:117-119`); `nas-dev/src/preflight.rs:303-308` lee `.tar.gz` entero en RAM al calcular SHA-256.
-- **`DT-B07` (Sin tests unitarios JavaScript ni E2E en navegador):** `.github/workflows/ci.yml` solo valida sintaxis (`node --check`). Regresiones funcionales (`unidades/<id>`, `onclick=""` en `layout.html`, `res.blob()`) pasan CI sin fallo.
-- **`DT-B08` (Cobertura unitaria faltante en UI/CLI):** sin unit tests propios en `nas-tui/src/app.rs`, `nasctl/src/main.rs`, `nas-dev/src/{preflight,remote,sync}.rs` y subcomandos CLI (`audit`, `backup`, `deploy`, `diag`, `migrate`, `network`, `services`, `status`, `storage`, `users`).
+- **`DT-B06` [RESUELTO]:** `parse_loadavg_1m` / `parse_psi_avg10` validan `is_finite() && >= 0.0`, `Inventory::load` distingue `NotFound` de `PermissionDenied` y `nas-dev::sha256_file` calcula el hash en streaming de 64 KiB.
+- **`DT-B07` (Sin tests unitarios JavaScript ni E2E en navegador):** `.github/workflows/ci.yml` valida sintaxis (`node --check`) y contrato estático (`qa_ui_audit.py --static`).
+- **`DT-B08` [PARCIAL — Ampliado]:** añadidas pruebas unitarias en `nas-tui/src/app.rs`, `nasctl/src/main.rs`, `nas-dev/src/{preflight,remote,sync}.rs` y `nas-cli/src/commands/migrate.rs`.
 
 ---
 
@@ -120,10 +115,10 @@
 | **A-02** (`packaging/` vs `deploy/`) | **Resuelto** | `deploy/{web,helpers,artifacts,samba}.rs` consumen `packaging/*` vía `include_str!` con tests de paridad. |
 | **A-03** (`su root grp_samba` en `logrotate`) | **Resuelto** | `deploy/artifacts.rs:23` incluye `su root grp_samba`. |
 | **A-04** (`UPDATE users` en `install.sh`) | **Resuelto** | `packaging/install.sh:144-169` actualiza `web_users` (`password_sha256`). |
-| **A-05** (`gpg_verified` vs `Ed25519`) | **Parcial (brecha nueva)** | `routes/system.rs:260-265` ya lee `ed25519_verified`, pero `install.sh:198,299` lo escribe en `true` sin verificar firma (`DT-C02`). |
-| **A-06** (`256 MiB` en `zip.rs`) | **Resuelto** | `ZIP_MAX_BYTES = 50 GiB` sin mensajes viejos (falta ZIP64 `DT-C03`). |
-| **A-07** (Restos PHP/Git/GPG) | **Parcial** | Limpio en `services.rs` y partes de `layout.html`/`system.rs`, pero persisten `www-data` (`crud.js`), token PHP (`layout.html:3357`), `tests/parity/fixtures/*.php` y `src/core/*.sh`. |
-| **A-08** (`80-udisks2-hide-os.rules`) | **Resuelto en Rust / Abierto en Bash** | Eliminado de `crates/nas-engine/src/uninstall.rs`, aún presente en `src/core/uninstall.sh:76`. |
+| **A-05** (`gpg_verified` vs `Ed25519`) | **Resuelto (`DT-C02`)** | `install.sh` valida SHA-256 + Ed25519 con `openssl` antes de descomprimir y reporta `ed25519_verified` verídico. |
+| **A-06** (`256 MiB` en `zip.rs`) | **Resuelto (`DT-C03`)** | `ZIP_MAX_BYTES = 50 GiB`, ZIP64 (`large_file(true)`) y descarga por token en streaming. |
+| **A-07** (Restos PHP/Git/GPG) | **Resuelto en Rust / Mínimo en BATS** | Limpio en código Rust y `layout.html`; `tests/parity/fixtures/*.php` y `src/core/*.sh` se mantienen únicamente por retrocompatibilidad BATS. |
+| **A-08** (`80-udisks2-hide-os.rules`) | **Resuelto** | Retirado tanto de `crates/nas-engine/src/uninstall.rs` como de `src/core/uninstall.sh`. |
 | **A-09** (`version.json` y helpers en `nas update`) | **Resuelto** | `nas-engine/src/update.rs:214-249` y `commands/update.rs:63-113,640-654` sincronizan `bin/`, `sbin/`, `version.json` y `release.pub`. |
 
 ---
