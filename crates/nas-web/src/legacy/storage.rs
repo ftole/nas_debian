@@ -547,17 +547,6 @@ pub fn task_storage_with_cache(task: &nas_engine::tasks::BackupTask) -> TaskStor
     placeholder
 }
 
-/// Compatibilidad: calcula el espacio en bytes consumido por el directorio de la tarea de respaldo.
-pub fn calculate_task_size_ex(task_dir: &Path) -> (u64, bool) {
-    calculate_single_dir_size_ex(task_dir)
-}
-
-/// Compatibilidad: devuelve solo los bytes.
-#[allow(dead_code)]
-pub fn calculate_task_size(task_dir: &Path) -> u64 {
-    calculate_task_size_ex(task_dir).0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
