@@ -278,7 +278,8 @@ impl FileRoot {
         Ok((temp_guard, size))
     }
 
-    /// Comprime una carpeta (o archivo) en un ZIP con límite de tamaño (compatibilidad).
+    /// Comprime una carpeta (o archivo) en un ZIP con límite de tamaño (solo pruebas).
+    #[cfg(test)]
     pub fn zip(&self, relative: &str) -> NasResult<Vec<u8>> {
         let (temp_guard, _size) = self.zip_temp(relative)?;
         std::fs::read(temp_guard.path()).map_err(|e| NasError::io(temp_guard.path(), e))
