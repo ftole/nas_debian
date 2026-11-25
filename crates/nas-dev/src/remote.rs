@@ -335,3 +335,19 @@ pub(crate) fn current_actor() -> String {
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "nas-dev".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_actor_no_esta_vacio() {
+        assert!(!current_actor().trim().is_empty());
+    }
+
+    #[test]
+    fn local_audit_path_termina_en_audit_jsonl() {
+        let p = local_audit_path();
+        assert!(p.to_string_lossy().ends_with("audit.jsonl"));
+    }
+}
