@@ -73,7 +73,6 @@ _referencia_limpieza_os() {
     rm -f /etc/sysctl.d/99-nas-tuning.conf
     rm -f /etc/audit/rules.d/nas.rules
     rm -f /etc/udev/rules.d/60-nas-readahead.rules
-    rm -f /etc/udev/rules.d/80-udisks2-hide-os.rules
     rm -f /etc/logrotate.d/nas-backups
     rm -f /etc/cron.d/nas-btrfs-scrub
     if command -v augenrules &>/dev/null; then
