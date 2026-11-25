@@ -120,24 +120,52 @@ pub fn plan_with_scope(purge_state: bool, os_scope: bool) -> UninstallPlan {
 
     if os_scope {
         steps.push(step(
-            "retirar ajustes de kernel y udev",
+            "retirar ajustes de kernel, journald y udev",
             &[
                 "rm",
                 "-f",
                 "/etc/sysctl.d/99-nas-tuning.conf",
+                "/etc/systemd/journald.conf.d/99-nas-limits.conf",
                 "/etc/udev/rules.d/60-nas-readahead.rules",
             ],
             true,
         ));
         steps.push(step(
-            "retirar rotación y auditoría",
+            "retirar reglas udev de caché de escritura",
+            &[
+                "sh",
+                "-c",
+                "rm -f /etc/udev/rules.d/65-nas-writecache-*.rules",
+            ],
+            true,
+        ));
+        steps.push(step(
+            "retirar rotación, scrubs cron y auditoría",
             &[
                 "rm",
                 "-f",
                 "/etc/logrotate.d/nas-backups",
                 "/etc/audit/rules.d/nas.rules",
                 "/etc/cron.d/nas-btrfs-scrub",
+                "/etc/cron.daily/nas-recycle-purge",
                 "/etc/aide/aide.conf.d/75_aide_nas",
+            ],
+            true,
+        ));
+        steps.push(step(
+            "retirar scrubs cron por unidad",
+            &["sh", "-c", "rm -f /etc/cron.d/nas-btrfs-scrub-unit-*"],
+            true,
+        ));
+        steps.push(step(
+            "desenmascarar objetivos de suspensión ACPI",
+            &[
+                "systemctl",
+                "unmask",
+                "sleep.target",
+                "suspend.target",
+                "hibernate.target",
+                "hybrid-sleep.target",
             ],
             true,
         ));
