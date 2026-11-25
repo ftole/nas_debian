@@ -190,12 +190,15 @@ impl FileRoot {
         resolved: &Path,
         action: &str,
     ) -> NasResult<()> {
-        if let Ok(canon_rel) = resolved.strip_prefix(&self.root) {
-            if let Some(desc) = self.is_protected_path(&canon_rel.to_string_lossy()) {
-                return Err(NasError::Denied(format!(
-                    "operación denegada: {desc} están protegidos contra {action}"
-                )));
-            }
+        let Ok(canon_rel) = resolved.strip_prefix(&self.root) else {
+            return Err(NasError::Denied(format!(
+                "operación denegada: ruta fuera de la raíz permitida ({action})"
+            )));
+        };
+        if let Some(desc) = self.is_protected_path(&canon_rel.to_string_lossy()) {
+            return Err(NasError::Denied(format!(
+                "operación denegada: {desc} están protegidos contra {action}"
+            )));
         }
         Ok(())
     }
