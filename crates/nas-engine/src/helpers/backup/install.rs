@@ -14,6 +14,86 @@ use super::permanent::freeze_backup_task;
 const MAX_RUNNER_BYTES: u64 = 256 * 1024;
 const MAX_CRON_BYTES: u64 = 4 * 1024;
 const MAX_CRED_BYTES: u64 = 16 * 1024;
+const ALLOWED_CRON_PATH_DIRS: &[&str] = &[
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+];
+
+fn extract_cron_expr(cron_text: &str) -> Option<String> {
+    for raw in cron_text.lines() {
+        let line = raw.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with("SHELL=")
+            || line.starts_with("PATH=")
+            || line.starts_with("MAILTO=")
+        {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 7 {
+            return Some(parts[..5].join(" "));
+        }
+    }
+    None
+}
+
+fn dest_unit_from_root(dest_root: &str) -> String {
+    let trimmed = dest_root.trim().trim_end_matches('/');
+    if let Some(rest) = trimmed.strip_prefix("/srv/nas/unidades/") {
+        if let Some(unit) = rest.strip_suffix("/BACKUPS_HISTORICOS") {
+            if !unit.is_empty() && !unit.contains('/') {
+                return unit.to_string();
+            }
+        }
+    }
+    "principal".to_string()
+}
+
+fn is_allowed_cron_path(path_val: &str) -> bool {
+    !path_val.is_empty()
+        && path_val
+            .split(':')
+            .all(|seg| ALLOWED_CRON_PATH_DIRS.contains(&seg))
+}
+
+fn render_validated_runner(
+    id: &str,
+    parsed_task: &crate::tasks::BackupTask,
+    cron_text: &str,
+    key_text: Option<&str>,
+) -> NasResult<String> {
+    let proto_str = match parsed_task.kind {
+        crate::tasks::SourceKind::Cifs => "cifs",
+        crate::tasks::SourceKind::Ssh => "ssh",
+        crate::tasks::SourceKind::Local => "local",
+    };
+    let cron = extract_cron_expr(cron_text).unwrap_or_else(|| "0 2 * * *".to_string());
+    let spec = BackupSpec {
+        id: id.to_string(),
+        proto: proto_str.to_string(),
+        ip: parsed_task.source_ip.clone().unwrap_or_default(),
+        share: parsed_task.share.clone().unwrap_or_default(),
+        path: parsed_task.path.clone().unwrap_or_default(),
+        user: parsed_task.user.clone().unwrap_or_default(),
+        password: String::new(),
+        cron,
+        retention: parsed_task.retention,
+        dest_unit: dest_unit_from_root(&parsed_task.destination_root),
+        port: parsed_task.port,
+        ssh_key: key_text
+            .map(str::to_string)
+            .or_else(|| parsed_task.key_file.clone()),
+        auto_permanent: parsed_task.auto_permanent,
+        preserve_existing_auth: true,
+    };
+    let proto = spec.validate()?;
+    Ok(spec.render_runner(proto))
+}
 
 /// Lee un archivo regular sin seguir enlaces simbólicos y exige que resida dentro
 /// de alguno de los directorios permitidos.
@@ -101,15 +181,12 @@ pub fn validate_cron_content(id: &str, content: &str) -> NasResult<()> {
             continue;
         }
         if let Some(path_val) = line.strip_prefix("PATH=") {
-            if !path_val.is_empty()
-                && path_val
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | ':' | '_' | '-' | '.'))
-            {
+            if is_allowed_cron_path(path_val) {
                 continue;
             }
             return Err(NasError::Denied(
-                "variable PATH inválida en archivo cron".into(),
+                "variable PATH no autorizada en archivo cron (solo rutas estándar del sistema)"
+                    .into(),
             ));
         }
 
@@ -208,10 +285,16 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         None
     };
 
-    // Validar sintaxis del runner con bash -n
+    // Re-renderizar el runner exclusivamente desde la especificación validada para evitar
+    // ejecución de código arbitrario inyectado en el archivo de staging.
+    let safe_runner_text =
+        render_validated_runner(id, &parsed_task, &cron_text, key_text.as_deref())?;
+
+    // Validar sintaxis del runner generado vía stdin (cero TOCTOU sobre staging).
     let check = runner.run(
         &CommandSpec::new("bash")
-            .args(["-n", &runner_src.to_string_lossy()])
+            .args(["-n", "-s"])
+            .stdin_secret(nas_exec::SecretInput::new(safe_runner_text.clone()))
             .timeout(Duration::from_secs(15)),
     )?;
     if !check.is_success() {
@@ -221,17 +304,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         )));
     }
 
-    // Determinar destino
-    let mut dest_root = "/srv/nas/BACKUPS_HISTORICOS".to_string();
-    for line in runner_text.lines() {
-        if let Some(rest) = line.strip_prefix("DEST_ROOT=") {
-            let trimmed = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
-            if trimmed.starts_with("/srv/nas/") && !trimmed.contains("..") {
-                dest_root = trimmed.to_string();
-                break;
-            }
-        }
-    }
+    let dest_root = parsed_task.destination_root.clone();
 
     let _ = std::fs::create_dir_all("/usr/local/bin");
     let _ = std::fs::create_dir_all("/etc/cron.d");
@@ -256,7 +329,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let cred_dst = PathBuf::from(format!("/etc/backup-credentials/{id}.cred"));
     let key_dst = PathBuf::from(format!("/etc/backup-credentials/{id}.id_ed25519"));
 
-    write_atomic_mode(&runner_dst, runner_text.as_bytes(), 0o755)?;
+    write_atomic_mode(&runner_dst, safe_runner_text.as_bytes(), 0o755)?;
     write_atomic_mode(&cron_dst, cron_text.as_bytes(), 0o644)?;
 
     if let Some(txt) = cred_text {
@@ -658,6 +731,8 @@ mod security_tests {
             "0 2 * * * root /usr/local/bin/backup_otra.sh\n",
             "0 2 * * * nobody /usr/local/bin/backup_demo.sh\n",
             "PATH=/tmp:$(id)\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
+            "PATH=/var/lib/nas/staging:/usr/bin\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
+            "PATH=/tmp:/usr/bin\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
             "# solo comentarios sin tarea\n",
         ] {
             assert!(
@@ -665,6 +740,19 @@ mod security_tests {
                 "debe rechazar cron malicioso: {malicious}"
             );
         }
+    }
+
+    #[test]
+    fn render_validated_runner_descarta_codigo_inyectado_y_fija_path_seguro() {
+        let injected = "#!/bin/bash\nSOURCE_TYPE=\"local\"\nSRC_PATH=\"/datos/app\"\nRETENTION=5\ntouch /tmp/pwned\n";
+        let task = crate::tasks::BackupTask::parse("demo", injected).expect("parse");
+        let cron = "0 3 * * * root /usr/local/bin/backup_demo.sh\n";
+        let rendered = render_validated_runner("demo", &task, cron, None).expect("render");
+        assert!(!rendered.contains("/tmp/pwned"));
+        assert!(rendered.contains(
+            "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\""
+        ));
+        assert!(rendered.contains("SRC_PATH='/datos/app'"));
     }
 
     #[test]
