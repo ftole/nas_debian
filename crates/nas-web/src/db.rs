@@ -109,22 +109,6 @@ impl Db {
             let _ = conn.execute("DROP TABLE api_rate_limits", []);
         }
 
-        // Migración idempotente: columna origin_ip en web_audit (bloque 3-IP)
-        let has_origin_ip: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('web_audit') WHERE name = 'origin_ip'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|count| count > 0)
-            .unwrap_or(false);
-        if !has_origin_ip {
-            let _ = conn.execute(
-                "ALTER TABLE web_audit ADD COLUMN origin_ip TEXT NOT NULL DEFAULT ''",
-                [],
-            );
-        }
-
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS web_users (
                  username TEXT PRIMARY KEY,
@@ -158,7 +142,24 @@ impl Db {
              );
              CREATE INDEX IF NOT EXISTS idx_api_rate_limits_window ON api_rate_limits(window_start);",
         )
-        .map_err(db_error)
+        .map_err(db_error)?;
+
+        // Migración idempotente: columna origin_ip en web_audit (bloque 3-IP)
+        let has_origin_ip: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('web_audit') WHERE name = 'origin_ip'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !has_origin_ip {
+            let _ = conn.execute(
+                "ALTER TABLE web_audit ADD COLUMN origin_ip TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+        }
+        Ok(())
     }
 
     /// Ruta del archivo de base de datos.
