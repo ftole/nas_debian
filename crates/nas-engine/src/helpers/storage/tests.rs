@@ -180,3 +180,15 @@ fn wipe_disk_exige_si_destruir_datos_y_dispositivo_valido() {
     assert!(wipe_disk(&runner, "SI-DESTRUIR-DATOS", "/dev/sdz/").is_err());
     assert!(wipe_disk(&runner, "SI-DESTRUIR-DATOS", "/dev/").is_err());
 }
+
+#[test]
+fn strip_subvol_suffix_y_parse_pknames_soportan_btrfs_y_multi_padre() {
+    use super::disks::{parse_pknames, strip_subvol_suffix};
+
+    assert_eq!(strip_subvol_suffix("/dev/nvme0n1p2[/@]"), "/dev/nvme0n1p2");
+    assert_eq!(strip_subvol_suffix("/dev/sda2[/@rootfs]"), "/dev/sda2");
+    assert_eq!(strip_subvol_suffix("/dev/sda1/"), "/dev/sda1");
+
+    let parents = parse_pknames("sda1\nsdb1\nsda1\n\n");
+    assert_eq!(parents, vec!["/dev/sda1", "/dev/sdb1"]);
+}
