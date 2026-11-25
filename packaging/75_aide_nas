@@ -1,11 +1,11 @@
 # Exclusiones AIDE para almacenamiento NAS, montajes temporales y entorno de desarrollo.
-# Reglas negativas no recursivas (prefijo '-', AIDE >= 0.19) para evitar recorrer datos masivos.
--/srv/nas$ 0
--/srv/dev$ 0
--/srv/cargo-target$ 0
--/srv/rust$ 0
--/opt/dev$ 0
--/opt/nas_debian/target$ 0
--/mnt/backup_sources$ 0
--/mnt/restore_targets$ 0
--/var/lib/nas$ 0
+# Reglas '!' excluyen recursivamente el subárbol completo (AIDE 0.19+) evitando recorrer datos masivos.
+!/srv/nas
+!/srv/dev
+!/srv/cargo-target
+!/srv/rust
+!/opt/dev
+!/opt/nas_debian/target
+!/mnt/backup_sources
+!/mnt/restore_targets
+!/var/lib/nas
