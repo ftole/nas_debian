@@ -14,7 +14,7 @@ pub struct LegacyItem {
 }
 
 pub fn legacy_inventory(root: &Path) -> Vec<LegacyItem> {
-    let items: [(&str, &str, &str); 10] = [
+    let items: [(&str, &str, &str); 9] = [
         ("web", "nas-web", "A"),
         ("bin/nas-cli", "nas (CLI Rust)", "A"),
         ("src/asistente.sh", "nas-tui", "A"),
@@ -24,7 +24,6 @@ pub fn legacy_inventory(root: &Path) -> Vec<LegacyItem> {
         ("src/core/deploy.sh", "nas deploy", "B"),
         ("src/core/updater.sh", "nas update", "B"),
         ("src/core/uninstall.sh", "nas uninstall", "B"),
-        ("install.sh", "packaging/install.sh", "B"),
     ];
 
     items
@@ -75,4 +74,16 @@ pub fn migrate_status(json: bool) -> NasResult<ExitCode> {
     println!("Pendientes de retiro: {pending}");
 
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_inventory_excluye_install_sh_activo() {
+        let items = legacy_inventory(Path::new("."));
+        assert_eq!(items.len(), 9);
+        assert!(!items.iter().any(|i| i.path == "install.sh"));
+    }
 }
