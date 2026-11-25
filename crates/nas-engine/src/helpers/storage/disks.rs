@@ -81,8 +81,10 @@ fn collect_device_ancestors(runner: &Runner, device: &str) -> HashSet<String> {
         ) {
             if out.is_success() {
                 for parent in parse_pknames(&out.stdout) {
-                    had_pkname = true;
-                    push_if_new(parent, &mut visited, &mut queue);
+                    if parent != cur {
+                        had_pkname = true;
+                        push_if_new(parent, &mut visited, &mut queue);
+                    }
                 }
             }
         }
@@ -93,8 +95,10 @@ fn collect_device_ancestors(runner: &Runner, device: &str) -> HashSet<String> {
         ) {
             if out.is_success() {
                 for parent in parse_pknames(&out.stdout) {
-                    had_pkname = true;
-                    push_if_new(parent, &mut visited, &mut queue);
+                    if parent != cur {
+                        had_pkname = true;
+                        push_if_new(parent, &mut visited, &mut queue);
+                    }
                 }
             }
         }
@@ -548,9 +552,9 @@ pub fn setup_lvm(
         if !vg_pvs.is_empty() && vg_pvs.iter().all(|p| pv_belongs_to_disk(p, disk)) {
             let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", vg]));
             let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", vg]));
-        } else if !vg_pvs.is_empty() {
+        } else {
             return Err(NasError::Denied(format!(
-                "el Volume Group '{vg}' ya existe en otros discos y no se destruirá automáticamente"
+                "el Volume Group '{vg}' ya existe en otros discos o no es verificable"
             )));
         }
     }
