@@ -19,6 +19,17 @@ pub struct DomainJoinBody {
     pub domain: String,
     pub user: String,
     pub password: String,
+    #[serde(default)]
+    pub ou: Option<String>,
+}
+
+/// Cuerpo opcional para salir de un dominio con credenciales de administrador.
+#[derive(Debug, Deserialize, Default)]
+pub struct DomainLeaveBody {
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 /// Cuerpo para descubrir un dominio Active Directory.
@@ -89,12 +100,25 @@ pub async fn domain_join(
         return bad_request("dominio o usuario inválidos");
     }
 
+    if let Some(ou) = body.ou.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if !nas_engine::domain::is_valid_ou(ou) {
+            return bad_request("unidad organizativa (OU) inválida");
+        }
+    }
+
     let domain = body.domain.clone();
     let domain_user = body.user.clone();
     let password = body.password.clone();
+    let ou = body.ou.clone();
     let outcome = state
         .run_system_blocking(move || {
-            nas_engine::domain::join(&Runner::new(), &domain, &domain_user, &password)
+            nas_engine::domain::join_with_ou(
+                &Runner::new(),
+                &domain,
+                &domain_user,
+                &password,
+                ou.as_deref(),
+            )
         })
         .await
         .unwrap_or_else(|_| Err("unión interrumpida".to_string()));
@@ -137,11 +161,38 @@ pub async fn domain_leave(
     State(state): State<AppState>,
     admin: AdminUser,
     headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Response {
     let user = admin.user().username().to_string();
+    let leave_body: DomainLeaveBody = if body.is_empty() {
+        DomainLeaveBody::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(parsed) => parsed,
+            Err(_) => return bad_request("cuerpo JSON inválido"),
+        }
+    };
+    if let Some(u) = leave_body
+        .user
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if !nas_engine::domain::is_valid_user(u) {
+            return bad_request("usuario de dominio inválido");
+        }
+    }
+    let leave_user = leave_body.user;
+    let leave_pass = leave_body.password;
 
     let outcome = state
-        .run_system_blocking(|| nas_engine::domain::leave(&Runner::new()))
+        .run_system_blocking(move || {
+            nas_engine::domain::leave_with_credentials(
+                &Runner::new(),
+                leave_user.as_deref(),
+                leave_pass.as_deref(),
+            )
+        })
         .await
         .unwrap_or_else(|_| Err("salida interrumpida".to_string()));
 
