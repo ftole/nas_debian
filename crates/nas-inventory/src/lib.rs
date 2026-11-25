@@ -114,8 +114,11 @@ impl Inventory {
     /// Carga el inventario desde un archivo YAML.
     pub fn load(path: impl AsRef<Path>) -> NasResult<Self> {
         let path = path.as_ref();
-        let raw = std::fs::read_to_string(path).map_err(|_| {
-            NasError::NotFound(format!("inventario no encontrado: {}", path.display()))
+        let raw = std::fs::read_to_string(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                NasError::NotFound(format!("inventario no encontrado: {}", path.display()))
+            }
+            _ => NasError::io(path, e),
         })?;
         Self::from_yaml(&raw)
     }
@@ -193,11 +196,36 @@ impl Inventory {
             .get(&host.group)
             .ok_or_else(|| NasError::Invalid(format!("grupo '{}' no definido", host.group)))?;
 
-        let role = host
-            .role
-            .as_deref()
-            .and_then(ServerRole::parse)
-            .unwrap_or(ServerRole::ArquivosBackup);
+        let role = match host.role.as_deref() {
+            Some(raw) => ServerRole::parse(raw)
+                .ok_or_else(|| NasError::Invalid(format!("{alias}: rol inválido '{raw}'")))?,
+            None => ServerRole::ArquivosBackup,
+        };
+
+        if !matches!(group.env.as_str(), ENV_DEV | ENV_PROD) {
+            return Err(NasError::Invalid(format!(
+                "{alias}: entorno de grupo inválido '{}' (debe ser dev o prod)",
+                group.env
+            )));
+        }
+
+        let port = host.port.or(self.defaults.port).unwrap_or(22);
+        if port == 0 {
+            return Err(NasError::Invalid(format!(
+                "{alias}: puerto SSH inválido (0)"
+            )));
+        }
+
+        let user = match (host.user.as_deref(), self.defaults.user.as_deref()) {
+            (Some(u), _) | (None, Some(u)) => {
+                let trimmed = u.trim();
+                if trimmed.is_empty() {
+                    return Err(NasError::Invalid(format!("{alias}: usuario SSH vacío")));
+                }
+                trimmed.to_string()
+            }
+            (None, None) => "nasadmin".to_string(),
+        };
 
         let defaults = if group.env == ENV_DEV {
             (
@@ -215,12 +243,8 @@ impl Inventory {
             group: host.group.clone(),
             env: group.env.clone(),
             role: role.as_str().to_string(),
-            port: host.port.or(self.defaults.port).unwrap_or(22),
-            user: host
-                .user
-                .clone()
-                .or_else(|| self.defaults.user.clone())
-                .unwrap_or_else(|| "nasadmin".to_string()),
+            port,
+            user,
             repo: group
                 .paths
                 .get("repo")
@@ -327,5 +351,30 @@ hosts:
     fn host_desconocido_devuelve_error() {
         let inventory = Inventory::from_yaml(YAML).expect("yaml");
         assert!(inventory.resolve("fantasma").is_err());
+    }
+
+    #[test]
+    fn resolve_rechaza_rol_env_puerto_cero_y_usuario_vacio() {
+        let bad_role = "groups:\n  g:\n    env: prod\nhosts:\n  h:\n    host: 1.1.1.1\n    group: g\n    role: INVALIDO\n";
+        assert!(Inventory::from_yaml(bad_role)
+            .unwrap()
+            .resolve("h")
+            .is_err());
+
+        let bad_env =
+            "groups:\n  g:\n    env: staging\nhosts:\n  h:\n    host: 1.1.1.1\n    group: g\n";
+        assert!(Inventory::from_yaml(bad_env).unwrap().resolve("h").is_err());
+
+        let bad_port = "groups:\n  g:\n    env: prod\nhosts:\n  h:\n    host: 1.1.1.1\n    group: g\n    port: 0\n";
+        assert!(Inventory::from_yaml(bad_port)
+            .unwrap()
+            .resolve("h")
+            .is_err());
+
+        let empty_user = "groups:\n  g:\n    env: prod\nhosts:\n  h:\n    host: 1.1.1.1\n    group: g\n    user: \"   \"\n";
+        assert!(Inventory::from_yaml(empty_user)
+            .unwrap()
+            .resolve("h")
+            .is_err());
     }
 }
