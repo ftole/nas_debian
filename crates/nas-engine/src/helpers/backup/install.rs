@@ -61,17 +61,38 @@ fn is_allowed_cron_path(path_val: &str) -> bool {
             .all(|seg| ALLOWED_CRON_PATH_DIRS.contains(&seg))
 }
 
+fn extract_cifs_username(cred_text: Option<&str>) -> Option<String> {
+    cred_text.and_then(|txt| {
+        txt.lines().find_map(|line| {
+            let val = line.trim().strip_prefix("username=")?;
+            let trimmed = val.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+    })
+}
+
 fn render_validated_runner(
     id: &str,
     parsed_task: &crate::tasks::BackupTask,
     cron_text: &str,
+    cred_text: Option<&str>,
     key_text: Option<&str>,
-) -> NasResult<String> {
+) -> NasResult<(String, String)> {
     let proto_str = match parsed_task.kind {
         crate::tasks::SourceKind::Cifs => "cifs",
         crate::tasks::SourceKind::Ssh => "ssh",
         crate::tasks::SourceKind::Local => "local",
     };
+    let user = parsed_task
+        .user
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+        .or_else(|| {
+            (parsed_task.kind == crate::tasks::SourceKind::Cifs)
+                .then(|| extract_cifs_username(cred_text))
+                .flatten()
+        })
+        .unwrap_or_default();
     let cron = extract_cron_expr(cron_text).unwrap_or_else(|| "0 2 * * *".to_string());
     let spec = BackupSpec {
         id: id.to_string(),
@@ -79,7 +100,7 @@ fn render_validated_runner(
         ip: parsed_task.source_ip.clone().unwrap_or_default(),
         share: parsed_task.share.clone().unwrap_or_default(),
         path: parsed_task.path.clone().unwrap_or_default(),
-        user: parsed_task.user.clone().unwrap_or_default(),
+        user,
         password: String::new(),
         cron,
         retention: parsed_task.retention,
@@ -92,7 +113,15 @@ fn render_validated_runner(
         preserve_existing_auth: true,
     };
     let proto = spec.validate()?;
-    Ok(spec.render_runner(proto))
+    let validated_dest_root = spec.destination_root();
+    if parsed_task.destination_root.trim().trim_end_matches('/')
+        != validated_dest_root.trim_end_matches('/')
+    {
+        return Err(NasError::Denied(
+            "DEST_ROOT no permitido o fuera de las rutas válidas".into(),
+        ));
+    }
+    Ok((spec.render_runner(proto), validated_dest_root))
 }
 
 /// Lee un archivo regular sin seguir enlaces simbólicos y exige que resida dentro
@@ -287,8 +316,13 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
 
     // Re-renderizar el runner exclusivamente desde la especificación validada para evitar
     // ejecución de código arbitrario inyectado en el archivo de staging.
-    let safe_runner_text =
-        render_validated_runner(id, &parsed_task, &cron_text, key_text.as_deref())?;
+    let (safe_runner_text, dest_root) = render_validated_runner(
+        id,
+        &parsed_task,
+        &cron_text,
+        cred_text.as_deref(),
+        key_text.as_deref(),
+    )?;
 
     // Validar sintaxis del runner generado vía stdin (cero TOCTOU sobre staging).
     let check = runner.run(
@@ -303,8 +337,6 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
             check.stderr
         )));
     }
-
-    let dest_root = parsed_task.destination_root.clone();
 
     let _ = std::fs::create_dir_all("/usr/local/bin");
     let _ = std::fs::create_dir_all("/etc/cron.d");
@@ -356,7 +388,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         .run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
 
-    let auto_permanent = runner_text.contains("AUTO_PERMANENT=true");
+    let auto_permanent = parsed_task.auto_permanent;
     if auto_permanent {
         let has_perm = std::fs::read_dir(&perm_task_dir)
             .map(|entries| {
@@ -713,87 +745,5 @@ pub fn delete_cred(id: &str) -> NasResult<String> {
 }
 
 #[cfg(test)]
-mod security_tests {
-    use super::*;
-
-    #[test]
-    fn validate_cron_content_acepta_plantilla_oficial_y_rechaza_comandos_arbitrarios() {
-        let valid = "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nMAILTO=\"\"\n0 2 * * * root /usr/local/bin/backup_demo.sh\n";
-        assert!(validate_cron_content("demo", valid).is_ok());
-
-        let valid_devnull = "30 3 * * 1-5 root /usr/local/bin/backup_demo.sh >/dev/null 2>&1\n";
-        assert!(validate_cron_content("demo", valid_devnull).is_ok());
-
-        for malicious in [
-            "* * * * * root /bin/sh -c 'id > /tmp/pwn'\n",
-            "0 2 * * * root /usr/local/bin/backup_demo.sh; id\n",
-            "0 2 * * * root /usr/local/bin/backup_demo.sh && touch /tmp/x\n",
-            "0 2 * * * root /usr/local/bin/backup_otra.sh\n",
-            "0 2 * * * nobody /usr/local/bin/backup_demo.sh\n",
-            "PATH=/tmp:$(id)\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
-            "PATH=/var/lib/nas/staging:/usr/bin\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
-            "PATH=/tmp:/usr/bin\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
-            "# solo comentarios sin tarea\n",
-        ] {
-            assert!(
-                validate_cron_content("demo", malicious).is_err(),
-                "debe rechazar cron malicioso: {malicious}"
-            );
-        }
-    }
-
-    #[test]
-    fn render_validated_runner_descarta_codigo_inyectado_y_fija_path_seguro() {
-        let injected = "#!/bin/bash\nSOURCE_TYPE=\"local\"\nSRC_PATH=\"/datos/app\"\nRETENTION=5\ntouch /tmp/pwned\n";
-        let task = crate::tasks::BackupTask::parse("demo", injected).expect("parse");
-        let cron = "0 3 * * * root /usr/local/bin/backup_demo.sh\n";
-        let rendered = render_validated_runner("demo", &task, cron, None).expect("render");
-        assert!(!rendered.contains("/tmp/pwned"));
-        assert!(rendered.contains(
-            "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\""
-        ));
-        assert!(rendered.contains("SRC_PATH='/datos/app'"));
-    }
-
-    #[test]
-    fn write_cron_y_write_cred_rechazan_archivos_fuera_de_staging() {
-        assert!(write_cron("demo", Some(Path::new("/etc/shadow")), None).is_err());
-        assert!(write_cron("demo", Some(Path::new("/etc/passwd")), None).is_err());
-        assert!(write_cred("demo", Some(Path::new("/etc/shadow")), None).is_err());
-        assert!(write_cred(
-            "demo",
-            Some(Path::new("/var/lib/nas/staging/../etc/passwd")),
-            None
-        )
-        .is_err());
-        assert!(write_cron("demo", None, Some("* * * * * root /bin/bash -c id\n")).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn read_confined_file_rechaza_symlinks_y_rutas_fuera_del_directorio() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let root =
-            std::env::temp_dir().join(format!("nas-install-sec-{}-{nanos}", std::process::id()));
-        let staging = root.join("staging");
-        let outside = root.join("outside");
-        std::fs::create_dir_all(&staging).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-
-        let ok_file = staging.join("ok.cron");
-        let secret = outside.join("secret.txt");
-        let link = staging.join("link.cron");
-        std::fs::write(&ok_file, "0 2 * * * root /usr/local/bin/backup_demo.sh\n").unwrap();
-        std::fs::write(&secret, "secreto").unwrap();
-        std::os::unix::fs::symlink(&secret, &link).unwrap();
-
-        assert!(read_confined_file(&ok_file, &[&staging], MAX_CRON_BYTES).is_ok());
-        assert!(read_confined_file(&secret, &[&staging], MAX_CRON_BYTES).is_err());
-        assert!(read_confined_file(&link, &[&staging], MAX_CRON_BYTES).is_err());
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-}
+#[path = "install/tests.rs"]
+mod security_tests;
