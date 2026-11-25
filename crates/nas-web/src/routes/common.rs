@@ -211,6 +211,46 @@ pub fn configured_superadmin() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Evalúa si un usuario es superadmin dados los orígenes ya resueltos.
+pub fn is_superadmin_from_sources(
+    username: &str,
+    configured_super: Option<&str>,
+    db_role: Option<&str>,
+    in_superadmin_group: bool,
+) -> bool {
+    configured_super == Some(username) || db_role == Some("superadmin") || in_superadmin_group
+}
+
+/// Comprueba membresía POSIX en `grp_superadmin`.
+pub fn is_in_superadmin_group(username: &str) -> bool {
+    let (_, groups) = nas_engine::users::load_local();
+    groups
+        .into_iter()
+        .find(|g| g.name == "grp_superadmin")
+        .is_some_and(|g| g.members.iter().any(|m| m == username))
+}
+
+/// Resuelve el rol efectivo (`"superadmin"`, `"admin"`, `"operator"`, ...) de forma homogénea.
+pub fn resolve_effective_role(db: &crate::db::Db, username: &str) -> String {
+    let configured = configured_superadmin();
+    let db_role = db.user_role(username).ok().flatten();
+    if is_superadmin_from_sources(
+        username,
+        configured.as_deref(),
+        db_role.as_deref(),
+        is_in_superadmin_group(username),
+    ) {
+        "superadmin".to_string()
+    } else {
+        db_role.unwrap_or_else(|| "operator".to_string())
+    }
+}
+
+/// Determina si `username` tiene privilegios efectivos de superadministrador.
+pub fn is_user_superadmin(db: &crate::db::Db, username: &str) -> bool {
+    resolve_effective_role(db, username) == "superadmin"
+}
+
 pub fn run_json(command: nas_exec::CommandSpec) -> Result<String, String> {
     let runner = match &command.stdin_data {
         Some(secret) => Runner::new().with_secret(secret.expose()),
@@ -316,4 +356,37 @@ pub struct ExtQuery {
     pub q: Option<String>,
     #[serde(default)]
     pub grouped: Option<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_superadmin_from_sources;
+
+    #[test]
+    fn is_superadmin_from_sources_respeta_tres_origenes() {
+        assert!(is_superadmin_from_sources(
+            "alice",
+            Some("alice"),
+            None,
+            false
+        ));
+        assert!(is_superadmin_from_sources(
+            "alice",
+            None,
+            Some("superadmin"),
+            false
+        ));
+        assert!(is_superadmin_from_sources(
+            "alice",
+            None,
+            Some("admin"),
+            true
+        ));
+        assert!(!is_superadmin_from_sources(
+            "alice",
+            Some("bob"),
+            Some("admin"),
+            false
+        ));
+    }
 }
