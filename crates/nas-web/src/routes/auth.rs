@@ -8,8 +8,8 @@ use nas_core::ApiResponse;
 use serde::Deserialize;
 
 use super::common::{
-    audit_ip, cached_host_ip, cached_host_ip_nonblocking, configured_superadmin, cookie_header,
-    extract_client_ip, server_error,
+    audit_ip, cached_host_ip, cached_host_ip_nonblocking, cookie_header, extract_client_ip,
+    server_error,
 };
 use crate::extractors::AuthenticatedUser;
 use crate::views;
@@ -264,24 +264,24 @@ pub async fn api_login(
             )
             .await;
             let uname = form.username.clone();
-            let role = state
+            let sess_lookup = session.clone();
+            let now = chrono::Utc::now().timestamp();
+            let (canonical_user, role) = state
                 .run_db(move |db| {
-                    if configured_superadmin().as_deref() == Some(uname.as_str()) {
-                        Ok("superadmin".to_string())
-                    } else {
-                        Ok(db
-                            .user_role(&uname)
-                            .ok()
-                            .flatten()
-                            .unwrap_or_else(|| "operator".into()))
-                    }
+                    let canonical = db
+                        .session_user(&sess_lookup, now)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(uname);
+                    let role = super::common::resolve_effective_role(db, &canonical);
+                    Ok((canonical, role))
                 })
                 .await
-                .unwrap_or_else(|_| "operator".into());
+                .unwrap_or_else(|_| (form.username.clone(), "operator".into()));
             let csrf = state.auth.csrf_for_session(&session);
             let mut response = axum::Json(ApiResponse::ok(
                 serde_json::json!({
-                    "username": form.username,
+                    "username": canonical_user,
                     "role": role,
                     "session": session,
                     "csrf_token": csrf,
