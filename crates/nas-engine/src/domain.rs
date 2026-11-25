@@ -36,14 +36,34 @@ pub fn is_valid_domain(domain: &str) -> bool {
     })
 }
 
-/// Valida un usuario de dominio (`usuario` o `DOMINIO\\usuario`).
-pub fn is_valid_user(user: &str) -> bool {
-    let name = user.rsplit(['\\', '/']).next().unwrap_or(user);
-    !name.is_empty()
-        && name.len() <= 64
-        && name
+fn is_valid_user_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment.len() <= 64
+        && !segment.starts_with('-')
+        && segment
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+}
+
+/// Valida un usuario de dominio (`usuario`, `DOMINIO\\usuario` o `usuario@dominio.local`).
+pub fn is_valid_user(user: &str) -> bool {
+    let user = user.trim();
+    if user.is_empty() || user.len() > 128 || user.contains('/') {
+        return false;
+    }
+    if let Some((prefix, name)) = user.split_once('\\') {
+        if name.contains('\\') || user.contains('@') {
+            return false;
+        }
+        return is_valid_user_segment(prefix) && is_valid_user_segment(name);
+    }
+    if let Some((name, domain)) = user.split_once('@') {
+        if domain.contains('@') {
+            return false;
+        }
+        return is_valid_user_segment(name) && is_valid_domain(domain);
+    }
+    is_valid_user_segment(user)
 }
 
 /// Interpreta la salida de `realm list`.
@@ -149,11 +169,34 @@ pub fn leave_plan() -> Vec<Vec<String>> {
     ]
 }
 
+/// Valida una unidad organizativa LDAP opcional (ej. `OU=Servidores,DC=empresa,DC=local`).
+pub fn is_valid_ou(ou: &str) -> bool {
+    let ou = ou.trim();
+    !ou.is_empty()
+        && ou.len() <= 256
+        && !ou.starts_with('-')
+        && !ou.chars().any(char::is_control)
+        && ou
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '=' | ',' | '.' | '_' | '-' | ' '))
+}
+
 /// Ejecuta la unión con la contraseña por `stdin` (nunca en `argv`).
+pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result<(), String> {
+    join_with_ou(runner, domain, user, password, None)
+}
+
+/// Ejecuta la unión al dominio admitiendo una unidad organizativa (`--computer-ou`) opcional.
 ///
 /// Tras `realm join` habilita y arranca `sssd`; el fallo del demonio se
 /// propaga porque el dominio no es usable sin él.
-pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result<(), String> {
+pub fn join_with_ou(
+    runner: &Runner,
+    domain: &str,
+    user: &str,
+    password: &str,
+    ou: Option<&str>,
+) -> Result<(), String> {
     if !is_valid_domain(domain) {
         return Err(format!("dominio inválido: {domain}"));
     }
@@ -163,12 +206,25 @@ pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result
     if password.chars().any(char::is_control) {
         return Err("la contraseña contiene caracteres de control no permitidos".into());
     }
+    let clean_ou = ou.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(ou_val) = clean_ou {
+        if !is_valid_ou(ou_val) {
+            return Err("unidad organizativa (OU) inválida".into());
+        }
+    }
+
+    let mut args: Vec<String> = vec!["join".into(), "--user".into(), user.into()];
+    if let Some(ou_val) = clean_ou {
+        args.push("--computer-ou".into());
+        args.push(ou_val.into());
+    }
+    args.push(domain.into());
 
     let safe_runner = runner.clone().with_secret(password);
     let output = safe_runner
         .run(
             &CommandSpec::new("realm")
-                .args(["join", "--user", user, domain])
+                .args(args)
                 .sudo(nas_exec::SudoMode::Passwordless)
                 .stdin_secret(SecretInput::new(password))
                 .timeout(std::time::Duration::from_secs(180)),
@@ -205,14 +261,46 @@ pub fn join(runner: &Runner, domain: &str, user: &str, password: &str) -> Result
 
 /// Ejecuta la salida del dominio y detiene el demonio SSSD.
 pub fn leave(runner: &Runner) -> Result<(), String> {
-    let output = runner
-        .run(
-            &CommandSpec::new("realm")
-                .arg("leave")
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .timeout(std::time::Duration::from_secs(120)),
-        )
-        .map_err(|error| error.to_string())?;
+    leave_with_credentials(runner, None, None)
+}
+
+/// Ejecuta la salida del dominio pasando credenciales opcionales por `stdin` (`--remove` / `--user`).
+pub fn leave_with_credentials(
+    runner: &Runner,
+    user: Option<&str>,
+    password: Option<&str>,
+) -> Result<(), String> {
+    let clean_user = user.map(str::trim).filter(|s| !s.is_empty());
+    let clean_pass = password.filter(|s| !s.is_empty());
+    if let Some(u) = clean_user {
+        if !is_valid_user(u) {
+            return Err(format!("usuario inválido: {u}"));
+        }
+    }
+    if let Some(p) = clean_pass {
+        if p.chars().any(char::is_control) {
+            return Err("la contraseña contiene caracteres de control no permitidos".into());
+        }
+    }
+
+    let mut args: Vec<String> = vec!["leave".into()];
+    if let Some(u) = clean_user {
+        args.push("--remove".into());
+        args.push("--user".into());
+        args.push(u.into());
+    }
+    let mut spec = CommandSpec::new("realm")
+        .args(args)
+        .sudo(nas_exec::SudoMode::Passwordless)
+        .timeout(std::time::Duration::from_secs(120));
+    let exec_runner = if let Some(p) = clean_pass {
+        spec = spec.stdin_secret(SecretInput::new(p));
+        runner.clone().with_secret(p)
+    } else {
+        runner.clone()
+    };
+
+    let output = exec_runner.run(&spec).map_err(|error| error.to_string())?;
 
     if !output.is_success() {
         return Err(output.stderr);
@@ -273,9 +361,15 @@ team.local
 
         assert!(is_valid_user("administrador"));
         assert!(is_valid_user("TEAM\\administrador"));
+        assert!(is_valid_user("admin@team.local"));
         assert!(is_valid_user("juan.perez"));
         assert!(!is_valid_user(""));
         assert!(!is_valid_user("a;rm -rf /"));
+        assert!(!is_valid_user(";id\\administrador"));
+        assert!(!is_valid_user("-oOption\\administrador"));
+        assert!(!is_valid_user("TEAM/administrador"));
+        assert!(!is_valid_user("A\\B\\C"));
+        assert!(!is_valid_user("-administrador"));
     }
 
     #[test]
