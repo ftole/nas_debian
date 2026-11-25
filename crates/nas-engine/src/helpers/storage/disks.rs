@@ -323,11 +323,19 @@ pub(super) fn format_partition(
 
     if fstype == "btrfs" {
         runner
-            .run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", label, &target]))?
+            .run(
+                &CommandSpec::new("mkfs.btrfs")
+                    .args(["-f", "-L", label, &target])
+                    .timeout(Duration::from_secs(900)),
+            )?
             .ensure_success()?;
     } else {
         runner
-            .run(&CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", label, &target]))?
+            .run(
+                &CommandSpec::new("mkfs.ext4")
+                    .args(["-F", "-m", "1", "-L", label, &target])
+                    .timeout(Duration::from_secs(900)),
+            )?
             .ensure_success()?;
     }
     let _ = runner.run(&CommandSpec::new("udevadm").args(["settle"]));
@@ -376,7 +384,9 @@ pub fn format_single(
                     .into(),
             ));
         }
-        let _ = runner.run(&CommandSpec::new("umount").args(["/srv/nas"]));
+        runner
+            .run(&CommandSpec::new("umount").args(["/srv/nas"]))?
+            .ensure_success()?;
     }
     if unmount {
         unmount_device(runner, device);
@@ -441,7 +451,9 @@ pub fn setup_lvm(
                     .into(),
             ));
         }
-        let _ = runner.run(&CommandSpec::new("umount").args(["/srv/nas"]));
+        runner
+            .run(&CommandSpec::new("umount").args(["/srv/nas"]))?
+            .ensure_success()?;
     }
 
     if unmount {
@@ -455,14 +467,61 @@ pub fn setup_lvm(
     ) {
         for line in out.stdout.lines() {
             let existing_vg = line.trim();
-            if !existing_vg.is_empty() {
-                let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", existing_vg]));
-                let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", existing_vg]));
+            if !existing_vg.is_empty() && existing_vg != vg {
+                let vg_pvs = runner
+                    .run(
+                        &CommandSpec::new("vgs")
+                            .args(["--noheadings", "-o", "pv_name", existing_vg])
+                            .timeout(Duration::from_secs(10)),
+                    )
+                    .map(|o| {
+                        o.stdout
+                            .lines()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if vg_pvs.iter().all(|p| p == disk || p.starts_with(disk)) {
+                    let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", existing_vg]));
+                    let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", existing_vg]));
+                } else {
+                    return Err(NasError::Denied(format!(
+                        "el disco {disk} pertenece al Volume Group '{existing_vg}' compartido con otros discos"
+                    )));
+                }
             }
         }
     }
-    let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", vg]));
-    let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", vg]));
+    if runner
+        .run(&CommandSpec::new("vgs").args([vg]))
+        .is_ok_and(|o| o.is_success())
+    {
+        let vg_pvs = runner
+            .run(
+                &CommandSpec::new("vgs")
+                    .args(["--noheadings", "-o", "pv_name", vg])
+                    .timeout(Duration::from_secs(10)),
+            )
+            .map(|o| {
+                o.stdout
+                    .lines()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !vg_pvs.is_empty() && vg_pvs.iter().all(|p| p == disk || p.starts_with(disk)) {
+            let _ = runner.run(&CommandSpec::new("vgchange").args(["-an", vg]));
+            let _ = runner.run(&CommandSpec::new("vgremove").args(["-y", vg]));
+        } else if !vg_pvs.is_empty() {
+            return Err(NasError::Denied(format!(
+                "el Volume Group '{vg}' ya existe en otros discos y no se destruirá automáticamente"
+            )));
+        }
+    }
 
     let _ = runner.run(&CommandSpec::new("wipefs").args(["-a", disk]));
     let _ = runner.run(&CommandSpec::new("partprobe").args([disk]));
@@ -493,12 +552,18 @@ pub fn setup_lvm(
     let options = mount_options_for(runner, fstype, &path_lv);
     if fstype == "btrfs" {
         runner
-            .run(&CommandSpec::new("mkfs.btrfs").args(["-f", "-L", "NAS_DATA", &path_lv]))?
+            .run(
+                &CommandSpec::new("mkfs.btrfs")
+                    .args(["-f", "-L", "NAS_DATA", &path_lv])
+                    .timeout(Duration::from_secs(900)),
+            )?
             .ensure_success()?;
     } else {
         runner
             .run(
-                &CommandSpec::new("mkfs.ext4").args(["-F", "-m", "1", "-L", "NAS_DATA", &path_lv]),
+                &CommandSpec::new("mkfs.ext4")
+                    .args(["-F", "-m", "1", "-L", "NAS_DATA", &path_lv])
+                    .timeout(Duration::from_secs(900)),
             )?
             .ensure_success()?;
     }
