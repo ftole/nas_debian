@@ -267,7 +267,8 @@ fn migrate_status_lista_componentes_legacy() {
 
     assert_eq!(payload["success"], true);
     let items = payload["data"]["items"].as_array().expect("items");
-    assert_eq!(items.len(), 10);
+    assert_eq!(items.len(), 9);
+    assert!(!items.iter().any(|item| item["path"] == "install.sh"));
     assert!(items
         .iter()
         .any(|item| item["path"] == "web" && item["wave"] == "A"));
