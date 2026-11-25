@@ -93,7 +93,7 @@ fn marca_protegido_el_disco_del_sistema_y_cuenta_hijos() {
             ]
         }"#;
     let parsed = crate::parsers::lsblk::parse(sample).expect("lsblk");
-    let list = compute_disks_from_lsblk(&parsed, Some("nvme0n1"));
+    let list = compute_disks_from_lsblk(&parsed, &["nvme0n1".to_string()]);
     assert_eq!(list.len(), 2);
     assert!(list[0].protected);
     assert_eq!(list[0].children_count, 2);
@@ -261,7 +261,7 @@ fn agrupa_pool_btrfs_multidisco_y_marca_todos_los_miembros_en_uso() {
             ]
         }"#;
     let parsed = crate::parsers::lsblk::parse(sample).expect("lsblk");
-    let list = compute_disks_from_lsblk(&parsed, Some("nvme0n1"));
+    let list = compute_disks_from_lsblk(&parsed, &["nvme0n1".to_string()]);
     assert_eq!(list.len(), 4);
     assert!(list[0].protected);
     // sda y sdb forman el mismo pool Btrfs montado en /srv/nas
