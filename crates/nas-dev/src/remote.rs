@@ -172,13 +172,15 @@ pub(crate) fn doctor(
     let failures = results.iter().filter(|result| !result.ok).count();
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&ApiResponse::ok(
-                serde_json::json!({ "host": host.alias, "failures": failures, "checks": results }),
-                "Diagnóstico del host de desarrollo"
-            ))?
-        );
+        let data =
+            serde_json::json!({ "host": host.alias, "failures": failures, "checks": results });
+        let msg = "Diagnóstico del host de desarrollo";
+        let payload = if failures > 0 {
+            ApiResponse::err(data, msg)
+        } else {
+            ApiResponse::ok(data, msg)
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         println!(
             "DIAGNÓSTICO DEL HOST DE DESARROLLO: {} ({})",
@@ -213,7 +215,7 @@ pub(crate) fn onboard(
     let host = inventory.resolve(alias)?;
     ensure_development(&host)?;
 
-    let script = onboard_script(&host);
+    let script = onboard_script(&host)?;
 
     if json {
         println!(
@@ -235,11 +237,27 @@ pub(crate) fn onboard(
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn onboard_script(host: &ResolvedHost) -> String {
+fn ensure_safe_shell_token(label: &str, value: &str) -> NasResult<()> {
+    if value.is_empty()
+        || value
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/')))
+    {
+        return Err(NasError::Invalid(format!(
+            "{label} contiene caracteres no permitidos: '{value}'"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn onboard_script(host: &ResolvedHost) -> NasResult<String> {
+    ensure_safe_shell_token("user", &host.user)?;
+    ensure_safe_shell_token("web", &host.web)?;
+    ensure_safe_shell_token("state", &host.state)?;
     let user = &host.user;
     let web = &host.web;
     let state = &host.state;
-    format!(
+    Ok(format!(
         r#"set -euo pipefail
 
 # 1. Usuario de desarrollo sin shell privilegiada innecesaria
@@ -265,7 +283,7 @@ install -d -m 750 -o {user} -g {user} {state}/dev-sync/incoming {state}/dev-sync
 # 5. Verificación
 sudo -u {user} sudo -n true && echo 'sudo sin contraseña OK'
 "#
-    )
+    ))
 }
 
 pub(crate) fn load_inventory(explicit: Option<PathBuf>) -> NasResult<Inventory> {
