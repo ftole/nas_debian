@@ -100,18 +100,26 @@ async function previewFile(relPath, fileName) {
   const root = encodeURIComponent(AppState.files.root || 'nas');
   const encodedPath = encodeURIComponent(relPath);
 
-  // 1. Imágenes
+  // 1. Imágenes (incluye saneamiento seguro para SVG sin debilitar /api/files/raw)
   if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) {
     const rawUrl = `/api/files/raw?root=${root}&path=${encodedPath}&_t=${Date.now()}`;
     const imgEl = document.getElementById('preview-img-element');
     if (imgEl) {
-      imgEl.src = rawUrl;
+      let revokeAfterLoad = null;
       imgEl.onload = () => {
+        if (revokeAfterLoad) {
+          URL.revokeObjectURL(revokeAfterLoad);
+          revokeAfterLoad = null;
+        }
         if (loading) loading.style.display = 'none';
         if (imgContainer) imgContainer.style.display = 'flex';
         if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Imagen ${ext.toUpperCase()} • ${imgEl.naturalWidth}x${imgEl.naturalHeight} px`;
       };
       imgEl.onerror = () => {
+        if (revokeAfterLoad) {
+          URL.revokeObjectURL(revokeAfterLoad);
+          revokeAfterLoad = null;
+        }
         if (loading) loading.style.display = 'none';
         if (binaryContainer) {
           binaryContainer.style.display = 'block';
@@ -121,6 +129,34 @@ async function previewFile(relPath, fileName) {
           if (bDet) bDet.textContent = 'Error al cargar imagen para previsualización.';
         }
       };
+
+      if (ext === 'svg') {
+        try {
+          const resp = await fetch(rawUrl, { credentials: 'same-origin' });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const rawSvg = await resp.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
+          doc.querySelectorAll('script, foreignObject, iframe, object, embed').forEach(n => n.remove());
+          doc.querySelectorAll('*').forEach(el => {
+            for (const attr of Array.from(el.attributes)) {
+              const name = attr.name.toLowerCase();
+              const val = (attr.value || '').trim().toLowerCase();
+              if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('data:text/html')) {
+                el.removeAttribute(attr.name);
+              }
+            }
+          });
+          const safeSvg = new XMLSerializer().serializeToString(doc.documentElement);
+          const blob = new Blob([safeSvg], { type: 'image/svg+xml;charset=utf-8' });
+          revokeAfterLoad = URL.createObjectURL(blob);
+          imgEl.src = revokeAfterLoad;
+        } catch (_) {
+          imgEl.onerror();
+        }
+      } else {
+        imgEl.src = rawUrl;
+      }
     }
     return;
   }
@@ -233,8 +269,10 @@ async function previewFile(relPath, fileName) {
       }
       const docxContentEl = document.getElementById('preview-docx-content');
       if (docxContentEl) {
-        docxContentEl.innerHTML = '';
-        await docx.renderAsync(arrayBuffer, docxContentEl, null, {
+        // Renderizamos en un nodo desconectado, saneamos y montamos en un iframe sandbox sin scripts.
+        const offDom = document.createElement('div');
+        const styleHost = document.createElement('div');
+        await docx.renderAsync(arrayBuffer, offDom, styleHost, {
           className: 'docx-document-rendered',
           inWrapper: false,
           ignoreWidth: false,
@@ -244,6 +282,30 @@ async function previewFile(relPath, fileName) {
           renderFooters: true,
           useBase64URL: true,
         });
+        offDom.querySelectorAll('script, iframe, object, embed, form, base, meta').forEach(n => n.remove());
+        offDom.querySelectorAll('*').forEach(el => {
+          for (const attr of Array.from(el.attributes)) {
+            const name = attr.name.toLowerCase();
+            const val = (attr.value || '').trim().toLowerCase();
+            if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('vbscript:')) {
+              el.removeAttribute(attr.name);
+            }
+          }
+        });
+        const stylesHtml = Array.from(styleHost.querySelectorAll('style'))
+          .map(s => `<style>${(s.textContent || '').replace(/<\/style/gi, '')}</style>`)
+          .join('\n');
+        const safeSrcDoc = `<!DOCTYPE html><html><head><meta charset="utf-8">${stylesHtml}<style>body{margin:16px;font-family:system-ui,sans-serif;background:#fff;color:#111;}</style></head><body>${offDom.innerHTML}</body></html>`;
+        docxContentEl.textContent = '';
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('sandbox', '');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.style.width = '100%';
+        iframe.style.minHeight = '70vh';
+        iframe.style.border = '0';
+        iframe.style.background = '#fff';
+        iframe.srcdoc = safeSrcDoc;
+        docxContentEl.appendChild(iframe);
       }
 
       if (loading) loading.style.display = 'none';
