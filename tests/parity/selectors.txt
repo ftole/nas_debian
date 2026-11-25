@@ -39,7 +39,8 @@ input[name=
 meta[name=
 option[data-custom=
 option[value=
-script, foreignObject, iframe, object, embed
+parsererror
+script, foreignObject, iframe, object, embed, animate, set, animateTransform, style, meta, link
 script, iframe, object, embed, form, base, meta
 style
 use
