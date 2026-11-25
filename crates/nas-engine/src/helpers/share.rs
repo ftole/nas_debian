@@ -29,7 +29,16 @@ fn is_protected_share_path(path: &str) -> bool {
     let Some(rel) = path.strip_prefix("/srv/nas/") else {
         return true;
     };
-    let comps: Vec<&str> = rel.split('/').filter(|s| !s.is_empty()).collect();
+    let mut comps: Vec<String> = Vec::new();
+    for comp in Path::new(rel).components() {
+        match comp {
+            std::path::Component::Normal(s) => comps.push(s.to_string_lossy().to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return true,
+        }
+    }
     if comps.is_empty() {
         return true;
     }
@@ -37,9 +46,9 @@ fn is_protected_share_path(path: &str) -> bool {
         if comps.len() < 3 {
             return true;
         }
-        return PROTECTED_SHARE_SEGMENTS.contains(&comps[2]);
+        return PROTECTED_SHARE_SEGMENTS.contains(&comps[2].as_str());
     }
-    PROTECTED_SHARE_SEGMENTS.contains(&comps[0])
+    PROTECTED_SHARE_SEGMENTS.contains(&comps[0].as_str())
 }
 
 fn ensure_no_symlink_under_srv_nas(path: &Path) -> NasResult<()> {
@@ -209,6 +218,14 @@ pub fn apply_share_acl(
             return Err(NasError::Denied(
                 "la ruta del recurso escapa de /srv/nas".into(),
             ));
+        }
+        if let Ok(canon_rel) = canon_dir.strip_prefix(&canon_root) {
+            let normalized = format!("/srv/nas/{}", canon_rel.to_string_lossy());
+            if is_protected_share_path(&normalized) {
+                return Err(NasError::Denied(
+                    "ruta protegida del sistema: no se permite modificar ACLs sobre respaldos, papelera o staging".into(),
+                ));
+            }
         }
     }
 
@@ -394,6 +411,20 @@ mod tests {
         assert!(
             apply_share_acl(&runner, "/srv/nas/BACKUPS_HISTORICOS", "grp_samba", "write").is_err()
         );
+        assert!(apply_share_acl(
+            &runner,
+            "/srv/nas/./BACKUPS_HISTORICOS",
+            "grp_samba",
+            "write"
+        )
+        .is_err());
+        assert!(apply_share_acl(
+            &runner,
+            "/srv/nas/unidades/u1/./.nas_staging",
+            "grp_samba",
+            "write"
+        )
+        .is_err());
         assert!(apply_share_acl(
             &runner,
             "/srv/nas/unidades/u1/BACKUPS_PERMANENTES",
