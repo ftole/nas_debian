@@ -11,6 +11,152 @@ use crate::backup_spec::{BackupSpec, Proto};
 
 use super::permanent::freeze_backup_task;
 
+const MAX_RUNNER_BYTES: u64 = 256 * 1024;
+const MAX_CRON_BYTES: u64 = 4 * 1024;
+const MAX_CRED_BYTES: u64 = 16 * 1024;
+
+/// Lee un archivo regular sin seguir enlaces simbólicos y exige que resida dentro
+/// de alguno de los directorios permitidos.
+fn read_confined_file(path: &Path, allowed_dirs: &[&Path], max_bytes: u64) -> NasResult<String> {
+    let raw = path.to_string_lossy();
+    if raw.is_empty()
+        || raw.contains('\0')
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(NasError::Denied(format!(
+            "ruta de origen inválida o con recorrido de directorios: {}",
+            path.display()
+        )));
+    }
+
+    let meta = std::fs::symlink_metadata(path).map_err(|_| {
+        NasError::NotFound(format!(
+            "archivo de origen no encontrado: {}",
+            path.display()
+        ))
+    })?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(NasError::Denied(format!(
+            "el origen debe ser un archivo regular (sin enlaces simbólicos): {}",
+            path.display()
+        )));
+    }
+    if meta.len() > max_bytes {
+        return Err(NasError::Invalid(format!(
+            "archivo de origen demasiado grande (máximo {max_bytes} bytes): {}",
+            path.display()
+        )));
+    }
+
+    let canon = std::fs::canonicalize(path)
+        .map_err(|e| NasError::Denied(format!("no se pudo resolver {}: {e}", path.display())))?;
+    let confined = allowed_dirs.iter().any(|dir| {
+        std::fs::canonicalize(dir)
+            .ok()
+            .is_some_and(|base| canon != base && canon.starts_with(&base))
+    });
+    if !confined {
+        return Err(NasError::Denied(format!(
+            "acceso denegado: {} está fuera de los directorios autorizados",
+            path.display()
+        )));
+    }
+
+    let content = std::fs::read_to_string(&canon).map_err(|e| NasError::Denied(e.to_string()))?;
+    if content.contains('\0') {
+        return Err(NasError::Invalid(
+            "el archivo de origen contiene bytes nulos".into(),
+        ));
+    }
+    Ok(content)
+}
+
+/// Valida que el contenido de un archivo `/etc/cron.d/backup_<id>` solo programe
+/// el runner legítimo `/usr/local/bin/backup_<id>.sh` como `root`.
+pub fn validate_cron_content(id: &str, content: &str) -> NasResult<()> {
+    if !valid_id(id) {
+        return Err(NasError::Invalid("identificador inválido".into()));
+    }
+    if content.len() as u64 > MAX_CRON_BYTES || content.contains('\0') || content.contains('\r') {
+        return Err(NasError::Invalid(
+            "contenido de cron inválido o excede el tamaño permitido".into(),
+        ));
+    }
+
+    let expected_cmd = format!("/usr/local/bin/backup_{id}.sh");
+    let mut job_lines = 0usize;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "SHELL=/bin/bash"
+            || line == "SHELL=/bin/sh"
+            || line == "MAILTO=\"\""
+            || line == "MAILTO="
+        {
+            continue;
+        }
+        if let Some(path_val) = line.strip_prefix("PATH=") {
+            if !path_val.is_empty()
+                && path_val
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | ':' | '_' | '-' | '.'))
+            {
+                continue;
+            }
+            return Err(NasError::Denied(
+                "variable PATH inválida en archivo cron".into(),
+            ));
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 7 {
+            return Err(NasError::Denied(format!(
+                "línea cron inválida o no autorizada: '{line}'"
+            )));
+        }
+        let schedule_ok = parts[..5].iter().all(|field| {
+            !field.is_empty()
+                && field
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '*' | '/' | ',' | '-'))
+        });
+        if !schedule_ok {
+            return Err(NasError::Denied(format!(
+                "expresión de horario cron inválida: '{}'",
+                parts[..5].join(" ")
+            )));
+        }
+        if parts[5] != "root" {
+            return Err(NasError::Denied(
+                "el usuario de la tarea cron debe ser root".into(),
+            ));
+        }
+
+        let cmd = parts[6..].join(" ");
+        let allowed_cmd = cmd == expected_cmd
+            || cmd == format!("{expected_cmd} >/dev/null 2>&1")
+            || cmd == format!("{expected_cmd} > /dev/null 2>&1");
+        if !allowed_cmd {
+            return Err(NasError::Denied(format!(
+                "comando cron no autorizado: solo se permite ejecutar {expected_cmd}"
+            )));
+        }
+        job_lines += 1;
+    }
+
+    if job_lines == 0 {
+        return Err(NasError::Invalid(
+            "el archivo cron debe contener al menos una programación válida".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Instala una tarea de respaldo a partir de sus archivos en staging.
 pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     if !valid_id(id) {
@@ -25,18 +171,42 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let cred_src = staging.join(format!("nas_backup_{id}.cred"));
     let key_src = staging.join(format!("nas_backup_{id}.id_ed25519"));
 
-    if !runner_src.exists() {
-        return Err(NasError::NotFound(format!(
-            "falta runner preparado: {}",
-            runner_src.display()
+    let runner_text = read_confined_file(&runner_src, &[staging], MAX_RUNNER_BYTES)?;
+    let cron_text = read_confined_file(&cron_src, &[staging], MAX_CRON_BYTES)?;
+    validate_cron_content(id, &cron_text)?;
+
+    // Verificar que el runner corresponda a una tarea de respaldo válida y parseable.
+    let parsed_task = crate::tasks::BackupTask::parse(id, &runner_text).map_err(|e| {
+        NasError::Invalid(format!(
+            "runner preparado inválido o sin metadatos de tarea de respaldo: {e}"
+        ))
+    })?;
+    let task_errors = parsed_task.validate();
+    if !task_errors.is_empty() {
+        return Err(NasError::Invalid(format!(
+            "runner preparado con configuración inválida: {}",
+            task_errors.join("; ")
         )));
     }
-    if !cron_src.exists() {
-        return Err(NasError::NotFound(format!(
-            "falta cron preparado: {}",
-            cron_src.display()
-        )));
-    }
+
+    let cred_text = if std::fs::symlink_metadata(&cred_src).is_ok() {
+        let txt = read_confined_file(&cred_src, &[staging], MAX_CRED_BYTES)?;
+        (!txt.is_empty()).then_some(txt)
+    } else {
+        None
+    };
+
+    let key_text = if std::fs::symlink_metadata(&key_src).is_ok() {
+        let txt = read_confined_file(&key_src, &[staging], MAX_CRED_BYTES)?;
+        if txt.is_empty() {
+            None
+        } else {
+            nas_ssh::validate_private_key(&txt)?;
+            Some(txt)
+        }
+    } else {
+        None
+    };
 
     // Validar sintaxis del runner con bash -n
     let check = runner.run(
@@ -53,14 +223,12 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
 
     // Determinar destino
     let mut dest_root = "/srv/nas/BACKUPS_HISTORICOS".to_string();
-    if let Ok(content) = std::fs::read_to_string(&runner_src) {
-        for line in content.lines() {
-            if let Some(rest) = line.strip_prefix("DEST_ROOT=") {
-                let trimmed = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
-                if trimmed.starts_with("/srv/nas/") && !trimmed.contains("..") {
-                    dest_root = trimmed.to_string();
-                    break;
-                }
+    for line in runner_text.lines() {
+        if let Some(rest) = line.strip_prefix("DEST_ROOT=") {
+            let trimmed = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
+            if trimmed.starts_with("/srv/nas/") && !trimmed.contains("..") {
+                dest_root = trimmed.to_string();
+                break;
             }
         }
     }
@@ -68,6 +236,14 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let _ = std::fs::create_dir_all("/usr/local/bin");
     let _ = std::fs::create_dir_all("/etc/cron.d");
     let _ = std::fs::create_dir_all("/etc/backup-credentials");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            "/etc/backup-credentials",
+            std::fs::Permissions::from_mode(0o700),
+        );
+    }
     let _ = std::fs::create_dir_all(&dest_root);
     let task_dest = format!("{dest_root}/{id}");
     let _ = std::fs::create_dir_all(&task_dest);
@@ -75,43 +251,22 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
     let _ = runner.run(&CommandSpec::new("chown").args(["root:grp_samba", &dest_root, &task_dest]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &dest_root, &task_dest]));
 
-    let runner_dst = format!("/usr/local/bin/backup_{id}.sh");
-    let cron_dst = format!("/etc/cron.d/backup_{id}");
-    let cred_dst = format!("/etc/backup-credentials/{id}.cred");
-    let key_dst = format!("/etc/backup-credentials/{id}.id_ed25519");
+    let runner_dst = PathBuf::from(format!("/usr/local/bin/backup_{id}.sh"));
+    let cron_dst = PathBuf::from(format!("/etc/cron.d/backup_{id}"));
+    let cred_dst = PathBuf::from(format!("/etc/backup-credentials/{id}.cred"));
+    let key_dst = PathBuf::from(format!("/etc/backup-credentials/{id}.id_ed25519"));
 
-    std::fs::copy(&runner_src, &runner_dst).map_err(|e| NasError::Denied(e.to_string()))?;
-    std::fs::copy(&cron_src, &cron_dst).map_err(|e| NasError::Denied(e.to_string()))?;
+    write_atomic_mode(&runner_dst, runner_text.as_bytes(), 0o755)?;
+    write_atomic_mode(&cron_dst, cron_text.as_bytes(), 0o644)?;
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&runner_dst, std::fs::Permissions::from_mode(0o755));
-        let _ = std::fs::set_permissions(&cron_dst, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::set_permissions(
-            "/etc/backup-credentials",
-            std::fs::Permissions::from_mode(0o700),
-        );
-    }
-
-    if cred_src.exists() && cred_src.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-        std::fs::copy(&cred_src, &cred_dst).map_err(|e| NasError::Denied(e.to_string()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&cred_dst, std::fs::Permissions::from_mode(0o600));
-        }
+    if let Some(txt) = cred_text {
+        write_atomic_mode(&cred_dst, txt.as_bytes(), 0o600)?;
     } else {
         let _ = std::fs::remove_file(&cred_dst);
     }
 
-    if key_src.exists() && key_src.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-        std::fs::copy(&key_src, &key_dst).map_err(|e| NasError::Denied(e.to_string()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_dst, std::fs::Permissions::from_mode(0o600));
-        }
+    if let Some(txt) = key_text {
+        write_atomic_mode(&key_dst, txt.as_bytes(), 0o600)?;
     } else {
         let _ = std::fs::remove_file(&key_dst);
     }
@@ -128,8 +283,7 @@ pub fn install_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
         .run(&CommandSpec::new("chown").args(["root:grp_samba", &perm_task_dir.to_string_lossy()]));
     let _ = runner.run(&CommandSpec::new("chmod").args(["2770", &perm_task_dir.to_string_lossy()]));
 
-    let runner_content = std::fs::read_to_string(&runner_dst).unwrap_or_default();
-    let auto_permanent = runner_content.contains("AUTO_PERMANENT=true");
+    let auto_permanent = runner_text.contains("AUTO_PERMANENT=true");
     if auto_permanent {
         let has_perm = std::fs::read_dir(&perm_task_dir)
             .map(|entries| {
@@ -394,27 +548,27 @@ pub fn install_backup_spec(runner: &Runner, spec: &BackupSpec) -> NasResult<Stri
     )
 }
 
-/// Escribe o actualiza el cron de una tarea de respaldo.
+/// Escribe o actualiza el cron de una tarea de respaldo validando estrictamente
+/// el origen (solo `/var/lib/nas/staging` sin symlinks) y que el comando invoque
+/// únicamente `/usr/local/bin/backup_<id>.sh`.
 pub fn write_cron(id: &str, file: Option<&Path>, content: Option<&str>) -> NasResult<String> {
     if !valid_id(id) {
         return Err(NasError::Invalid("identificador inválido".into()));
     }
-    let cron_dst = format!("/etc/cron.d/backup_{id}");
-    if let Some(src) = file {
-        std::fs::copy(src, &cron_dst).map_err(|e| NasError::Denied(e.to_string()))?;
-    } else if let Some(txt) = content {
-        std::fs::write(&cron_dst, txt).map_err(|e| NasError::Denied(e.to_string()))?;
+    let txt = if let Some(src) = file {
+        read_confined_file(src, &[Path::new("/var/lib/nas/staging")], MAX_CRON_BYTES)?
+    } else if let Some(raw) = content {
+        raw.to_string()
     } else {
         return Err(NasError::Invalid(
             "se requiere archivo o contenido para el cron".into(),
         ));
-    }
+    };
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&cron_dst, std::fs::Permissions::from_mode(0o644));
-    }
+    validate_cron_content(id, &txt)?;
+
+    let cron_dst = PathBuf::from(format!("/etc/cron.d/backup_{id}"));
+    write_atomic_mode(&cron_dst, txt.as_bytes(), 0o644)?;
     Ok(format!("cron {id} instalado"))
 }
 
@@ -429,44 +583,49 @@ pub fn delete_cron(id: &str) -> NasResult<String> {
 }
 
 pub(super) fn write_secure_file(path: &Path, content: &str) -> NasResult<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| NasError::Denied(e.to_string()))?;
-        f.write_all(content.as_bytes())
-            .map_err(|e| NasError::Denied(e.to_string()))?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, content).map_err(|e| NasError::Denied(e.to_string()))
-    }
+    write_atomic_mode(path, content.as_bytes(), 0o600)
 }
 
 /// Escribe o actualiza el archivo de credenciales cifrado/protegido de una tarea.
+/// Si recibe `--file`, solo admite archivos regulares (sin symlinks) dentro de
+/// `/var/lib/nas/staging` o `/etc/backup-credentials`.
 pub fn write_cred(id: &str, file: Option<&Path>, content: Option<&str>) -> NasResult<String> {
     if !valid_id(id) {
         return Err(NasError::Invalid("identificador inválido".into()));
     }
-    let _ = std::fs::create_dir_all("/etc/backup-credentials");
-    let cred_dst = format!("/etc/backup-credentials/{id}.cred");
-    if let Some(src) = file {
-        let txt = std::fs::read_to_string(src).map_err(|e| NasError::Denied(e.to_string()))?;
-        write_secure_file(Path::new(&cred_dst), &txt)?;
-    } else if let Some(txt) = content {
-        write_secure_file(Path::new(&cred_dst), txt)?;
+    let txt = if let Some(src) = file {
+        read_confined_file(
+            src,
+            &[
+                Path::new("/var/lib/nas/staging"),
+                Path::new("/etc/backup-credentials"),
+            ],
+            MAX_CRED_BYTES,
+        )?
+    } else if let Some(raw) = content {
+        if raw.len() as u64 > MAX_CRED_BYTES || raw.contains('\0') {
+            return Err(NasError::Invalid(
+                "contenido de credencial inválido o demasiado grande".into(),
+            ));
+        }
+        raw.to_string()
     } else {
         return Err(NasError::Invalid(
             "se requiere archivo o contenido de credencial".into(),
         ));
+    };
+
+    let _ = std::fs::create_dir_all("/etc/backup-credentials");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            "/etc/backup-credentials",
+            std::fs::Permissions::from_mode(0o700),
+        );
     }
+    let cred_dst = format!("/etc/backup-credentials/{id}.cred");
+    write_secure_file(Path::new(&cred_dst), &txt)?;
     Ok(format!("credencial {id} instalada"))
 }
 
@@ -478,4 +637,75 @@ pub fn delete_cred(id: &str) -> NasResult<String> {
     let cred_path = format!("/etc/backup-credentials/{id}.cred");
     let _ = std::fs::remove_file(&cred_path);
     Ok(format!("credencial {id} eliminada"))
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn validate_cron_content_acepta_plantilla_oficial_y_rechaza_comandos_arbitrarios() {
+        let valid = "SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nMAILTO=\"\"\n0 2 * * * root /usr/local/bin/backup_demo.sh\n";
+        assert!(validate_cron_content("demo", valid).is_ok());
+
+        let valid_devnull = "30 3 * * 1-5 root /usr/local/bin/backup_demo.sh >/dev/null 2>&1\n";
+        assert!(validate_cron_content("demo", valid_devnull).is_ok());
+
+        for malicious in [
+            "* * * * * root /bin/sh -c 'id > /tmp/pwn'\n",
+            "0 2 * * * root /usr/local/bin/backup_demo.sh; id\n",
+            "0 2 * * * root /usr/local/bin/backup_demo.sh && touch /tmp/x\n",
+            "0 2 * * * root /usr/local/bin/backup_otra.sh\n",
+            "0 2 * * * nobody /usr/local/bin/backup_demo.sh\n",
+            "PATH=/tmp:$(id)\n0 2 * * * root /usr/local/bin/backup_demo.sh\n",
+            "# solo comentarios sin tarea\n",
+        ] {
+            assert!(
+                validate_cron_content("demo", malicious).is_err(),
+                "debe rechazar cron malicioso: {malicious}"
+            );
+        }
+    }
+
+    #[test]
+    fn write_cron_y_write_cred_rechazan_archivos_fuera_de_staging() {
+        assert!(write_cron("demo", Some(Path::new("/etc/shadow")), None).is_err());
+        assert!(write_cron("demo", Some(Path::new("/etc/passwd")), None).is_err());
+        assert!(write_cred("demo", Some(Path::new("/etc/shadow")), None).is_err());
+        assert!(write_cred(
+            "demo",
+            Some(Path::new("/var/lib/nas/staging/../etc/passwd")),
+            None
+        )
+        .is_err());
+        assert!(write_cron("demo", None, Some("* * * * * root /bin/bash -c id\n")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_confined_file_rechaza_symlinks_y_rutas_fuera_del_directorio() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-install-sec-{}-{nanos}", std::process::id()));
+        let staging = root.join("staging");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let ok_file = staging.join("ok.cron");
+        let secret = outside.join("secret.txt");
+        let link = staging.join("link.cron");
+        std::fs::write(&ok_file, "0 2 * * * root /usr/local/bin/backup_demo.sh\n").unwrap();
+        std::fs::write(&secret, "secreto").unwrap();
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+
+        assert!(read_confined_file(&ok_file, &[&staging], MAX_CRON_BYTES).is_ok());
+        assert!(read_confined_file(&secret, &[&staging], MAX_CRON_BYTES).is_err());
+        assert!(read_confined_file(&link, &[&staging], MAX_CRON_BYTES).is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
