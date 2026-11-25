@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use nas_core::{ApiResponse, NasError, NasResult};
+use nas_core::{ApiResponse, NasResult};
 use nas_inventory::{Inventory, ResolvedHost};
 use serde::Serialize;
 
@@ -20,8 +20,7 @@ use serde::Serialize;
     version,
     about = "Administración de producción del servidor NAS (multi-servidor)",
     long_about = "Herramienta de producción: valida el inventario, resuelve perfiles por host \
-                  y opera únicamente sobre despliegues declarados. El transporte SSH y la \
-                  ejecución remota se incorporan en la fase F3."
+                  y ejecuta operaciones remotas vía SSH sobre despliegues declarados."
 )]
 struct Cli {
     /// Ruta del inventario YAML (por defecto `inventory.yaml` o `$NAS_INVENTORY`).
@@ -220,8 +219,28 @@ fn status(inventory: &Inventory, alias: &str, json: bool) -> NasResult<ExitCode>
     Ok(ExitCode::SUCCESS)
 }
 
-/// Error reservado para la fase F3 (transporte remoto de producción).
-#[allow(dead_code)]
-fn remote_not_available() -> NasError {
-    NasError::Denied("la ejecución remota de producción se habilita en la fase F3".into())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_parsea_subcomandos_y_flag_json() {
+        let cli = Cli::try_parse_from(["nasctl", "--json", "hosts"]).expect("hosts");
+        assert!(cli.json);
+        assert!(matches!(cli.command, Command::Hosts));
+
+        let check = Cli::try_parse_from(["nasctl", "check"]).expect("check");
+        assert!(!check.json);
+        assert!(matches!(check.command, Command::Check));
+
+        let exec =
+            Cli::try_parse_from(["nasctl", "exec", "--host", "prod-nas", "status"]).expect("exec");
+        assert!(matches!(exec.command, Command::Exec { .. }));
+    }
+
+    #[test]
+    fn inventory_path_usa_valor_explicito_si_se_provee() {
+        let custom = PathBuf::from("/etc/nas/custom-inv.yaml");
+        assert_eq!(inventory_path(Some(custom.clone())), custom);
+    }
 }
