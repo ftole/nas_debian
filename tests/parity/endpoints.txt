@@ -33,12 +33,14 @@
 /api/files/trash/restore
 /api/files/trash/restore-all
 /api/files/upload
+/api/files/zip
 /api/groups
 /api/groups/delete
 /api/groups/rename
 /api/logs
 /api/metrics
 /api/network
+/api/security/status
 /api/services
 /api/services/manage
 /api/shares
