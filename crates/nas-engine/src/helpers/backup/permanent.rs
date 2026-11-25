@@ -173,64 +173,32 @@ pub(super) struct TaskScriptInfo {
 
 pub(super) fn read_task_info(id: &str) -> TaskScriptInfo {
     let runner_path = Path::new("/usr/local/bin").join(format!("backup_{id}.sh"));
-    let content = std::fs::read_to_string(&runner_path).unwrap_or_default();
     let mut info = TaskScriptInfo {
         dest_root: "/srv/nas/BACKUPS_HISTORICOS".to_string(),
         source_type: "local".to_string(),
         src_port: 22,
         ..Default::default()
     };
-
-    for line in content.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("DEST_ROOT=") {
-            let val = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
-            if val.starts_with("/srv/nas") {
-                info.dest_root = val.to_string();
-            }
-        } else if let Some(rest) = line.strip_prefix("SOURCE_TYPE=") {
-            info.source_type = rest
-                .trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                .to_ascii_lowercase();
-        } else if let Some(rest) = line.strip_prefix("SRC_IP=") {
-            info.src_ip = Some(
-                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                    .to_string(),
-            );
-        } else if let Some(rest) = line.strip_prefix("SRC_SHARE=") {
-            info.src_share = Some(
-                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                    .to_string(),
-            );
-        } else if let Some(rest) = line.strip_prefix("SRC_PATH=") {
-            info.src_path = Some(
-                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                    .to_string(),
-            );
-        } else if let Some(rest) = line.strip_prefix("SRC_USER=") {
-            info.src_user = Some(
-                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                    .to_string(),
-            );
-        } else if let Some(rest) = line.strip_prefix("SRC_PORT=") {
-            if let Ok(p) = rest
-                .trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                .parse::<u16>()
-            {
-                info.src_port = p;
-            }
-        } else if let Some(rest) = line.strip_prefix("CRED_FILE=") {
-            info.cred_file = Some(
-                rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ')
-                    .to_string(),
-            );
-        } else if let Some(rest) = line.strip_prefix("KEY_FILE=") {
-            let val = rest.trim_matches(|c| c == '\'' || c == '"' || c == ' ');
-            if !val.is_empty() {
-                info.key_file = Some(val.to_string());
-            }
-        }
+    let Ok(task) = crate::tasks::BackupTask::load(&runner_path) else {
+        return info;
+    };
+    if task.destination_root.starts_with("/srv/nas") {
+        info.dest_root = task.destination_root;
     }
+    info.source_type = match task.kind {
+        crate::tasks::SourceKind::Cifs => "cifs".to_string(),
+        crate::tasks::SourceKind::Ssh => "ssh".to_string(),
+        crate::tasks::SourceKind::Local => "local".to_string(),
+    };
+    info.src_ip = task.source_ip;
+    info.src_share = task.share;
+    info.src_path = task.path;
+    info.src_user = task.user;
+    if let Some(p) = task.port {
+        info.src_port = p;
+    }
+    info.cred_file = task.credentials_file;
+    info.key_file = task.key_file;
     info
 }
 
