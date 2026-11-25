@@ -61,9 +61,15 @@ async function logoutSession() {
     btn.classList.add('is-loading');
   }
   try {
-    await apiFetch('/logout', { method: 'POST' });
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    await fetch('/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      redirect: 'manual',
+      headers: csrf ? { 'X-CSRF-Token': csrf } : {},
+    });
   } catch (e) {
-    // Si la llamada falla o redirige
+    // Redirección directa al login incluso ante interrupción de red
   } finally {
     window.location.href = '/login';
   }
