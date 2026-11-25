@@ -500,3 +500,20 @@ pub(crate) fn health_ok(body: &str) -> bool {
     let code = body.trim();
     code == "200" || code == "302"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_path_y_health_ok_funcionan_correctamente() {
+        assert_eq!(
+            split_path("/srv/nas/web"),
+            ("/srv/nas".to_string(), "web".to_string())
+        );
+        assert_eq!(split_path("/web"), ("/".to_string(), "web".to_string()));
+        assert!(health_ok("200\n"));
+        assert!(health_ok("302"));
+        assert!(!health_ok("502"));
+    }
+}
