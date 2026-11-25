@@ -74,13 +74,13 @@ pub fn run_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
             )?
             .ensure_success()?;
     } else {
-        runner
-            .run(
-                &CommandSpec::new("nice")
-                    .args(["-n", "10", "nohup", &runner_path])
-                    .timeout(Duration::from_secs(10)),
-            )?
-            .ensure_success()?;
+        std::process::Command::new("nice")
+            .args(["-n", "10", &runner_path])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| NasError::Denied(format!("no se pudo iniciar {runner_path}: {e}")))?;
     }
 
     Ok(format!("tarea {id} iniciada"))
@@ -106,9 +106,18 @@ pub fn stop_backup_task(runner: &Runner, id: &str) -> NasResult<String> {
             .timeout(Duration::from_secs(15)),
     ) {
         if out.is_success() {
+            let prefix = format!("nas-backup-{id}-");
             for line in out.stdout.lines() {
                 if let Some(unit) = line.split_whitespace().next() {
-                    let _ = runner.run(&CommandSpec::new("systemctl").args(["stop", unit]));
+                    let is_exact_task_unit = unit
+                        .strip_prefix(&prefix)
+                        .and_then(|rest| rest.strip_suffix(".service"))
+                        .is_some_and(|stamp| {
+                            !stamp.is_empty() && stamp.chars().all(|c| c.is_ascii_digit())
+                        });
+                    if is_exact_task_unit {
+                        let _ = runner.run(&CommandSpec::new("systemctl").args(["stop", unit]));
+                    }
                 }
             }
         }
@@ -185,7 +194,25 @@ pub fn backup_logs(id: &str, lines: Option<usize>) -> NasResult<String> {
         return Ok(format!("(sin bitácora todavía para {id})"));
     }
 
-    let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX_TAIL_BYTES: u64 = 256 * 1024;
+    let Ok(mut file) = std::fs::File::open(&log_path) else {
+        return Ok(format!("(sin bitácora todavía para {id})"));
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut start = len.saturating_sub(MAX_TAIL_BYTES);
+    if start > 0 {
+        let _ = file.seek(SeekFrom::Start(start));
+    }
+    let mut buf = Vec::new();
+    let _ = file.read_to_end(&mut buf);
+    if start > 0 {
+        if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            start = pos as u64 + 1;
+            buf.drain(..start as usize);
+        }
+    }
+    let content = String::from_utf8_lossy(&buf);
     let all_lines: Vec<&str> = content.lines().collect();
     let take_count = all_lines.len().min(count);
     let slice = &all_lines[all_lines.len() - take_count..];
