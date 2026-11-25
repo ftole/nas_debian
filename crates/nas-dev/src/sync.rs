@@ -154,8 +154,13 @@ pub(crate) fn sync(
 
     ensure_known_hosts_dir(&target)?;
 
-    let preflight_code = preflight(source, json)?;
+    let preflight_code = preflight(source, false)?;
     if preflight_code != ExitCode::SUCCESS {
+        if json {
+            return Err(NasError::Invalid(
+                "el preflight falló antes de sincronizar; ejecuta `nas-dev preflight` para ver detalles".into(),
+            ));
+        }
         return Ok(preflight_code);
     }
 
@@ -397,6 +402,7 @@ pub(crate) fn build_plan(host: &ResolvedHost, sha: &str, timestamp: &str) -> Syn
                 incoming.clone(),
                 "-C".into(),
                 stage.clone(),
+                "--strip-components=1".into(),
             ],
         ),
         RemoteStep::new(
