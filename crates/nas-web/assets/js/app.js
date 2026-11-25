@@ -69,9 +69,15 @@ function applyRoleUi() {
     const el = document.getElementById(id);
     if (el) el.style.display = isAdmin ? '' : 'none';
   });
+  document.querySelectorAll('.role-card[data-role="admin"]').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
   ['user-superadmin-role-wrap', 'edit-user-superadmin-role-wrap'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isSuper ? '' : 'none';
+  });
+  document.querySelectorAll('.role-card[data-role="superadmin"]').forEach(el => {
+    el.style.display = isSuper ? '' : 'none';
   });
 
   // Ocultar módulo de respaldos en frontend si el rol exclusivo es ARCHIVOS
