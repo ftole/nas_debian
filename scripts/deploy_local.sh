@@ -205,10 +205,18 @@ if [ "$RESTART_SERVICE" -eq 1 ]; then
             if "${SUDO_CMD[@]}" systemctl is-active --quiet nas-web; then
                 echo "  -> Servicio nas-web activo y en ejecución."
                 if command -v curl >/dev/null 2>&1; then
-                    if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+                    health_ok=0
+                    for _ in $(seq 1 10); do
+                        if curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+                            health_ok=1
+                            break
+                        fi
+                        sleep 0.5
+                    done
+                    if [ "$health_ok" -eq 1 ]; then
                         echo "  -> Healthcheck /healthz OK."
                     else
-                        echo "[!] Advertencia: /healthz no respondió en 127.0.0.1:8080." >&2
+                        echo "[!] Advertencia: /healthz no respondió en 127.0.0.1:8080 tras 10 intentos." >&2
                     fi
                 fi
             else
