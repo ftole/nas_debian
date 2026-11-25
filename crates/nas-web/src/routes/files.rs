@@ -36,21 +36,58 @@ const PREPARED_ZIP_MAX_ENTRIES: usize = 8;
 
 fn prepared_zips() -> &'static Mutex<HashMap<String, PreparedZip>> {
     static STORE: OnceLock<Mutex<HashMap<String, PreparedZip>>> = OnceLock::new();
+    static CLEANER: OnceLock<()> = OnceLock::new();
+    CLEANER.get_or_init(|| {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async {
+                let mut interval = tokio::time::interval(Duration::from_secs(120));
+                loop {
+                    interval.tick().await;
+                    let expired: Vec<PreparedZip> = if let Ok(mut guard) = prepared_zips().lock() {
+                        let now = Instant::now();
+                        let keys: Vec<String> = guard
+                            .iter()
+                            .filter(|(_, entry)| {
+                                now.duration_since(entry.created_at) >= PREPARED_ZIP_TTL
+                            })
+                            .map(|(k, _)| k.clone())
+                            .collect();
+                        keys.into_iter().filter_map(|k| guard.remove(&k)).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    drop(expired);
+                }
+            });
+        }
+    });
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn store_prepared_zip(owner: &str, temp_file: TempFile, filename: String, size: u64) -> String {
     let token = random_hex();
     let now = Instant::now();
+    let mut dropped: Vec<PreparedZip> = Vec::new();
     if let Ok(mut guard) = prepared_zips().lock() {
-        guard.retain(|_, entry| now.duration_since(entry.created_at) < PREPARED_ZIP_TTL);
+        let expired_keys: Vec<String> = guard
+            .iter()
+            .filter(|(_, entry)| now.duration_since(entry.created_at) >= PREPARED_ZIP_TTL)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in expired_keys {
+            if let Some(entry) = guard.remove(&k) {
+                dropped.push(entry);
+            }
+        }
         while guard.len() >= PREPARED_ZIP_MAX_ENTRIES {
             let oldest_key = guard
                 .iter()
                 .min_by_key(|(_, entry)| entry.created_at)
                 .map(|(k, _)| k.clone());
             if let Some(k) = oldest_key {
-                guard.remove(&k);
+                if let Some(entry) = guard.remove(&k) {
+                    dropped.push(entry);
+                }
             } else {
                 break;
             }
@@ -66,19 +103,35 @@ fn store_prepared_zip(owner: &str, temp_file: TempFile, filename: String, size: 
             },
         );
     }
+    drop(dropped);
     token
 }
 
 fn take_prepared_zip(token: &str, owner: &str) -> Option<PreparedZip> {
     let now = Instant::now();
-    let mut guard = prepared_zips().lock().ok()?;
-    guard.retain(|_, entry| now.duration_since(entry.created_at) < PREPARED_ZIP_TTL);
-    let matches_owner = guard.get(token).is_some_and(|entry| entry.owner == owner);
-    if matches_owner {
-        guard.remove(token)
-    } else {
-        None
-    }
+    let (res, expired) = {
+        let mut guard = prepared_zips().lock().ok()?;
+        let expired_keys: Vec<String> = guard
+            .iter()
+            .filter(|(_, entry)| now.duration_since(entry.created_at) >= PREPARED_ZIP_TTL)
+            .map(|(k, _)| k.clone())
+            .collect();
+        let mut expired = Vec::with_capacity(expired_keys.len());
+        for k in expired_keys {
+            if let Some(entry) = guard.remove(&k) {
+                expired.push(entry);
+            }
+        }
+        let matches_owner = guard.get(token).is_some_and(|entry| entry.owner == owner);
+        let res = if matches_owner {
+            guard.remove(token)
+        } else {
+            None
+        };
+        (res, expired)
+    };
+    drop(expired);
+    res
 }
 
 async fn stream_zip_temp(temp_file: TempFile, file_size: u64, zip_filename: &str) -> Response {
