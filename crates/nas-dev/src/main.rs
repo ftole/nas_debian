@@ -113,14 +113,19 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let json_output = cli.json;
     match run(cli) {
         Ok(code) => code,
         Err(error) => {
-            let payload = ApiResponse::<serde_json::Value>::error(error.to_string());
-            eprintln!(
-                "{}",
-                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| error.to_string())
-            );
+            if json_output {
+                let payload = ApiResponse::<serde_json::Value>::error(error.to_string());
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| error.to_string())
+                );
+            } else {
+                eprintln!("Error: {error}");
+            }
             ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(1))
         }
     }
@@ -289,7 +294,7 @@ mod tests {
 
     #[test]
     fn onboard_genera_sudoers_acotado_y_rutas_propias() {
-        let script = onboard_script(&host("/var/www/nas-web-dev"));
+        let script = onboard_script(&host("/var/www/nas-web-dev")).expect("script válido");
         assert!(script.contains("/etc/sudoers.d/nas-dev"));
         assert!(script.contains("NOPASSWD"));
         assert!(script.contains("/var/www/nas-web-dev"));
@@ -315,5 +320,21 @@ mod tests {
         assert!(health_ok("302\n"));
         assert!(!health_ok("500"));
         assert!(!health_ok(""));
+    }
+
+    #[test]
+    fn sync_plan_usa_strip_components_y_onboard_rechaza_inyeccion() {
+        let h = host("/var/www/nas-web-dev");
+        let plan = crate::sync::build_plan(&h, "deadbeef", "20261125");
+        let extract = plan
+            .steps
+            .iter()
+            .find(|s| s.label == "extraer paquete")
+            .expect("paso extraer");
+        assert!(extract.argv.contains(&"--strip-components=1".to_string()));
+
+        let mut bad = h;
+        bad.user = "dev;id".to_string();
+        assert!(onboard_script(&bad).is_err());
     }
 }
