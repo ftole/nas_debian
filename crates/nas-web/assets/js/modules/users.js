@@ -64,6 +64,9 @@ function copyPasswordInput(inputId) {
 }
 
 function selectRoleCard(formPrefix, role) {
+  if (role === 'superadmin' && !window.NAS_IS_SUPER) {
+    return;
+  }
   const containerId = formPrefix === 'user' ? 'new-user-role-cards' : 'edit-user-role-cards';
   const container = document.getElementById(containerId);
   if (container) {
@@ -353,6 +356,7 @@ function showUserActionConfirm({ title, icon = 'alert-triangle', alertText, aler
   const alertTextEl = document.getElementById('user-action-confirm-alert-text');
   if (alertBox && alertTextEl) {
     alertBox.className = `alert-box alert-box-${alertType}`;
+    alertTextEl.style.whiteSpace = 'pre-line';
     alertTextEl.textContent = alertText || '';
   }
 
