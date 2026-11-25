@@ -132,7 +132,7 @@ pub fn build_plan(
     steps.push(healthcheck_step());
 
     let mut rollback = Vec::new();
-    if let Some(previous) = previous_version {
+    if let Some(previous) = previous_version.filter(|v| super::is_valid_version(v)) {
         let previous_dir = format!("{root}/releases/{previous}");
         rollback.push(vec![
             "ln".to_string(),
