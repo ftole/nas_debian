@@ -154,61 +154,77 @@ impl AuditLog {
     }
 
     fn trim_truncated_tail_unlocked(&self) -> NasResult<bool> {
+        use std::io::{Read, Seek, SeekFrom};
+
         if !self.path.exists() {
             return Ok(false);
         }
-        let raw = std::fs::read(&self.path).map_err(|e| NasError::io(&self.path, e))?;
-        if raw.is_empty() {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path)
+            .map_err(|e| NasError::io(&self.path, e))?;
+        let file_len = file
+            .metadata()
+            .map_err(|e| NasError::io(&self.path, e))?
+            .len();
+        if file_len == 0 {
             return Ok(false);
         }
-        let text = String::from_utf8_lossy(&raw);
-        let Some(last_nl) = raw.iter().rposition(|&b| b == b'\n') else {
-            if serde_json::from_str::<AuditEntry>(text.trim()).is_ok() {
+
+        // Lee solo la cola del archivo (O(1) en RAM) aumentando la ventana únicamente si la última línea excede 64 KiB.
+        let mut window: u64 = 64 * 1024;
+        loop {
+            let read_len = window.min(file_len);
+            let start = file_len - read_len;
+            file.seek(SeekFrom::Start(start))
+                .map_err(|e| NasError::io(&self.path, e))?;
+            let mut buf = vec![0u8; read_len as usize];
+            file.read_exact(&mut buf)
+                .map_err(|e| NasError::io(&self.path, e))?;
+
+            let valid_slice = if start > 0 {
+                if let Some(first_nl) = buf.iter().position(|&b| b == b'\n') {
+                    (start + first_nl as u64 + 1, &buf[first_nl + 1..])
+                } else if read_len < file_len {
+                    window = (window * 2).min(file_len);
+                    continue;
+                } else {
+                    (0, buf.as_slice())
+                }
+            } else {
+                (0, buf.as_slice())
+            };
+
+            let (base_offset, tail_bytes) = valid_slice;
+            let trimmed_end = tail_bytes
+                .iter()
+                .rposition(|&b| b != b'\n' && b != b'\r')
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+            if trimmed_end == 0 {
                 return Ok(false);
             }
-            let file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&self.path)
-                .map_err(|e| NasError::io(&self.path, e))?;
-            file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
-            return Ok(true);
-        };
+            let content_no_trailing_nl = &tail_bytes[..trimmed_end];
+            let (line_start, last_line) =
+                match content_no_trailing_nl.iter().rposition(|&b| b == b'\n') {
+                    Some(nl) => (nl + 1, &content_no_trailing_nl[nl + 1..]),
+                    None => (0, content_no_trailing_nl),
+                };
 
-        let tail = std::str::from_utf8(&raw[last_nl + 1..]);
-        let tail_invalid_no_nl = match tail {
-            Ok(t) => !t.trim().is_empty() && serde_json::from_str::<AuditEntry>(t.trim()).is_err(),
-            Err(_) => true,
-        };
-        if tail_invalid_no_nl {
-            let file = std::fs::OpenOptions::new()
-                .write(true)
-                .open(&self.path)
-                .map_err(|e| NasError::io(&self.path, e))?;
-            file.set_len((last_nl + 1) as u64)
-                .map_err(|e| NasError::io(&self.path, e))?;
-            file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
-            return Ok(true);
-        }
-
-        // También si la última línea sí terminó en `\n` pero quedó parcialmente escrita/corrupta al final.
-        let non_empty: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-        if let Some(last_line) = non_empty.last() {
-            if serde_json::from_str::<AuditEntry>(last_line.trim()).is_err() {
-                if let Some(prev_end) = text.trim_end_matches(['\r', '\n']).rfind('\n') {
-                    let file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .open(&self.path)
-                        .map_err(|e| NasError::io(&self.path, e))?;
-                    file.set_len((prev_end + 1) as u64)
-                        .map_err(|e| NasError::io(&self.path, e))?;
-                    file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
-                    return Ok(true);
-                }
+            let is_valid_json = std::str::from_utf8(last_line)
+                .ok()
+                .is_some_and(|s| serde_json::from_str::<AuditEntry>(s.trim()).is_ok());
+            if is_valid_json {
+                return Ok(false);
             }
-        }
 
-        Ok(false)
+            let new_len = base_offset + line_start as u64;
+            file.set_len(new_len)
+                .map_err(|e| NasError::io(&self.path, e))?;
+            file.sync_all().map_err(|e| NasError::io(&self.path, e))?;
+            return Ok(true);
+        }
     }
 
     /// Recupera la bitácora recortando únicamente una última línea truncada por corte eléctrico.
@@ -557,6 +573,21 @@ mod tests {
         assert_eq!(e3.prev_hash, e2.hash);
         assert_eq!(log.verify().expect("cadena recuperada"), 3);
 
+        let _ = std::fs::remove_file(log.path());
+    }
+
+    #[test]
+    fn recorta_unica_linea_corrupta_terminada_en_salto() {
+        let log = temp_log("single-corrupt-nl");
+        std::fs::write(log.path(), "{\"ts\":123,\"corrupt\n").expect("write");
+        assert!(log.recover_truncated_tail().expect("recover"));
+        let entry = log
+            .append(AuditEntry::new(
+                "admin", "panel", "login", "web", "SUCCESS", "ok",
+            ))
+            .expect("append");
+        assert_eq!(entry.prev_hash, "0");
+        assert_eq!(log.verify().expect("verify"), 1);
         let _ = std::fs::remove_file(log.path());
     }
 }
