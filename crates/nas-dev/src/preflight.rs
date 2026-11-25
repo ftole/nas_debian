@@ -85,7 +85,7 @@ pub(crate) fn plan(source: &Path, json: bool) -> NasResult<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn preflight(source: &Path, json: bool) -> NasResult<ExitCode> {
+pub(crate) fn run_preflight_checks(source: &Path) -> (Vec<Check>, usize) {
     let runner = Runner::new();
     let mut checks = Vec::new();
 
@@ -115,6 +115,11 @@ pub(crate) fn preflight(source: &Path, json: bool) -> NasResult<ExitCode> {
     checks.extend(lint_files(&runner, source, "sh", "bash", ["-n"]));
 
     let failed = checks.iter().filter(|check| check.failed()).count();
+    (checks, failed)
+}
+
+pub(crate) fn preflight(source: &Path, json: bool) -> NasResult<ExitCode> {
+    let (checks, failed) = run_preflight_checks(source);
 
     if json {
         let msg = format!("Preflight: {failed} fallo(s)");
