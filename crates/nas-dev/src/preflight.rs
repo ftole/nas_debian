@@ -117,13 +117,13 @@ pub(crate) fn preflight(source: &Path, json: bool) -> NasResult<ExitCode> {
     let failed = checks.iter().filter(|check| check.failed()).count();
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&ApiResponse::ok(
-                &checks,
-                format!("Preflight: {failed} fallo(s)")
-            ))?
-        );
+        let msg = format!("Preflight: {failed} fallo(s)");
+        let payload = if failed > 0 {
+            ApiResponse::err(&checks, msg)
+        } else {
+            ApiResponse::ok(&checks, msg)
+        };
+        println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         println!("PREFLIGHT DE DESARROLLO: {}", source.display());
         for check in &checks {
@@ -301,8 +301,16 @@ pub(crate) fn create_archive(source: &Path, out: &Path) -> NasResult<u64> {
 }
 
 pub(crate) fn sha256_file(path: &Path) -> NasResult<String> {
-    let bytes = std::fs::read(path).map_err(|e| NasError::io(path, e))?;
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| NasError::io(path, e))?;
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| NasError::io(path, e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
