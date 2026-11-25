@@ -8,7 +8,7 @@ mod units;
 #[cfg(test)]
 mod tests;
 
-pub use disks::{format_single, is_os_disk, os_disk_guard, setup_lvm, wipe_disk};
+pub use disks::{format_single, is_os_disk, os_disk_guard, os_disks, setup_lvm, wipe_disk};
 pub use maintenance::{sanitize_fstab, set_write_cache};
 pub use pools::{
     create_pool, extend_pool, extend_pool_target, remove_pool_device, ALLOWED_POOL_MODES,
