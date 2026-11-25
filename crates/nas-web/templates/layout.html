@@ -256,7 +256,7 @@
             <svg class="icon"><use href="#icon-hard-drive"></use></svg>
             <span>Almacenamiento</span>
           </div>
-          <span class="nav-badge" id="badge-storage">%%round_disktotal_1024_1%% TB</span>
+          <span class="nav-badge" id="badge-storage">%%disk_total_tb%% TB</span>
         </div>
 <!--ENDIF-->
 
@@ -812,7 +812,7 @@
           </div>
           <div class="page-head-actions">
             <span class="text-muted" id="net-updated" style="font-size:12px; align-self:center;">
-              %%netgenerated_actualizado_esc_netgenerated_sin_verificar%%
+              Sin verificar
             </span>
             <button type="button" class="btn btn-secondary" onclick="loadNetworking(true)">
               <svg class="icon"><use href="#icon-refresh"></use></svg> Actualizar
@@ -835,87 +835,61 @@
             <dl class="info-list">
               <div class="info-row">
                 <dt class="info-label">Nombre NetBIOS:</dt>
-                <dd class="info-val" id="net-netbios">%%netNetbios%%</dd>
+                <dd class="info-val" id="net-netbios">%%hostname%%</dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Workgroup:</dt>
-                <dd class="info-val" id="net-workgroup">%%networkgroup_app_services_systemservice_getworkgroup%%</dd>
+                <dd class="info-val" id="net-workgroup">%%workgroup%%</dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Interfaces:</dt>
                 <dd class="info-val" id="net-interfaces">
-                  <!--IF:net_no_interfaces-->
-                    <span class="text-muted">Sin interfaces detectadas.</span>
-                  <!--ELSE-->
-                    
-                      <div class="net-iface">
-                        <strong>%%netiface_name%%</strong>
-                        <span class="badge %%netiface_state_up_badge_ok_badge_warn%%">%%netiface_state_n_d%%</span>
-                        <code>%%netiface_ip_sin_ipv4%%%%empty_netiface_prefix_int_netiface_prefix%%</code>
-                        <span class="text-muted">
-                          %%empty_netiface_speed_mbps_int_netiface_speed_mbps_mbps_velocidad_n_d%%
-                          · MTU %%int_netiface_mtu_0%%
-                          %%empty_netiface_mac_esc_netiface_mac%%
-                        </span>
-                      </div>
-                    
-                  <!--ENDIF-->
+                  <div class="net-iface"><span class="text-muted">Consultando interfaces de red...</span></div>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Puerta de enlace:</dt>
                 <dd class="info-val" id="net-gateway">
-                  <code>%%net_gateway_n_d%%</code>
-                  <!--IF:net_dhcp_known-->
-                    <span class="badge %%empty_net_dhcp_badge_blue_badge_gray%%">%%empty_net_dhcp_dhcp_est_tica%%</span>
-                  <!--ENDIF-->
+                  <code>N/D</code>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Servidores DNS:</dt>
-                <dd class="info-val" id="net-dns">%%empty_netdns_span_class_text_muted_n_d_span_esc_implode_netdns%%</dd>
+                <dd class="info-val" id="net-dns"><span class="text-muted">N/D</span></dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Protocolo SMB:</dt>
                 <dd class="info-val" id="net-smb">
-                  %%netprotocollabel_netminproto%% — %%netprotocollabel_netmaxproto%%
-                  <span class="badge badge-gray">Firma: %%netsigning_n_d%%</span>
-                  <span class="badge badge-gray">Cifrado: %%netencrypt_n_d%%</span>
+                  <span class="text-muted">Consultando SMB...</span>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">NetBIOS / LLMNR:</dt>
                 <dd class="info-val" id="net-nmbd">
-                  <span class="badge %%empty_netservices_nmbd_badge_ok_badge_err%%">nmbd %%empty_netservices_nmbd_activo_inactivo%%</span>
+                  <span class="badge badge-gray">nmbd N/D</span>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Descubrimiento WSD:</dt>
                 <dd class="info-val" id="net-wsd">
-                  <span class="badge %%netwsdon_badge_ok_badge_err%%">wsdd2 %%netwsdon_activo_inactivo%%</span>
-                  <!--IF:net_has_wsd_ports-->
-                    <span class="text-muted" style="font-size:12px;">puertos %%implode_netwsdports%%</span>
-                  <!--ENDIF-->
+                  <span class="badge badge-gray">wsdd2 N/D</span>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Cortafuegos UFW:</dt>
                 <dd class="info-val" id="net-firewall">
-                  <span class="badge %%empty_netfirewall_active_badge_ok_badge_err%%">%%empty_netfirewall_active_activo_inactivo%%</span>
-                  <!--IF:net_firewall_hidden-->
-                    <span class="text-muted" style="font-size:12px;">reglas no verificables sin privilegios</span>
-                  <!--ENDIF-->
+                  <span class="badge badge-gray">N/D</span>
                 </dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Sesiones SMB:</dt>
-                <dd class="info-val" id="net-sessions">%%netsessions_null_span_class_text_muted_no_verificable_span_int_netsessions_activa_s%%</dd>
+                <dd class="info-val" id="net-sessions"><span class="text-muted">Consultando...</span></dd>
               </div>
               <div class="info-row">
                 <dt class="info-label">Ruta de Red Windows:</dt>
                 <dd class="info-val" id="net-info-path">
-                  <code>\\%%netNetbios%%</code> o <code>\\%%netprimaryip_n_d%%</code>
-                  <button type="button" class="btn btn-secondary btn-sm" title="Copiar ruta UNC" style="margin-left:6px;" onclick="copyNetUnc('%%netNetbios%%')">
+                  <code>\\%%hostname%%</code> o <code>\\%%server_ip%%</code>
+                  <button type="button" class="btn btn-secondary btn-sm" title="Copiar ruta UNC" style="margin-left:6px;" onclick="copyNetUnc('%%hostname%%')">
                     <svg class="icon icon-sm"><use href="#icon-copy"></use></svg>
                   </button>
                 </dd>
@@ -927,18 +901,10 @@
         <div class="panel-card" style="margin-top:20px;">
           <div class="panel-card-head">
             <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-services"></use></svg> Puertos en escucha</h3>
-            <span class="badge badge-gray" id="net-ports-count">%%count_netlistening%% puerto(s)</span>
+            <span class="badge badge-gray" id="net-ports-count">0 puerto(s)</span>
           </div>
           <div class="panel-card-body" id="net-ports-body" aria-live="polite">
-            <!--IF:net_no_listening-->
-              <span class="text-muted">Sin datos de puertos disponibles.</span>
-            <!--ELSE-->
-              <div class="net-port-list">
-                
-                  <span class="net-port-chip"><strong>%%int_netport_port_0%%/%%netport_proto_tcp%%</strong>%%empty_netport_service_esc_netport_service%%</span>
-                
-              </div>
-            <!--ENDIF-->
+            <div class="net-port-list"><span class="net-port-chip text-muted">Consultando puertos en escucha...</span></div>
           </div>
         </div>
       </section>
@@ -1798,74 +1764,35 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
             <!-- Tarjeta sysctl -->
             <div class="panel-card">
               <div class="panel-card-head">
-                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Parámetros sysctl (99-nas-tuning.conf)</h3>
+                <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Parámetros sysctl en vivo (99-nas-tuning.conf)</h3>
+                <span class="badge badge-gray" id="sec-sysctl-badge">Consultando...</span>
               </div>
               <div class="panel-card-body">
-                <div style="display:flex; flex-direction:column; gap:8px; font-size:12.5px;">
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>fs.inotify.max_user_watches</code></span>
-                    <span class="badge badge-ok">524,288 watches</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>net.ipv4.tcp_keepalive_time</code></span>
-                    <span class="badge badge-blue">120s (purga 3 min)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>vm.dirty_bytes</code></span>
-                    <span class="badge badge-teal">268,435,456 (256 MB)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>net.ipv4.conf.all.rp_filter</code></span>
-                    <span class="badge badge-ok">2 (Loose RFC 3704)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>net.ipv4.tcp_syncookies</code></span>
-                    <span class="badge badge-ok">1 (Anti SYN-Flood)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>kernel.kptr_restrict / dmesg</code></span>
-                    <span class="badge badge-purple">2 / 1 (Oculto)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>kernel.yama.ptrace_scope</code></span>
-                    <span class="badge badge-ok">2 (Bloqueo ptrace)</span>
-                  </div>
-                  <div class="info-row" style="padding:6px 10px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color); display:flex; justify-content:space-between;">
-                    <span><code>disable_ipv6 / UFW IPV6=no</code></span>
-                    <span class="badge badge-ok">1 (IPv6 Desactivado)</span>
-                  </div>
+                <div id="sec-sysctl-list" style="display:flex; flex-direction:column; gap:8px; font-size:12.5px;">
+                  <div class="text-muted"><span class="badge badge-teal">sysctl</span> <span class="badge badge-purple">kernel</span> Consultando parámetros del kernel en tiempo real...</div>
                 </div>
               </div>
             </div>
 
-            <!-- Tarjetas auditd & AIDE -->
+            <!-- Tarjetas auditd, AIDE & Defensa -->
             <div style="display:flex; flex-direction:column; gap:16px;">
               <div class="panel-card">
                 <div class="panel-card-head">
                   <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-logs"></use></svg> Auditoría del Kernel (auditd)</h3>
+                  <span class="badge badge-gray" id="sec-auditd-badge">Consultando...</span>
                 </div>
-                <div class="panel-card-body" style="font-size:12.5px;">
-                  <p style="margin-bottom:8px; color:var(--text-secondary);">Reglas activas en <code>/etc/audit/rules.d/nas.rules</code>:</p>
-                  <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
-                    <li>Vigilancia estricta de cambios en <code>/etc/sudoers*</code></li>
-                    <li>Detección de modificaciones en <code>/etc/samba/smb.conf</code></li>
-                    <li>Auditoría de accesos a credenciales <code>/etc/backup-credentials/</code></li>
-                    <li>Registro de ejecuciones del helper <code>/usr/local/sbin/nas-terminal</code></li>
-                  </ul>
+                <div class="panel-card-body" id="sec-auditd-body" style="font-size:12.5px;">
+                  <p style="margin-bottom:8px; color:var(--text-secondary);">Consultando estado de <code>auditd</code> y reglas en <code>/etc/audit/rules.d/nas.rules</code>...</p>
                 </div>
               </div>
 
               <div class="panel-card">
                 <div class="panel-card-head">
-                  <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Integridad Criptográfica Offline (AIDE)</h3>
+                  <h3><svg class="icon icon-sm" style="color:var(--accent-primary);"><use href="#icon-shield"></use></svg> Integridad Criptográfica (AIDE) y Defensa</h3>
+                  <span class="badge badge-gray" id="sec-aide-badge">Consultando...</span>
                 </div>
-                <div class="panel-card-body" style="font-size:12.5px;">
-                  <p style="margin-bottom:8px; color:var(--text-secondary);">Monitoreo de integridad de archivos (FIM):</p>
-                  <ul style="margin:0; padding-left:18px; color:var(--text-secondary); line-height:1.6;">
-                    <li>Base criptográfica en <code>/var/lib/aide/aide.db</code></li>
-                    <li>Temporizador de verificación diaria: <code>dailyaidecheck.timer</code></li>
-                    <li>Protección contra modificaciones maliciosas y rootkits offline</li>
-                  </ul>
+                <div class="panel-card-body" id="sec-aide-body" style="font-size:12.5px;">
+                  <p style="margin-bottom:8px; color:var(--text-secondary);">Consultando estado de AIDE, Fail2Ban y servicios de seguridad...</p>
                 </div>
               </div>
             </div>
@@ -2644,7 +2571,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 </div>
                 <div class="role-card-desc">Acceso total al servidor (root/sudo + panel completo + Samba + SSH).</div>
               </div>
-              <div class="role-card %%super_disabled%%" data-role="superadmin" onclick="%%issuper_selectrolecard_user_superadmin%%" style="%%super_hidden%%">
+              <div class="role-card %%super_disabled%%" data-role="superadmin" onclick="selectRoleCard('user', 'superadmin')" style="%%super_hidden%%">
                 <div class="role-card-header">
                   <span class="role-card-title">Superadministrador</span>
                   <span class="badge badge-err">Superadmin</span>
@@ -2766,7 +2693,7 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 </div>
                 <div class="role-card-desc">Acceso total al servidor (root/sudo + panel completo + Samba + SSH).</div>
               </div>
-              <div class="role-card %%super_disabled%%" data-role="superadmin" onclick="%%issuper_selectrolecard_edit_user_superadmin%%" style="%%super_hidden%%">
+              <div class="role-card %%super_disabled%%" data-role="superadmin" onclick="selectRoleCard('edit-user', 'superadmin')" style="%%super_hidden%%">
                 <div class="role-card-header">
                   <span class="role-card-title">Superadministrador</span>
                   <span class="badge badge-err">Superadmin</span>
@@ -3659,6 +3586,6 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
   <script src="/js/modules/misc.js"></script>
   <script src="/js/modules/files.js"></script>
   <script src="/js/modules/domain.js"></script>
-  <script src="/js/app.js?v=%%file_exists_dir_public_js_app_js_filemtime_dir_public_js_app_js_2%%"></script>
+  <script src="/js/app.js?v=%%asset_version%%"></script>
 </body>
 </html>
