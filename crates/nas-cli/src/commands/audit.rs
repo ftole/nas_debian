@@ -15,10 +15,13 @@ pub fn audit_verify(json: bool) -> NasResult<ExitCode> {
     };
 
     if json {
-        print_json(&ApiResponse::ok(
-            serde_json::json!({ "ok": ok, "detail": detail, "path": log.path().display().to_string() }),
-            "Verificación de auditoría",
-        ))?;
+        let data = serde_json::json!({ "ok": ok, "detail": detail, "path": log.path().display().to_string() });
+        let payload = if ok {
+            ApiResponse::ok(data, "Verificación de auditoría")
+        } else {
+            ApiResponse::err(data, "Verificación de auditoría fallida")
+        };
+        print_json(&payload)?;
     } else {
         println!("AUDITORÍA: {detail}");
     }
