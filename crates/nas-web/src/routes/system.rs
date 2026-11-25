@@ -281,7 +281,20 @@ pub async fn security_status(
     match state
         .run_system_blocking(|| {
             let runner = Runner::new();
-            let status = nas_engine::security::status(&runner);
+            let privileged_spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["--json", "security", "status"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .timeout(std::time::Duration::from_secs(5));
+            let privileged_status = runner
+                .run(&privileged_spec)
+                .ok()
+                .filter(|out| out.is_success())
+                .and_then(|out| serde_json::from_str::<serde_json::Value>(&out.stdout).ok())
+                .and_then(|val| val.get("data").cloned())
+                .filter(|data| data.is_object());
+            let privileged_check = privileged_status.is_some();
+            let status = privileged_status
+                .unwrap_or_else(|| serde_json::json!(nas_engine::security::status(&runner)));
             let sysctl = serde_json::json!({
                 "inotify_max_watches": read_sysctl("fs/inotify/max_user_watches"),
                 "tcp_keepalive_time": read_sysctl("net/ipv4/tcp_keepalive_time"),
@@ -296,6 +309,7 @@ pub async fn security_status(
             serde_json::json!({
                 "status": status,
                 "sysctl": sysctl,
+                "privileged_check": privileged_check,
             })
         })
         .await
