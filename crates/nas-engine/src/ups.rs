@@ -105,13 +105,25 @@ pub fn parse_upsc_output(raw: &str, driver: Option<String>, min_battery_pct: u8)
                 model = Some(val.to_string());
             }
             "battery.charge" => {
-                charge = val.parse::<f64>().ok().map(|n| n.clamp(0.0, 100.0) as u8);
+                charge = val
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite())
+                    .map(|n| n.clamp(0.0, 100.0) as u8);
             }
             "battery.runtime" => {
-                runtime = val.parse::<f64>().ok().map(|n| n.max(0.0) as u64);
+                runtime = val
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite())
+                    .map(|n| n.max(0.0) as u64);
             }
             "ups.load" => {
-                load = val.parse::<f64>().ok().map(|n| n.clamp(0.0, 100.0) as u8);
+                load = val
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite())
+                    .map(|n| n.clamp(0.0, 100.0) as u8);
             }
             _ => {}
         }
@@ -301,9 +313,18 @@ fn generate_random_hex_secret() -> NasResult<String> {
 }
 
 fn write_nut_file(path: &str, content: &str, mode: u32) -> NasResult<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let p = Path::new(path);
-    std::fs::write(p, content).map_err(|e| NasError::io(p, e))?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(mode)
+        .open(p)
+        .map_err(|e| NasError::io(p, e))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| NasError::io(p, e))?;
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))
         .map_err(|e| NasError::io(p, e))?;
     Ok(())
@@ -358,13 +379,18 @@ pub fn configure_usb(runner: &Runner, confirm: &str, min_battery_pct: u8) -> Nas
         "/etc/nut/upsmon.conf",
     ]));
 
-    runner
-        .run(
-            &CommandSpec::new("upsdrvctl")
-                .args(["start"])
-                .timeout(Duration::from_secs(20)),
-        )?
-        .ensure_success()?;
+    let driver_unit_ok = runner
+        .run(&CommandSpec::new("systemctl").args(["restart", "nut-driver@nasups.service"]))
+        .is_ok_and(|o| o.is_success());
+    if !driver_unit_ok {
+        runner
+            .run(
+                &CommandSpec::new("upsdrvctl")
+                    .args(["start"])
+                    .timeout(Duration::from_secs(20)),
+            )?
+            .ensure_success()?;
+    }
     for svc in ["nut-server", "nut-monitor"] {
         let _ = runner.run(&CommandSpec::new("systemctl").args(["enable", svc]));
         runner
@@ -439,5 +465,14 @@ ups.status: OL
             .upsmon_conf
             .contains("SHUTDOWNCMD \"/sbin/shutdown -h +0\""));
         assert!(cfgs.upsd_users.contains("secreto_rand_123"));
+    }
+
+    #[test]
+    fn parse_upsc_output_ignora_nan_e_infinito() {
+        let raw = "battery.charge: NaN\nbattery.runtime: inf\nups.load: -inf\nups.status: OL\n";
+        let st = parse_upsc_output(raw, Some("usbhid-ups".into()), 35);
+        assert_eq!(st.battery_charge, None);
+        assert_eq!(st.runtime_seconds, None);
+        assert_eq!(st.load_percent, None);
     }
 }
