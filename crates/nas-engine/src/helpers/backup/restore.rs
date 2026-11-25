@@ -23,6 +23,34 @@ fn restore_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
+/// Valida `SRC_PATH` antes de restaurar sobre el origen remoto (SSH) o local,
+/// evitando que una configuración vacía o malformada sobrescriba `/`.
+fn validate_restore_source_path(raw: Option<&str>) -> NasResult<&str> {
+    let path = raw
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| {
+            NasError::Invalid("falta SRC_PATH válido en la configuración de la tarea".into())
+        })?;
+    if path == "/"
+        || !path.starts_with('/')
+        || path.contains("..")
+        || path.contains('\0')
+        || path.chars().any(char::is_control)
+    {
+        return Err(NasError::Invalid(format!(
+            "SRC_PATH inválido o inseguro para restaurar: '{path}'"
+        )));
+    }
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(NasError::Invalid(
+            "SRC_PATH no puede apuntar a la raíz '/'".into(),
+        ));
+    }
+    Ok(trimmed)
+}
+
 fn is_protected_restore_subpath(rel: &Path) -> bool {
     let comps: Vec<String> = rel
         .components()
@@ -386,7 +414,7 @@ pub fn restore_backup(
             let Some(user) = task_info.src_user.as_deref() else {
                 return Err(NasError::Invalid("falta SRC_USER en la tarea".into()));
             };
-            let path = task_info.src_path.as_deref().unwrap_or("/");
+            let path = validate_restore_source_path(task_info.src_path.as_deref())?;
 
             let res = if let Some(key_path) = resolve_ssh_key_for_task(id, &task_info) {
                 let ssh_cmd = nas_ssh::rsync_ssh_command(task_info.src_port, Some(&key_path));
@@ -445,8 +473,15 @@ pub fn restore_backup(
                 )))
             }
         }
-        _ => {
-            let path = task_info.src_path.as_deref().unwrap_or("/");
+        "local" => {
+            let path = validate_restore_source_path(task_info.src_path.as_deref())?;
+            if let Some(rest) = path.strip_prefix("/srv/nas/") {
+                if is_protected_restore_subpath(Path::new(rest)) {
+                    return Err(NasError::Denied(
+                        "no se puede restaurar sobre directorios protegidos del sistema".into(),
+                    ));
+                }
+            }
             let res = runner.run(
                 &CommandSpec::new("rsync")
                     .args([
@@ -468,6 +503,9 @@ pub fn restore_backup(
                 )))
             }
         }
+        other => Err(NasError::Invalid(format!(
+            "tipo de origen de tarea no soportado para restauración: '{other}'"
+        ))),
     }
 }
 
@@ -528,5 +566,19 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&link_path);
+    }
+
+    #[test]
+    fn validate_restore_source_path_rechaza_vacio_raiz_y_recorrido() {
+        assert!(validate_restore_source_path(None).is_err());
+        assert!(validate_restore_source_path(Some("")).is_err());
+        assert!(validate_restore_source_path(Some("/")).is_err());
+        assert!(validate_restore_source_path(Some("///")).is_err());
+        assert!(validate_restore_source_path(Some("relativo/sin/barra")).is_err());
+        assert!(validate_restore_source_path(Some("/var/www/../etc")).is_err());
+        assert_eq!(
+            validate_restore_source_path(Some("/var/www/app/")).expect("válido"),
+            "/var/www/app"
+        );
     }
 }
