@@ -81,24 +81,6 @@ fn helper(user: &str, args: &[&str]) -> CommandSpec {
         .timeout(std::time::Duration::from_secs(30))
 }
 
-/// Construye `sudo -n -u <usuario> tmux -L nas <args>` (legado, sin uso).
-#[allow(dead_code)]
-fn tmux(user: &str, args: &[&str]) -> CommandSpec {
-    let mut argv: Vec<String> = vec![
-        "-n".to_string(),
-        "-u".to_string(),
-        user.to_string(),
-        "tmux".to_string(),
-        "-L".to_string(),
-        TMUX_SOCKET.to_string(),
-    ];
-    argv.extend(args.iter().map(|arg| (*arg).to_string()));
-
-    CommandSpec::new("sudo")
-        .args(argv)
-        .timeout(std::time::Duration::from_secs(20))
-}
-
 fn failure(output: nas_exec::CommandOutput) -> String {
     if output.stderr.is_empty() {
         output.stdout
