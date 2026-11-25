@@ -597,12 +597,16 @@ mod tests {
         spec.id = "t_wd".into();
         spec.proto = "local".into();
         spec.path = src_dir.to_string_lossy().to_string();
+        let orig_path = std::env::var("PATH").unwrap_or_default();
+        let test_path = format!("{}:{orig_path}", bin_dir.display());
+        let safe_path_line =
+            "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"";
         let script = spec.render_runner(Proto::Local);
+        assert!(script.contains(safe_path_line));
+        let script = script.replacen(safe_path_line, &format!("export PATH=\"{test_path}\""), 1);
         let script_path = root.join("backup_t_wd.sh");
         std::fs::write(&script_path, script).unwrap();
 
-        let orig_path = std::env::var("PATH").unwrap_or_default();
-        let test_path = format!("{}:{orig_path}", bin_dir.display());
         let task_bkp_dir = bkp_dir.join("t_wd");
         let task_perm_dir = perm_dir.join("t_wd");
 
