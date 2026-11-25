@@ -237,7 +237,7 @@ pub fn deploy_apply(
     }
 
     if failure.is_none() {
-        if let Err(error) = nas_engine::deploy::samba::create_base_groups(&runner) {
+        if let Err(error) = nas_engine::deploy::samba::create_groups(&runner) {
             failure = Some(NasError::Denied(error.to_string()));
         }
     }
@@ -264,7 +264,7 @@ pub fn deploy_apply(
                 "/opt/nas_debian/packaging".to_string()
             }
         });
-        if let Err(error) = nas_engine::deploy::helpers::install_all_helpers(&runner, &source_dir) {
+        if let Err(error) = nas_engine::deploy::helpers::install_helpers(&runner, &source_dir) {
             failure = Some(NasError::Denied(error.to_string()));
         }
     }
@@ -357,9 +357,15 @@ pub fn deploy_apply(
         }
 
         if failure.is_none() {
-            let run_mkdir = |dir: &str| -> NasResult<()> {
+            let run_mkdir = |dir: &str, mode: Option<&str>| -> NasResult<()> {
+                let mut args = vec!["-p"];
+                if let Some(m) = mode {
+                    args.push("-m");
+                    args.push(m);
+                }
+                args.push(dir);
                 let spec = CommandSpec::new("mkdir")
-                    .args(["-p", dir])
+                    .args(args)
                     .sudo(if options.sudo {
                         nas_exec::SudoMode::Passwordless
                     } else {
@@ -376,20 +382,21 @@ pub fn deploy_apply(
                 }
                 Ok(())
             };
-            if let Err(error) = run_mkdir("/srv/nas/SISTEMAS") {
+            if let Err(error) = run_mkdir("/srv/nas/SISTEMAS", None) {
                 failure = Some(error);
+            } else {
+                steps_executed += 1;
             }
-            steps_executed += 1;
             if failure.is_none() && params.role != ServerRole::Arquivos {
                 for dir in ["BACKUPS_HISTORICOS", "BACKUPS_PERMANENTES", "LOGS_BACKUP"] {
                     let path = format!("/srv/nas/{dir}");
-                    if let Err(error) = run_mkdir(&path) {
+                    if let Err(error) = run_mkdir(&path, None) {
                         failure = Some(error);
                         break;
                     }
                 }
                 if failure.is_none() {
-                    if let Err(error) = run_mkdir("/etc/backup-credentials") {
+                    if let Err(error) = run_mkdir("/etc/backup-credentials", Some("700")) {
                         failure = Some(error);
                     }
                 }
