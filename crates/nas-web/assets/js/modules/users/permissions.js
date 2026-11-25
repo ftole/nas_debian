@@ -148,12 +148,12 @@ async function repairAcls(shareName = null) {
           onConfirm: () => executeRepair(true),
         });
       } else {
-        const discList = ((sAudit && sAudit.discrepancies) || []).map(d => `• ${d}`).join('<br>');
+        const discList = ((sAudit && sAudit.discrepancies) || []).map(d => `• ${d}`).join('\n');
         showUserActionConfirm({
           title: `Reparar ACL: [${shareName}]`,
           icon: 'alert-triangle',
           alertType: 'warning',
-          alertText: `Se detectaron desajustes entre smb.conf y las ACL del sistema en [${shareName}]:<br><div style="margin-top:6px; font-family:monospace; font-size:11.5px;">${discList || 'Discrepancias en permisos'}</div>`,
+          alertText: `Se detectaron desajustes entre smb.conf y las ACL del sistema en [${shareName}]:\n${discList || 'Discrepancias en permisos'}`,
           desc: `Se reajustarán las ACL POSIX y las máscaras efectivas para que coincidan con la definición del recurso.`,
           prompt: `¿Proceder con la reparación automática de ACL?`,
           btnText: 'Reparar ACL',
@@ -177,13 +177,13 @@ async function repairAcls(shareName = null) {
       } else {
         const outList = Object.entries(sharesMap)
           .filter(([_, v]) => !v.in_sync)
-          .map(([k, v]) => `• <strong>${k}</strong>: ${(v.discrepancies || []).length} discrepancia(s)`)
-          .join('<br>');
+          .map(([k, v]) => `• ${k}: ${(v.discrepancies || []).length} discrepancia(s)`)
+          .join('\n');
         showUserActionConfirm({
           title: `Reparación de ACL del sistema`,
           icon: 'alert-triangle',
           alertType: 'warning',
-          alertText: `Auditoría: ${outOfSync} de ${total} recurso(s) requieren sincronización:<br><div style="margin-top:6px; font-size:12px;">${outList}</div>`,
+          alertText: `Auditoría: ${outOfSync} de ${total} recurso(s) requieren sincronización:\n${outList}`,
           desc: `La reparación inteligente procesará únicamente las carpetas compartidas con desajustes detectados.`,
           prompt: `¿Proceder con la reparación inteligente de ACL?`,
           btnText: 'Reparar desajustes',
