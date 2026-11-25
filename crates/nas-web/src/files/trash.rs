@@ -1,14 +1,18 @@
 //! Papelera de reciclaje interna (`.trash`) con metadatos de autoría y restauración.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use nas_core::{NasError, NasResult};
 
 use super::{
-    dir_size_recursive, set_dir_permissions,
-    util::{format_trash_stamp, human_size, split_trash_name},
+    set_dir_permissions,
+    util::{dir_size_recursive_bounded_timed, format_trash_stamp, human_size, split_trash_name},
     FileRoot,
 };
+
+const TRASH_DIR_SIZE_MAX_ENTRIES: usize = 2_000;
+const TRASH_DIR_SIZE_MAX_MS: u64 = 200;
 
 /// Entrada de la papelera interna.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -43,6 +47,8 @@ struct TrashMetaRecord {
     deleted_by: String,
     #[serde(default)]
     deleted_at: String,
+    #[serde(default)]
+    size_bytes: Option<u64>,
 }
 
 impl FileRoot {
@@ -118,16 +124,22 @@ impl FileRoot {
                 continue;
             }
             let entry_path = item.path();
-            let metadata = item.metadata().ok();
+            let metadata = std::fs::symlink_metadata(&entry_path).ok();
             let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
-            let size = if is_dir {
-                dir_size_recursive(&entry_path)
-            } else {
-                metadata.as_ref().map_or(0, |m| m.len())
-            };
 
             let (stamp, raw_name) = split_trash_name(&id);
             let meta = self.read_trash_meta_record(&id);
+            let size = if is_dir {
+                meta.as_ref().and_then(|m| m.size_bytes).unwrap_or_else(|| {
+                    dir_size_recursive_bounded_timed(
+                        &entry_path,
+                        TRASH_DIR_SIZE_MAX_ENTRIES,
+                        Duration::from_millis(TRASH_DIR_SIZE_MAX_MS),
+                    )
+                })
+            } else {
+                metadata.as_ref().map_or(0, |m| m.len())
+            };
             let name = meta
                 .as_ref()
                 .map(|m| m.filename.as_str())
@@ -189,22 +201,31 @@ impl FileRoot {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| name.to_string());
 
+        if let Some(desc) = self.is_protected_path(&relative) {
+            return Err(NasError::Denied(format!(
+                "operación no permitida: no se puede restaurar sobre {desc}"
+            )));
+        }
+
         let mut target = self.resolve(&relative)?;
         if target == self.root || target.parent().is_none() {
             target = self.root.join(name);
         }
+        self.check_resolved_not_protected(&target, "restauración")?;
+
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| NasError::io(parent, e))?;
             set_dir_permissions(parent);
         }
 
         let mut counter = 1;
-        while target.exists() {
+        while std::fs::symlink_metadata(&target).is_ok() {
             let candidate = format!("{name}.{counter}");
             target = match target.parent() {
                 Some(parent) => parent.join(&candidate),
                 None => self.root.join(&candidate),
             };
+            self.check_resolved_not_protected(&target, "restauración")?;
             counter += 1;
         }
 
@@ -263,6 +284,7 @@ impl FileRoot {
                 actor.trim().to_string()
             },
             deleted_at: deleted_at.to_string(),
+            size_bytes: None,
         };
         let json = serde_json::to_string(&record)
             .map_err(|e| NasError::Invalid(format!("metadatos de papelera: {e}")))?;
@@ -466,6 +488,32 @@ mod trash_tests {
         root.delete_permanent("CARPETA")
             .expect("borrado permanente");
         assert!(!root.root().join("CARPETA").exists());
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn restore_trash_bloquea_rutas_protegidas_en_metadatos() {
+        let root = root("restore-protected");
+        root.write("DOCS/a.txt", "hola").expect("write");
+        root.trash("DOCS/a.txt").expect("trash");
+
+        let entries = root.trash_entries().expect("lista");
+        let id = &entries[0].id;
+        let meta_path = root.root().join(".trash/.meta").join(id);
+        std::fs::write(
+            &meta_path,
+            r#"{"original_path":"BACKUPS_HISTORICOS/t1/a.txt","filename":"a.txt","deleted_by":"admin","deleted_at":"2026-01-01 00:00:00"}"#,
+        )
+        .unwrap();
+        assert!(root.restore_trash(id).is_err());
+
+        std::fs::write(
+            &meta_path,
+            r#"{"original_path":".nas_staging/a.txt","filename":"a.txt","deleted_by":"admin","deleted_at":"2026-01-01 00:00:00"}"#,
+        )
+        .unwrap();
+        assert!(root.restore_trash(id).is_err());
+
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
