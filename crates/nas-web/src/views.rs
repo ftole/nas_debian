@@ -135,6 +135,7 @@ fn detect_storage_info() -> (String, String) {
 /// Renderiza el panel completo con la vista activa.
 pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     let mut flags: HashMap<&str, bool> = HashMap::new();
+    let mut tokens: HashMap<&str, String> = HashMap::new();
     for view in [
         "dashboard",
         "files",
@@ -147,8 +148,14 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
         "terminal",
         "networking",
         "domain",
+        "applications",
+        "updates",
+        "diagnostics",
     ] {
-        flags.insert(view_flag(view), context.active == view);
+        let key = view_flag(view);
+        let is_active = context.active == view;
+        flags.insert(key, is_active);
+        token(&mut tokens, key, if is_active { "active" } else { "" });
     }
     flags.insert(
         "active_group_services_diagnostics",
@@ -165,14 +172,13 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     flags.insert("show_diagnostics", context.active == "diagnostics");
     flags.insert("show_updates", context.active == "updates");
     flags.insert("net_health_ok", true);
-    flags.insert("net_no_interfaces", false);
-    flags.insert("net_dhcp_known", true);
-    flags.insert("net_has_wsd_ports", true);
-    flags.insert("net_firewall_hidden", true);
-    flags.insert("net_no_listening", false);
+    flags.insert("net_no_interfaces", true);
+    flags.insert("net_dhcp_known", false);
+    flags.insert("net_has_wsd_ports", false);
+    flags.insert("net_firewall_hidden", false);
+    flags.insert("net_no_listening", true);
 
     let now = chrono::Local::now();
-    let mut tokens: HashMap<&str, String> = HashMap::new();
     token(&mut tokens, "hostname", escape(context.hostname));
     token(&mut tokens, "user", escape(context.user));
     token(&mut tokens, "user_role_label", escape(context.role_label));
@@ -181,6 +187,20 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     token(&mut tokens, "server_ip", escape(context.ip));
     token(&mut tokens, "csrf_token", csrf.to_string());
     token(&mut tokens, "activeView", context.active.to_string());
+    token(
+        &mut tokens,
+        "super_disabled",
+        if context.is_super { "" } else { "disabled" },
+    );
+    token(
+        &mut tokens,
+        "super_hidden",
+        if context.is_super {
+            ""
+        } else {
+            "display:none;"
+        },
+    );
     token(
         &mut tokens,
         "active_group_services_diagnostics",
@@ -199,7 +219,7 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
             String::new()
         },
     );
-    token(&mut tokens, "asset_version", "1");
+    token(&mut tokens, "asset_version", asset_version_stamp());
     token(&mut tokens, "now_ts", now.timestamp().to_string());
     token(
         &mut tokens,
@@ -270,7 +290,7 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
         format!("{:.1}", metrics.ram_total_gb),
     );
 
-    let storage = nas_engine::storage::overview_for(&nas_core::NasPaths::default(), &runner).ok();
+    let storage = nas_engine::storage::overview_for(&nas_core::NasPaths::from_env(), &runner).ok();
     let (disk_pct, disk_used, disk_total) = if let Some(stg) = &storage {
         (stg.usage_percent, stg.used_gb, stg.total_gb)
     } else {
@@ -279,6 +299,11 @@ pub fn shell(context: &Shell<'_>, csrf: &str) -> String {
     token(&mut tokens, "disk_pct", format!("{:.1}", disk_pct));
     token(&mut tokens, "disk_used", format!("{:.1}", disk_used));
     token(&mut tokens, "disk_total", format!("{:.1}", disk_total));
+    token(
+        &mut tokens,
+        "disk_total_tb",
+        format!("{:.1}", disk_total / 1024.0),
+    );
 
     let (
         stg_color,
@@ -370,7 +395,7 @@ pub fn login_with_context(hostname: &str, ip: &str, csrf: &str, error: Option<&s
     token(&mut tokens, "safeHostname", safe_host);
     token(&mut tokens, "safeServerIp", safe_ip);
     token(&mut tokens, "csrf_token", escape(csrf));
-    token(&mut tokens, "asset_version", "1");
+    token(&mut tokens, "asset_version", asset_version_stamp());
     token(
         &mut tokens,
         "error_visible",
@@ -379,6 +404,21 @@ pub fn login_with_context(hostname: &str, ip: &str, csrf: &str, error: Option<&s
     token(&mut tokens, "error_text", escape(error.unwrap_or("")));
 
     Template::new(LOGIN).render(&HashMap::new(), &tokens)
+}
+
+fn asset_version_stamp() -> String {
+    use sha2::{Digest, Sha256};
+    use std::sync::OnceLock;
+    static STAMP: OnceLock<String> = OnceLock::new();
+    STAMP
+        .get_or_init(|| {
+            let mut h = Sha256::new();
+            h.update(APP_CSS.as_bytes());
+            h.update(crate::assets::APP_JS);
+            let hex_str = hex::encode(h.finalize());
+            format!("{}-{}", env!("CARGO_PKG_VERSION"), &hex_str[..8])
+        })
+        .clone()
 }
 
 fn view_flag(view: &str) -> &'static str {
