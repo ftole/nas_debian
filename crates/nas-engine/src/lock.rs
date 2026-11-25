@@ -57,12 +57,13 @@ impl TaskLock {
         loop {
             match Self::acquire(&path) {
                 Ok(guard) => return Ok(guard),
-                Err(err) => {
+                Err(err @ NasError::Denied(_)) => {
                     if Instant::now() >= deadline {
                         return Err(err);
                     }
                     std::thread::sleep(Duration::from_millis(250));
                 }
+                Err(err) => return Err(err),
             }
         }
     }
