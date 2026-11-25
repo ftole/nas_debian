@@ -141,9 +141,10 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
         fi
         if ! cargo --version >/dev/null 2>&1; then
             echo -e "  Instalando toolchain de Rust..."
-            curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
-            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable >/dev/null 2>&1
-            rm -f /tmp/rustup-init.sh
+            RUSTUP_TMP="$(mktemp /tmp/rustup-init.XXXXXX.sh)"
+            curl -fsSL https://sh.rustup.rs -o "$RUSTUP_TMP"
+            sh "$RUSTUP_TMP" -y --profile minimal --default-toolchain stable >/dev/null 2>&1
+            rm -f "$RUSTUP_TMP"
             export PATH="$CARGO_HOME/bin:$PATH"
         fi
     fi
@@ -372,7 +373,7 @@ else
         cat > "$INSTALL_DIR/version.json" <<EOF
 {
   "version": "${TARGET_VER}",
-  "commit": "${TARGET_TAG}",
+  "commit": "${M_COMMIT}",
   "date": "$(date -u +"%Y-%m-%d")",
   "channel": "stable",
   "signature_scheme": "Ed25519",
