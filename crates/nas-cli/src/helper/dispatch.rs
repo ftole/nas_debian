@@ -538,6 +538,7 @@ pub fn run_helper(action: HelperAction, json: bool) -> NasResult<ExitCode> {
         },
         HelperAction::PurgeRecycle { days } => share::purge_recycle(&runner, days)?,
         HelperAction::BackupDedupMigration => run_backup_dedup_migration_helper(&runner)?,
+        HelperAction::FilesDelete => run_files_delete_helper(&runner)?,
     };
 
     if json {
@@ -623,6 +624,37 @@ fn run_backup_dedup_migration_helper(runner: &Runner) -> NasResult<String> {
         "Runners actualizados ({}); deduplicación ejecutada ({hardlinks} hardlinks)",
         runners.updated.len()
     ))
+}
+
+fn run_files_delete_helper(runner: &Runner) -> NasResult<String> {
+    let raw = read_stdin_bounded(MAX_HELPER_PASSWORD_BYTES)?;
+    let req: share::PrivilegedDeleteRequest = serde_json::from_str(raw.trim())
+        .map_err(|e| NasError::Invalid(format!("JSON de borrado privilegiado inválido: {e}")))?;
+    let paths = nas_core::NasPaths::from_env();
+    let res = share::privileged_delete_file(runner, &paths.data_root, &req);
+
+    let actor = if req.web_user.trim().is_empty() {
+        "helper"
+    } else {
+        req.web_user.trim()
+    };
+    let status = if res.is_ok() { "SUCCESS" } else { "FAILED" };
+    let detail = format!(
+        "os_user={} ip={}",
+        req.auth_user.trim(),
+        req.origin_ip.trim()
+    );
+    let log = nas_audit::AuditLog::new(paths.audit_log());
+    let _ = log.append(nas_audit::AuditEntry::new(
+        actor,
+        "files",
+        "privileged_delete",
+        &req.path,
+        status,
+        &detail,
+    ));
+
+    res
 }
 
 #[cfg(all(test, unix))]
