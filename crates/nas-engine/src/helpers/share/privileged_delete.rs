@@ -180,14 +180,28 @@ pub fn sudo_list_grants_root_all(stdout: &str) -> bool {
             if let Some(close_rel) = line[open + 1..].find(')') {
                 let target = &line[open + 1..open + 1 + close_rel];
                 let after = line[open + 1 + close_rel + 1..].trim();
-                let target_ok =
-                    target.contains("ALL") || target.split(':').any(|p| p.trim() == "root");
-                let cmd_clean = after
-                    .strip_prefix("NOPASSWD:")
-                    .or_else(|| after.strip_prefix("PASSWD:"))
-                    .unwrap_or(after)
-                    .trim();
-                if target_ok && cmd_clean == "ALL" {
+                let runas_user = target.split(':').next().unwrap_or("").trim();
+                let target_ok = runas_user
+                    .split(',')
+                    .any(|u| matches!(u.trim(), "ALL" | "root"));
+                let mut cmd_clean = after;
+                loop {
+                    let trimmed = cmd_clean.trim_start();
+                    if let Some(rest) = trimmed
+                        .strip_prefix("NOPASSWD:")
+                        .or_else(|| trimmed.strip_prefix("PASSWD:"))
+                        .or_else(|| trimmed.strip_prefix("SETENV:"))
+                        .or_else(|| trimmed.strip_prefix("NOSETENV:"))
+                        .or_else(|| trimmed.strip_prefix("EXEC:"))
+                        .or_else(|| trimmed.strip_prefix("NOEXEC:"))
+                    {
+                        cmd_clean = rest;
+                    } else {
+                        cmd_clean = trimmed;
+                        break;
+                    }
+                }
+                if target_ok && cmd_clean.trim() == "ALL" {
                     return true;
                 }
             }
@@ -624,17 +638,88 @@ fn split_trash_name(id: &str) -> (&str, &str) {
     }
 }
 
+fn ensure_real_trash_dir(trash_base: &Path, create_if_missing: bool) -> NasResult<PathBuf> {
+    let canon_base = std::fs::canonicalize(trash_base).map_err(|e| NasError::io(trash_base, e))?;
+    let trash = canon_base.join(".trash");
+    match std::fs::symlink_metadata(&trash) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(NasError::Denied(
+                    "la papelera (.trash) es un enlace simbólico o tipo inválido".into(),
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if create_if_missing {
+                std::fs::create_dir(&trash).map_err(|err| NasError::io(&trash, err))?;
+            } else {
+                return Err(NasError::NotFound(format!(
+                    "no existe la papelera en {}",
+                    canon_base.display()
+                )));
+            }
+        }
+        Err(e) => return Err(NasError::io(&trash, e)),
+    }
+    let canon_trash = std::fs::canonicalize(&trash).map_err(|e| NasError::io(&trash, e))?;
+    if canon_trash != canon_base.join(".trash") {
+        return Err(NasError::Denied(
+            "la papelera (.trash) escapa de su raíz permitida".into(),
+        ));
+    }
+    Ok(canon_trash)
+}
+
+fn ensure_real_trash_meta_dir(trash_base: &Path, create_if_missing: bool) -> NasResult<PathBuf> {
+    let canon_trash = ensure_real_trash_dir(trash_base, create_if_missing)?;
+    let meta_dir = canon_trash.join(".meta");
+    match std::fs::symlink_metadata(&meta_dir) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(NasError::Denied(
+                    "el directorio de metadatos (.trash/.meta) es un enlace simbólico o tipo inválido"
+                        .into(),
+                ));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if create_if_missing {
+                std::fs::create_dir(&meta_dir).map_err(|err| NasError::io(&meta_dir, err))?;
+            } else {
+                return Err(NasError::NotFound(format!(
+                    "no existe .trash/.meta en {}",
+                    canon_trash.display()
+                )));
+            }
+        }
+        Err(e) => return Err(NasError::io(&meta_dir, e)),
+    }
+    let canon_meta = std::fs::canonicalize(&meta_dir).map_err(|e| NasError::io(&meta_dir, e))?;
+    if canon_meta != canon_trash.join(".meta") {
+        return Err(NasError::Denied(
+            "el directorio .trash/.meta escapa de la papelera confinada".into(),
+        ));
+    }
+    Ok(canon_meta)
+}
+
 fn write_privileged_trash_meta(
     trash_base: &Path,
     id: &str,
     record: &PrivTrashMetaRecord,
 ) -> NasResult<()> {
-    let meta_dir = trash_base.join(".trash").join(".meta");
-    std::fs::create_dir_all(&meta_dir).map_err(|e| NasError::io(&meta_dir, e))?;
+    use std::io::Write;
+    let meta_dir = ensure_real_trash_meta_dir(trash_base, true)?;
     let json = serde_json::to_string(record)
         .map_err(|e| NasError::Invalid(format!("metadatos de papelera: {e}")))?;
     let meta_path = meta_dir.join(id);
-    std::fs::write(&meta_path, json).map_err(|e| NasError::io(&meta_path, e))?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&meta_path)
+        .map_err(|e| NasError::io(&meta_path, e))?;
+    file.write_all(json.as_bytes())
+        .map_err(|e| NasError::io(&meta_path, e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -650,11 +735,11 @@ fn trash_validated_target(
     rel_from_base: &str,
     actor: &str,
 ) -> NasResult<String> {
-    let _meta = std::fs::symlink_metadata(target)
+    let meta = std::fs::symlink_metadata(target)
         .map_err(|_| NasError::NotFound(format!("elemento no encontrado: {}", target.display())))?;
+    let is_symlink = meta.file_type().is_symlink();
 
-    let trash_dir = trash_base.join(".trash");
-    std::fs::create_dir_all(&trash_dir).map_err(|e| NasError::io(&trash_dir, e))?;
+    let trash_dir = ensure_real_trash_dir(trash_base, true)?;
 
     let stamp_ms = next_unique_trash_ms(&trash_dir);
     let name = target
@@ -672,7 +757,8 @@ fn trash_validated_target(
     let _ro_guard = BtrfsRoRestoreGuard::unlock_ancestors(runner, trash_base, parent);
     let _imm_parent_guard = ImmutableRestoreGuard::unlock(runner, &[parent]);
 
-    let was_immutable = target.exists()
+    let was_immutable = !is_symlink
+        && target.exists()
         && has_immutable_flag(runner, target)
         && set_immutable_flag(runner, target, false);
 
@@ -741,7 +827,9 @@ fn delete_validated_target_with_runner(
         }
     };
 
-    if meta.file_type().is_symlink() || !meta.is_dir() {
+    if meta.file_type().is_symlink() {
+        std::fs::remove_file(target).map_err(map_io)?;
+    } else if !meta.is_dir() {
         if has_immutable_flag(runner, target) {
             let _ = set_immutable_flag(runner, target, false);
         }
@@ -799,11 +887,14 @@ fn resolve_privileged_trash_entry(
             "identificador de papelera inválido".into(),
         ));
     }
-    let trash = trash_base.join(".trash");
-    if !trash.is_dir() {
-        return Err(NasError::NotFound(format!("no existe en papelera: {id}")));
-    }
-    let canon_trash = std::fs::canonicalize(&trash).map_err(|e| NasError::io(&trash, e))?;
+    let canon_trash = match ensure_real_trash_dir(trash_base, false) {
+        Ok(dir) => dir,
+        Err(NasError::NotFound(_)) => {
+            return Err(NasError::NotFound(format!("no existe en papelera: {id}")));
+        }
+        Err(e) => return Err(e),
+    };
+    let trash = canon_trash.as_path();
 
     let verify_under_trash = |name: String, candidate: PathBuf| -> NasResult<(String, PathBuf)> {
         let Some(parent) = candidate.parent() else {
@@ -827,7 +918,7 @@ fn resolve_privileged_trash_entry(
     }
     if id.bytes().all(|b| b.is_ascii_digit()) {
         let prefix = format!("{id}_");
-        if let Ok(entries) = std::fs::read_dir(&trash) {
+        if let Ok(entries) = std::fs::read_dir(trash) {
             let mut matches: Vec<(String, PathBuf)> = entries
                 .flatten()
                 .filter_map(|entry| {
@@ -845,7 +936,12 @@ fn resolve_privileged_trash_entry(
 }
 
 fn read_priv_trash_meta(trash_base: &Path, id: &str) -> Option<PrivTrashMetaRecord> {
-    let path = trash_base.join(".trash").join(".meta").join(id);
+    let meta_dir = ensure_real_trash_meta_dir(trash_base, false).ok()?;
+    let path = meta_dir.join(id);
+    let meta = std::fs::symlink_metadata(&path).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return None;
+    }
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -863,8 +959,15 @@ fn read_priv_trash_meta(trash_base: &Path, id: &str) -> Option<PrivTrashMetaReco
 }
 
 fn remove_priv_trash_meta(trash_base: &Path, id: &str) {
-    let path = trash_base.join(".trash").join(".meta").join(id);
-    let _ = std::fs::remove_file(path);
+    let Ok(meta_dir) = ensure_real_trash_meta_dir(trash_base, false) else {
+        return;
+    };
+    let path = meta_dir.join(id);
+    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+        if !meta.file_type().is_symlink() && meta.is_file() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn purge_privileged_trash_entry(
@@ -998,6 +1101,9 @@ fn restore_privileged_trash_entry(
     let _ro_guard = BtrfsRoRestoreGuard::unlock_ancestors(runner, &canon_base, &canon_parent);
     let _imm_guard = ImmutableRestoreGuard::unlock(runner, &[&canon_parent]);
 
+    let source_is_symlink =
+        std::fs::symlink_metadata(&source).is_ok_and(|m| m.file_type().is_symlink());
+
     std::fs::rename(&source, &target).map_err(|e| {
         if e.raw_os_error() == Some(1) {
             NasError::Denied(
@@ -1008,7 +1114,7 @@ fn restore_privileged_trash_entry(
         }
     })?;
 
-    if meta.as_ref().is_some_and(|m| m.was_immutable) {
+    if !source_is_symlink && meta.as_ref().is_some_and(|m| m.was_immutable) {
         let _ = set_immutable_flag(runner, &target, true);
     }
     remove_priv_trash_meta(trash_base, &real_id);
@@ -1023,10 +1129,13 @@ fn restore_privileged_trash_entry(
 }
 
 fn empty_privileged_trash(runner: &Runner, trash_base: &Path) -> NasResult<String> {
-    let trash = trash_base.join(".trash");
-    if !trash.is_dir() {
-        return Ok("La papelera ya está vacía (0 elementos eliminados)".into());
-    }
+    let trash = match ensure_real_trash_dir(trash_base, false) {
+        Ok(dir) => dir,
+        Err(NasError::NotFound(_)) => {
+            return Ok("La papelera ya está vacía (0 elementos eliminados)".into());
+        }
+        Err(e) => return Err(e),
+    };
     let mut removed = 0u32;
     let mut errors = 0u32;
     for entry in std::fs::read_dir(&trash).map_err(|e| NasError::io(&trash, e))? {
@@ -1137,6 +1246,15 @@ mod tests {
         assert!(!sudo_list_grants_root_all(restricted));
         assert!(!sudo_list_grants_root_all(
             "User foo is not allowed to run sudo"
+        ));
+        assert!(!sudo_list_grants_root_all(
+            "User foo may run the following commands:\n    (nobody : ALL) ALL\n"
+        ));
+        assert!(!sudo_list_grants_root_all(
+            "User foo may run the following commands:\n    (root) ALL, !/usr/bin/su\n"
+        ));
+        assert!(sudo_list_grants_root_all(
+            "User foo may run the following commands:\n    (root : grp) SETENV: NOPASSWD: ALL\n"
         ));
     }
 
@@ -1322,5 +1440,48 @@ mod tests {
         assert!(msg.contains("2 elementos eliminados"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rechaza_symlinks_en_trash_y_meta() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("nas-priv-sym-{}-{nanos}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("nas-priv-sym-out-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(root.join("SISTEMAS")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("SISTEMAS/a.txt"), b"hola").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".trash")).unwrap();
+
+        let runner = Runner::new();
+        let (base, target, rel) =
+            resolve_privileged_target_with_base(&root, None, "SISTEMAS/a.txt").unwrap();
+        assert!(trash_validated_target(&runner, &base, &target, &rel, "admin").is_err());
+        assert!(resolve_privileged_trash_entry(&base, "123_a.txt").is_err());
+        assert!(empty_privileged_trash(&runner, &base).is_err());
+
+        // Ahora .trash real, pero .trash/.meta como symlink externo
+        std::fs::remove_file(root.join(".trash")).unwrap();
+        std::fs::create_dir_all(root.join(".trash")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".trash/.meta")).unwrap();
+        let rec = PrivTrashMetaRecord {
+            original_path: "SISTEMAS/a.txt".into(),
+            filename: "a.txt".into(),
+            deleted_by: "admin".into(),
+            deleted_at: "2026-01-01 00:00:00".into(),
+            size_bytes: None,
+            privileged: true,
+            was_immutable: false,
+        };
+        assert!(write_privileged_trash_meta(&base, "123_a.txt", &rec).is_err());
+        assert!(!outside.join("123_a.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }
