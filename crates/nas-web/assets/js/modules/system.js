@@ -12,7 +12,7 @@ async function loadUpdates() {
     window.LAST_UPDATE_INFO = u;
 
     // Versión SemVer destacada
-    const verTag = u.version ? (u.version.startsWith('v') ? u.version : `v${u.version}`) : 'v0.1.13';
+    const verTag = u.version ? (u.version.startsWith('v') ? u.version : `v${u.version}`) : 'v0.1.14';
     const latestVer = u.latest_version ? (u.latest_version.startsWith('v') ? u.latest_version : `v${u.latest_version}`) : verTag;
 
     // Badge verde de verificación criptográfica Ed25519
@@ -81,7 +81,7 @@ async function loadUpdates() {
         <div class="card-grid-3" style="gap:10px;">
           <div class="info-row" style="padding:8px 12px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color);">
             <span class="info-label">Versión instalada:</span>
-            <strong class="info-val"><code>${escapeHtml(u.version || '0.1.13')}</code> (${escapeHtml(u.installed_commit || '')})</strong>
+            <strong class="info-val"><code>${escapeHtml(u.version || '0.1.14')}</code> (${escapeHtml(u.installed_commit || '')})</strong>
           </div>
           <div class="info-row" style="padding:8px 12px; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color);">
             <span class="info-label">Versión más reciente:</span>
