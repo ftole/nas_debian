@@ -136,7 +136,15 @@ async function previewFile(relPath, fileName) {
             for (const attr of Array.from(el.attributes)) {
               const name = attr.name.toLowerCase();
               const val = (attr.value || '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-              if (name.startsWith('on') || val.startsWith('javascript:') || val.startsWith('vbscript:') || val.startsWith('data:text/html') || val.startsWith('data:image/svg+xml')) {
+              if (
+                name.startsWith('on') ||
+                val.startsWith('javascript:') ||
+                val.startsWith('vbscript:') ||
+                val.startsWith('data:text/html') ||
+                val.startsWith('data:image/svg+xml') ||
+                val.startsWith('data:application/xhtml+xml') ||
+                ((name === 'href' || name === 'xlink:href') && val && !val.startsWith('#'))
+              ) {
                 el.removeAttribute(attr.name);
               }
             }
