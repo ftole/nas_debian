@@ -865,6 +865,7 @@
       "btn-confirm-delete",
       "btn-confirm-empty-trash",
       "btn-confirm-pool-action",
+      "btn-confirm-priv-delete",
       "btn-confirm-reboot",
       "btn-confirm-restore-all",
       "btn-confirm-run-backup",
@@ -914,6 +915,7 @@
       "btn-submit-rename-group",
       "btn-submit-restore-backup",
       "btn-submit-storage",
+      "btn-switch-priv-delete",
       "btn-test-backup",
       "btn-test-edit-backup",
       "btn-trim-storage",
@@ -1129,6 +1131,12 @@
       "preview-spreadsheet-stats",
       "preview-spreadsheet-table-container",
       "preview-video-element",
+      "priv-delete-confirm",
+      "priv-delete-name",
+      "priv-delete-password",
+      "priv-delete-path",
+      "priv-delete-path-label",
+      "priv-delete-user",
       "rename-file-newname",
       "rename-file-oldpath",
       "rename-group-new",
@@ -1354,6 +1362,7 @@
       "/api/files/content",
       "/api/files/create",
       "/api/files/delete",
+      "/api/files/delete-privileged",
       "/api/files/download",
       "/api/files/list",
       "/api/files/mkdir",
@@ -1476,9 +1485,9 @@
   "counts": {
     "layout_ids": 547,
     "layout_classes": 159,
-    "app_ids": 461,
+    "app_ids": 469,
     "app_selectors": 46,
-    "app_endpoints": 89,
+    "app_endpoints": 90,
     "inline_handlers": 48
   }
 }
