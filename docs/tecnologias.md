@@ -27,12 +27,13 @@ La plataforma actual (`0.1.13`) se ejecuta de forma nativa en **Rust** (edición
 El panel de administración está diseñado para redes corporativas cerradas sin salida a internet (**100% offline**). Todos los recursos gráficos y lógicos se incrustan byte a byte dentro del binario `nas-web` mediante `include_str!` e `include_bytes!`.
 
 - **Slate UI + 52 iconos SVG embebidos:** definidos como `<symbol>` en `crates/nas-web/templates/layout.html` junto con el logotipo vectorial `/img/logo-iintec.svg`, evitando fuentes de iconos externas o peticiones a CDN (*Content Delivery Network* — Red de Distribución de Contenidos).
-- **Arquitectura JavaScript modular (28 archivos propios + 3 *vendor*):**
-  - 28 archivos sin transpiladores externos ni `node_modules`: `app.js`, 4 utilidades en `assets/js/lib/` (`api.js`, `modal.js`, `toast.js`, `utils.js`) y 23 módulos por dominio en `assets/js/modules/`.
-  - 3 librerías locales (*vendor*) con carga perezosa (*lazy loading*, solo se descargan al previsualizar un documento):
+- **Arquitectura JavaScript modular (29 archivos propios + 4 *vendor*):**
+  - 29 archivos sin transpiladores externos ni `node_modules`: `app.js`, 4 utilidades en `assets/js/lib/` (`api.js`, `modal.js`, `toast.js`, `utils.js`) y 24 módulos por dominio en `assets/js/modules/`.
+  - 4 librerías locales (*vendor*) con carga perezosa (*lazy loading*, solo se descargan al previsualizar un documento):
     - **`xlsx.full.min.js` (SheetJS):** lectura en navegador de hojas de cálculo (`.xlsx`, `.xls`, `.ods`, `.csv`), protegida además con un sanitizador DOM (*Document Object Model* — Modelo de Objetos del Documento) por lista blanca.
     - **`docx-preview.min.js`:** renderizado en cliente de documentos Word (`.docx`) sin enviar archivos a nubes externas ni consumir CPU del servidor NAS.
-    - **`jszip.min.js`:** descompresión en navegador de paquetes `.docx` / `.pptx` para previsualización local.
+    - **`jszip.min.js`:** descompresión en navegador de paquetes `.docx` / `.pptx` e inspector de archivos `.zip` / `.jar` (listado y previsualización de elementos internos) para previsualización local.
+    - **`unrar.js` + `unrar.wasm` (node-unrar-js, MIT):** motor RAR compilado a WebAssembly que impulsa el inspector de archivos `.rar` (listado con tamaños, ratios y fechas, previsualización de elementos internos de texto/imagen/PDF y detección amable de archivos protegidos con contraseña) sin instalar `unrar` en el servidor ni consumir su CPU.
 - **Terminal PTY (*Pseudo-Terminal* — Seudoterminal) real:** integra sesiones `tmux` por usuario mediante el helper `nas-terminal`, permitiendo ejecutar `sudo`, comandos interactivos y programas de consola desde el navegador.
 
 ---
