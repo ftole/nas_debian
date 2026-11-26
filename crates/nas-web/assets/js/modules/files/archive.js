@@ -364,28 +364,148 @@ function formatArchiveDate(date) {
 }
 
 // ------------------------------------------------------------------------------
-// Tabla del listado (todo con textContent: sin riesgo XSS)
+// Árbol jerárquico del listado (todo con textContent: sin riesgo XSS)
 // ------------------------------------------------------------------------------
+function buildArchiveTree(entries) {
+  const root = { name: '', path: '', depth: 0, dirs: new Map(), files: [], count: 0 };
+  const dirNodes = new Map();
+
+  const ensureDir = (path) => {
+    if (dirNodes.has(path)) return dirNodes.get(path);
+    const parts = path.split('/');
+    const name = parts[parts.length - 1];
+    const parentPath = parts.slice(0, -1).join('/');
+    const parent = parentPath ? ensureDir(parentPath) : root;
+    const node = { name, path, depth: parent.depth + 1, dirs: new Map(), files: [], entry: null, count: 0 };
+    parent.dirs.set(name, node);
+    dirNodes.set(path, node);
+    return node;
+  };
+
+  for (const entry of entries) {
+    const clean = String(entry.name || '').replace(/\/+$/, '');
+    if (!clean) continue;
+    if (entry.directory) {
+      ensureDir(clean).entry = entry;
+    } else {
+      const parts = clean.split('/');
+      const parentPath = parts.slice(0, -1).join('/');
+      const parent = parentPath ? ensureDir(parentPath) : root;
+      parent.files.push(entry);
+    }
+  }
+
+  const computeCount = (node) => {
+    node.count = node.files.length;
+    for (const child of node.dirs.values()) {
+      node.count += computeCount(child);
+    }
+    return node.count;
+  };
+  computeCount(root);
+  return root;
+}
+
+function countArchiveDirs(node) {
+  let total = node.dirs.size;
+  for (const child of node.dirs.values()) {
+    total += countArchiveDirs(child);
+  }
+  return total;
+}
+
 function renderArchiveTable(entries) {
   const tbody = document.getElementById('preview-archive-tbody');
   const summary = document.getElementById('preview-archive-summary');
-  if (!tbody) return;
+  const cur = ArchiveInspector.current;
+  if (!tbody || !cur) return;
   tbody.textContent = '';
 
-  entries.forEach((entry, index) => {
-    const tr = document.createElement('tr');
-    if (!entry.directory) {
-      tr.style.cursor = 'pointer';
-      tr.title = 'Clic para previsualizar';
-      tr.addEventListener('click', () => previewArchiveEntry(index));
+  const tree = buildArchiveTree(entries);
+
+  // Estado inicial del plegado: expandido si es pequeño; solo primer nivel si es grande
+  if (!cur.collapsed) {
+    cur.collapsed = new Set();
+    if (entries.length > 100) {
+      const collapseDeep = (node) => {
+        for (const child of node.dirs.values()) {
+          cur.collapsed.add(child.path);
+          collapseDeep(child);
+        }
+      };
+      collapseDeep(tree);
     }
+  }
+
+  renderArchiveNode(tbody, tree, cur);
+
+  if (summary) {
+    const files = entries.filter((e) => !e.directory).length;
+    const dirs = countArchiveDirs(tree);
+    summary.textContent = `${files} archivo(s)${dirs ? ` • ${dirs} carpeta(s)` : ''} • Clic en una carpeta para plegarla o en un archivo para previsualizarlo`;
+  }
+}
+
+function renderArchiveNode(tbody, node, cur) {
+  const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const dir of dirs) {
+    const isCollapsed = cur.collapsed.has(dir.path);
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.title = isCollapsed ? 'Clic para expandir la carpeta' : 'Clic para contraer la carpeta';
+    tr.addEventListener('click', () => toggleArchiveFolder(dir.path));
 
     const tdName = document.createElement('td');
+    tdName.style.paddingLeft = `${8 + dir.depth * 18}px`;
     tdName.style.wordBreak = 'break-all';
     const icon = document.createElement('span');
-    icon.textContent = entry.directory ? '📁 ' : '📄 ';
+    icon.textContent = isCollapsed ? '📁 ' : '📂 ';
     const nameSpan = document.createElement('span');
-    nameSpan.textContent = entry.name;
+    nameSpan.textContent = dir.name;
+    nameSpan.style.fontWeight = '600';
+    tdName.appendChild(icon);
+    tdName.appendChild(nameSpan);
+    tr.appendChild(tdName);
+
+    const tdCount = document.createElement('td');
+    tdCount.textContent = `${dir.count} elemento(s)`;
+    tdCount.style.color = 'var(--text-secondary)';
+    tr.appendChild(tdCount);
+
+    const tdPack = document.createElement('td');
+    tdPack.textContent = '—';
+    tr.appendChild(tdPack);
+
+    const tdRatio = document.createElement('td');
+    tdRatio.textContent = '—';
+    tr.appendChild(tdRatio);
+
+    const tdTime = document.createElement('td');
+    tdTime.textContent = (dir.entry && dir.entry.time) || '—';
+    tr.appendChild(tdTime);
+
+    tbody.appendChild(tr);
+    if (!isCollapsed) {
+      renderArchiveNode(tbody, dir, cur);
+    }
+  }
+
+  for (const entry of files) {
+    const depth = node.depth + 1;
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.title = 'Clic para previsualizar';
+    tr.addEventListener('click', () => previewArchiveEntry(entry));
+
+    const tdName = document.createElement('td');
+    tdName.style.paddingLeft = `${8 + depth * 18}px`;
+    tdName.style.wordBreak = 'break-all';
+    const icon = document.createElement('span');
+    icon.textContent = '📄 ';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = String(entry.name || '').replace(/\/+$/, '').split('/').pop();
     tdName.appendChild(icon);
     tdName.appendChild(nameSpan);
     if (entry.encrypted) {
@@ -397,19 +517,15 @@ function renderArchiveTable(entries) {
     tr.appendChild(tdName);
 
     const tdSize = document.createElement('td');
-    tdSize.textContent = entry.directory ? '—' : formatBytesLocal(entry.unpSize || 0);
+    tdSize.textContent = formatBytesLocal(entry.unpSize || 0);
     tr.appendChild(tdSize);
 
     const tdPack = document.createElement('td');
-    tdPack.textContent = entry.directory ? '—' : formatBytesLocal(entry.packSize || 0);
+    tdPack.textContent = formatBytesLocal(entry.packSize || 0);
     tr.appendChild(tdPack);
 
     const tdRatio = document.createElement('td');
-    if (!entry.directory && entry.unpSize > 0) {
-      tdRatio.textContent = `${Math.round((entry.packSize / entry.unpSize) * 100)}%`;
-    } else {
-      tdRatio.textContent = '—';
-    }
+    tdRatio.textContent = entry.unpSize > 0 ? `${Math.round((entry.packSize / entry.unpSize) * 100)}%` : '—';
     tr.appendChild(tdRatio);
 
     const tdTime = document.createElement('td');
@@ -417,13 +533,18 @@ function renderArchiveTable(entries) {
     tr.appendChild(tdTime);
 
     tbody.appendChild(tr);
-  });
-
-  if (summary) {
-    const files = entries.filter((e) => !e.directory).length;
-    const dirs = entries.length - files;
-    summary.textContent = `${files} archivo(s)${dirs ? ` • ${dirs} carpeta(s)` : ''} • Clic en un archivo para previsualizarlo`;
   }
+}
+
+function toggleArchiveFolder(path) {
+  const cur = ArchiveInspector.current;
+  if (!cur || !cur.collapsed) return;
+  if (cur.collapsed.has(path)) {
+    cur.collapsed.delete(path);
+  } else {
+    cur.collapsed.add(path);
+  }
+  renderArchiveTable(cur.entries);
 }
 
 // ------------------------------------------------------------------------------
@@ -436,10 +557,9 @@ const ARCHIVE_MIME = {
   webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', pdf: 'application/pdf',
 };
 
-async function previewArchiveEntry(index) {
+async function previewArchiveEntry(entry) {
   const cur = ArchiveInspector.current;
   if (!cur) return;
-  const entry = cur.entries[index];
   if (!entry || entry.directory) return;
 
   if ((entry.unpSize || 0) > ARCHIVE_MAX_ENTRY_BYTES) {
