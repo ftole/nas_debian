@@ -6,6 +6,11 @@ use std::time::Duration;
 use nas_core::{NasError, NasResult};
 use nas_exec::{CommandSpec, Runner};
 
+mod privileged_delete;
+pub use privileged_delete::{
+    is_valid_os_username, privileged_delete_file, PrivilegedDeleteRequest,
+};
+
 /// Valida el nombre de un recurso compartido (`^[A-Za-z0-9_-]{1,32}\$?$`).
 pub fn is_valid_share_name(name: &str) -> bool {
     crate::validation::is_valid_share_name(name)
