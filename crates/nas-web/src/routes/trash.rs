@@ -60,13 +60,32 @@ fn priv_del_clear(key: &str) {
     }
 }
 
-/// Cuerpo para borrado privilegiado con credenciales del SO (`root` o `sudo`).
+/// Cuerpo para borrado o envío a papelera con credenciales del SO (`root` o `sudo`).
 #[derive(Debug, Deserialize)]
 pub struct PrivilegedDeleteBody {
     #[serde(default)]
     pub root: Option<String>,
     #[serde(default)]
     pub path: String,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub auth_user: String,
+    #[serde(default)]
+    pub auth_password: String,
+    #[serde(default)]
+    pub confirm: String,
+}
+
+/// Cuerpo para operaciones privilegiadas sobre la papelera (`.trash`).
+#[derive(Debug, Deserialize)]
+pub struct PrivilegedTrashBody {
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default, deserialize_with = "deserialize_string_or_int")]
+    pub id: String,
     #[serde(default)]
     pub auth_user: String,
     #[serde(default)]
@@ -248,12 +267,27 @@ pub async fn trash_empty(
         Ok(root) => root,
         Err(response) => return *response,
     };
-    match state.run_system_blocking(move || root.empty_trash()).await {
-        Ok(Ok(removed)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "removed": removed }),
-            "Papelera vaciada",
-        ))
-        .into_response(),
+    match state
+        .run_system_blocking(move || root.empty_trash_detailed())
+        .await
+    {
+        Ok(Ok((removed, skipped_privileged))) => {
+            let msg = if skipped_privileged > 0 {
+                format!(
+                    "Se eliminaron {removed} elemento(s); {skipped_privileged} elemento(s) privilegiado(s) requieren credenciales root/sudo"
+                )
+            } else {
+                "Papelera vaciada".to_string()
+            };
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "removed": removed,
+                    "skipped_privileged": skipped_privileged,
+                }),
+                &msg,
+            ))
+            .into_response()
+        }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("vaciado interrumpido"),
     }
@@ -279,26 +313,129 @@ pub async fn trash_restore_all(
         .run_system_blocking(move || {
             let entries = root.trash_entries()?;
             let mut restored = 0u32;
+            let mut skipped_privileged = 0u32;
             for entry in entries {
+                if entry.privileged {
+                    skipped_privileged += 1;
+                    continue;
+                }
                 if root.restore_trash(&entry.id).is_ok() {
                     restored += 1;
                 }
             }
-            Ok::<_, nas_core::NasError>(restored)
+            Ok::<_, nas_core::NasError>((restored, skipped_privileged))
         })
         .await
     {
-        Ok(Ok(restored)) => axum::Json(ApiResponse::ok(
-            serde_json::json!({ "restored": restored }),
-            "Papelera restaurada",
-        ))
-        .into_response(),
+        Ok(Ok((restored, skipped_privileged))) => {
+            let msg = if skipped_privileged > 0 {
+                format!(
+                    "Se restauraron {restored} elemento(s); {skipped_privileged} elemento(s) privilegiado(s) deben restaurarse individualmente con root/sudo"
+                )
+            } else {
+                "Papelera restaurada".to_string()
+            };
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({
+                    "restored": restored,
+                    "skipped_privileged": skipped_privileged,
+                }),
+                &msg,
+            ))
+            .into_response()
+        }
         Ok(Err(error)) => error_response(error),
         Err(_) => server_error("restauración interrumpida"),
     }
 }
 
-/// Elimina un elemento con credenciales OS (`root` o usuario `sudo`), sin alterar permisos/ACLs.
+fn is_privileged_web_path_blocked(
+    root_param: Option<&str>,
+    rel_path: &str,
+) -> Option<&'static str> {
+    let clean = rel_path
+        .trim()
+        .trim_matches(['/', '\\'].as_ref())
+        .replace('\\', "/");
+    let segs: Vec<&str> = clean
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect();
+    if segs.is_empty() {
+        return Some("la raíz del almacenamiento");
+    }
+    if root_param
+        .map(str::trim)
+        .is_some_and(|r| r.eq_ignore_ascii_case("backups"))
+    {
+        // En `root=backups` ya estamos dentro de `BACKUPS_HISTORICOS/`; cualquier subruta >= 1 es válida.
+        return None;
+    }
+    let sub: &[&str] = if segs[0] == "unidades" {
+        if segs.len() < 3 {
+            return Some("la raíz de la unidad");
+        }
+        &segs[2..]
+    } else {
+        &segs[..]
+    };
+    let Some(&first) = sub.first() else {
+        return Some("la raíz del almacenamiento");
+    };
+    match first {
+        "LOGS_BACKUP" => Some("los registros de respaldo del sistema (LOGS_BACKUP)"),
+        ".trash" => Some("la papelera de reciclaje interna (.trash)"),
+        ".nas_staging" => Some("el área temporal interna (.nas_staging)"),
+        ".tmp_zip" => Some("el área temporal de compresión (.tmp_zip)"),
+        "unidades" => Some("el contenedor de unidades"),
+        "BACKUPS_HISTORICOS" | "BACKUPS_PERMANENTES" if sub.len() < 2 => {
+            Some("la carpeta raíz de respaldos")
+        }
+        _ => None,
+    }
+}
+
+fn is_valid_trash_id(id: &str) -> bool {
+    let trimmed = id.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with('.')
+        && !trimmed.contains('/')
+        && !trimmed.contains('\\')
+        && !trimmed.contains("..")
+        && !trimmed.contains('\0')
+        && !trimmed.chars().any(char::is_control)
+}
+
+async fn run_files_delete_helper_async(
+    state: &AppState,
+    payload_json: String,
+    secret_pw: String,
+    timeout_secs: u64,
+) -> Result<Result<String, nas_core::NasError>, tokio::task::JoinError> {
+    state
+        .run_system_blocking(move || {
+            let runner = nas_exec::Runner::new().with_secret(&secret_pw);
+            let spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
+                .args(["helper", "files-delete"])
+                .sudo(nas_exec::SudoMode::Passwordless)
+                .stdin_secret(nas_exec::SecretInput::new(payload_json))
+                .timeout(Duration::from_secs(timeout_secs));
+            let out = runner.run(&spec)?;
+            if out.is_success() {
+                Ok::<_, nas_core::NasError>(out.stdout)
+            } else {
+                let msg = if out.stderr.trim().is_empty() {
+                    out.stdout.trim().to_string()
+                } else {
+                    out.stderr.trim().to_string()
+                };
+                Err(nas_core::NasError::Denied(msg))
+            }
+        })
+        .await
+}
+
+/// Elimina o mueve a papelera un elemento con credenciales OS (`root` o usuario `sudo`), sin alterar permisos/ACLs.
 pub async fn files_delete_privileged(
     State(state): State<AppState>,
     admin: AdminUser,
@@ -323,7 +460,12 @@ pub async fn files_delete_privileged(
         return resp;
     }
 
-    if body.confirm.trim() != "SI-ELIMINAR" {
+    let mode = match body.mode.trim() {
+        "" | "permanent" => "permanent",
+        "trash" => "trash",
+        _ => return bad_request("modo inválido: usa 'trash' o 'permanent'"),
+    };
+    if mode == "permanent" && body.confirm.trim() != "SI-ELIMINAR" {
         return bad_request("confirmación requerida: escribe SI-ELIMINAR");
     }
     let rel_path = body.path.trim().to_string();
@@ -342,15 +484,15 @@ pub async fn files_delete_privileged(
         return bad_request("contraseña del sistema inválida");
     }
 
+    if let Some(desc) = is_privileged_web_path_blocked(body.root.as_deref(), &rel_path) {
+        return forbidden(&format!(
+            "operación no permitida: no se puede operar sobre {desc}"
+        ));
+    }
     let root = match file_root_for_async(&state, body.root.as_deref()).await {
         Ok(root) => root,
         Err(response) => return *response,
     };
-    if let Some(desc) = root.is_protected_path(&rel_path) {
-        return forbidden(&format!(
-            "operación no permitida: no se puede eliminar sobre {desc}"
-        ));
-    }
     let root_check = root.clone();
     let rel_check = rel_path.clone();
     match state
@@ -370,8 +512,15 @@ pub async fn files_delete_privileged(
         Err(_) => return server_error("validación de ruta interrumpida"),
     }
 
+    let helper_action = if mode == "trash" { "trash" } else { "delete" };
+    let audit_action = if mode == "trash" {
+        "file_trash_privileged"
+    } else {
+        "file_delete_privileged"
+    };
     let payload_json = serde_json::json!({
         "root": body.root,
+        "action": helper_action,
         "path": rel_path,
         "auth_user": auth_user,
         "auth_password": body.auth_password,
@@ -381,29 +530,9 @@ pub async fn files_delete_privileged(
     .to_string();
     let secret_pw = body.auth_password.clone();
 
-    let outcome = state
-        .run_system_blocking(move || {
-            let runner = nas_exec::Runner::new().with_secret(&secret_pw);
-            let spec = nas_exec::CommandSpec::new("/usr/local/bin/nas")
-                .args(["helper", "files-delete"])
-                .sudo(nas_exec::SudoMode::Passwordless)
-                .stdin_secret(nas_exec::SecretInput::new(payload_json))
-                .timeout(Duration::from_secs(30));
-            let out = runner.run(&spec)?;
-            if out.is_success() {
-                Ok::<_, nas_core::NasError>(out.stdout)
-            } else {
-                let msg = if out.stderr.trim().is_empty() {
-                    out.stdout.trim().to_string()
-                } else {
-                    out.stderr.trim().to_string()
-                };
-                Err(nas_core::NasError::Denied(msg))
-            }
-        })
-        .await;
+    let outcome = run_files_delete_helper_async(&state, payload_json, secret_pw, 30).await;
 
-    let detail = format!("os_user={auth_user}");
+    let detail = format!("os_user={auth_user} mode={mode}");
     match outcome {
         Ok(Ok(msg)) => {
             priv_del_clear(&rate_key);
@@ -411,16 +540,21 @@ pub async fn files_delete_privileged(
                 &state,
                 &headers,
                 admin.username(),
-                "file_delete_privileged",
+                audit_action,
                 &rel_path,
                 "SUCCESS",
                 &detail,
             )
             .await;
+            let default_msg = if mode == "trash" {
+                "Elemento movido a la papelera con privilegios"
+            } else {
+                "Elemento eliminado con privilegios"
+            };
             axum::Json(ApiResponse::ok(
-                serde_json::json!({ "path": rel_path, "os_user": auth_user }),
+                serde_json::json!({ "path": rel_path, "os_user": auth_user, "mode": mode }),
                 if msg.trim().is_empty() {
-                    "Elemento eliminado con privilegios"
+                    default_msg
                 } else {
                     msg.trim()
                 },
@@ -433,7 +567,7 @@ pub async fn files_delete_privileged(
                 &state,
                 &headers,
                 admin.username(),
-                "file_delete_privileged",
+                audit_action,
                 &rel_path,
                 "FAILED",
                 &detail,
@@ -448,6 +582,138 @@ pub async fn files_delete_privileged(
     }
 }
 
+/// Gestiona elementos privilegiados dentro de la papelera (`.trash`): purgar, restaurar o vaciar.
+pub async fn files_trash_privileged(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<PrivilegedTrashBody>,
+) -> Response {
+    let ip = extract_client_ip(&headers);
+    let rate_key = format!("{ip}:{}", admin.username());
+    let now = Instant::now();
+    if let Some(retry_after) = priv_del_retry_after(&rate_key, now) {
+        let mut resp = (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(ApiResponse::<serde_json::Value>::error(format!(
+                "demasiados intentos fallidos; espera {retry_after}s antes de reintentar"
+            ))),
+        )
+            .into_response();
+        if let Ok(val) = axum::http::HeaderValue::from_str(&retry_after.to_string()) {
+            resp.headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, val);
+        }
+        return resp;
+    }
+
+    let action_trimmed = body.action.trim();
+    let (helper_action, audit_action, needs_confirm, needs_id, timeout_secs) = match action_trimmed
+    {
+        "delete" => ("purge_trash", "trash_delete_privileged", true, true, 30u64),
+        "restore" => (
+            "restore_trash",
+            "trash_restore_privileged",
+            false,
+            true,
+            30u64,
+        ),
+        "empty" => ("empty_trash", "trash_empty_privileged", true, false, 60u64),
+        _ => return bad_request("acción de papelera inválida: usa 'delete', 'restore' o 'empty'"),
+    };
+    if needs_confirm && body.confirm.trim() != "SI-ELIMINAR" {
+        return bad_request("confirmación requerida: escribe SI-ELIMINAR");
+    }
+    let trash_id = body.id.trim().to_string();
+    if needs_id && !is_valid_trash_id(&trash_id) {
+        return bad_request("identificador de papelera inválido");
+    }
+    let auth_user = body.auth_user.trim().to_string();
+    if !nas_engine::helpers::share::is_valid_os_username(&auth_user) {
+        return bad_request("usuario del sistema inválido");
+    }
+    if body.auth_password.is_empty()
+        || body.auth_password.contains('\0')
+        || body.auth_password.contains('\n')
+        || body.auth_password.contains('\r')
+    {
+        return bad_request("contraseña del sistema inválida");
+    }
+
+    let normalized_root = match body.root.as_deref().map(str::trim) {
+        Some(r) if r.eq_ignore_ascii_case("backups") => Some("nas".to_string()),
+        Some(r) if !r.is_empty() => Some(r.to_string()),
+        _ => None,
+    };
+    if let Err(response) = file_root_for_async(&state, normalized_root.as_deref()).await {
+        return *response;
+    }
+
+    let payload_json = serde_json::json!({
+        "root": normalized_root,
+        "action": helper_action,
+        "trash_id": trash_id,
+        "auth_user": auth_user,
+        "auth_password": body.auth_password,
+        "web_user": admin.username(),
+        "origin_ip": ip,
+    })
+    .to_string();
+    let secret_pw = body.auth_password.clone();
+    let audit_target = if needs_id {
+        trash_id.clone()
+    } else {
+        "*".to_string()
+    };
+
+    let outcome =
+        run_files_delete_helper_async(&state, payload_json, secret_pw, timeout_secs).await;
+    let detail = format!("os_user={auth_user}");
+
+    match outcome {
+        Ok(Ok(msg)) => {
+            priv_del_clear(&rate_key);
+            audit_ip(
+                &state,
+                &headers,
+                admin.username(),
+                audit_action,
+                &audit_target,
+                "SUCCESS",
+                &detail,
+            )
+            .await;
+            axum::Json(ApiResponse::ok(
+                serde_json::json!({ "action": action_trimmed, "id": trash_id, "os_user": auth_user }),
+                if msg.trim().is_empty() {
+                    "Operación en papelera completada con privilegios"
+                } else {
+                    msg.trim()
+                },
+            ))
+            .into_response()
+        }
+        Ok(Err(error)) => {
+            priv_del_record_failure(&rate_key, Instant::now());
+            audit_ip(
+                &state,
+                &headers,
+                admin.username(),
+                audit_action,
+                &audit_target,
+                "FAILED",
+                &detail,
+            )
+            .await;
+            error_response(error)
+        }
+        Err(_) => {
+            priv_del_record_failure(&rate_key, Instant::now());
+            server_error("operación privilegiada en papelera interrumpida")
+        }
+    }
+}
+
 /// Router del dominio de papelera.
 pub fn router() -> Router<crate::AppState> {
     use axum::routing::{get, post};
@@ -457,6 +723,7 @@ pub fn router() -> Router<crate::AppState> {
         .route("/api/files/trash/restore-all", post(trash_restore_all))
         .route("/api/files/trash/delete", post(trash_delete))
         .route("/api/files/trash/empty", post(trash_empty))
+        .route("/api/files/trash/privileged", post(files_trash_privileged))
         .route("/api/files/delete", post(files_delete))
         .route(
             "/api/files/delete-privileged",
