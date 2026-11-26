@@ -1,7 +1,7 @@
 # Auditoría Técnica: Código Real vs. Documentación (`main` `0f7a272`)
 
 > [!IMPORTANT]
-> **Documento histórico (línea base `main` `0f7a272`):** Esta auditoría corresponde a la revisión inicial tras la migración a Rust. Sus hallazgos centrales (`A-01`, `A-02`, `A-03`, `A-04`, `A-06` y `A-09`) quedaron resueltos en `v0.1.11`–`v0.1.12`. Para el estado vivo actual código por código, consulta **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
+> **Documento histórico (línea base `main` `0f7a272`):** Esta auditoría corresponde a la revisión inicial tras la migración a Rust. Todos sus hallazgos (`A-01` a `A-09`) quedaron resueltos entre `v0.1.11` y `v0.1.13`. Para el estado vivo actual código por código, consulta **[docs/deuda_tecnica.md](./deuda_tecnica.md)**.
 
 ---
 
@@ -124,4 +124,4 @@ Tras completar la migración de PHP/Bash hacia Rust (`0.1.10`), la documentació
 
 Como parte de este trabajo de auditoría y reorganización documental sobre `0f7a272`:
 - Se retiraron los 13 documentos redundantes u obsoletos que arrastraban datos de la era PHP/Bash o fragmentaban guías operativas y de desarrollo.
-- Se consolidó la documentación técnica en **7 documentos en `docs/`** (`arquitectura.md`, `tecnologias.md`, `seguridad.md`, `manual.md`, `lab_y_desarrollo.md`, `auditoria.md` y `propuesta_ux_usuarios.md`) junto con `README.md` y 7 diagramas SVG actualizados en `docs/assets/`.
+- Se consolidó la documentación técnica en **7 documentos en `docs/`** (`arquitectura.md`, `tecnologias.md`, `seguridad.md`, `manual.md`, `lab_y_desarrollo.md`, `auditoria.md` y `propuesta_ux_usuarios.md`) junto con `README.md` y 7 diagramas SVG en `docs/assets/` (ampliada posteriormente a **9 documentos en `docs/`** y **9 diagramas SVG en `docs/assets/`**).
