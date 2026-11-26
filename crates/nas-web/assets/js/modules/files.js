@@ -54,8 +54,34 @@ function isProtectedFilePath(path) {
     first === 'BACKUPS_HISTORICOS' ||
     first === 'BACKUPS_PERMANENTES' ||
     first === 'LOGS_BACKUP' ||
-    first === '.trash'
+    first === '.trash' ||
+    first === '.nas_staging' ||
+    first === '.tmp_zip'
   );
+}
+
+function canPrivilegedDeletePath(path) {
+  if (window.NAS_IS_ADMIN === false || !path) return false;
+  const clean = String(path).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const segs = clean.split('/').filter(s => s && s !== '.');
+  if (segs.length === 0) return false;
+  if (AppState.files?.root === 'backups') {
+    return true;
+  }
+  let sub = segs;
+  if (segs[0] === 'unidades') {
+    if (segs.length < 3) return false;
+    sub = segs.slice(2);
+  }
+  if (sub.length === 0) return false;
+  const first = sub[0];
+  if (['LOGS_BACKUP', '.trash', '.nas_staging', '.tmp_zip', 'unidades'].includes(first)) {
+    return false;
+  }
+  if (first === 'BACKUPS_HISTORICOS' || first === 'BACKUPS_PERMANENTES') {
+    return sub.length >= 2;
+  }
+  return true;
 }
 
 function getFileTypeMeta(item) {
