@@ -175,7 +175,7 @@ fn resolve_safe_restore_target(target: &str) -> NasResult<PathBuf> {
             "el destino de restauración escapa de /srv/nas o /tmp".into(),
         ));
     }
-    if canon_root == Path::new("/srv/nas") {
+    if allowed_root == Path::new("/srv/nas") {
         if let Ok(rel) = final_canon.strip_prefix(&canon_root) {
             if is_protected_restore_subpath(rel) {
                 return Err(NasError::Denied(
