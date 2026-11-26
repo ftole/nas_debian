@@ -1,7 +1,7 @@
 # Laboratorio, Flujo de Desarrollo, CI y Releases
 
 > [!NOTE]
-> Documento unificado para desarrolladores, integradores y agentes de IA. Reemplaza `MANUAL_DESARROLLADORES.md`, `Preparar_Laboratorio.md`, `despliegue_rust.md` y `releases.md`, reflejando el flujo activo sobre Debian 13 (plataforma Rust `0.1.13`).
+> Documento unificado para desarrolladores, integradores y agentes de IA. Reemplaza `MANUAL_DESARROLLADORES.md`, `Preparar_Laboratorio.md`, `despliegue_rust.md` y `releases.md`, reflejando el flujo activo sobre Debian 13 (plataforma Rust `0.1.14`).
 
 ---
 
@@ -45,8 +45,8 @@ cd /opt/dev/nas_debian-mi-tarea
 
 ### 2.2 Reglas Estrictas de Convivencia y Git (`AGENTS.md`)
 
-1. **Archivos compartidos de alto tráfico prohibidos en paralelo:** no editar simultáneamente `Cargo.lock`, `AGENTS.md`, `README.md`, `crates/nas-web/assets/js/app.js`, `crates/nas-web/templates/layout.html`, `crates/nas-web/src/routes/mod.rs`, `crates/nas-cli/src/commands/mod.rs`, `crates/nas-cli/src/main.rs`, `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/updater.sh`.
-2. **Commits atómicos 1 archivo = 1 commit:** cada archivo creado, editado o eliminado debe registrarse en su propio commit independiente con mensaje convencional en **español** (`feat:`, `fix:`, `docs:`, `refactor:`, `ci:`).
+1. **Archivos compartidos de alto tráfico prohibidos en paralelo:** no editar simultáneamente `Cargo.toml`, `Cargo.lock`, `AGENTS.md`, `README.md`, `tests/parity/*`, `crates/nas-web/assets/js/app.js`, `crates/nas-web/templates/layout.html`, `crates/nas-web/src/routes/mod.rs`, `crates/nas-cli/src/commands/mod.rs`, `crates/nas-cli/src/main.rs`, `crates/nas-cli/src/helper/dispatch.rs`, `src/core/deploy.sh`, `src/core/uninstall.sh`, `src/core/updater.sh`.
+2. **Commits atómicos 1 archivo = 1 commit:** cada archivo creado, editado o eliminado debe registrarse en su propio commit independiente con mensaje convencional en **español** (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`, sin firma GPG).
 3. **Servicios de producción intocables en tests paralelos:** ninguna prueba unitaria o de integración debe reiniciar o detener `nas-web`, `smbd` o `nmbd` en el host compartido.
 4. **Cero supresiones de lint/CI:** no usar `# shellcheck disable`, flags para omitir advertencias ni debilitar tests para forzar verde.
 
@@ -56,7 +56,7 @@ cd /opt/dev/nas_debian-mi-tarea
 
 ### 3.1 Por qué editar código no cambia la web activa (`deploy_local.sh`)
 
-En `crates/nas-web`, toda la interfaz (`layout.html`, CSS, 28 JS propios, 3 vendor y 52 iconos SVG) está **embebida byte a byte dentro del binario** mediante `include_str!` / `include_bytes!`. Por tanto, editar un archivo en el repositorio **no modifica** el servicio activo hasta recompilar e instalar.
+En `crates/nas-web`, toda la interfaz (`layout.html`, CSS, 29 JS propios, 4 vendor JS + 1 WASM y 52 iconos SVG) está **embebida byte a byte dentro del binario** mediante `include_str!` / `include_bytes!`. Por tanto, editar un archivo en el repositorio **no modifica** el servicio activo hasta recompilar e instalar.
 
 ```bash
 # Compila e instala nas-web (o todo el workspace con --all) y reinicia el servicio
@@ -87,11 +87,13 @@ export CARGO_TARGET_DIR=/opt/dev/target-mi-tarea
 # 1. Pruebas del motor Bash (BATS)
 PATH="$PATH:/usr/sbin" bats --print-output-on-failure tests/*.bats
 
-# 2. Análisis estático Bash
+# 2. Análisis estático Bash y seguridad
+find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 -n1 bash -n && bash -n install.sh
 find src scripts packaging -type f -name "*.sh" -print0 | xargs -0 shellcheck -x
-bash -n install.sh
+shellcheck -x install.sh packaging/nas-{accounts,backup-manage,samba-apply,share-acl,share-dir,storage-apply,terminal}
+! grep -RIn --exclude-dir=legacy --exclude-dir=tests --include="*.py" --include="*.sh" "StrictHostKeyChecking=no" src install.sh scripts
 
-# 3. Sintaxis JavaScript (28 módulos propios + 3 vendor)
+# 3. Sintaxis JavaScript (29 módulos propios + 4 vendor)
 find crates/nas-web/assets/js -type f -name "*.js" -print0 | xargs -0 -n1 node --check
 
 # 4. Suite Rust completa (formato, clippy estricto y tests con Cargo.lock bloqueado)
@@ -137,5 +139,5 @@ nas update verify <nas-X.Y.Z.json> --artifact <nas_debian-X.Y.Z.tar.gz> --pubkey
 sudo nas update apply --previous <version_actual> --yes
 ```
 
-- **Slots A/B:** `nas update apply` extrae la nueva versión en `/opt/nas_debian/releases/<version>/`, verifica `SHA-256` y firma `Ed25519`, actualiza de forma atómica el symlink `/opt/nas_debian/current` (`ln -sfn` + `mv -T`), instala los 5 binarios en `/usr/local/bin/` y los 7 helpers en `/usr/local/sbin/`, ejecuta `repair-runners`, `nas deploy resources` (`10-resources.conf` + `99-nas-tuning.conf`), sincroniza `/etc/nas/release.pub` desde la release verificada y recarga `nginx` y `nas-web`, preservando intactos `/srv/nas`, la configuración restante de `/etc/nas/` y `/var/lib/nas/nas.sqlite`.
+- **Slots A/B:** `nas update apply` extrae la nueva versión en `/opt/nas_debian/releases/<version>/`, verifica `SHA-256` y firma `Ed25519`, actualiza de forma atómica el symlink `/opt/nas_debian/current` (`ln -sfn` + `mv -T`), instala los 5 binarios en `/usr/local/bin/` y los 7 helpers en `/usr/local/sbin/`, ejecuta `repair-runners`, `nas deploy resources` (`10-resources.conf` + `99-nas-tuning.conf`), `nas security harden --apply --safe-only`, sincroniza `/etc/nas/release.pub` desde la release verificada y recarga `nginx` y `nas-web`, preservando intactos `/srv/nas`, la configuración restante de `/etc/nas/` y `/var/lib/nas/nas.sqlite`.
 - **Rollback automático y recuperación manual:** si cualquier paso o el *healthcheck* (`https://127.0.0.1/login`) falla durante `nas update apply --previous <version_actual>`, el plan ejecuta el rollback automático hacia `/opt/nas_debian/releases/<version_actual>/`; si fuese necesario revertir manualmente después de terminar, basta con reenlazar `/opt/nas_debian/current` al slot previo (`ln -sfn` + `mv -T`), reinstalar `/opt/nas_debian/current/bin/*` en `/usr/local/bin/` y reiniciar `nas-web` + `nginx`.
