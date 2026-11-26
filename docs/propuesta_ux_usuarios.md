@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > Este documento contiene la **propuesta técnica y conceptual de rediseño de Experiencia de Usuario (UX)** para el módulo de Usuarios, Grupos y Permisos del panel web administrativo de **NAS Debian 13**.
-> **Nota de gobernanza (F7):** esta especificación es documental. El panel PHP al que se refiere ya fue retirado (etiqueta `legacy-php-final`); las mismas vistas y `app.js` siguen activos desde `crates/nas-web` (plantillas portadas y assets embebidos).
+> **Nota de gobernanza:** esta especificación es un RFC conceptual pendiente de implementación. El código activo del módulo de usuarios vive en `crates/nas-web/templates/layout.html` y en los módulos JavaScript `crates/nas-web/assets/js/modules/users.js`, `users/crud.js` y `users/permissions.js` (embebidos en `nas-web`).
 
 ---
 
@@ -94,7 +94,7 @@ Para eliminar los formularios rígidos de texto plano, se propone un componente 
    * Al hacer clic en el contenedor, se despliega un menú desplegable con búsqueda incremental instantánea que filtra los grupos disponibles con prefijo `grp_*`.
 2. **Modo Drag-and-Drop Opcional (Tablero Visual de Grupos):**
    * Vista de cuadrícula opcional donde los usuarios se representan como tarjetas compactas arrastrables (*Draggable Cards*).
-   * Al arrastrar la tarjeta de un usuario sobre el recuadro de un grupo (por ejemplo, soltar a `usuario.contabilidad` sobre `grp_contabilidad`), se efectúa la adición inmediata con feedback háptico visual (resplandor esmeralda `.card-drop-glow`) y llamada en segundo plano a la API REST (`POST /api/users/assign-groups`).
+   * Al arrastrar la tarjeta de un usuario sobre el recuadro de un grupo (por ejemplo, soltar a `usuario.contabilidad` sobre `grp_contabilidad`), se efectúa la adición inmediata con feedback háptico visual (resplandor esmeralda `.card-drop-glow`) y llamada en segundo plano a la API REST (`POST /api/users/groups`, o alias equivalente).
    * Cumple con la directiva **100% Offline**: implementado exclusivamente mediante la API nativa HTML5 Drag and Drop (`dragstart`, `dragover`, `drop`), sin dependencias de SortableJS ni librerías externas.
 
 ---
@@ -203,10 +203,10 @@ Cuando este desarrollo sea programado para codificación en una versión posteri
 
 | Fase | Alcance | Archivos a Modificar | Impacto |
 | :--- | :--- | :--- | :--- |
-| **Fase 1** | Segmentación por pestañas (Admin vs NAS) | `crates/nas-web/templates/layout.html`, `crates/nas-web/assets/js/app.js` | Mejora visual en la presentación de tablas sin alterar la API. |
-| **Fase 2** | Previsualizador de accesos Samba | API `/api/shares/access` + `crates/nas-web/assets/js/app.js` | Cálculo de permisos por usuario y modal informativo. |
-| **Fase 3** | Tags/Chips y drag-and-drop | `crates/nas-web/assets/js/app.js`, `crates/nas-web/assets/app.css` | Reemplazo del selector de grupos en los modales de creación y edición. |
-| **Fase 4** | Iluminación cruzada y guardado en lote en la matriz | `crates/nas-web/assets/js/app.js` | Interactividad avanzada de la tabla matricial y consolidación de peticiones. |
+| **Fase 1** | Segmentación por pestañas (Admin vs NAS) | `crates/nas-web/templates/layout.html`, `crates/nas-web/assets/js/modules/users.js` | Mejora visual en la presentación de tablas sin alterar la API. |
+| **Fase 2** | Previsualizador de accesos Samba | API `/api/shares/access` + `crates/nas-web/assets/js/modules/users/permissions.js` | Cálculo de permisos por usuario y modal informativo. |
+| **Fase 3** | Tags/Chips y drag-and-drop | `crates/nas-web/assets/js/modules/users/crud.js`, `crates/nas-web/assets/app.css` | Reemplazo del selector de grupos en los modales de creación y edición. |
+| **Fase 4** | Iluminación cruzada y guardado en lote en la matriz | `crates/nas-web/assets/js/modules/users/permissions.js` | Interactividad avanzada de la tabla matricial y consolidación de peticiones. |
 
 ---
 
