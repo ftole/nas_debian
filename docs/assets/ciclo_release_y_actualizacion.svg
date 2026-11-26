@@ -33,7 +33,7 @@
 
     <rect x="12" y="102" width="181" height="52" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="121" fill="#f8fafc" font-size="11" font-weight="600">JS: node --check</text>
-    <text x="20" y="138" fill="#94a3b8" font-size="9.5">31 JS (28 propios + 3 vendor)</text>
+    <text x="20" y="138" fill="#94a3b8" font-size="9.5">33 JS (29 propios + 4 vendor) + 1 WASM</text>
 
     <rect x="12" y="164" width="181" height="62" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="183" fill="#f8fafc" font-size="11" font-weight="600">Rust Workspace</text>
@@ -118,8 +118,8 @@
     <rect x="12" y="40" width="162" height="104" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="20" y="60" fill="#f8fafc" font-size="11" font-weight="600">Slots de Release</text>
     <text x="20" y="78" fill="#94a3b8" font-size="9.5">/opt/nas_debian/releases/</text>
-    <text x="20" y="95" fill="#64748b" font-size="9.5">  ├── 0.1.9 (slot anterior)</text>
-    <text x="20" y="111" fill="#34d399" font-size="9.5">  └── 0.1.10 (nuevo slot)</text>
+    <text x="20" y="95" fill="#64748b" font-size="9.5">  ├── 0.1.13 (slot anterior)</text>
+    <text x="20" y="111" fill="#34d399" font-size="9.5">  └── 0.1.14 (nuevo slot)</text>
     <text x="20" y="130" fill="#38bdf8" font-size="9.5">Symlink atómico: current -&gt;</text>
 
     <rect x="12" y="158" width="162" height="92" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
