@@ -164,6 +164,23 @@ pub async fn vendor_docx() -> Response {
     js_response(crate::assets::DOCX_JS)
 }
 
+/// Motor unrar (glue JS) para el inspector de archivos comprimidos.
+pub async fn vendor_unrar_js() -> Response {
+    js_response(crate::assets::UNRAR_JS)
+}
+
+/// Binario WebAssembly del motor unrar.
+pub async fn vendor_unrar_wasm() -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/wasm"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        crate::assets::UNRAR_WASM,
+    )
+        .into_response()
+}
+
 pub fn js_response(bytes: &'static [u8]) -> Response {
     (
         [
