@@ -18,7 +18,7 @@
 
 - **Compartición de archivos para oficinas (+100 puestos):** Samba 4 optimizado (`SMB2_10`–`SMB3_11`, firma obligatoria, módulos VFS `acl_xattr`, `streams_xattr` y papelera `.recycle`) con ACLs POSIX heredables por grupo para evitar bloqueos en Excel/Office.
 - **Central de copias de seguridad multiplataforma:** respaldo automatizado de carpetas compartidas Windows (`mount.cifs` SMB 3.1.1 en solo lectura) y servidores Linux (`SSH` con `rsync -aAXH --numeric-ids`), staging atómico `.inprogress_*`, deduplicación por *hardlinks* (`--link-dest`) y *Golden Snapshots*.
-- **Operación 100% offline y consumo mínimo:** binario único `nas-web` (`axum` + SQLite WAL) detrás de Nginx TLS con visores locales de ofimática (`.xlsx`, `.docx`, `.pptx`), terminal PTY por usuario (`tmux`), CLI unificado (`nas`), TUI (`nas-tui`) y orquestador multi-host (`nasctl`).
+- **Operación 100% offline y consumo mínimo:** binario único `nas-web` (`axum` + SQLite WAL) detrás de Nginx TLS con visores locales de ofimática (`.xlsx`, `.docx`, `.pptx`) e inspector de comprimidos (`.rar` vía WASM local, `.zip`), terminal PTY por usuario (`tmux`), CLI unificado (`nas`), TUI (`nas-tui`) y orquestador multi-host (`nasctl`).
 - **Seguridad por mínimo privilegio:** el panel web corre como usuario sin privilegios (`nas-web`) delegando acciones privilegiadas a 7 helpers acotados en `sudoers`, con auditoría encadenada SHA-256 (`nas-audit`) y protección en código del disco del sistema operativo (`is_os_disk()`).
 
 ---
