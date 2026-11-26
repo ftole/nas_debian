@@ -19,7 +19,7 @@
 - **Críticos:** `0` activos (`DT-C01`–`DT-C07` y `C-01`–`C-03` resueltos)
 - **Altos:** `0` activos (`DT-A01`–`DT-A20` resueltos; `DT-A10` acota RAM en `backup_dedup.rs`; `DT-A21` reducido a bloques BATS retrocompatibles)
 - **Medios:** `0` activos (`DT-M01`–`DT-M15` resueltos; `tasks/runner.rs` y `backup_spec/render.rs` coexisten intencionalmente por roles distintos)
-- **Bajos / Deuda Estructural:** `2` parciales (`DT-B01` restante en HTML/JS y `backup_dedup.rs`; `DT-B05` nomenclatura `Arquivos` / `legacy.rs`; `DT-B07` cobertura JS/E2E) y `DT-B08` ampliado (`nas-tui`, `nasctl`, `nas-dev`, `nas-cli`)
+- **Bajos / Deuda Estructural:** `4` parciales (`DT-B01` restante en HTML/JS y `backup_dedup.rs`; `DT-B05` nomenclatura `Arquivos` / `legacy.rs`; `DT-B07` cobertura JS/E2E; `DT-B08` ampliado en `nas-tui`, `nasctl`, `nas-dev` y `nas-cli`)
 
 ---
 
@@ -94,7 +94,7 @@
 
 ### `DT-B01` — Archivos sobredimensionados (>450 líneas)
 - *Ya modularizados en submódulos:* `nas-core/src/resources.rs` (`parsers.rs`, `cgroup.rs`, `tests.rs`), `security/acls.rs` (`probe.rs`, `discover.rs`), `helpers/backup/install.rs` (`install/tests.rs`), `storage_ops.rs` (`maintenance.rs`, `tests.rs`), `routes/files/mutations.rs` (`upload.rs`), además de `security.rs`, `storage.rs`, `helpers/storage.rs`, `update.rs`, `helpers/backup.rs`, `helpers/accounts.rs`, `commands/update.rs` y `routes/system.rs`.
-- *Pendientes de modularización futura:* `crates/nas-web/templates/layout.html` (**3,591** líneas), `assets/js/app.js` (**818** líneas), `crates/nas-engine/src/backup_dedup.rs` (**2,889** líneas), `src/core/{updater,deploy}.sh` y `scripts/qa_live_runner.py`.
+- *Pendientes de modularización futura:* `crates/nas-web/templates/layout.html` (**3,591** líneas), `assets/js/app.js` (**823** líneas), `crates/nas-engine/src/backup_dedup.rs` (**3,028** líneas), `src/core/{updater,deploy}.sh` y `scripts/qa_live_runner.py`.
 
 ### `DT-B02` a `DT-B08` — Código muerto, restos PHP/Whiptail y deuda de pruebas
 - **`DT-B02` [RESUELTO]:** retirados los aliases triviales sin uso en `deploy/{helpers.rs, samba.rs, samba/wsdd2.rs}` y migrados los llamadores en `commands/deploy.rs`.
