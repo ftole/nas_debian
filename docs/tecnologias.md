@@ -7,7 +7,7 @@
 
 ## 1. Núcleo de Plataforma y Lenguaje Rust
 
-La plataforma actual (`0.1.13`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
+La plataforma actual (`0.1.14`) se ejecuta de forma nativa en **Rust** (edición 2021, versión mínima `1.80`, política `#![forbid(unsafe_code)]` en todo el workspace). La elección de Rust elimina intérpretes y demonios pesados en tiempo de ejecución: el servidor web, el CLI y el asistente visual consumen memoria mínima en reposo y validan tipos antes de tocar disco o red.
 
 | Tecnología / Crate | Qué Significa | Qué Problema Resuelve y Beneficio Práctico |
 | :--- | :--- | :--- |
@@ -44,9 +44,9 @@ Cada servidor se optimiza según el **rol** asignado (`ARCHIVOS`, `BACKUP`, `ARC
 
 | Tecnología | Qué Significa y Qué Hace | Beneficio Práctico |
 | :--- | :--- | :--- |
-| **`ext4` optimizado** | *Fourth Extended Filesystem* (Sistema de Archivos Extendido 4) | Usado por defecto en el rol **`ARCHIVOS`**. Configura `noatime` (evita escrituras al leer), `commit=5,errors=remount-ro` (equilibrio entre durabilidad ante apagones y desgaste en flash consumidor), y `tune2fs -m 1` para recuperar el 4% de espacio reservado al superusuario. |
+| **`ext4` optimizado** | *Fourth Extended Filesystem* (Sistema de Archivos Extendido 4) | Usado por defecto en el rol **`ARCHIVOS`**. Configura `noatime` (evita escrituras al leer), `commit=5,errors=remount-ro` (equilibrio entre durabilidad ante apagones y desgaste en flash consumidor) y `mkfs.ext4 -F -m 1` para reservar solo 1% al superusuario. |
 | **`Btrfs` + `zstd:3`** | *B-tree File System* (Sistema de Archivos Árbol-B) + compresión *Zstandard* | Usado por defecto en **`BACKUP`** y **`ARCHIVOS_BACKUP`**. Activa `compress=zstd:3` y `space_cache=v2` (ahorro físico típico del 20% al 40%), `ssd` sin `discard=async` continuo (TRIM periódico vía `fstrim.timer`), sin `autodefrag` para evitar amplificación CoW sobre snapshots/hardlinks, y sumas de comprobación bloque a bloque. |
-| **`btrfs scrub` mensual** | Verificación de integridad física en Btrfs | Tarea programada en `/etc/cron.d/nas-btrfs-scrub` (día 1 de cada mes a las 02:00) para detectar y corregir corrupción silenciosa (*Bit Rot* — degradación silenciosa de bits en disco). |
+| **`btrfs scrub` mensual** | Verificación de integridad física en Btrfs | Tarea programada en `/etc/cron.d/nas-btrfs-scrub` (día 1 de cada mes a las 02:00 para `/srv/nas`) y `/etc/cron.d/nas-btrfs-scrub-unit-<id>` (día 1 a las 03:00 para unidades adicionales) para detectar y corregir corrupción silenciosa (*Bit Rot* — degradación silenciosa de bits en disco). |
 | **LVM (*Logical Volume Manager*)** | Administrador de Volúmenes Lógicos (`pvcreate`, `vgcreate`, `lvcreate`) | Permite crear y ampliar volúmenes lógicos y subvolúmenes Btrfs directamente desde la vista de Almacenamiento del panel web. |
 | **`fstrim.timer`** | Descarte periódico de bloques libres (*TRIM*) | Mantiene la velocidad sostenida de escritura y prolonga la vida útil en SSD y NVMe (*Non-Volatile Memory Express*). |
 | **Guardián `is_os_disk()` en Rust** | Verificación en código de dispositivos raíz y `/boot` | Reemplaza el antiguo uso de reglas `udisks2` (`80-udisks2-hide-os.rules` ya no se despliega ni instala). `nas-engine` impide formatear o reparticionar el disco del sistema operativo desde CLI y Web. |
