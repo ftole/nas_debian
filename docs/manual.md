@@ -131,6 +131,12 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 | **Semanal (Manual)** | Respaldo de estado del panel | Copia segura de `/var/lib/nas/nas.sqlite`, `/etc/nas/`, `/etc/samba/smb.conf` y `/etc/cron.d/backup_*` | Permite restaurar configuración, usuarios web y tareas cron ante fallo de disco raíz. |
 | **Mensual (Manual)** | Verificación de auditoría y actualización | `nas audit verify` y `sudo nas update apply` | Comprueba integridad SHA-256 de la bitácora y aplica parches firmados `Ed25519`. |
 
+### 4.1 Explorador de Archivos, Papelera y Eliminación Privilegiada (`/dashboard#files`)
+
+* **Modos de eliminación (para `admin` y `superadmin`):** además del borrado estándar, el botón de candado (`root`/`sudo`) permite elegir entre **Mover a la papelera (`.trash`)** o **Eliminar permanentemente del disco** (`SI-ELIMINAR`), sin modificar permisos, ACLs ni ejecutar `chattr -R -i`.
+* **Alcance en carpetas y respaldos:** habilitado dentro de carpetas compartidas, unidades (`/srv/nas/unidades/<id>/`) y archivos/subcarpetas **dentro** de `BACKUPS_HISTORICOS/...` y `BACKUPS_PERMANENTES/...` (para limpiar copias erróneas). Las carpetas raíz `BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`, `.nas_staging`, `.tmp_zip` y `.trash` permanecen estrictamente bloqueadas.
+* **Gestión en Papelera (`.trash`):** los elementos enviados con privilegios muestran la insignia `Privilegiado` y se restauran, purgan o vacían con las mismas credenciales `root`/`sudo` desde la vista Papelera.
+
 ### 4.1 Parámetros de Montaje y Verificación Rápida en Consola
 
 * **Opciones de montaje aplicadas por rol y hardware:**
