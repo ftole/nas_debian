@@ -32,6 +32,8 @@ async function previewFile(relPath, fileName) {
   const spreadsheetContainer = document.getElementById('preview-spreadsheet-container');
   const docxContainer = document.getElementById('preview-docx-container');
   const pptxContainer = document.getElementById('preview-pptx-container');
+  const archiveContainer = document.getElementById('preview-archive-container');
+  const archiveBackbar = document.getElementById('preview-archive-backbar');
 
   const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
   const meta = getFileTypeMeta({ name: fileName, is_dir: false });
@@ -90,9 +92,11 @@ async function previewFile(relPath, fileName) {
   if (editorEl) editorEl.style.display = 'none';
 
   // Ocultar todos los contenedores y mostrar cargando
-  [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer, spreadsheetContainer, docxContainer, pptxContainer].forEach(c => {
+  [codeContainer, imgContainer, pdfContainer, mediaContainer, binaryContainer, spreadsheetContainer, docxContainer, pptxContainer, archiveContainer].forEach(c => {
     if (c) c.style.display = 'none';
   });
+  if (archiveBackbar) archiveBackbar.style.display = 'none';
+  ArchiveInspector.current = null;
   if (loading) loading.style.display = 'flex';
 
   openModal('modal-file-preview');
@@ -431,6 +435,12 @@ async function previewFile(relPath, fileName) {
       }
     }
     if (metaEl) metaEl.textContent = `${sizeFormatted ? sizeFormatted + ' • ' : ''}Documento ${ext.toUpperCase()} (Heredado)`;
+    return;
+  }
+
+  // 7.5 Inspector de Archivos Comprimidos (.rar vía WASM local / .zip vía JSZip)
+  if (['rar', 'zip', 'jar'].includes(ext)) {
+    await previewArchiveFile(fileName, relPath, ext, sizeFormatted);
     return;
   }
 
