@@ -35,6 +35,8 @@ pub struct TrashEntry {
     pub size_formatted: String,
     /// Marca de borrado (`YYYY-MM-DD HH:MM:SS`).
     pub deleted_at: String,
+    /// Indica si requiere credenciales privilegiadas (`root`/`sudo`) para purgar o restaurar.
+    pub privileged: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -49,6 +51,8 @@ struct TrashMetaRecord {
     deleted_at: String,
     #[serde(default)]
     size_bytes: Option<u64>,
+    #[serde(default)]
+    privileged: bool,
 }
 
 impl FileRoot {
@@ -164,6 +168,8 @@ impl FileRoot {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
                 .unwrap_or_else(|| format_trash_stamp(stamp));
+            let privileged = meta.as_ref().is_some_and(|m| m.privileged)
+                || self.is_protected_path(&original_path).is_some();
 
             entries.push(TrashEntry {
                 id,
@@ -175,6 +181,7 @@ impl FileRoot {
                 size,
                 size_formatted: human_size(size),
                 deleted_at,
+                privileged,
             });
         }
         entries.sort_by(|a, b| {
@@ -284,12 +291,30 @@ impl FileRoot {
     /// Elimina definitivamente un elemento de la papelera.
     pub fn delete_trash(&self, id: &str) -> NasResult<()> {
         let (real_id, path) = self.resolve_trash_entry(id)?;
-        let result = if path.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|e| NasError::io(&path, e))
-        } else {
-            std::fs::remove_file(&path).map_err(|e| NasError::io(&path, e))
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| NasError::io(&path, e))?;
+        let map_err = |e: std::io::Error| {
+            if e.raw_os_error() == Some(1) {
+                NasError::Denied(
+                    "operación no permitida (EPERM): el elemento en papelera es inmutable o de solo lectura".into(),
+                )
+            } else if e.kind() == std::io::ErrorKind::PermissionDenied
+                || e.raw_os_error() == Some(13)
+            {
+                NasError::Denied(
+                    "permiso denegado: el elemento en papelera requiere credenciales privilegiadas (root/sudo)".into(),
+                )
+            } else {
+                NasError::io(&path, e)
+            }
         };
-        let _ = self.remove_trash_meta(&real_id);
+        let result = if meta.file_type().is_symlink() || !meta.is_dir() {
+            std::fs::remove_file(&path).map_err(map_err)
+        } else {
+            std::fs::remove_dir_all(&path).map_err(map_err)
+        };
+        if result.is_ok() {
+            let _ = self.remove_trash_meta(&real_id);
+        }
         result
     }
 
@@ -317,6 +342,7 @@ impl FileRoot {
             },
             deleted_at: deleted_at.to_string(),
             size_bytes: None,
+            privileged: false,
         };
         let json = serde_json::to_string(&record)
             .map_err(|e| NasError::Invalid(format!("metadatos de papelera: {e}")))?;
@@ -351,16 +377,28 @@ impl FileRoot {
         }
     }
 
-    /// Vacía la papelera completa.
-    pub fn empty_trash(&self) -> NasResult<u32> {
+    /// Vacía la papelera omitiendo elementos privilegiados y devuelve `(eliminados, omitidos_privilegiados)`.
+    pub fn empty_trash_detailed(&self) -> NasResult<(u32, u32)> {
         let entries = self.trash_entries()?;
-        let mut removed = 0;
+        let mut removed = 0u32;
+        let mut skipped_privileged = 0u32;
         for entry in entries {
-            if self.delete_trash(&entry.id).is_ok() {
-                removed += 1;
+            if entry.privileged {
+                skipped_privileged += 1;
+                continue;
+            }
+            match self.delete_trash(&entry.id) {
+                Ok(()) => removed += 1,
+                Err(NasError::Denied(_)) => skipped_privileged += 1,
+                Err(_) => {}
             }
         }
-        Ok(removed)
+        Ok((removed, skipped_privileged))
+    }
+
+    /// Vacía la papelera completa (elementos no privilegiados).
+    pub fn empty_trash(&self) -> NasResult<u32> {
+        self.empty_trash_detailed().map(|(removed, _)| removed)
     }
 
     fn resolve_trash_entry(&self, id: &str) -> NasResult<(String, PathBuf)> {
@@ -565,6 +603,40 @@ mod trash_tests {
             );
         }
 
+        let _ = std::fs::remove_dir_all(root.root());
+    }
+
+    #[test]
+    fn empty_trash_detailed_omite_entradas_privilegiadas() {
+        let root = root("empty-priv-skip");
+        root.write("DOCS/normal.txt", "a").expect("write normal");
+        root.write("DOCS/priv.txt", "b").expect("write priv");
+        root.trash("DOCS/normal.txt").expect("trash normal");
+        root.trash("DOCS/priv.txt").expect("trash priv");
+
+        let entries = root.trash_entries().expect("entries");
+        assert_eq!(entries.len(), 2);
+        let priv_entry = entries.iter().find(|e| e.filename == "priv.txt").unwrap();
+        let meta_path = root.root().join(".trash/.meta").join(&priv_entry.id);
+        std::fs::write(
+            &meta_path,
+            serde_json::json!({
+                "original_path": "BACKUPS_HISTORICOS/t1/priv.txt",
+                "filename": "priv.txt",
+                "deleted_by": "admin",
+                "deleted_at": "2026-01-01 00:00:00",
+                "privileged": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let (removed, skipped) = root.empty_trash_detailed().expect("empty_trash_detailed");
+        assert_eq!(removed, 1);
+        assert_eq!(skipped, 1);
+        let remaining = root.trash_entries().expect("remaining");
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].privileged);
         let _ = std::fs::remove_dir_all(root.root());
     }
 }
