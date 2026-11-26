@@ -85,6 +85,9 @@ pub enum HelperAction {
     /// Repara runners y lanza (una sola vez) la migración de deduplicación de respaldos.
     #[command(alias = "backup_dedup_migration")]
     BackupDedupMigration,
+    /// Elimina un archivo o carpeta con credenciales privilegiadas (root/sudo) vía stdin.
+    #[command(alias = "files_delete")]
+    FilesDelete,
 }
 
 /// Subcomandos de gestión de cuentas (`nas helper accounts`).
