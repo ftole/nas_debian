@@ -74,6 +74,26 @@ fn helper_files_delete_rechaza_json_invalido_y_rutas_protegidas() {
     assert!(!output.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
     assert_eq!(payload["success"], false);
+
+    let mut child_purge = nas()
+        .args(["--json", "helper", "files-delete"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child_purge
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"action":"purge_trash","trash_id":"../escape","auth_user":"root","auth_password":"x"}"#,
+        )
+        .unwrap();
+    let purge_out = child_purge.wait_with_output().expect("wait");
+    assert!(!purge_out.status.success());
+    let purge_payload: serde_json::Value = serde_json::from_slice(&purge_out.stderr).expect("json");
+    assert_eq!(purge_payload["success"], false);
 }
 
 #[test]
