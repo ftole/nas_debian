@@ -2996,9 +2996,46 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           </label>
         </div>
       </div>
+      <div class="modal-footer" style="justify-content:space-between;">
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-switch-priv-delete" onclick="switchToPrivilegedDelete()" title="Eliminar usando credenciales root o sudo">
+          <svg class="icon" style="color:var(--accent-danger);"><use href="#icon-lock"></use></svg> Con privilegios (root/sudo)
+        </button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-file')">Cancelar</button>
+          <button type="button" class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDeleteFile()">Proceder</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Eliminación Privilegiada (root / sudo) -->
+  <div class="modal-backdrop modal-static" id="modal-privileged-delete">
+    <div class="modal-dialog" style="max-width:480px;">
+      <div class="modal-header">
+        <h3><svg class="icon" style="color:var(--accent-danger);"><use href="#icon-lock"></use></svg> Eliminar con privilegios (root / sudo)</h3>
+        <button class="modal-close" onclick="closeModal('modal-privileged-delete')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="priv-delete-path">
+        <input type="hidden" id="priv-delete-name">
+        <p style="margin-top:0;">Se eliminará de forma permanente sin modificar permisos ni ACLs:</p>
+        <div id="priv-delete-path-label" style="background:var(--bg-body); padding:8px 12px; border-radius:6px; font-family:var(--font-mono); font-size:12px; margin-bottom:12px; border:1px solid var(--border-color); word-break:break-all;"></div>
+        <div class="form-group">
+          <label for="priv-delete-user">Usuario del sistema (<code>root</code> o con permiso <code>sudo</code>)</label>
+          <input type="text" id="priv-delete-user" class="form-control" placeholder="root" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="priv-delete-password">Contraseña del sistema</label>
+          <input type="password" id="priv-delete-password" class="form-control" placeholder="Contraseña del usuario" autocomplete="new-password">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label for="priv-delete-confirm">Confirmación textual (escribe <code>SI-ELIMINAR</code>)</label>
+          <input type="text" id="priv-delete-confirm" class="form-control" placeholder="SI-ELIMINAR" autocomplete="off">
+        </div>
+      </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-delete-file')">Cancelar</button>
-        <button type="button" class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDeleteFile()">Proceder</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-privileged-delete')">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-priv-delete" onclick="confirmPrivilegedDeleteFile()">Eliminar con privilegios</button>
       </div>
     </div>
   </div>
