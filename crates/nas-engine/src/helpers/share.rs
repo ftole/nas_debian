@@ -8,7 +8,7 @@ use nas_exec::{CommandSpec, Runner};
 
 mod privileged_delete;
 pub use privileged_delete::{
-    is_valid_os_username, privileged_delete_file, PrivilegedDeleteRequest,
+    is_valid_os_username, privileged_delete_file, PrivilegedDeleteRequest, PrivilegedFileAction,
 };
 
 /// Valida el nombre de un recurso compartido (`^[A-Za-z0-9_-]{1,32}\$?$`).
