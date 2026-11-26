@@ -324,6 +324,10 @@ notifications-drawer
 notifications-list
 perm-matrix-container
 perms-search
+preview-archive-backbar
+preview-archive-container
+preview-archive-summary
+preview-archive-tbody
 preview-audio-element
 preview-binary-container
 preview-binary-details
