@@ -99,15 +99,20 @@ function renderFileGrid(items) {
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
       : `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
 
-    const canPrivDelete = !isProtected && window.NAS_IS_ADMIN !== false;
+    const canPrivDelete = typeof canPrivilegedDeletePath === 'function'
+      ? canPrivilegedDeletePath(relPath)
+      : (!isProtected && window.NAS_IS_ADMIN !== false);
+    const privDeleteBtn = canPrivDelete
+      ? `<button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'privileged-delete')" title="Eliminar o enviar a papelera con privilegios (root/sudo)"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-lock"></use></svg></button>`
+      : '';
     const writeActions = !isProtected
       ? `
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
           <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
-          ${canPrivDelete ? `<button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'privileged-delete')" title="Eliminar con privilegios (root/sudo)"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-lock"></use></svg></button>` : ''}
+          ${privDeleteBtn}
         `
-      : '';
+      : privDeleteBtn;
 
     return `
       <div class="file-card ${isDir ? 'is-folder' : ''} ${isSelected ? 'selected' : ''}"
@@ -229,9 +234,12 @@ function renderFileTable(items) {
       ? `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'download')" title="Descargar carpeta como ZIP"><svg class="icon"><use href="#icon-download"></use></svg></button>`
       : `<button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'download')" title="Descargar archivo"><svg class="icon"><use href="#icon-download"></use></svg></button>`;
 
-    const ownerStr = escapeHtml(item.owner || 'sistemas');
-    const groupStr = escapeHtml(item.group || 'grp_samba');
-    const modStr = escapeHtml(item.modified_at || item.mtime || 'N/A');
+    const canPrivDeleteRow = typeof canPrivilegedDeletePath === 'function'
+      ? canPrivilegedDeletePath(relPath)
+      : (!isProtected && window.NAS_IS_ADMIN !== false);
+    const privRowAction = canPrivDeleteRow
+      ? `<button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'privileged-delete')" title="Eliminar o enviar a papelera con privilegios (root/sudo)"><svg class="icon"><use href="#icon-lock"></use></svg></button>`
+      : '';
 
     return `
       <tr class="file-table-row ${isSelected ? 'selected' : ''}"
@@ -262,8 +270,8 @@ function renderFileTable(items) {
               <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
               <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
               <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
-              ${window.NAS_IS_ADMIN !== false ? `<button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'privileged-delete')" title="Eliminar con privilegios (root/sudo)"><svg class="icon"><use href="#icon-lock"></use></svg></button>` : ''}
             ` : ''}
+            ${privRowAction}
           </div>
         </td>
       </tr>
