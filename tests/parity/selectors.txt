@@ -88,6 +88,7 @@ btn-confirm-audit-btrfs
 btn-confirm-delete
 btn-confirm-empty-trash
 btn-confirm-pool-action
+btn-confirm-priv-delete
 btn-confirm-reboot
 btn-confirm-restore-all
 btn-confirm-run-backup
@@ -137,6 +138,7 @@ btn-submit-rename-file
 btn-submit-rename-group
 btn-submit-restore-backup
 btn-submit-storage
+btn-switch-priv-delete
 btn-test-backup
 btn-test-edit-backup
 btn-trim-storage
@@ -352,6 +354,12 @@ preview-spreadsheet-container
 preview-spreadsheet-stats
 preview-spreadsheet-table-container
 preview-video-element
+priv-delete-confirm
+priv-delete-name
+priv-delete-password
+priv-delete-path
+priv-delete-path-label
+priv-delete-user
 rename-file-newname
 rename-file-oldpath
 rename-group-new
