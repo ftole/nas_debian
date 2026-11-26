@@ -1,7 +1,7 @@
 # Seguridad y Endurecimiento del Sistema
 
 > [!IMPORTANT]
-> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento manual obligatorio sobre Debian 13** que el administrador debe aplicar en el servidor, y **(3) riesgos/brechas abiertas** sobre la plataforma actual (`v0.1.13`; detalle completo en [docs/deuda_tecnica.md](./deuda_tecnica.md)).
+> Este documento distingue de forma estricta entre **(1) controles automatizados ya implementados en el código y empaquetado**, **(2) endurecimiento bajo demanda sobre Debian 13** que el administrador puede aplicar en el servidor, y **(3) riesgos/brechas abiertas** sobre la plataforma actual (`v0.1.14`; detalle completo en [docs/deuda_tecnica.md](./deuda_tecnica.md)).
 
 ![Modelo de Seguridad en Profundidad](./assets/modelo_seguridad.svg)
 
@@ -28,7 +28,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 
 ### 1.2 Aislamiento XSS en Visores y Transporte HTTP
 
-- **Cabeceras Nginx y Middleware `nas-web` (`lib.rs` y `packaging/nginx-nas-web.conf`):** TLS 1.2/1.3, `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`), `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` y `Permissions-Policy`.
+- **Cabeceras Nginx y Middleware `nas-web` (`lib.rs` y `packaging/nginx-nas-web.conf`):** TLS 1.2/1.3, `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'`, donde `'unsafe-inline'` corresponde a los manejadores locales de Slate UI), `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` y `Permissions-Policy`.
 - **Aislamiento de descargas directas (`/api/files/raw`):** responde con `Content-Security-Policy: default-src 'none'; sandbox` y `X-Content-Type-Options: nosniff`, impidiendo que archivos HTML/SVG subidos por usuarios puedan ejecutar JavaScript bajo el origen del panel.
 - **Sanitizador DOM en cliente para hojas `.xlsx`:** en `crates/nas-web/assets/js/modules/files/viewers.js`, la tabla HTML generada por SheetJS pasa por un limpiador DOM basado en lista blanca estricta de etiquetas (`table`, `thead`, `tbody`, `tr`, `th`, `td`, etc.) y atributos seguros, bloqueando `<script>`, `<iframe>` y manejadores `on*`.
 - **Protección anti *Path Traversal*:** `FileRoot::resolve` verifica rutas canónicas dentro de `/srv/nas` antes de leer, subir, comprimir o eliminar archivos.
@@ -49,7 +49,7 @@ Implementados en `crates/nas-web/src/auth.rs`, `db.rs` y `extractors.rs`:
 
 ### 1.4 Kernel, Samba, Auditoría y Actualizaciones Firmadas
 
-- **Kernel (`packaging/99-nas-tuning.conf` y `packaging/99-nas-journald.conf`):** activa `net.ipv4.conf.*.rp_filter=2` (modo laxo RFC 3704, compatible con múltiples interfaces/VLANs), `net.ipv4.tcp_syncookies=1`, `vm.vfs_cache_pressure=100`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2`, desactiva IPv6 (`disable_ipv6=1`), enmascara objetivos de suspensión/hibernación (`sleep.target`) y limita `systemd-journald` a `SystemMaxUse=256M`.
+- **Kernel (`packaging/99-nas-tuning.conf` y `packaging/99-nas-journald.conf` → `/etc/systemd/journald.conf.d/99-nas-limits.conf`):** activa `net.ipv4.conf.*.rp_filter=2` (modo laxo RFC 3704, compatible con múltiples interfaces/VLANs), `net.ipv4.tcp_syncookies=1`, `vm.vfs_cache_pressure=100`, `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, `kernel.yama.ptrace_scope=2`, desactiva IPv6 (`disable_ipv6=1`), enmascara objetivos de suspensión/hibernación (`sleep.target`) y limita `systemd-journald` a `SystemMaxUse=256M`.
 - **Samba 4:** `server min protocol = SMB2_10`, `server max protocol = SMB3_11`, `server signing = mandatory`, `smb encrypt = desired`, `map to guest = Bad User`, directorios de respaldo `2770` (`BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`, con soporte para recursos ocultos `$`) y permisos POSIX `2770` + `default ACL`.
 - **Auditoría triple:**
   1. `web_audit` en SQLite con usuario e IP de origen (`origin_ip`).
@@ -79,7 +79,7 @@ Los comandos concretos para verificación o endurecimiento adicional (`nas secur
 
 ---
 
-## 3. Estado de Brechas y Riesgos Operativos (`v0.1.13`)
+## 3. Estado de Brechas y Riesgos Operativos (`v0.1.14`)
 
 La auditoría inicial sobre `0f7a272` ([docs/auditoria.md](./auditoria.md)) registró hallazgos críticos resueltos en `v0.1.11`–`v0.1.12` (`system_update_run` vía `systemd-run`, unificación de plantillas `packaging/` ↔ `deploy/` vía `include_str!`, `su root grp_samba` en `logrotate`, actualización de `web_users` en `packaging/install.sh` y sincronización post-update).
 
