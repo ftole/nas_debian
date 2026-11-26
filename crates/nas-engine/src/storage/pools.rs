@@ -124,8 +124,8 @@ pub fn is_path_on_os_disk(runner: &Runner, path: &Path) -> bool {
             .is_some();
     };
     let tgt_clean = clean_block_source(&tgt_src);
-    if let Ok(is_os) = crate::helpers::storage::is_os_disk(runner, tgt_clean) {
-        return is_os;
+    if crate::helpers::storage::is_os_disk(runner, tgt_clean).unwrap_or(false) {
+        return true;
     }
     let os_source = findmnt_value(runner, "/", "SOURCE")
         .or_else(|| mount_source_from_proc_mounts(Path::new("/")));
