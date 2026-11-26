@@ -221,25 +221,33 @@ pub fn is_superadmin_from_sources(
     configured_super == Some(username) || db_role == Some("superadmin") || in_superadmin_group
 }
 
-/// Comprueba membresía POSIX en `grp_superadmin`.
+fn is_member_in_group_text(group_text: &str, group_name: &str, username: &str) -> bool {
+    group_text.lines().any(|line| {
+        let mut parts = line.split(':');
+        if parts.next() != Some(group_name) {
+            return false;
+        }
+        parts
+            .nth(2)
+            .is_some_and(|members| members.split(',').any(|m| m.trim() == username))
+    })
+}
+
+/// Comprueba membresía POSIX en `grp_superadmin` leyendo `/etc/group`.
 pub fn is_in_superadmin_group(username: &str) -> bool {
-    let (_, groups) = nas_engine::users::load_local();
-    groups
-        .into_iter()
-        .find(|g| g.name == "grp_superadmin")
-        .is_some_and(|g| g.members.iter().any(|m| m == username))
+    let Ok(group_text) = std::fs::read_to_string("/etc/group") else {
+        return false;
+    };
+    is_member_in_group_text(&group_text, "grp_superadmin", username)
 }
 
 /// Resuelve el rol efectivo (`"superadmin"`, `"admin"`, `"operator"`, ...) de forma homogénea.
 pub fn resolve_effective_role(db: &crate::db::Db, username: &str) -> String {
     let configured = configured_superadmin();
     let db_role = db.user_role(username).ok().flatten();
-    if is_superadmin_from_sources(
-        username,
-        configured.as_deref(),
-        db_role.as_deref(),
-        is_in_superadmin_group(username),
-    ) {
+    if is_superadmin_from_sources(username, configured.as_deref(), db_role.as_deref(), false)
+        || is_in_superadmin_group(username)
+    {
         "superadmin".to_string()
     } else {
         db_role.unwrap_or_else(|| "operator".to_string())
@@ -360,7 +368,16 @@ pub struct ExtQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::is_superadmin_from_sources;
+    use super::{is_member_in_group_text, is_superadmin_from_sources};
+
+    #[test]
+    fn is_member_in_group_text_detecta_miembros() {
+        let group = "root:x:0:\ngrp_superadmin:x:1002:alice,bob\n";
+        assert!(is_member_in_group_text(group, "grp_superadmin", "alice"));
+        assert!(is_member_in_group_text(group, "grp_superadmin", "bob"));
+        assert!(!is_member_in_group_text(group, "grp_superadmin", "charlie"));
+        assert!(!is_member_in_group_text(group, "grp_admin", "alice"));
+    }
 
     #[test]
     fn is_superadmin_from_sources_respeta_tres_origenes() {
