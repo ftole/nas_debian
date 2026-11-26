@@ -1,4 +1,9 @@
 
+function effectiveTrashRoot() {
+  const r = AppState.files?.root || 'nas';
+  return r === 'backups' ? 'nas' : r;
+}
+
 function openDeleteModal(relPath, name) {
   const pathInput = document.getElementById('delete-file-path');
   const label = document.getElementById('delete-file-name-label');
@@ -15,42 +20,147 @@ function switchToPrivilegedDelete() {
   const path = document.getElementById('delete-file-path')?.value || '';
   const nameLabel = document.getElementById('delete-file-name-label')?.textContent || '';
   const name = nameLabel.replace(/^"|"$/g, '') || path;
+  const isPermanent = document.getElementById('del-mode-permanent')?.checked === true;
   closeModal('modal-delete-file');
-  openPrivilegedDeleteModal(path, name);
+  openPrivilegedDeleteModal(path, name, isPermanent ? 'permanent' : 'trash');
 }
 
-function openPrivilegedDeleteModal(relPath, name) {
+function updatePrivilegedDeleteModeUi() {
+  const ctx = document.getElementById('priv-delete-context')?.value || 'file';
+  const modeGroup = document.getElementById('priv-delete-mode-group');
+  const confirmGroup = document.getElementById('priv-delete-confirm-group');
+  const confirmBtn = document.getElementById('btn-confirm-priv-delete');
+  const titleEl = document.getElementById('priv-delete-title');
+  const descEl = document.getElementById('priv-delete-desc');
+  const isPerm = document.getElementById('priv-mode-permanent')?.checked === true;
+
+  if (ctx === 'file') {
+    if (modeGroup) modeGroup.style.display = 'flex';
+    if (confirmGroup) confirmGroup.style.display = isPerm ? 'block' : 'none';
+    if (titleEl) titleEl.textContent = 'Eliminar con privilegios (root / sudo)';
+    if (descEl) {
+      descEl.textContent = isPerm
+        ? 'Se eliminará permanentemente del disco sin modificar permisos ni ACLs:'
+        : 'Se moverá a la papelera confinada (.trash) sin modificar permisos ni ACLs:';
+    }
+    if (confirmBtn) {
+      confirmBtn.textContent = isPerm
+        ? 'Eliminar permanentemente'
+        : 'Mover a papelera con privilegios';
+    }
+  } else if (ctx === 'trash-delete') {
+    if (modeGroup) modeGroup.style.display = 'none';
+    if (confirmGroup) confirmGroup.style.display = 'block';
+    if (titleEl) titleEl.textContent = 'Purgar de papelera (root / sudo)';
+    if (descEl) descEl.textContent = 'Se eliminará definitivamente de la papelera (.trash) sin modificar permisos ni ACLs:';
+    if (confirmBtn) confirmBtn.textContent = 'Eliminar definitivamente';
+  } else if (ctx === 'trash-restore') {
+    if (modeGroup) modeGroup.style.display = 'none';
+    if (confirmGroup) confirmGroup.style.display = 'none';
+    if (titleEl) titleEl.textContent = 'Restaurar con privilegios (root / sudo)';
+    if (descEl) descEl.textContent = 'Se restaurará a su ubicación original conservando permisos y atributos:';
+    if (confirmBtn) confirmBtn.textContent = 'Restaurar con privilegios';
+  } else if (ctx === 'trash-empty') {
+    if (modeGroup) modeGroup.style.display = 'none';
+    if (confirmGroup) confirmGroup.style.display = 'block';
+    if (titleEl) titleEl.textContent = 'Vaciar papelera con privilegios (root / sudo)';
+    if (descEl) descEl.textContent = 'Se eliminarán definitivamente todos los elementos de la papelera (.trash):';
+    if (confirmBtn) confirmBtn.textContent = 'Vaciar papelera con privilegios';
+  }
+}
+
+function openPrivilegedDeleteModal(relPath, name, defaultMode = 'trash') {
   if (!relPath) return;
-  if (isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath)) {
-    showToast('Los respaldos históricos y rutas del sistema están protegidos contra eliminación.', 'warning');
+  const allowed = typeof canPrivilegedDeletePath === 'function'
+    ? canPrivilegedDeletePath(relPath)
+    : (!isProtectedFilePath(relPath) && !isProtectedFilePath(AppState.files.currentPath));
+  if (!allowed) {
+    showToast('Las carpetas raíz de respaldo, LOGS_BACKUP y áreas del sistema están protegidas contra eliminación.', 'warning');
     return;
   }
   const pathInput = document.getElementById('priv-delete-path');
   const nameInput = document.getElementById('priv-delete-name');
+  const ctxInput = document.getElementById('priv-delete-context');
+  const trashIdInput = document.getElementById('priv-delete-trash-id');
   const label = document.getElementById('priv-delete-path-label');
   const userInput = document.getElementById('priv-delete-user');
   const pwInput = document.getElementById('priv-delete-password');
   const confirmInput = document.getElementById('priv-delete-confirm');
+  const radioTrash = document.getElementById('priv-mode-trash');
+  const radioPerm = document.getElementById('priv-mode-permanent');
+
   if (pathInput) pathInput.value = relPath;
   if (nameInput) nameInput.value = name || relPath;
+  if (ctxInput) ctxInput.value = 'file';
+  if (trashIdInput) trashIdInput.value = '';
   if (label) label.textContent = `${AppState.files.root || 'nas'}:/${relPath}`;
   if (userInput) userInput.value = '';
   if (pwInput) pwInput.value = '';
   if (confirmInput) confirmInput.value = '';
+  if (defaultMode === 'permanent') {
+    if (radioPerm) radioPerm.checked = true;
+  } else if (radioTrash) {
+    radioTrash.checked = true;
+  }
+  updatePrivilegedDeleteModeUi();
   openModal('modal-privileged-delete');
 }
 
+function openPrivilegedTrashModal(action, id, labelText) {
+  if (window.NAS_IS_ADMIN === false) {
+    showToast('Esta operación requiere privilegios de administrador.', 'warning');
+    return;
+  }
+  const pathInput = document.getElementById('priv-delete-path');
+  const nameInput = document.getElementById('priv-delete-name');
+  const ctxInput = document.getElementById('priv-delete-context');
+  const trashIdInput = document.getElementById('priv-delete-trash-id');
+  const label = document.getElementById('priv-delete-path-label');
+  const userInput = document.getElementById('priv-delete-user');
+  const pwInput = document.getElementById('priv-delete-password');
+  const confirmInput = document.getElementById('priv-delete-confirm');
+
+  const ctxMap = {
+    delete: 'trash-delete',
+    restore: 'trash-restore',
+    empty: 'trash-empty',
+  };
+  if (pathInput) pathInput.value = '';
+  if (nameInput) nameInput.value = labelText || id || 'Papelera completa';
+  if (ctxInput) ctxInput.value = ctxMap[action] || 'trash-delete';
+  if (trashIdInput) trashIdInput.value = id || '';
+  if (label) label.textContent = `${effectiveTrashRoot()}:/.trash/${labelText || id || '*'}`;
+  if (userInput) userInput.value = '';
+  if (pwInput) pwInput.value = '';
+  if (confirmInput) confirmInput.value = '';
+  updatePrivilegedDeleteModeUi();
+  openModal('modal-privileged-delete');
+}
+
+function switchToPrivilegedEmptyTrash() {
+  closeModal('modal-empty-trash');
+  openPrivilegedTrashModal('empty', '', 'Todos los elementos de .trash');
+}
+
 async function confirmPrivilegedDeleteFile() {
+  const ctx = document.getElementById('priv-delete-context')?.value || 'file';
   const path = document.getElementById('priv-delete-path')?.value || '';
+  const trashId = document.getElementById('priv-delete-trash-id')?.value || '';
   const authUser = (document.getElementById('priv-delete-user')?.value || '').trim();
   const pwInput = document.getElementById('priv-delete-password');
   const authPassword = pwInput?.value || '';
   const confirm = (document.getElementById('priv-delete-confirm')?.value || '').trim();
-  if (!path) return;
-  if (isProtectedFilePath(path) || isProtectedFilePath(AppState.files.currentPath)) {
-    showToast('Ruta protegida: los respaldos históricos no pueden eliminarse desde Archivos.', 'warning');
-    closeModal('modal-privileged-delete');
-    return;
+
+  if (ctx === 'file') {
+    if (!path) return;
+    const allowed = typeof canPrivilegedDeletePath === 'function'
+      ? canPrivilegedDeletePath(path)
+      : (!isProtectedFilePath(path) && !isProtectedFilePath(AppState.files.currentPath));
+    if (!allowed) {
+      showToast('Ruta protegida: no se puede operar sobre esta ubicación.', 'warning');
+      closeModal('modal-privileged-delete');
+      return;
+    }
   }
   if (!authUser) {
     showToast('Indica el usuario del sistema (root o con permiso sudo).', 'warning');
@@ -60,7 +170,10 @@ async function confirmPrivilegedDeleteFile() {
     showToast('Indica la contraseña del usuario del sistema.', 'warning');
     return;
   }
-  if (confirm !== 'SI-ELIMINAR') {
+
+  const isFilePermanent = ctx === 'file' && document.getElementById('priv-mode-permanent')?.checked === true;
+  const needsConfirm = isFilePermanent || ctx === 'trash-delete' || ctx === 'trash-empty';
+  if (needsConfirm && confirm !== 'SI-ELIMINAR') {
     showToast('Escribe exactamente SI-ELIMINAR para confirmar.', 'warning');
     return;
   }
@@ -71,20 +184,51 @@ async function confirmPrivilegedDeleteFile() {
     btn.classList.add('is-loading');
   }
   try {
-    await apiFetch('/api/files/delete-privileged', {
-      method: 'POST',
-      body: JSON.stringify({
-        root: AppState.files.root || 'nas',
-        path,
-        auth_user: authUser,
-        auth_password: authPassword,
-        confirm,
-      }),
-    });
-    closeModal('modal-privileged-delete');
-    showToast('Elemento eliminado con privilegios del sistema.', 'success');
-    loadFiles();
-    updateTrashBadge();
+    if (ctx === 'file') {
+      const mode = isFilePermanent ? 'permanent' : 'trash';
+      await apiFetch('/api/files/delete-privileged', {
+        method: 'POST',
+        body: JSON.stringify({
+          root: AppState.files.root || 'nas',
+          path,
+          mode,
+          auth_user: authUser,
+          auth_password: authPassword,
+          confirm,
+        }),
+      });
+      closeModal('modal-privileged-delete');
+      showToast(
+        mode === 'trash'
+          ? 'Elemento movido a la papelera con privilegios.'
+          : 'Elemento eliminado con privilegios del sistema.',
+        'success',
+      );
+      loadFiles();
+      updateTrashBadge();
+    } else {
+      const trashAction = ctx === 'trash-restore' ? 'restore' : (ctx === 'trash-empty' ? 'empty' : 'delete');
+      await apiFetch('/api/files/trash/privileged', {
+        method: 'POST',
+        body: JSON.stringify({
+          root: effectiveTrashRoot(),
+          action: trashAction,
+          id: trashId,
+          auth_user: authUser,
+          auth_password: authPassword,
+          confirm,
+        }),
+      });
+      closeModal('modal-privileged-delete');
+      const okMsg = trashAction === 'restore'
+        ? 'Elemento restaurado con privilegios.'
+        : (trashAction === 'empty'
+          ? 'Papelera vaciada con privilegios.'
+          : 'Elemento eliminado definitivamente de la papelera.');
+      showToast(okMsg, 'success');
+      loadTrash();
+      updateTrashBadge();
+    }
   } catch (err) {
     // Ya mostrado por apiFetch
   } finally {
@@ -183,7 +327,7 @@ async function loadTrash() {
   }
 
   try {
-    const root = encodeURIComponent(AppState.files.root || 'nas');
+    const root = encodeURIComponent(effectiveTrashRoot());
     const res = await apiFetch(`/api/files/trash?root=${root}`);
     const items = res.data?.items ?? res.items ?? [];
     const count = res.data?.count ?? res.count ?? items.length;
@@ -237,16 +381,21 @@ function renderTrashRows(items) {
   range.selectNodeContents(tbody);
   const html = filtered.map(item => {
     const isDir = item.is_dir;
+    const isPriv = Boolean(item.privileged);
     const meta = getFileTypeMeta({ name: item.filename, is_dir: isDir });
     const fileSize = isDir ? '—' : (item.size_formatted || formatBytesLocal(item.size_bytes ?? item.size ?? 0));
+    const privBadge = isPriv
+      ? '<span class="badge badge-warn" style="font-size:10px;" title="Requiere credenciales root/sudo para restaurar o purgar">Privilegiado</span>'
+      : '';
 
     return `
-      <tr class="trash-table-row" data-id="${escapeHtml(item.id)}" data-filename="${escapeHtml(item.filename)}" onclick="selectTrashRow(this)">
+      <tr class="trash-table-row" data-id="${escapeHtml(item.id)}" data-filename="${escapeHtml(item.filename)}" data-privileged="${isPriv ? 'true' : 'false'}" onclick="selectTrashRow(this)">
         <td style="width:36px; text-align:center;"><svg class="icon ${isDir ? 'icon-folder-colored' : ''}" style="${isDir ? '' : 'color:' + meta.color + ';'} width:18px; height:18px;"><use href="${meta.icon}"></use></svg></td>
         <td>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <strong>${escapeHtml(item.filename)}</strong>
             <span class="file-type-badge ${meta.badgeClass || ''}" title="${escapeHtml(meta.typeLabel)}">${escapeHtml(meta.shortLabel)}</span>
+            ${privBadge}
           </div>
         </td>
         <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-muted);">${escapeHtml(item.original_path)}</td>
@@ -302,12 +451,17 @@ async function confirmRestoreAllTrash() {
   try {
     const res = await apiFetch('/api/files/trash/restore-all', {
       method: 'POST',
-      body: JSON.stringify({ root: AppState.files.root || 'nas' }),
+      body: JSON.stringify({ root: effectiveTrashRoot() }),
     });
 
     closeModal('modal-restore-all-trash');
     const restored = res.data?.restored ?? res.restored ?? 0;
-    showToast(`Se restauraron ${restored} elemento(s) a sus rutas originales.`, 'success');
+    const skipped = res.data?.skipped_privileged ?? 0;
+    if (skipped > 0) {
+      showToast(`Se restauraron ${restored} elemento(s); ${skipped} elemento(s) privilegiado(s) requieren root/sudo individual.`, 'warning');
+    } else {
+      showToast(`Se restauraron ${restored} elemento(s) a sus rutas originales.`, 'success');
+    }
     loadTrash();
     updateTrashBadge();
   } catch (err) {
@@ -331,6 +485,12 @@ async function handleTrashAction(btn, action) {
   const id = String(tr.getAttribute('data-id') || '').trim();
   if (!id) return;
   const name = tr.getAttribute('data-filename') || '';
+  const isPriv = tr.getAttribute('data-privileged') === 'true';
+
+  if (isPriv) {
+    openPrivilegedTrashModal(action, id, name);
+    return;
+  }
 
   btn.disabled = true;
   btn.classList.add('is-loading');
@@ -349,7 +509,7 @@ async function handleTrashAction(btn, action) {
 
 async function updateTrashBadge() {
   try {
-    const root = encodeURIComponent(AppState.files.root || 'nas');
+    const root = encodeURIComponent(effectiveTrashRoot());
     const res = await apiFetch(`/api/files/trash?root=${root}`, { silentToast: true });
     const count = res.data?.count ?? res.count ?? (res.data?.items?.length ?? 0);
     updateTrashBadgeCount(count);
@@ -370,7 +530,7 @@ async function restoreTrashItem(id, name) {
   try {
     await apiFetch('/api/files/trash/restore', {
       method: 'POST',
-      body: JSON.stringify({ id, root: AppState.files.root || 'nas' }),
+      body: JSON.stringify({ id, root: effectiveTrashRoot() }),
     });
 
     showToast(`Elemento "${name}" restaurado correctamente a su ubicación.`, 'success');
@@ -394,18 +554,23 @@ async function deleteTrashItem(id, name) {
   try {
     await apiFetch('/api/files/trash/delete', {
       method: 'POST',
-      body: JSON.stringify({ id, root: AppState.files.root || 'nas' }),
+      body: JSON.stringify({ id, root: effectiveTrashRoot() }),
     });
 
     showToast(`Elemento "${name}" eliminado definitivamente.`, 'info');
     loadTrash();
     updateTrashBadge();
   } catch (err) {
-    // Ya mostrado por apiFetch
+    const msg = String(err?.message || '').toLowerCase();
+    if (window.NAS_IS_ADMIN !== false && (msg.includes('permiso') || msg.includes('eperm') || msg.includes('privilegiad'))) {
+      openPrivilegedTrashModal('delete', id, name);
+    }
   }
 }
 
 function openEmptyTrashModal() {
+  const privBtn = document.getElementById('btn-switch-priv-empty-trash');
+  if (privBtn) privBtn.style.display = window.NAS_IS_ADMIN !== false ? '' : 'none';
   openModal('modal-empty-trash');
 }
 
@@ -417,13 +582,18 @@ async function confirmEmptyTrash() {
   }
 
   try {
-    await apiFetch('/api/files/trash/empty', {
+    const res = await apiFetch('/api/files/trash/empty', {
       method: 'POST',
-      body: JSON.stringify({ root: AppState.files.root || 'nas' }),
+      body: JSON.stringify({ root: effectiveTrashRoot() }),
     });
 
     closeModal('modal-empty-trash');
-    showToast('Papelera vaciada por completo.', 'info');
+    const skipped = res.data?.skipped_privileged ?? 0;
+    if (skipped > 0) {
+      showToast(`Quedaron ${skipped} elemento(s) privilegiado(s). Usa "Con privilegios (root/sudo)" para purgarlos.`, 'warning');
+    } else {
+      showToast('Papelera vaciada por completo.', 'info');
+    }
     loadTrash();
     updateTrashBadge();
   } catch (err) {
