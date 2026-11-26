@@ -639,6 +639,17 @@ fn run_files_delete_helper(runner: &Runner) -> NasResult<String> {
         req.web_user.trim()
     };
     let status = if res.is_ok() { "SUCCESS" } else { "FAILED" };
+    let (audit_action, audit_target) = match req.action {
+        share::PrivilegedFileAction::Trash => ("file_trash_privileged", req.path.as_str()),
+        share::PrivilegedFileAction::Delete => ("file_delete_privileged", req.path.as_str()),
+        share::PrivilegedFileAction::PurgeTrash => {
+            ("trash_purge_privileged", req.trash_id.as_str())
+        }
+        share::PrivilegedFileAction::RestoreTrash => {
+            ("trash_restore_privileged", req.trash_id.as_str())
+        }
+        share::PrivilegedFileAction::EmptyTrash => ("trash_empty_privileged", "*"),
+    };
     let detail = format!(
         "os_user={} ip={}",
         req.auth_user.trim(),
@@ -648,8 +659,8 @@ fn run_files_delete_helper(runner: &Runner) -> NasResult<String> {
     let _ = log.append(nas_audit::AuditEntry::new(
         actor,
         "files",
-        "privileged_delete",
-        &req.path,
+        audit_action,
+        audit_target,
         status,
         &detail,
     ));
