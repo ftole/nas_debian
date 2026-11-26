@@ -1,8 +1,8 @@
-# Diseño de Lógica Operativa: Gestión Segura de Discos, Pools Btrfs y Unidades (`Rust Target Spec`)
+# Diseño de Lógica Operativa: Gestión Segura de Discos, Pools Btrfs y Unidades (`Referencia Implementada 0.1.14`)
 
 > [!NOTE]
-> Documento de ingeniería vivo construido a partir de casos reales de operación y recuperación sobre Debian 13 (`x86_64`).
-> **Propósito:** definir paso a paso la lógica exacta de inspección, validación, montaje resiliente y saneamiento de `/etc/fstab` y permisos para replicarla limpiamente en el motor Rust (`crates/nas-engine`).
+> Documento de ingeniería construido a partir de casos reales de operación y recuperación sobre Debian 13 (`x86_64`).
+> **Estado: Implementado** en el motor Rust (`crates/nas-engine/src/storage/*`, `crates/nas-engine/src/helpers/storage/*` y `crates/nas-engine/src/deploy/artifacts.rs`).
 > *(Todos los identificadores, rutas concretas, direcciones y UUIDs están abstraídos con marcadores genéricos).*
 
 ---
@@ -42,9 +42,9 @@ Antes de que Rust (o el operador) modifique montajes o `/etc/fstab`, debe recopi
 
 ---
 
-## 3. Fase 2 — Lógica de Saneamiento y Configuración Segura (En Curso)
+## 3. Fase 2 — Lógica de Saneamiento y Configuración Segura (Implementada)
 
-Secuencia ordenada que el operador valida manualmente y que luego se portará a `crates/nas-engine`:
+Secuencia ordenada de saneamiento implementada en `crates/nas-engine` (`sanitize_fstab`, `create_pool`, `add_unit`):
 
 ### Paso 1: Verificar el contenido real dentro de la unidad montada y del filesystem Btrfs
 - Comprobar como `root` (`sudo`) qué directorios existen dentro de `/srv/nas/unidades/<ID>` (si ya contiene `BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP` o snapshots previos) y el UUID exacto del filesystem Btrfs (`btrfs filesystem show`).
@@ -76,18 +76,16 @@ Secuencia ordenada que el operador valida manualmente y que luego se portará a 
 
 ---
 
-## 4. Requisitos para Replicar esta Lógica en Rust (`nas-engine`)
+## 4. Mapeo de Implementación en Rust (`nas-engine`)
 
-Al llevar este flujo a `crates/nas-engine/src/storage.rs` y `helpers/storage/units.rs`:
+Implementado en `crates/nas-engine/src/storage/pools.rs`, `helpers/storage/{pools,units,maintenance}.rs` y `deploy/artifacts.rs`:
 
-1. **Modelo `BtrfsPoolInfo`:** parsear `btrfs filesystem show` para agrupar múltiples dispositivos `/dev/...` bajo un mismo `fs_uuid` y marcar todos los `devid` miembros como `in_use = true` / `pool_member_of = Some(fs_uuid)`.
-2. **Helper `reconcile_fstab`:**
-   - Leer `/etc/fstab`, detectar y reportar líneas cuyo origen ya no existe en `/dev/`.
-   - Aplicar siempre `fstab_options_for_target` (`nofail,x-systemd.device-timeout=15s`) también en `deploy/storage.rs` y `helpers/storage/units.rs` (resolviendo `DT-A08`).
+1. **Modelo `BtrfsPoolInfo` (`storage/pools.rs`, `helpers/storage/pools.rs`):** parsea `btrfs filesystem show` para agrupar múltiples dispositivos `/dev/...` bajo un mismo `fs_uuid` y marcar todos los `devid` miembros como `in_use = true` / `pool_member_of = Some(fs_uuid)`.
+2. **Helper `sanitize_fstab` (`deploy/artifacts.rs`, `helpers/storage/maintenance.rs`, `POST /api/storage/fstab-sanitize`):**
+   - Lee `/etc/fstab`, detecta y retira entradas huérfanas cuyo origen ya no existe en `/dev/`, respalda en `/etc/fstab.bak.<epoch>`.
+   - Aplica siempre `fstab_options_for_target` (`nofail,x-systemd.device-timeout=15s`) también en `deploy/storage.rs` y `helpers/storage/units.rs` (`DT-A08` **[RESUELTO]**).
 3. **Guardia de destino de respaldo cuando `/srv/nas` está sobre `/`:**
-   - Exponer un indicador `data_root_on_os_disk: bool` en `/api/storage/units` y advertir en la UI si existen unidades dedicadas en `/srv/nas/unidades/<ID>` para que el operador no cree tareas sobre `principal`.
-4. **Auto-alta de `btrfs scrub` por unidad:** al montar una unidad adicional Btrfs en `/srv/nas/unidades/<ID>`, registrar su cron mensual con `nice -n 19 ionice -c 3` (resolviendo `DT-M12`).
-5. **Bloqueo contra *overmount*:** antes de montar en `/srv/nas/unidades/<ID>`, verificar si el destino ya es un `mountpoint`; si lo es, rechazar la operación en `add_unit`.
-6. **Modelado de topología multi-disco (Pool único vs Unidades independientes):**
-   - **Opción Pool Unificado Btrfs:** unir `N` discos en un solo volumen (`mkfs.btrfs -d single -m raid1` para sumar capacidad protegiendo metadatos, o `-d raid1 -m raid1` si se busca espejo) montado en `/srv/nas`.
-   - **Opción Unidades Independientes:** disco A montado en `/srv/nas` principal + disco B montado en `/srv/nas/unidades/<ID>`, aislando fallos físicos de un disco respecto al otro.
+   - Expone `data_root_on_os_disk: bool` en `/api/storage/units` y advierte en la UI si existen unidades dedicadas en `/srv/nas/unidades/<ID>`.
+4. **Auto-alta de `btrfs scrub` por unidad:** al montar una unidad adicional Btrfs en `/srv/nas/unidades/<ID>`, registra `/etc/cron.d/nas-btrfs-scrub-unit-<id>` con `nice -n 19 ionice -c 3` (`DT-M12` **[RESUELTO]**).
+5. **Bloqueo contra *overmount*:** antes de montar en `/srv/nas/unidades/<ID>`, verifica `/proc/mounts`; si ya está montado, rechaza la operación en `add_unit`.
+6. **Topología multi-disco (`create_pool` / `POST /api/storage/create-pool`):** soporta `btrfs_single` (`-d single -m raid1`), `btrfs_raid1` (`-d raid1 -m raid1`), `ext4`, `lvm_ext4`, `lvm_btrfs` en `/srv/nas` o en unidades independientes `/srv/nas/unidades/<ID>`.
