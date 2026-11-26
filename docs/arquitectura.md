@@ -1,7 +1,7 @@
 # Arquitectura del Sistema
 
 > [!NOTE]
-> Documento de diseño estructural del sistema sobre **Debian 13 Trixie (`x86_64`)** (plataforma Rust `v0.1.13`).
+> Documento de diseño estructural del sistema sobre **Debian 13 Trixie (`x86_64`)** (plataforma Rust `v0.1.14`).
 > Los parámetros finos de montaje y comandos de consola viven en **[docs/manual.md](./manual.md)**; el glosario completo del stack en **[docs/tecnologias.md](./tecnologias.md)**; y el modelo de endurecimiento en **[docs/seguridad.md](./seguridad.md)**.
 
 ---
@@ -29,7 +29,7 @@ El código está organizado como un **workspace** (*espacio de trabajo unificado
 
 La arquitectura separa tres planos de responsabilidad con dependencias unidireccionales:
 
-- **Plano de Interfaces (consumidores):** `nas-web` (panel web HTTP), `nas-cli` (binario **`nas`** de **CLI** — *Command-Line Interface* / Interfaz de Línea de Comandos), `nas-tui` (**TUI** — *Text-based User Interface* / Interfaz en Terminal) y `nasctl` (orquestador remoto multi-servidor sobre **YAML** — *YAML Ain't Markup Language* / formato de inventario legible).
+- **Plano de Interfaces (consumidores):** `nas-web` (panel web HTTP), `nas-cli` (binario **`nas`** de **CLI** — *Command-Line Interface* / Interfaz de Línea de Comandos), `nas-tui` (**TUI** — *Text-based User Interface* / Interfaz en Terminal), `nasctl` (orquestador remoto multi-servidor sobre **YAML** — *YAML Ain't Markup Language* / formato de inventario legible) y `nas-dev` (herramienta de sincronización e incorporación en laboratorio).
 - **Plano de Lógica y Seguridad (librerías):** `nas-engine` concentra las reglas de almacenamiento, Samba, usuarios, copias de seguridad y actualizaciones; `nas-exec` ejecuta comandos del sistema de forma segura; `nas-audit` mantiene la cadena criptográfica; `nas-ssh` y `nas-inventory` gestionan la flota remota.
 - **Plano Base Compartido:** `nas-core` define los tipos comunes, roles, rutas y el calculador adaptativo `ResourceBudget`.
 
@@ -116,4 +116,4 @@ Al iniciar `nas-web` o una migración pesada, `nas-core/src/resources.rs` inspec
 - [Seguridad y Endurecimiento](./seguridad.md)
 - [Laboratorio, CI y Releases](./lab_y_desarrollo.md)
 - [Diseño Operativo de Discos y Pools Btrfs](./diseno_gestion_discos_y_pools.md)
-- [Deuda Técnica Activa (`v0.1.12+`)](./deuda_tecnica.md)
+- [Deuda Técnica Activa (`v0.1.14`)](./deuda_tecnica.md)
