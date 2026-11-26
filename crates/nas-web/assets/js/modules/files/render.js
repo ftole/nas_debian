@@ -99,11 +99,13 @@ function renderFileGrid(items) {
       ? `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar como ZIP"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`
       : `<button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'download')" title="Descargar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-download"></use></svg></button>`;
 
+    const canPrivDelete = !isProtected && window.NAS_IS_ADMIN !== false;
     const writeActions = !isProtected
       ? `
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'rename')" title="Renombrar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-edit"></use></svg></button>
           <button type="button" class="file-card-action-btn" onclick="handleCardAction(event, this, 'move')" title="Mover"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-folder"></use></svg></button>
           <button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'delete')" title="Eliminar"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-trash"></use></svg></button>
+          ${canPrivDelete ? `<button type="button" class="file-card-action-btn btn-danger-hover" onclick="handleCardAction(event, this, 'privileged-delete')" title="Eliminar con privilegios (root/sudo)"><svg class="icon" style="width:14px; height:14px;"><use href="#icon-lock"></use></svg></button>` : ''}
         `
       : '';
 
@@ -185,6 +187,8 @@ function handleCardAction(e, btn, action) {
     openMoveModal(relPath, name);
   } else if (action === 'delete') {
     openDeleteModal(relPath, name);
+  } else if (action === 'privileged-delete') {
+    openPrivilegedDeleteModal(relPath, name);
   }
 }
 
@@ -258,6 +262,7 @@ function renderFileTable(items) {
               <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'rename')" title="Renombrar"><svg class="icon"><use href="#icon-edit"></use></svg></button>
               <button type="button" class="btn btn-secondary btn-sm" onclick="handleTableRowAction(this, 'move')" title="Mover"><svg class="icon"><use href="#icon-folder"></use></svg></button>
               <button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'delete')" title="Eliminar"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+              ${window.NAS_IS_ADMIN !== false ? `<button type="button" class="btn btn-danger btn-sm" onclick="handleTableRowAction(this, 'privileged-delete')" title="Eliminar con privilegios (root/sudo)"><svg class="icon"><use href="#icon-lock"></use></svg></button>` : ''}
             ` : ''}
           </div>
         </td>
@@ -336,6 +341,8 @@ function handleTableRowAction(btn, action) {
     openMoveModal(relPath, name);
   } else if (action === 'delete') {
     openDeleteModal(relPath, name);
+  } else if (action === 'privileged-delete') {
+    openPrivilegedDeleteModal(relPath, name);
   }
 }
 
