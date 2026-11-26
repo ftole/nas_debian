@@ -1101,6 +1101,10 @@
       "notifications-list",
       "perm-matrix-container",
       "perms-search",
+      "preview-archive-backbar",
+      "preview-archive-container",
+      "preview-archive-summary",
+      "preview-archive-tbody",
       "preview-audio-element",
       "preview-binary-container",
       "preview-binary-details",
@@ -1495,7 +1499,7 @@
   "counts": {
     "layout_ids": 547,
     "layout_classes": 159,
-    "app_ids": 478,
+    "app_ids": 482,
     "app_selectors": 46,
     "app_endpoints": 91,
     "inline_handlers": 48
