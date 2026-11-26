@@ -3,10 +3,97 @@ function openDeleteModal(relPath, name) {
   const pathInput = document.getElementById('delete-file-path');
   const label = document.getElementById('delete-file-name-label');
   const radioTrash = document.getElementById('del-mode-trash');
+  const switchPrivBtn = document.getElementById('btn-switch-priv-delete');
   if (pathInput) pathInput.value = relPath;
   if (label) label.textContent = `"${name}"`;
   if (radioTrash) radioTrash.checked = true;
+  if (switchPrivBtn) switchPrivBtn.style.display = window.NAS_IS_ADMIN !== false ? '' : 'none';
   openModal('modal-delete-file');
+}
+
+function switchToPrivilegedDelete() {
+  const path = document.getElementById('delete-file-path')?.value || '';
+  const nameLabel = document.getElementById('delete-file-name-label')?.textContent || '';
+  const name = nameLabel.replace(/^"|"$/g, '') || path;
+  closeModal('modal-delete-file');
+  openPrivilegedDeleteModal(path, name);
+}
+
+function openPrivilegedDeleteModal(relPath, name) {
+  if (!relPath) return;
+  if (isProtectedFilePath(relPath) || isProtectedFilePath(AppState.files.currentPath)) {
+    showToast('Los respaldos históricos y rutas del sistema están protegidos contra eliminación.', 'warning');
+    return;
+  }
+  const pathInput = document.getElementById('priv-delete-path');
+  const nameInput = document.getElementById('priv-delete-name');
+  const label = document.getElementById('priv-delete-path-label');
+  const userInput = document.getElementById('priv-delete-user');
+  const pwInput = document.getElementById('priv-delete-password');
+  const confirmInput = document.getElementById('priv-delete-confirm');
+  if (pathInput) pathInput.value = relPath;
+  if (nameInput) nameInput.value = name || relPath;
+  if (label) label.textContent = `${AppState.files.root || 'nas'}:/${relPath}`;
+  if (userInput) userInput.value = '';
+  if (pwInput) pwInput.value = '';
+  if (confirmInput) confirmInput.value = '';
+  openModal('modal-privileged-delete');
+}
+
+async function confirmPrivilegedDeleteFile() {
+  const path = document.getElementById('priv-delete-path')?.value || '';
+  const authUser = (document.getElementById('priv-delete-user')?.value || '').trim();
+  const pwInput = document.getElementById('priv-delete-password');
+  const authPassword = pwInput?.value || '';
+  const confirm = (document.getElementById('priv-delete-confirm')?.value || '').trim();
+  if (!path) return;
+  if (isProtectedFilePath(path) || isProtectedFilePath(AppState.files.currentPath)) {
+    showToast('Ruta protegida: los respaldos históricos no pueden eliminarse desde Archivos.', 'warning');
+    closeModal('modal-privileged-delete');
+    return;
+  }
+  if (!authUser) {
+    showToast('Indica el usuario del sistema (root o con permiso sudo).', 'warning');
+    return;
+  }
+  if (!authPassword) {
+    showToast('Indica la contraseña del usuario del sistema.', 'warning');
+    return;
+  }
+  if (confirm !== 'SI-ELIMINAR') {
+    showToast('Escribe exactamente SI-ELIMINAR para confirmar.', 'warning');
+    return;
+  }
+
+  const btn = document.getElementById('btn-confirm-priv-delete');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+  }
+  try {
+    await apiFetch('/api/files/delete-privileged', {
+      method: 'POST',
+      body: JSON.stringify({
+        root: AppState.files.root || 'nas',
+        path,
+        auth_user: authUser,
+        auth_password: authPassword,
+        confirm,
+      }),
+    });
+    closeModal('modal-privileged-delete');
+    showToast('Elemento eliminado con privilegios del sistema.', 'success');
+    loadFiles();
+    updateTrashBadge();
+  } catch (err) {
+    // Ya mostrado por apiFetch
+  } finally {
+    if (pwInput) pwInput.value = '';
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  }
 }
 
 async function confirmDeleteFile() {
