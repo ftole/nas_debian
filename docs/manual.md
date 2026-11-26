@@ -104,7 +104,7 @@ Ejecuta `nas-tui` (o `sudo nas-tui` para operaciones de sistema) sobre cualquier
 Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la instalación; la contraseña autogenerada inicial se guarda temporalmente en `/etc/nas/.initial_admin_password`):
 
 1. **Dashboard:** resumen de carga, disco `/srv/nas`, demonios activos y estado de respaldos.
-2. **Archivos (`files`):** explorador Drag & Drop sobre `/srv/nas`, descarga ZIP (hasta 50 GiB) y visores 100% offline para `.xlsx`/`.xls`/`.ods`/`.csv`, `.docx`, `.pptx`, imágenes y texto.
+2. **Archivos (`files`):** explorador Drag & Drop sobre `/srv/nas`, descarga ZIP (hasta 50 GiB), visores 100% offline para `.xlsx`/`.xls`/`.ods`/`.csv`, `.docx`, `.pptx`, imágenes y texto, y **eliminación privilegiada (`root`/`sudo`)** exclusiva para `admin`/`superadmin` en carpetas compartidas y unidades (con confirmación `SI-ELIMINAR`, credenciales vía `stdin`, sin alterar permisos/ACLs y manteniendo `BACKUPS_HISTORICOS`/`BACKUPS_PERMANENTES` bloqueados).
 3. **Bitácoras (`logs`):** consulta de logs de Samba, sistema y tareas de respaldo.
 4. **Carpetas Compartidas (`shares`):** alta/edición de recursos SMB, visibilidad (`$` oculto) y esquemas de ACL POSIX `2770` + herencia por defecto.
 5. **Respaldos (`backups`):** gestión de tareas CIFS/SSH/Locales, credenciales vía `stdin`, ejecución bajo demanda y Golden Snapshots.
