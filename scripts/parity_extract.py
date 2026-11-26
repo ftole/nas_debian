@@ -67,10 +67,13 @@ ASSET_FILES = [
     "js/modules/files/trash.js",
     "js/modules/files/preview.js",
     "js/modules/files/viewers.js",
+    "js/modules/files/archive.js",
     "js/modules/domain.js",
     "js/vendor/xlsx.full.min.js",
     "js/vendor/jszip.min.js",
     "js/vendor/docx-preview.min.js",
+    "js/vendor/unrar.js",
+    "js/vendor/unrar.wasm",
 ]
 
 
