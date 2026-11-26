@@ -399,6 +399,7 @@ async fn borrado_permanente_exige_privilegios_admin() {
 
     // Mover a papelera sí permitido para operador
     let resp_trash = app
+        .clone()
         .oneshot(post_json(
             "/api/files/delete",
             &cookie,
@@ -407,6 +408,69 @@ async fn borrado_permanente_exige_privilegios_admin() {
         .await
         .expect("trash delete");
     assert_eq!(resp_trash.status(), StatusCode::OK);
+
+    // Borrado privilegiado denegado para operador (403)
+    let resp_priv_op = app
+        .oneshot(post_json(
+            "/api/files/delete-privileged",
+            &cookie,
+            r#"{"path":"nota.txt","auth_user":"root","auth_password":"x","confirm":"SI-ELIMINAR"}"#,
+        ))
+        .await
+        .expect("priv delete operator");
+    assert_eq!(resp_priv_op.status(), StatusCode::FORBIDDEN);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn borrado_privilegiado_rechaza_sin_confirmacion_y_rutas_protegidas() {
+    let dir = temp_dir("priv-delete-guards");
+    std::fs::create_dir_all(dir.join("data/BACKUPS_HISTORICOS/t1")).expect("mkdir");
+    std::fs::write(dir.join("data/BACKUPS_HISTORICOS/t1/a.txt"), b"x").expect("write");
+    let db = Db::in_memory().expect("db");
+    db.upsert_user("admin", &sha256_hex("Secreta123"), "superadmin")
+        .expect("admin");
+    let auth = Auth::with_csrf_secret(db, 3600, false, [0x42u8; 32]);
+    let session = auth
+        .login("admin", "Secreta123", chrono::Utc::now().timestamp())
+        .expect("login")
+        .expect("sesion");
+    let cookie = format!("nas_session={session}");
+    let csrf = auth.csrf_for_session(&session);
+    let app = router(AppState::new(auth, paths_for(&dir), ServerRole::Arquivos));
+
+    // Falta confirmación SI-ELIMINAR -> 400
+    let req_bad_confirm = Request::builder()
+        .method("POST")
+        .uri("/api/files/delete-privileged")
+        .header("cookie", &cookie)
+        .header("x-csrf-token", &csrf)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"path":"SISTEMAS/x.txt","auth_user":"root","auth_password":"x","confirm":"NO"}"#,
+        ))
+        .expect("req");
+    let resp_bad_confirm = app
+        .clone()
+        .oneshot(req_bad_confirm)
+        .await
+        .expect("bad confirm");
+    assert_eq!(resp_bad_confirm.status(), StatusCode::BAD_REQUEST);
+
+    // Ruta protegida BACKUPS_HISTORICOS -> 403
+    let req_protected = Request::builder()
+        .method("POST")
+        .uri("/api/files/delete-privileged")
+        .header("cookie", &cookie)
+        .header("x-csrf-token", &csrf)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"path":"BACKUPS_HISTORICOS/t1/a.txt","auth_user":"root","auth_password":"x","confirm":"SI-ELIMINAR"}"#,
+        ))
+        .expect("req");
+    let resp_protected = app.oneshot(req_protected).await.expect("protected");
+    assert_eq!(resp_protected.status(), StatusCode::FORBIDDEN);
 
     let _ = std::fs::remove_dir_all(&dir);
 }
