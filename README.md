@@ -4,7 +4,7 @@
 
 ![Debian 13 Trixie](https://img.shields.io/badge/OS-Debian%2013%20Trixie-A81D33?style=for-the-badge&logo=debian&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-1.80%2B%20Workspace-000000?style=for-the-badge&logo=rust&logoColor=white)
-![Versión](https://img.shields.io/badge/Release-v0.1.13-0EA5E9?style=for-the-badge)
+![Versión](https://img.shields.io/badge/Release-v0.1.14-0EA5E9?style=for-the-badge)
 ![Samba 4](https://img.shields.io/badge/SMB-2.10..3.11%20%2B%20VFS-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Offline](https://img.shields.io/badge/Panel%20Web-100%25%20Offline-0F172A?style=for-the-badge)
 
@@ -81,7 +81,7 @@ sudo nas deploy apply \
   --admin admin
 ```
 
-Al terminar, accede a `https://<IP-del-servidor>` (la contraseña temporal generada se guarda una única vez en `/etc/nas/.initial_admin_password`) y completa el checklist de endurecimiento de host (`UFW`, SSH, `fail2ban`, `AIDE`) en **[docs/manual.md](./docs/manual.md)**.
+Al terminar, accede a `https://<IP-del-servidor>` (si la contraseña inicial se autogenera, se muestra una única vez en consola y el archivo temporal `/etc/nas/.initial_admin_password` se elimina de inmediato). Los controles base (`UFW`, `fail2ban`, `unattended-upgrades`, exclusiones `AIDE` y máscara ACPI) se aplican automáticamente (`--safe-only`); revisa el endurecimiento bajo demanda de SSH (`--harden-ssh`) y base `AIDE` (`--init-aide`) en **[docs/manual.md](./docs/manual.md)**.
 
 ---
 
@@ -100,7 +100,7 @@ Al terminar, accede a `https://<IP-del-servidor>` (la contraseña temporal gener
 
 La plataforma utiliza Rust con `#![forbid(unsafe_code)]`, `CommandSpec` sin intérprete de shell, autenticación `PBKDF2-HMAC-SHA512`, tokens anti-CSRF `HMAC-SHA256`, rate limiting en SQLite y actualizaciones firmadas con `Ed25519`. Para transparencia operativa, consulta las brechas vigentes, bugs conocidos y plan de corrección en:
 - **[docs/seguridad.md](./docs/seguridad.md)** — Controles automatizados vs endurecimiento manual requerido.
-- **[docs/deuda_tecnica.md](./docs/deuda_tecnica.md)** — Auditoría código por código y plan de remediación activo (`v0.1.12+`).
+- **[docs/deuda_tecnica.md](./docs/deuda_tecnica.md)** — Auditoría código por código y estado de remediación (`v0.1.14`).
 
 ---
 
@@ -114,6 +114,7 @@ La plataforma utiliza Rust con `#![forbid(unsafe_code)]`, `CommandSpec` sin int�
 - **[Arquitectura del Sistema](./docs/arquitectura.md)** — Diseño de los 11 crates, `nas-web`, 7 helpers root y pipeline de respaldos.
 - **[Stack Tecnológico y Glosario](./docs/tecnologias.md)** — Tecnologías integradas, parámetros clave y glosario de siglas.
 - **[Laboratorio, CI y Releases](./docs/lab_y_desarrollo.md)** — Trabajo paralelo con `git worktree`, `scripts/deploy_local.sh`, puertas CI y releases `Ed25519`.
+- **[Diseño Operativo de Discos y Pools Btrfs](./docs/diseno_gestion_discos_y_pools.md)** — Lógica implementada de pools Btrfs (`single`/`raid1`), saneamiento `fstab` y protección *overmount*.
 - **[Contrato de Agentes y Desarrolladores](./AGENTS.md)** — Reglas de commits atómicos, protecciones de hardware y guardrails obligatorios.
 
 ### Calidad, Histórico y Propuestas
