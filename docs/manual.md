@@ -1,7 +1,7 @@
 # Manual Operativo, Administración y Diagnóstico
 
 > [!NOTE]
-> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento manual de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.13`.
+> Este manual consolida la puesta en marcha, administración diaria por perfiles, mantenimiento preventivo, endurecimiento de Debian 13, resolución de incidentes y la matriz FMEA (*Failure Mode and Effects Analysis* — Análisis de Modos de Falla y Efectos) para la plataforma Rust `0.1.14`.
 
 ---
 
@@ -87,11 +87,13 @@ sudo nas deploy apply \
 | `nas services` | Estado de `smbd`, `nmbd`, `wsdd2`, `nginx` y `nas-web`. |
 | `nas diag` | Diagnóstico integral con código de salida significativo para scripts. |
 | `nas storage <subcomando>` | Inventario de discos (mostrando `protected: true` en el disco del SO), particiones y uso de `/srv/nas`. |
-| `nas helper storage-apply <acción>` | Acciones privilegiadas de almacenamiento: `create-pool` (1 o N discos: `btrfs_single`, `btrfs_raid1`, `ext4`, `lvm_ext4`, `lvm_btrfs`), `extend-pool-target`, `remove-pool-device`, `umount-unit`, `wipe-disk`, `sanitize-fstab`, `scrub-unit-status`, `scrub-unit-start` y `trim-unit`. |
+| `nas helper storage-apply <acción>` | Acciones privilegiadas de almacenamiento: `create-pool` (1 o N discos: `btrfs_single`, `btrfs_raid1`, `ext4`, `lvm_ext4`, `lvm_btrfs`), `extend-pool-target`, `remove-pool-device`, `umount-unit`, `wipe-disk`, `sanitize-fstab`, `scrub-unit-status`, `scrub-unit-start`, `trim-unit`, `set-write-cache`, `smart-health`, `write-cache-status`, `ups-configure` y `ups-disable`. |
 | `nas users <subcomando>` | Listado e inventario de usuarios/grupos del sistema y Samba. |
-| `nas backup <subcomando>` | Listado de tareas de respaldo, ejecución, bitácoras, Golden Snapshots, `repair-runners` y `deduplicate`. |
-| `nas audit <subcomando>` | Consulta y verificación criptográfica SHA-256 de la bitácora `nas-audit`. |
-| `nas update <status \| check \| list \| verify \| plan \| apply \| rollback>` | Consulta de estado, verificación `Ed25519`, actualización atómica A/B y regresión (*downgrade*) a releases locales en `/opt/nas_debian/releases/` (también accesible desde `/dashboard#applications`, pestaña **Actualizaciones**, con confirmación `SI-REVERTIR`). |
+| `nas backup <subcomando>` | Listado de tareas de respaldo, planificación, ejecución, Golden Snapshots (`freeze`/`permanent`), `restore`, `repair-runners` y `deduplicate` (bitácoras vía `nas helper backup-manage logs` o `/dashboard#logs`). |
+| `nas audit verify` | Verificación criptográfica SHA-256 de la bitácora `nas-audit` (la consulta filtrable se realiza en `/audit` o `/api/audit`). |
+| `nas security <status \| harden>` | Auditoría y aplicación de controles de seguridad (`--safe-only`, `--harden-ssh`, `--init-aide`, `--dry-run`). |
+| `nas deploy <plan \| apply \| resources \| ensure-deps>` | Aprovisionamiento inicial, cuotas `cgroup`/`sysctl` y auto-instalación de dependencias base. |
+| `nas update <status \| check \| list \| verify \| sign \| pubkey \| plan \| apply \| rollback>` | Consulta de estado, firma/verificación `Ed25519`, actualización atómica A/B y regresión (*downgrade*) a releases locales en `/opt/nas_debian/releases/` (también accesible desde `/dashboard#applications`, pestaña **Actualizaciones**, con confirmación `SI-REVERTIR`). |
 | `nas uninstall [--yes --purge --scope os]` | Desinstalación controlada (conserva siempre `/srv/nas`). |
 
 ### 3.2 Asistente Visual de Terminal (`nas-tui`)
@@ -101,10 +103,10 @@ Ejecuta `nas-tui` (o `sudo nas-tui` para operaciones de sistema) sobre cualquier
 
 ### 3.3 Panel Web Slate UI (14 Vistas de Navegación + Auditoría)
 
-Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la instalación; la contraseña autogenerada inicial se guarda temporalmente en `/etc/nas/.initial_admin_password`):
+Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la instalación; si la contraseña se autogenera, se imprime **una única vez** en consola y el temporal `/etc/nas/.initial_admin_password` se elimina inmediatamente):
 
 1. **Dashboard:** resumen de carga, disco `/srv/nas`, demonios activos y estado de respaldos.
-2. **Archivos (`files`):** explorador Drag & Drop sobre `/srv/nas`, descarga ZIP (hasta 50 GiB), visores 100% offline para `.xlsx`/`.xls`/`.ods`/`.csv`, `.docx`, `.pptx`, imágenes y texto, y **eliminación privilegiada (`root`/`sudo`)** exclusiva para `admin`/`superadmin` en carpetas compartidas y unidades (con confirmación `SI-ELIMINAR`, credenciales vía `stdin`, sin alterar permisos/ACLs y manteniendo `BACKUPS_HISTORICOS`/`BACKUPS_PERMANENTES` bloqueados).
+2. **Archivos (`files`):** explorador Drag & Drop sobre `/srv/nas`, descarga ZIP (hasta 50 GiB), visores 100% offline para `.xlsx`/`.xls`/`.ods`/`.csv`, `.docx`, `.pptx`, imágenes y texto, y **eliminación/papelera privilegiada (`root`/`sudo`)** exclusiva para `admin`/`superadmin` (soporta **Mover a papelera `.trash`** o **Eliminar permanentemente `SI-ELIMINAR`**, credenciales vía `stdin`, sin alterar permisos/ACLs; habilitado en carpetas compartidas, unidades y subárboles dentro de `BACKUPS_HISTORICOS/...` y `BACKUPS_PERMANENTES/...`, manteniendo bloqueadas sus carpetas raíz, `LOGS_BACKUP`, `.nas_staging`, `.tmp_zip` y `.trash`).
 3. **Bitácoras (`logs`):** consulta de logs de Samba, sistema y tareas de respaldo.
 4. **Carpetas Compartidas (`shares`):** alta/edición de recursos SMB, visibilidad (`$` oculto) y esquemas de ACL POSIX `2770` + herencia por defecto.
 5. **Respaldos (`backups`):** gestión de tareas CIFS/SSH/Locales, credenciales vía `stdin`, ejecución bajo demanda y Golden Snapshots.
@@ -137,10 +139,10 @@ Accesible en `https://<IP-del-servidor>` (usuario inicial configurado durante la
 * **Alcance en carpetas y respaldos:** habilitado dentro de carpetas compartidas, unidades (`/srv/nas/unidades/<id>/`) y archivos/subcarpetas **dentro** de `BACKUPS_HISTORICOS/...` y `BACKUPS_PERMANENTES/...` (para limpiar copias erróneas). Las carpetas raíz `BACKUPS_HISTORICOS`, `BACKUPS_PERMANENTES`, `LOGS_BACKUP`, `.nas_staging`, `.tmp_zip` y `.trash` permanecen estrictamente bloqueadas.
 * **Gestión en Papelera (`.trash`):** los elementos enviados con privilegios muestran la insignia `Privilegiado` y se restauran, purgan o vacían con las mismas credenciales `root`/`sudo` desde la vista Papelera.
 
-### 4.1 Parámetros de Montaje y Verificación Rápida en Consola
+### 4.2 Parámetros de Montaje y Verificación Rápida en Consola
 
 * **Opciones de montaje aplicadas por rol y hardware:**
-  * **`ext4` (`ARCHIVOS`):** `rw,noatime,commit=5,errors=remount-ro` + `tune2fs -m 1` (recupera 4% de espacio reservado); `readahead` `4096 KB` en HDD y `1024 KB` en SSD (`fstrim.timer`).
+  * **`ext4` (`ARCHIVOS`):** `rw,noatime,commit=5,errors=remount-ro` + `mkfs.ext4 -F -m 1` (conserva solo 1% reservado al superusuario); `readahead` `4096 KB` en HDD y `1024 KB` en SSD (`fstrim.timer`).
   * **`Btrfs` (`BACKUP` / `ARCHIVOS_BACKUP`):** `rw,noatime,compress=zstd:3,space_cache=v2` (`ssd` en flash, sin `autodefrag` ni `discard=async` continuo); *scrub* mensual con `ionice` idle (`-c 3`), monitoreo de errores en `btrfs device stats` y deduplicación `rsync --link-dest` (`--no-o --no-g` en CIFS, `stdbuf -oL` y progreso `to-chk`/`ir-chk`).
   * **Resiliencia eléctrica en hardware low-cost:** SQLite en `WAL` + `synchronous=FULL` (`wal_autocheckpoint=200`); entradas secundarias de `/etc/fstab` con `nofail,x-systemd.device-timeout=15s`; toggle opcional por disco para desactivar caché DRAM volátil (`hdparm -W0` + regla `udev` persistente); módulo Plug & Play opcional para UPS USB (`nut`); límites dinámicos `ResourceBudget` en backups (`systemd-run`), `journald` (`SystemMaxUse=256M`) y auto-aprovisionamiento `nas deploy ensure-deps` desde Debian limpio.
 
@@ -162,10 +164,10 @@ systemctl cat nas-web | grep -E "MemoryHigh|MemoryMax|CPUQuota|TasksMax"
 
 ---
 
-## 5. Checklist de Endurecimiento Manual en Debian 13
+## 5. Endurecimiento en Debian 13 (Automatizado y Pasos Bajo Demanda)
 
 > [!NOTE]
-> **Automatización integrada:** La ejecución de los controles seguros (`ufw` con anti-lockout LAN/SSH, `fail2ban`, `unattended-upgrades`, `auditd`, `aide` exclusiones, máscara ACPI y sincronización de `nas-web.service`/`sudoers`) se ejecuta automáticamente mediante `nas security harden --apply --safe-only` en `install.sh`, `nas deploy apply` y `nas update apply`. Desde el panel web, la pestaña de seguridad (`GET /api/security/status`) consulta `sudo -n /usr/local/bin/nas --json security status` y degrada limpiamente mostrando *"No verificable sin privilegios"* si `sudoers` aún no está sincronizado. Para verificar el estado o endurecer SSH/AIDE manualmente:
+> **Automatización integrada:** La ejecución de los controles seguros (`ufw` con anti-lockout LAN/SSH, `fail2ban`, `unattended-upgrades`, `auditd`, `aide` exclusiones, máscara ACPI y sincronización de `nas-web.service`/`sudoers`) se ejecuta automáticamente mediante `nas security harden --apply --safe-only` en `install.sh`, `nas deploy apply` y `nas update apply`. Desde el panel web, la pestaña de seguridad (`GET /api/security/status`) consulta `sudo -n /usr/local/bin/nas --json security status` y degrada limpiamente mostrando *"No verificable sin privilegios"* si `sudoers` aún no está sincronizado. Los únicos pasos bajo demanda son `--harden-ssh` y `--init-aide` (`aideinit`):
 
 ```bash
 # Ver estado completo de controles de seguridad del host
@@ -176,7 +178,7 @@ sudo nas security harden --dry-run
 sudo nas security harden --apply --harden-ssh --init-aide
 ```
 
-Ejecuta estos pasos después de completar `install.sh` y `nas deploy apply` en un servidor de producción:
+**Referencia manual equivalente (solo si necesitas revisar o sobrescribir manualmente):**
 
 ```bash
 # 1. Cortafuegos UFW restrictivo (ajusta 192.168.1.0/24 a tu subred LAN)
