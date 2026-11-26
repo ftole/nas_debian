@@ -139,6 +139,7 @@ btn-submit-rename-group
 btn-submit-restore-backup
 btn-submit-storage
 btn-switch-priv-delete
+btn-switch-priv-empty-trash
 btn-test-backup
 btn-test-edit-backup
 btn-trim-storage
@@ -355,11 +356,19 @@ preview-spreadsheet-stats
 preview-spreadsheet-table-container
 preview-video-element
 priv-delete-confirm
+priv-delete-confirm-group
+priv-delete-context
+priv-delete-desc
+priv-delete-mode-group
 priv-delete-name
 priv-delete-password
 priv-delete-path
 priv-delete-path-label
+priv-delete-title
+priv-delete-trash-id
 priv-delete-user
+priv-mode-permanent
+priv-mode-trash
 rename-file-newname
 rename-file-oldpath
 rename-group-new
