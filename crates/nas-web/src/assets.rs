@@ -30,6 +30,10 @@ pub const XLSX_JS: &[u8] = include_bytes!("../assets/js/vendor/xlsx.full.min.js"
 pub const JSZIP_JS: &[u8] = include_bytes!("../assets/js/vendor/jszip.min.js");
 /// Vista previa de documentos Word.
 pub const DOCX_JS: &[u8] = include_bytes!("../assets/js/vendor/docx-preview.min.js");
+/// Motor unrar (glue JS de Emscripten) para el inspector de archivos comprimidos.
+pub const UNRAR_JS: &[u8] = include_bytes!("../assets/js/vendor/unrar.js");
+/// Binario WebAssembly del motor unrar.
+pub const UNRAR_WASM: &[u8] = include_bytes!("../assets/js/vendor/unrar.wasm");
 
 /// Módulos por dominio: backups.
 pub const MODULE_BACKUPS_JS: &[u8] = concat!(
@@ -52,6 +56,7 @@ pub const MODULE_FILES_JS: &[u8] = concat!(
     include_str!("../assets/js/modules/files/trash.js"),
     include_str!("../assets/js/modules/files/preview.js"),
     include_str!("../assets/js/modules/files/viewers.js"),
+    include_str!("../assets/js/modules/files/archive.js"),
 )
 .as_bytes();
 
