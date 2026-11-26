@@ -20,6 +20,7 @@
 /api/files/content
 /api/files/create
 /api/files/delete
+/api/files/delete-privileged
 /api/files/download
 /api/files/list
 /api/files/mkdir
