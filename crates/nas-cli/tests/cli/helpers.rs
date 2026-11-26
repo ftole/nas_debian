@@ -53,6 +53,30 @@ fn helper_share_acl_rechaza_rutas_invalidas() {
 }
 
 #[test]
+fn helper_files_delete_rechaza_json_invalido_y_rutas_protegidas() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = nas()
+        .args(["--json", "helper", "files-delete"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{json-roto")
+        .unwrap();
+    let output = child.wait_with_output().expect("wait");
+    assert!(!output.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&output.stderr).expect("json");
+    assert_eq!(payload["success"], false);
+}
+
+#[test]
 fn helper_accounts_rechaza_usuarios_reservados() {
     for reserved in ["root", "nas", "nas-web"] {
         let output = nas()
