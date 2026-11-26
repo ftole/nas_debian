@@ -82,7 +82,7 @@
   <g transform="translate(30, 426)">
     <rect width="900" height="106" rx="8" fill="#1e293b" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="6,4" filter="url(#shadow)"/>
     <rect x="0" y="0" width="6" height="106" rx="2" fill="#f59e0b"/>
-    <text x="22" y="24" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">NIVEL 4 • PERÍMETRO Y HOST DEBIAN 13 (ENDURECIMIENTO MANUAL / NO AUTOMATIZADO)</text>
+    <text x="22" y="24" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="1">NIVEL 4 • PERÍMETRO Y HOST DEBIAN 13 (AUTOMATIZADO --safe-only + SSH/AIDE BAJO DEMANDA)</text>
 
     <rect x="22" y="36" width="275" height="54" rx="5" fill="#0f172a" stroke="#475569" stroke-width="1"/>
     <text x="34" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">Cortafuegos UFW &amp; SSH Host</text>
@@ -95,8 +95,8 @@
     <text x="324" y="82" fill="#fbbf24" font-size="9">aideinit + cron FIM • máscara sleep logind</text>
 
     <rect x="602" y="36" width="278" height="54" rx="5" fill="#0f172a" stroke="#475569" stroke-width="1"/>
-    <text x="614" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">Superficie Conocida / Brechas</text>
-    <text x="614" y="69" fill="#94a3b8" font-size="9.5">Deriva packaging vs deploy/web.rs (ver auditoría)</text>
-    <text x="614" y="82" fill="#f87171" font-size="9">system_update_run sin sudo • TLS autofirmado inicial</text>
+    <text x="614" y="54" fill="#f8fafc" font-size="11.5" font-weight="600">Controles Bajo Demanda / Prod.</text>
+    <text x="614" y="69" fill="#94a3b8" font-size="9.5">TLS autofirmado inicial (CA/ACME en prod.)</text>
+    <text x="614" y="82" fill="#fbbf24" font-size="9">SSH --harden-ssh + AIDE --init-aide bajo demanda</text>
   </g>
 </svg>
