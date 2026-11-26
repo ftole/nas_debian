@@ -3118,6 +3118,11 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
           <svg class="icon spin" style="width:32px; height:32px; color:var(--accent-primary);"><use href="#icon-refresh"></use></svg>
           <span id="preview-loading-text">Cargando previsualización...</span>
         </div>
+        <div id="preview-archive-backbar" style="display:none; padding:10px 16px 0;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="backToArchiveList()">
+            <svg class="icon icon-sm"><use href="#icon-arrow-up"></use></svg> Volver al listado del archivo
+          </button>
+        </div>
         <div id="preview-code-container" class="preview-code-wrap" style="display:none;">
           <div class="preview-line-numbers" id="preview-line-numbers"></div>
           <pre class="preview-code-content" id="preview-code-content"></pre>
@@ -3174,6 +3179,25 @@ Escribe 'help' o cualquier comando del sistema para ejecutar.
                 <div class="preview-pptx-slide-body" id="preview-pptx-slide-body"></div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Inspector de Archivos Comprimidos (.rar / .zip) 100% Offline -->
+        <div id="preview-archive-container" class="preview-office-wrap" style="display:none; flex-direction:column; gap:10px; padding:16px;">
+          <div id="preview-archive-summary" style="font-size:12.5px; color:var(--text-secondary);"></div>
+          <div style="overflow:auto; max-height:56vh; border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+            <table class="data-table" id="preview-archive-table" style="width:100%;">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th style="width:110px;">Tamaño</th>
+                  <th style="width:110px;">Comprimido</th>
+                  <th style="width:64px;">%</th>
+                  <th style="width:140px;">Fecha</th>
+                </tr>
+              </thead>
+              <tbody id="preview-archive-tbody"></tbody>
+            </table>
           </div>
         </div>
 
