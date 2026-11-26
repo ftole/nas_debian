@@ -249,6 +249,8 @@ pub fn router(state: AppState) -> Router {
         .route("/js/vendor/xlsx.full.min.js", get(routes::vendor_xlsx))
         .route("/js/vendor/jszip.min.js", get(routes::vendor_jszip))
         .route("/js/vendor/docx-preview.min.js", get(routes::vendor_docx))
+        .route("/js/vendor/unrar.js", get(routes::vendor_unrar_js))
+        .route("/js/vendor/unrar.wasm", get(routes::vendor_unrar_wasm))
         .route("/favicon.svg", get(routes::favicon))
         .route("/favicon.ico", get(routes::favicon_ico))
         .route("/img/logo-iintec.svg", get(routes::logo_iintec))
